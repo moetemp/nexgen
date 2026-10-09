@@ -1,0 +1,1 @@
+Added the `x-nexus-long-poll` operation keyword, which names the wait and result members of a long-pollable synchronous operation; the `--client` HTTP callers emit a loop method for it that re-issues the call until it answers with something or a deadline passes.

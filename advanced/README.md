@@ -406,9 +406,12 @@ cargo run --features advanced -- python \
 
 The caller posts each operation's input to `{base_url}/{operation}` and
 decodes the answer through the generated models, so the wire is the models'
-own. It depends on the standard library only. See
-[`specs/json-schema/http-caller.md`](../specs/json-schema/http-caller.md) for
-the generated shapes and the status handling. The `streams` sample's advanced
+own. It depends on the standard library only. An operation marked
+`x-nexus-long-poll` also gets a loop method that re-issues the call until it
+answers with something or a deadline passes. See
+[`specs/json-schema/http-caller.md`](../specs/json-schema/http-caller.md) and
+[`specs/json-schema/long-poll.md`](../specs/json-schema/long-poll.md) for the
+generated shapes, the status handling and the loop. The `streams` sample's advanced
 output carries a generated caller in both languages.
 
 ## Validation

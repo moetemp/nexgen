@@ -1,11 +1,13 @@
 //! The language-neutral plan an HTTP caller emitter works from.
 //!
 //! An emitted caller needs, per operation, the target's type name for the input
-//! and output models and the wire name it posts to. The planned IR holds those
-//! in different places, so this module assembles them once and the Python and
-//! Go emitters differ only in how they render them.
+//! and output models, the wire name it posts to, and the long-poll member names.
+//! The planned IR holds those in different places, so this module assembles
+//! them once and the Python and Go emitters differ only in how they render them.
 
 use std::collections::BTreeMap;
+
+use serde_json::Value;
 
 use crate::error::Result;
 use crate::language::Language;
@@ -20,6 +22,31 @@ pub(in crate::generator) struct ClientModel {
     /// The model's name as the JSON backend knows it, used to derive sibling
     /// identifiers such as a converter class.
     pub(in crate::generator) model_name: String,
+    /// The model's authored schema, for the member lookups an emitter needs.
+    pub(in crate::generator) schema: Value,
+}
+
+impl ClientModel {
+    /// The authored schema of one top-level member, when the model declares it.
+    pub(in crate::generator) fn member(&self, wire_name: &str) -> Option<&Value> {
+        self.schema.get("properties")?.get(wire_name)
+    }
+
+    /// Whether a top-level member is required, which decides whether a target
+    /// holds it behind an optional.
+    pub(in crate::generator) fn member_required(&self, wire_name: &str) -> bool {
+        self.schema
+            .get("required")
+            .and_then(Value::as_array)
+            .is_some_and(|required| required.iter().any(|name| name.as_str() == Some(wire_name)))
+    }
+}
+
+/// The two member names a long-poll loop drives.
+#[derive(Debug, Clone)]
+pub(in crate::generator) struct ClientLongPoll {
+    pub(in crate::generator) wait_member: String,
+    pub(in crate::generator) result_member: String,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +62,7 @@ pub(in crate::generator) struct ClientOperation {
     pub(in crate::generator) deprecated: bool,
     pub(in crate::generator) input: Option<ClientModel>,
     pub(in crate::generator) output: Option<ClientModel>,
+    pub(in crate::generator) long_poll: Option<ClientLongPoll>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +82,14 @@ pub(in crate::generator) struct ClientPlan {
 impl ClientPlan {
     pub(in crate::generator) fn is_empty(&self) -> bool {
         self.services.is_empty()
+    }
+
+    /// Whether any operation declares a long-poll contract.
+    pub(in crate::generator) fn has_long_poll(&self) -> bool {
+        self.services
+            .iter()
+            .flat_map(|service| service.operations.iter())
+            .any(|operation| operation.long_poll.is_some())
     }
 }
 
@@ -87,6 +123,7 @@ pub(in crate::generator) fn build_client_plan(
                 .cloned()
                 .unwrap_or_else(|| json_type.model_name.clone()),
             model_name: json_type.model_name.clone(),
+            schema: json_type.schema.clone(),
         })
     };
 
@@ -109,6 +146,13 @@ pub(in crate::generator) fn build_client_plan(
                     deprecated: operation.deprecated,
                     input: client_model(operation.input.as_ref()),
                     output: client_model(operation.output.as_ref()),
+                    long_poll: operation
+                        .long_poll
+                        .as_ref()
+                        .map(|long_poll| ClientLongPoll {
+                            wait_member: long_poll.wait_field.clone(),
+                            result_member: long_poll.result_field.clone(),
+                        }),
                 })
                 .collect(),
         })

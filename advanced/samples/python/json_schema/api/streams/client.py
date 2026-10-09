@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
+import time
 import typing
 import urllib.error
 import urllib.request
@@ -67,6 +69,22 @@ def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> byt
     return answer
 
 
+_LONG_POLL_MIN_BACKOFF = 0.05
+_LONG_POLL_MAX_BACKOFF = 2.0
+
+
+async def _long_poll_pause(backoff: float, end: float) -> None:
+    """Waits out a backoff without running past the read's own deadline."""
+    remaining = end - time.monotonic()
+    delay = min(backoff, remaining)
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+
+def _long_poll_next_backoff(backoff: float) -> float:
+    return min(backoff * 2, _LONG_POLL_MAX_BACKOFF)
+
+
 class StreamServiceHttpClient:
     """Append records to a workflow's stream and read them back. Reads hand out
     batches and an append carries one batch per call, because a call per record
@@ -86,6 +104,15 @@ class StreamServiceHttpClient:
         self._base_url: str = base_url.rstrip("/")
         self._headers: dict[str, str] = dict(headers or {})
         self._timeout: float = timeout
+
+    def _poll_budget(self, remaining: float) -> float:
+        """How long one attempt may ask the endpoint to park, in seconds.
+
+        Asking for longer than the transport will wait is a socket timeout
+        dressed as a long poll, so the ask leaves the answer room to come back
+        inside this client's own timeout.
+        """
+        return max(0.001, min(remaining, self._timeout * 0.9))
 
     async def append(
         self,
@@ -131,3 +158,44 @@ class StreamServiceHttpClient:
             raise ValueError("read answered with an empty body")
         answer: typing.Any = json.loads(raw)
         return _ReadOutputTransferTypeConverter().from_transfer_type(answer, ReadOutput)
+
+    async def read_until_records(
+        self,
+        request: ReadInput,
+        *,
+        deadline: float,
+    ) -> ReadOutput:
+        """Calls `read` until it answers with something, or until `deadline`.
+
+        Each attempt sets `wait_ms` from the budget left, so the endpoint parks
+        for the caller instead of the caller spinning. The first answer whose
+        `records` is non-empty is returned. When the deadline passes first, the
+        last answer is returned, which still carries the caller's resume position.
+
+        `deadline` is the whole budget in seconds. The single-shot method stays
+        available for a caller that wants one attempt.
+        """
+        end = time.monotonic() + deadline
+        answer: ReadOutput | None = None
+        backoff = _LONG_POLL_MIN_BACKOFF
+        while True:
+            wait = self._poll_budget(end - time.monotonic())
+            attempt = dataclasses.replace(request, wait_ms=int(wait * 1000))
+            started = time.monotonic()
+            try:
+                answer = await self.read(attempt)
+            except HTTPStatusError as error:
+                if not error.retryable or time.monotonic() >= end:
+                    raise
+                await _long_poll_pause(backoff, end)
+                backoff = _long_poll_next_backoff(backoff)
+                continue
+            if answer.records:
+                return answer
+            if time.monotonic() >= end:
+                return answer
+            if time.monotonic() - started < wait / 2:
+                await _long_poll_pause(backoff, end)
+                backoff = _long_poll_next_backoff(backoff)
+            else:
+                backoff = _LONG_POLL_MIN_BACKOFF

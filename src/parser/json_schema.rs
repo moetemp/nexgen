@@ -14,8 +14,8 @@ use crate::generator::json_schema::{java, python, typescript};
 use crate::language::Language;
 use crate::spec::{
     ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelBindingSpec, JsonModelSpec,
-    LanguageStringSpec, ModulePath, OperationSpec, ServiceSpec, Symbol, TypeDeclEntry,
-    TypeDeclSpec, TypeSpec,
+    LanguageStringSpec, ModulePath, OperationLongPollSpec, OperationSpec, ServiceSpec, Symbol,
+    TypeDeclEntry, TypeDeclSpec, TypeSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
@@ -393,6 +393,12 @@ impl Schema {
 /// a type declaration it renames the type (see [`lang_name_keyword`] for the
 /// per-target lookup).
 const LANG_NAME_KEYWORDS: [&str; 4] = ["x-go-name", "x-ts-name", "x-py-name", "x-java-name"];
+
+use crate::json_schema::streaming::{
+    LONG_POLL_KEYWORD as NEXUS_LONG_POLL_KEYWORD,
+    LONG_POLL_RESULT_MEMBER as NEXUS_LONG_POLL_RESULT_MEMBER,
+    LONG_POLL_WAIT_MEMBER as NEXUS_LONG_POLL_WAIT_MEMBER,
+};
 
 /// Keywords admitted by the strict schema-node grammar. This is deliberately
 /// an exact allowlist: supported keywords, specifically rejected keywords, and
@@ -1601,6 +1607,10 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
                         }
                         continue;
                     }
+                    if keyword == NEXUS_LONG_POLL_KEYWORD {
+                        validate_long_poll_grammar(path, operation_name, value)?;
+                        continue;
+                    }
                     return reject(format!(
                         "operation `{operation_name}` has unknown keyword `{keyword}`"
                     ));
@@ -1636,6 +1646,44 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
                         )?;
                     }
                 }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validates the shape of an `x-nexus-long-poll` value. Whether the two named
+/// members exist is checked later, in [`build_long_poll`], where the input and
+/// output models are resolved.
+fn validate_long_poll_grammar(path: &Path, operation_name: &str, value: &Value) -> Result<()> {
+    let reject = |reason: String| -> Result<()> {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!("operation `{operation_name}`: {reason}"),
+        })
+    };
+    let Some(members) = value.as_object() else {
+        return reject(format!(
+            "`{NEXUS_LONG_POLL_KEYWORD}` must be an object with `{NEXUS_LONG_POLL_WAIT_MEMBER}` and `{NEXUS_LONG_POLL_RESULT_MEMBER}`, got {value}"
+        ));
+    };
+    for member in members.keys() {
+        if member != NEXUS_LONG_POLL_WAIT_MEMBER && member != NEXUS_LONG_POLL_RESULT_MEMBER {
+            return reject(format!(
+                "`{NEXUS_LONG_POLL_KEYWORD}` has unknown member `{member}`; it takes `{NEXUS_LONG_POLL_WAIT_MEMBER}` and `{NEXUS_LONG_POLL_RESULT_MEMBER}`"
+            ));
+        }
+    }
+    for member in [NEXUS_LONG_POLL_WAIT_MEMBER, NEXUS_LONG_POLL_RESULT_MEMBER] {
+        let Some(named) = members.get(member) else {
+            return reject(format!("`{NEXUS_LONG_POLL_KEYWORD}` requires `{member}`"));
+        };
+        match named.as_str() {
+            Some(name) if !name.trim().is_empty() => {}
+            _ => {
+                return reject(format!(
+                    "`{NEXUS_LONG_POLL_KEYWORD}.{member}` must be a non-empty string naming a member of the operation's model, got {named}"
+                ));
             }
         }
     }
@@ -6174,6 +6222,8 @@ fn build_operation(
         None
     };
 
+    let long_poll = build_long_poll(path, canonical_path, operation_key, operation, docs, models)?;
+
     Ok(OperationSpec {
         name: operation_name.clone(),
         code_name: language_string_override(language, code_name),
@@ -6184,6 +6234,7 @@ fn build_operation(
             .get("deprecated")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        long_poll,
         doc: language_string(operation.description.clone()),
         return_doc: LanguageStringSpec::default(),
         input,
@@ -6192,6 +6243,105 @@ fn build_operation(
         serialization_context: LanguageStringSpec::default(),
         data: (),
     })
+}
+
+/// Lowers `x-nexus-long-poll` and checks the two members it names against the
+/// operation's models. The grammar is already validated; a name that does not
+/// resolve, or resolves to a shape a loop cannot drive, would otherwise surface
+/// as a compile error inside generated caller code, far from the contract that
+/// caused it.
+///
+/// The wait hint must be an `integer` (milliseconds) and the emptiness test an
+/// `array`. Pinning both keeps every target's emitted loop a fixed shape: one
+/// numeric assignment and one length test.
+fn build_long_poll(
+    path: &Path,
+    canonical_path: &Path,
+    operation_key: &str,
+    operation: &Operation,
+    docs: &IndexMap<PathBuf, (PathBuf, Document)>,
+    models: &BTreeMap<TypeKey, JsonModel>,
+) -> Result<Option<OperationLongPollSpec>> {
+    let Some(members) = operation
+        .extra
+        .get(NEXUS_LONG_POLL_KEYWORD)
+        .and_then(Value::as_object)
+    else {
+        return Ok(None);
+    };
+    let named = |member: &str| -> String {
+        members
+            .get(member)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let spec = OperationLongPollSpec {
+        wait_field: named(NEXUS_LONG_POLL_WAIT_MEMBER),
+        result_field: named(NEXUS_LONG_POLL_RESULT_MEMBER),
+    };
+
+    for (label, member, required_type, schema) in [
+        (
+            "input",
+            spec.wait_field.as_str(),
+            "integer",
+            operation.input.as_ref(),
+        ),
+        (
+            "output",
+            spec.result_field.as_str(),
+            "array",
+            operation.output.as_ref(),
+        ),
+    ] {
+        let Some(schema) = schema else {
+            return Err(Error::InvalidJsonSchema {
+                path: path.to_path_buf(),
+                reason: format!(
+                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` names the {label} member `{member}`, but the operation declares no {label}"
+                ),
+            });
+        };
+        let properties = if let Some(reference) = &schema.reference {
+            resolve_ref(path, canonical_path, reference, docs, models)?
+                .schema
+                .properties
+                .clone()
+        } else {
+            schema.properties.clone()
+        };
+        // A generated loop reaches both members by name, and nothing downstream
+        // resolves a name against a map or a union, so a model without
+        // `properties` would emit an accessor for a member that does not exist.
+        let Some(properties) = properties else {
+            return Err(Error::InvalidJsonSchema {
+                path: path.to_path_buf(),
+                reason: format!(
+                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` requires a \
+                     `properties`-shaped {label} model to name `{member}` in; this {label} \
+                     declares no `properties`"
+                ),
+            });
+        };
+        let Some(property) = properties.get(member) else {
+            return Err(Error::InvalidJsonSchema {
+                path: path.to_path_buf(),
+                reason: format!(
+                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` names the {label} member `{member}`, which the {label} model does not declare"
+                ),
+            });
+        };
+        if property.ty.as_ref().and_then(Value::as_str) != Some(required_type) {
+            return Err(Error::InvalidJsonSchema {
+                path: path.to_path_buf(),
+                reason: format!(
+                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` {label} member `{member}` must be `type: {required_type}`; a generated loop assigns the wait hint as a number of milliseconds and ends on the result array being non-empty"
+                ),
+            });
+        }
+    }
+    Ok(Some(spec))
 }
 
 fn operation_model_type(
@@ -10724,6 +10874,224 @@ services:
         );
         assert!(spec.services[0].deprecated);
         assert!(spec.services[0].operations[0].deprecated);
+    }
+
+    #[test]
+    fn lowers_the_long_poll_annotation() {
+        let spec = parse(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        x-nexus-long-poll:
+          wait-field: wait_ms
+          result-field: records
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+      append:
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      wait_ms: { type: integer }
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+"##,
+        );
+        let long_poll = spec.services[0].operations[0]
+            .long_poll
+            .as_ref()
+            .expect("read declares a long-poll contract");
+        assert_eq!(long_poll.wait_field, "wait_ms");
+        assert_eq!(long_poll.result_field, "records");
+        assert!(spec.services[0].operations[1].long_poll.is_none());
+    }
+
+    #[test]
+    fn rejects_a_long_poll_member_the_model_does_not_declare() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        x-nexus-long-poll:
+          wait-field: wait_ms
+          result-field: entries
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      wait_ms: { type: integer }
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+"##,
+        );
+        assert!(
+            error.contains(
+                "names the output member `entries`, which the output model does not declare"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_long_poll_object_with_an_unknown_member() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        x-nexus-long-poll:
+          wait-field: wait_ms
+          result-field: records
+          deadline: 30
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      wait_ms: { type: integer }
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+"##,
+        );
+        assert!(
+            error.contains("`x-nexus-long-poll` has unknown member `deadline`"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_long_poll_member_of_the_wrong_type() {
+        for (wait, records, member) in [
+            (
+                "{ type: string }",
+                "{ type: array, items: { type: string } }",
+                "wait_ms",
+            ),
+            ("{ type: integer }", "{ type: string }", "records"),
+        ] {
+            let error = doc_reject(&format!(
+                r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        x-nexus-long-poll:
+          wait-field: wait_ms
+          result-field: records
+        input: {{ $ref: "#/$defs/ReadInput" }}
+        output: {{ $ref: "#/$defs/ReadOutput" }}
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      wait_ms: {wait}
+  ReadOutput:
+    type: object
+    properties:
+      records: {records}
+"##
+            ));
+            assert!(
+                error.contains(&format!("member `{member}` must be `type:")),
+                "{member}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_a_long_poll_on_an_operation_without_an_output() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        x-nexus-long-poll:
+          wait-field: wait_ms
+          result-field: records
+        input: { $ref: "#/$defs/ReadInput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      wait_ms: { type: integer }
+"##,
+        );
+        assert!(
+            error.contains(
+                "names the output member `records`, but the operation declares no output"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_long_poll_whose_output_has_no_properties() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        x-nexus-long-poll:
+          wait-field: wait_ms
+          result-field: records
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      wait_ms: { type: integer }
+  ReadOutput:
+    type: object
+    additionalProperties: { type: string }
+"##,
+        );
+        assert!(
+            error.contains("requires a `properties`-shaped output model"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_long_poll_value_that_is_not_an_object() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        x-nexus-long-poll: true
+"##,
+        );
+        assert!(
+            error.contains("`x-nexus-long-poll` must be an object"),
+            "{error}"
+        );
     }
 
     #[test]

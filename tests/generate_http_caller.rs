@@ -1,9 +1,11 @@
-//! The HTTP callers `--client` emits for Go and Python.
+//! The HTTP callers `--client` emits for Go and Python, and the loops they
+//! carry for `x-nexus-long-poll`.
 //!
 //! The committed `samples/schemas/streams.nexusrpc.yaml` advanced output is the
 //! golden for the whole shape; these assert the individual decisions,
 //! including the shapes that sample does not carry (a void operation, a wire
-//! name that is not a URL-safe path segment, a target with no caller).
+//! name that is not a URL-safe path segment, a required wait hint, a target
+//! with no caller).
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -58,6 +60,69 @@ $defs:
     additionalProperties: false
 "##;
 
+/// A long-pollable read beside an operation with no contract, and an optional
+/// wait hint, which a target holds behind an optional.
+const LONG_POLL_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    operations:
+      append:
+        fqn: append
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+      read:
+        fqn: read
+        x-nexus-long-poll:
+          wait-field: waitMs
+          result-field: records
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      stream: { type: string }
+      waitMs: { type: integer }
+    required: [stream]
+    additionalProperties: false
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+    additionalProperties: false
+"##;
+
+/// A required wait hint, which a target holds by value rather than behind an
+/// optional.
+const REQUIRED_WAIT_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    operations:
+      read:
+        fqn: read
+        x-nexus-long-poll:
+          wait-field: waitMs
+          result-field: records
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      waitMs: { type: integer }
+    required: [waitMs]
+    additionalProperties: false
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+    additionalProperties: false
+"##;
+
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn unique_output_path(label: &str) -> PathBuf {
@@ -71,11 +136,20 @@ fn unique_output_path(label: &str) -> PathBuf {
 
 /// Generates the contract and answers with the emitted files by name.
 fn generate(language: Language, client: bool, label: &str) -> (PathBuf, Vec<(String, String)>) {
+    generate_contract(language, CONTRACT, client, label)
+}
+
+fn generate_contract(
+    language: Language,
+    contract: &str,
+    client: bool,
+    label: &str,
+) -> (PathBuf, Vec<(String, String)>) {
     let temp_dir = unique_output_path(label);
     let input_dir = temp_dir.join("input");
     fs::create_dir_all(&input_dir).unwrap();
     let input_path = input_dir.join("streams.nexusrpc.yaml");
-    fs::write(&input_path, CONTRACT).unwrap();
+    fs::write(&input_path, contract).unwrap();
     let output_path = temp_dir.join("streams");
     generate_to_file(&GenerateRequest {
         config: NexgenConfig {
@@ -221,4 +295,111 @@ fn the_other_targets_emit_no_caller() {
         }
         fs::remove_dir_all(temp_dir).unwrap();
     }
+}
+
+#[test]
+fn python_caller_loops_the_long_poll_operation_and_keeps_the_single_shot() {
+    let (temp_dir, files) = generate_contract(
+        Language::Python,
+        LONG_POLL_CONTRACT,
+        true,
+        "http-caller-python-poll",
+    );
+    let client = file(&files, "client.py");
+    assert!(client.contains("async def read_until_records("), "{client}");
+    assert!(client.contains("deadline: float,"), "{client}");
+    assert!(client.contains("wait_ms=int(wait * 1000)"), "{client}");
+    assert!(client.contains("if answer.records:"), "{client}");
+    // The single-shot call is what the loop drives, and stays callable.
+    assert!(
+        client.contains("answer = await self.read(attempt)"),
+        "{client}"
+    );
+    // The ask is clamped to the transport, and an empty answer that came back
+    // faster than the wait it asked for is paced.
+    assert!(
+        client.contains("wait = self._poll_budget(end - time.monotonic())"),
+        "{client}"
+    );
+    assert!(
+        client.contains("min(remaining, self._timeout * 0.9)"),
+        "{client}"
+    );
+    assert!(
+        client.contains("if time.monotonic() - started < wait / 2:"),
+        "{client}"
+    );
+    assert!(client.contains("if not error.retryable"), "{client}");
+    // `append` declares no long-poll contract, so it gets no loop.
+    assert!(!client.contains("append_until"), "{client}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn go_caller_loops_the_long_poll_operation_through_a_pointer_wait_hint() {
+    let (temp_dir, files) = generate_contract(
+        Language::Go,
+        LONG_POLL_CONTRACT,
+        true,
+        "http-caller-go-poll",
+    );
+    let client = file(&files, "client.go");
+    assert!(
+        client.contains(
+            "func (c *StreamServiceHTTPClient) ReadUntilRecords(ctx context.Context, request ReadInput, deadline time.Duration) (ReadOutput, error)"
+        ),
+        "{client}"
+    );
+    assert!(
+        client.contains("attempt.WaitMs = &milliseconds"),
+        "{client}"
+    );
+    assert!(client.contains("if len(answer.Records) > 0 {"), "{client}");
+    assert!(
+        client.contains("next, err := c.Read(ctx, attempt)"),
+        "{client}"
+    );
+    assert!(
+        client.contains("wait := c.pollBudget(time.Until(end))"),
+        "{client}"
+    );
+    assert!(
+        client.contains("if time.Since(started) < wait/2 {"),
+        "{client}"
+    );
+    // A cancelled context during the pacing pause is reported, not swallowed.
+    assert!(client.contains("return answer, paused"), "{client}");
+    assert!(!client.contains("AppendUntil"), "{client}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn go_caller_assigns_a_required_wait_hint_by_value() {
+    let (temp_dir, files) = generate_contract(
+        Language::Go,
+        REQUIRED_WAIT_CONTRACT,
+        true,
+        "http-caller-go-required-wait",
+    );
+    let client = file(&files, "client.go");
+    assert!(client.contains("attempt.WaitMs = milliseconds"), "{client}");
+    assert!(
+        !client.contains("attempt.WaitMs = &milliseconds"),
+        "{client}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn a_caller_without_a_long_poll_carries_no_loop() {
+    let (temp_dir, files) = generate(Language::Python, true, "http-caller-python-no-poll");
+    let client = file(&files, "client.py");
+    assert!(!client.contains("import time"), "{client}");
+    assert!(!client.contains("_until_"), "{client}");
+    fs::remove_dir_all(temp_dir).unwrap();
+    let (temp_dir, files) = generate(Language::Go, true, "http-caller-go-no-poll");
+    let client = file(&files, "client.go");
+    assert!(!client.contains("\"time\""), "{client}");
+    assert!(!client.contains("Until"), "{client}");
+    fs::remove_dir_all(temp_dir).unwrap();
 }

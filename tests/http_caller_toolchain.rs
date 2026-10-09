@@ -45,9 +45,48 @@ $defs:
     additionalProperties: false
 "##;
 
+/// A long-pollable read with a required wait hint, which a target holds by
+/// value rather than behind an optional.
+const LONG_POLL_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    operations:
+      read:
+        fqn: read
+        x-nexus-long-poll:
+          wait-field: waitMs
+          result-field: records
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      waitMs: { type: integer }
+    required: [waitMs]
+    additionalProperties: false
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+      nextToken: { type: string }
+    additionalProperties: false
+"##;
+
 fn generate_client(workspace: &Workspace, target: Target, dir: &str) -> PathBuf {
-    let contract = workspace.root().join("streams.nexusrpc.yaml");
-    fs::write(&contract, CONTRACT).expect("write the contract");
+    generate_client_from(workspace, target, dir, CONTRACT)
+}
+
+fn generate_client_from(
+    workspace: &Workspace,
+    target: Target,
+    dir: &str,
+    contract_text: &str,
+) -> PathBuf {
+    let contract = workspace.root().join(format!("{dir}.nexusrpc.yaml"));
+    fs::write(&contract, contract_text).expect("write the contract");
     let output_path = workspace.package_path(target, dir);
     fs::create_dir_all(output_path.parent().expect("a package parent"))
         .expect("create the package parent");
@@ -255,5 +294,198 @@ fn the_generated_python_caller_posts_to_a_local_endpoint() {
         .arg(&driver)
         .arg(&package))
     .expect_ok("drive the generated caller");
+    assert!(output.contains("ok"), "{output}");
+}
+
+/// Drives the loop against an endpoint that answers empty twice, fails once
+/// with a retryable status, then answers with records.
+const GO_LONG_POLL_DRIVER: &str = r#"package polls
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestTheLoopReturnsTheFirstNonEmptyAnswer(t *testing.T) {
+	var mu sync.Mutex
+	var waits []float64
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var decoded map[string]any
+		_ = json.Unmarshal(body, &decoded)
+		mu.Lock()
+		calls++
+		call := calls
+		waits = append(waits, decoded["waitMs"].(float64))
+		mu.Unlock()
+		switch call {
+		case 1, 2:
+			_, _ = w.Write([]byte(`{"records": [], "nextToken": "t1"}`))
+		case 3:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			_, _ = w.Write([]byte(`{"records": ["a"], "nextToken": "t2"}`))
+		}
+	}))
+	defer server.Close()
+	client := NewStreamServiceHTTPClient(server.URL, nil)
+	answer, err := client.ReadUntilRecords(context.Background(), ReadInput{}, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(answer.Records) != 1 || *answer.NextToken != "t2" {
+		t.Fatalf("loop answered %+v", answer)
+	}
+	if calls != 4 {
+		t.Fatalf("want four attempts, got %d", calls)
+	}
+	for _, wait := range waits {
+		if wait <= 0 || wait > 5000 {
+			t.Fatalf("wait hint %v outside the budget", wait)
+		}
+	}
+}
+
+func TestTheLoopReturnsTheLastAnswerAtTheDeadline(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"records": [], "nextToken": "resume-here"}`))
+	}))
+	defer server.Close()
+	client := NewStreamServiceHTTPClient(server.URL, nil)
+	answer, err := client.ReadUntilRecords(context.Background(), ReadInput{}, 200*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(answer.Records) != 0 || answer.NextToken == nil || *answer.NextToken != "resume-here" {
+		t.Fatalf("loop answered %+v", answer)
+	}
+}
+
+func TestTheLoopStopsOnAStatusThatIsNotRetryable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+	_, err := NewStreamServiceHTTPClient(server.URL, nil).ReadUntilRecords(context.Background(), ReadInput{}, time.Second)
+	var status *HTTPStatusError
+	if !errors.As(err, &status) || status.StatusCode != http.StatusBadRequest {
+		t.Fatalf("got %v, want the 400", err)
+	}
+}
+"#;
+
+#[test]
+fn the_generated_go_long_poll_loop_runs_against_a_local_endpoint() {
+    let workspace = Workspace::new("http-caller-go-long-poll-toolchain");
+    let root = prepare_go_module(&workspace).expect("prepare the go module");
+    let package = generate_client_from(&workspace, Target::Go, "polls", LONG_POLL_CONTRACT);
+    fs::write(package.join("poll_test.go"), GO_LONG_POLL_DRIVER).expect("write the driver");
+
+    run(command("go")
+        .current_dir(&root)
+        .env("GOFLAGS", "-mod=mod")
+        .args(["vet", "./..."]))
+    .expect_ok("go vet over the generated loop");
+    run(command("go")
+        .current_dir(&root)
+        .env("GOFLAGS", "-mod=mod")
+        .args(["test", "./..."]))
+    .expect_ok("go test over the generated loop");
+}
+
+/// The same three cases against a local `http.server` endpoint.
+const PYTHON_LONG_POLL_DRIVER: &str = r#"
+import asyncio
+import http.server
+import importlib
+import json
+import pathlib
+import sys
+import threading
+
+package = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+models = importlib.import_module(f"{package.name}.models")
+
+script = []
+waits = []
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(length))
+        waits.append(body["waitMs"])
+        status, answer = script.pop(0) if script else (200, b'{"records": [], "nextToken": "resume-here"}')
+        self.send_response(status)
+        self.end_headers()
+        self.wfile.write(answer)
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+client = client_module.StreamServiceHttpClient(f"http://127.0.0.1:{server.server_port}")
+
+
+async def main():
+    script.extend(
+        [
+            (200, b'{"records": [], "nextToken": "t1"}'),
+            (200, b'{"records": [], "nextToken": "t1"}'),
+            (503, b"busy"),
+            (200, b'{"records": ["a"], "nextToken": "t2"}'),
+        ]
+    )
+    answer = await client.read_until_records(models.ReadInput(wait_ms=0), deadline=5.0)
+    assert answer.records == ["a"] and answer.next_token == "t2", answer
+    assert len(waits) == 4 and all(0 < wait <= 5000 for wait in waits), waits
+
+    answer = await client.read_until_records(models.ReadInput(wait_ms=0), deadline=0.2)
+    assert answer.records == [] and answer.next_token == "resume-here", answer
+
+    script.append((400, b"refused"))
+    try:
+        await client.read_until_records(models.ReadInput(wait_ms=0), deadline=1.0)
+    except client_module.HTTPStatusError as error:
+        assert error.status == 400, error
+    else:
+        raise AssertionError("a 400 was retried")
+
+
+asyncio.run(main())
+server.shutdown()
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_long_poll_loop_runs_against_a_local_endpoint() {
+    let workspace = Workspace::new("http-caller-python-long-poll-toolchain");
+    let package = generate_client_from(&workspace, Target::Python, "polls", LONG_POLL_CONTRACT);
+    let driver = workspace.root().join("drive_poll.py");
+    fs::write(&driver, PYTHON_LONG_POLL_DRIVER).expect("write the driver");
+
+    let interpreter = python_interpreter();
+    run(command(&interpreter.to_string_lossy())
+        .arg("-m")
+        .arg("compileall")
+        .arg("-q")
+        .arg(&package))
+    .expect_ok("compile the generated loop");
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package))
+    .expect_ok("drive the generated loop");
     assert!(output.contains("ok"), "{output}");
 }

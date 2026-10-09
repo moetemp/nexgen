@@ -11,7 +11,7 @@ For the more advanced WIT-based generation and the JSON Schema *native-api*
 ## Layout
 
 - [`schemas/`](schemas/): the authored JSON Schema / `*.nexusrpc.yaml` inputs
-  (`chat`, `kb`, `showcase`, `temporal`).
+  (`chat`, `kb`, `showcase`, `streams`, `temporal`).
 - [`wire/json_schema/`](wire/json_schema/): canonical wire fixtures shared by the
   per-language round-trip tests.
 - Per-language projects with the generated definitions and their tests:

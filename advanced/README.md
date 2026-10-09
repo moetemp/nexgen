@@ -19,7 +19,7 @@ The generator picks its input format from the file extension, so the same
 
 > [!IMPORTANT]
 > The `dotnet` target, the `--descriptors`, `--format`, and `--native-api`
-> flags, and the `add-rpc` and
+> flags, the `--client` flag on `go` and `python`, and the `add-rpc` and
 > `debug-wit-dir` subcommands — is
 > gated behind the `advanced` Cargo feature, which is off by default. Build or
 > run with `--features advanced` (as every command below does), or produce a
@@ -33,6 +33,7 @@ The generator picks its input format from the file extension, so the same
 - [WIT-Direct Generation](#wit-direct-generation)
 - [WIT Directives](#wit-directives)
 - [Proto Backing](#proto-backing)
+- [HTTP Callers](#http-callers)
 - [Validation](#validation)
 
 ## Examples
@@ -389,6 +390,26 @@ cargo run --features advanced -- add-rpc \
   --input advanced/samples/inputs/deps \
   --output advanced/samples/inputs/workflow-service.wit
 ```
+
+## HTTP Callers
+
+`--client` on `go` and `python` also emits a typed HTTP caller per service in a
+JSON Schema Nexus document, for a process outside a worker that calls a
+synchronous operation through the Nexus HTTP ingress:
+
+```bash
+cargo run --features advanced -- python \
+  samples/schemas/streams.nexusrpc.yaml \
+  --client \
+  --output /tmp/streams
+```
+
+The caller posts each operation's input to `{base_url}/{operation}` and
+decodes the answer through the generated models, so the wire is the models'
+own. It depends on the standard library only. See
+[`specs/json-schema/http-caller.md`](../specs/json-schema/http-caller.md) for
+the generated shapes and the status handling. The `streams` sample's advanced
+output carries a generated caller in both languages.
 
 ## Validation
 

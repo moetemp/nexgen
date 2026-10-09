@@ -1,0 +1,1 @@
+Added an experimental `--client` flag on `go` and `python` (behind the `advanced` feature) that also emits a typed HTTP caller per service, for a process outside a worker that calls a synchronous operation through the Nexus HTTP ingress.

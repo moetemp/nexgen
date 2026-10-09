@@ -398,6 +398,20 @@ const LANG_NAME_KEYWORDS: [&str; 4] = ["x-go-name", "x-ts-name", "x-py-name", "x
 /// an exact allowlist: supported keywords, specifically rejected keywords, and
 /// generator extensions all have an owner below. Anything else is a typo or a
 /// dialect feature the loader cannot preserve coherently.
+/// The identifiers the `--client` HTTP caller declares per service, with the
+/// role each plays, for the targets that emit one.
+fn http_caller_idents(language: Language, service_ident: &str) -> Vec<(String, &'static str)> {
+    match language {
+        Language::Go => vec![
+            (format!("{service_ident}HTTPClient"), "type"),
+            (format!("{service_ident}HTTPClientOptions"), "options type"),
+            (format!("New{service_ident}HTTPClient"), "constructor"),
+        ],
+        Language::Python => vec![(format!("{service_ident}HttpClient"), "class")],
+        _ => Vec::new(),
+    }
+}
+
 fn schema_extra_keyword_is_known(keyword: &str) -> bool {
     matches!(
         keyword,
@@ -8889,6 +8903,26 @@ pub(crate) fn build_name_manifest(
                     format!("{} native client constructor", service.origin_label()),
                 )?;
             }
+            // The `--client` HTTP caller is another optional output whose names
+            // are fixed by the service identifier, reserved for the same reason.
+            // Go emits it into the models' package; Python's caller module
+            // imports the operation models by name beside its own declarations.
+            for (ident, role) in http_caller_idents(language, &service_ident) {
+                top.insert(
+                    language,
+                    ident,
+                    format!("{} HTTP caller {role}", service.origin_label()),
+                )?;
+            }
+        }
+        if matches!(language, Language::Go | Language::Python)
+            && services.iter().any(|service| in_scope(&service.module_key))
+        {
+            top.insert(
+                language,
+                "HTTPStatusError".to_string(),
+                "generated HTTP caller error type `HTTPStatusError`".to_string(),
+            )?;
         }
         // TypeScript `DEFAULT_<FIELD>` constants share the module scope; make
         // them participate rather than silently coexist (P15). Python surfaces
@@ -15965,6 +15999,46 @@ $defs:
             assert!(
                 error.contains(declared) && error.contains("native client"),
                 "{declared}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn reserves_http_caller_identifiers() {
+        for (language, declared) in [
+            (Language::Go, "ChatHTTPClient"),
+            (Language::Go, "ChatHTTPClientOptions"),
+            (Language::Go, "NewChatHTTPClient"),
+            (Language::Go, "HTTPStatusError"),
+            (Language::Python, "ChatHttpClient"),
+            (Language::Python, "HTTPStatusError"),
+        ] {
+            // The type is named through the override, because a `$defs` key's
+            // own casing folds `HTTP` to `Http` and so never meets the caller's
+            // Go spelling.
+            let override_keyword = match language {
+                Language::Go => "x-go-name",
+                _ => "x-py-name",
+            };
+            let input = format!(
+                r##"
+$schema: https://json-schema.org/draft/2020-12/schema
+nexusrpc: "1.0.0"
+services:
+  Chat:
+    operations:
+      ping: {{ input: {{ $ref: "#/$defs/Declared" }} }}
+$defs:
+  Declared:
+    type: object
+    {override_keyword}: {declared}
+    properties: {{ value: {{ type: string }} }}
+"##
+            );
+            let error = reject_for(language, &input);
+            assert!(
+                error.contains(declared) && error.contains("HTTP caller"),
+                "{language:?} {declared}: {error}"
             );
         }
     }

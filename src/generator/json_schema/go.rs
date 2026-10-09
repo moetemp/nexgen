@@ -1840,6 +1840,54 @@ fn render_validator_core(output: &mut String) {
 /// the primitive (`type ShowcaseStatus string`) plus one typed constant per
 /// member (`const ShowcaseStatusActive ShowcaseStatus = "active"`). See
 /// `specs/json-schema/features/{const,enum}.md`.
+/// The HTTP caller's plan for one input file in the generate closure.
+///
+/// The models are the whole closure's, name-resolved exactly as
+/// [`ModelBackend::prepare`] resolves them, so a `$ref` crossing input files
+/// still reaches its target and every emitted type name matches the structs.
+pub(in crate::generator) fn client_plan(
+    api_plan: &PlannedSpec,
+    tree_models: &[PlannedJsonType],
+) -> Result<crate::generator::json_schema::client::ClientPlan> {
+    use crate::generator::json_schema::client::{ClientNaming, build_client_plan};
+
+    let manifest = build_json_name_manifest(crate::language::Language::Go, api_plan)?;
+    let mut cross_module_names = BTreeMap::new();
+    register_cross_module_ref_names(api_plan, &mut cross_module_names);
+    let resolved_names = tree_models
+        .iter()
+        .map(|model| {
+            let name = manifest
+                .type_name(&model.full_name)
+                .map(str::to_string)
+                .or_else(|| cross_module_names.get(&model.full_name).cloned())
+                .unwrap_or_else(|| model.model_name.clone());
+            (model.full_name.clone(), name)
+        })
+        .collect();
+    build_client_plan(
+        api_plan,
+        &resolved_names,
+        crate::language::Language::Go,
+        &ClientNaming {
+            service: &|service| {
+                service
+                    .code_name
+                    .for_language(crate::language::Language::Go)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| go_field_name(&service.name))
+            },
+            operation: &|operation| {
+                operation
+                    .code_name
+                    .for_language(crate::language::Language::Go)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| go_field_name(&operation.name))
+            },
+        },
+    )
+}
+
 fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType]) -> Result<()> {
     struct Declared {
         type_name: String,

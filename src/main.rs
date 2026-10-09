@@ -27,11 +27,11 @@ enum Commands {
     #[command(about = "Generate C# / .NET bindings")]
     Dotnet(SupportPackageGenerateArgs),
     #[command(about = "Generate Go bindings")]
-    Go(SupportPackageGenerateArgs),
+    Go(HttpCallerGenerateArgs),
     #[command(about = "Generate Java bindings")]
     Java(JavaGenerateArgs),
     #[command(about = "Generate Python bindings")]
-    Python(SupportPackageGenerateArgs),
+    Python(HttpCallerGenerateArgs),
     #[command(alias = "ts", about = "Generate TypeScript bindings (alias: ts)")]
     Typescript(TypescriptGenerateArgs),
     #[cfg(feature = "advanced")]
@@ -87,6 +87,23 @@ struct JavaGenerateArgs {
     /// segment must match the `--output` directory's name.
     #[arg(long = "package-name")]
     package_name: String,
+}
+
+/// The HTTP-caller flag rides only on the two targets that emit one, rather
+/// than on the shared `GenerateArgs`, so the other targets do not advertise a
+/// flag they ignore.
+#[derive(Args)]
+struct HttpCallerGenerateArgs {
+    #[command(flatten)]
+    common: GenerateArgs,
+    /// Import path or namespace of the user-owned support package (required for WIT).
+    #[arg(long = "support-package")]
+    support_package: Option<String>,
+    /// Also emit an HTTP caller for each service, for a process outside the
+    /// worker calling the Nexus HTTP ingress.
+    #[cfg(feature = "advanced")]
+    #[arg(long)]
+    client: bool,
 }
 
 #[derive(Args)]
@@ -166,13 +183,21 @@ fn main() -> ExitCode {
             None,
             args.support_package,
         )),
-        Commands::Go(args) => generate_to_file(&generate_request(
-            Language::Go,
-            args.common,
-            Default::default(),
-            None,
-            args.support_package,
-        )),
+        Commands::Go(args) => {
+            #[cfg(feature = "advanced")]
+            let client = args.client;
+            #[cfg(not(feature = "advanced"))]
+            let client = false;
+            let mut request = generate_request(
+                Language::Go,
+                args.common,
+                Default::default(),
+                None,
+                args.support_package,
+            );
+            request.config.client = client;
+            generate_to_file(&request)
+        }
         Commands::Java(args) => generate_to_file(&generate_request(
             Language::Java,
             args.common,
@@ -191,6 +216,7 @@ fn main() -> ExitCode {
                         nexgen::generator::GenerationMode::DefinitionsOnly
                     },
                     system_nexus,
+                    client: args.client,
                 };
                 let mut request = generate_request(
                     Language::Python,
@@ -224,6 +250,7 @@ fn main() -> ExitCode {
                         nexgen::generator::GenerationMode::DefinitionsOnly
                     },
                     system_nexus,
+                    ..Default::default()
                 };
                 let mut request = generate_request(
                     Language::TypeScript,
@@ -289,6 +316,7 @@ fn generate_request(
                 nexgen::generator::GenerationMode::DefinitionsOnly
             },
             system_nexus: args.system_nexus,
+            ..Default::default()
         },
         #[cfg(not(feature = "advanced"))]
         config: Default::default(),

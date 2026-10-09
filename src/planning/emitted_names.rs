@@ -275,6 +275,27 @@ fn manifest_services(language: Language, api_plan: &PlannedSpec) -> Vec<Manifest
                     _ => None,
                 })
                 .collect(),
+            handle_idents: crate::parser::http_caller_handle_idents(
+                language,
+                &service.handles,
+                &service
+                    .operations
+                    .iter()
+                    .map(|operation| {
+                        let input = match operation.input.as_ref() {
+                            Some(crate::spec::TypeSpec::External(
+                                crate::spec::ExternalTypeSpec::Json(json),
+                            )) => Some(&json.schema),
+                            _ => None,
+                        };
+                        crate::parser::http_caller_handle_operation(
+                            &operation.name,
+                            operation.code_name.for_language(Language::Go),
+                            input,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ),
         })
         .collect()
 }

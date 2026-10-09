@@ -2640,6 +2640,7 @@ fn build_service(
         experimental,
         deprecated: false,
         delay_load_temporalio_workflow,
+        handles: Vec::new(),
         operations,
         resources,
         data: (),

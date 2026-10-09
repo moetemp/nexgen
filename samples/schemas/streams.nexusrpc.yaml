@@ -3,8 +3,9 @@ $schema: https://json-schema.org/draft/2020-12/schema
 description: >
   A stream endpoint: append records to a workflow's stream and read them back
   from a resume token. The generated HTTP callers post to it from outside a
-  worker, loop the long-pollable read until records arrive, and hold resume
-  positions in an opaque token type.
+  worker, loop the long-pollable read until records arrive, hold resume
+  positions in an opaque token type, and bind a workflow's streams or one
+  producer on them through handles.
 services:
   StreamService:
     fqn: example.streams.v1.StreamService
@@ -12,6 +13,9 @@ services:
       Append records to a workflow's stream and read them back. Reads hand out
       batches and an append carries one batch per call, because a call per
       record costs too much for a token stream.
+    x-nexus-handle:
+      WorkflowStreams: [workflowId]
+      StreamProducer: [workflowId, stream, producerId, attempt]
     operations:
       append:
         fqn: append

@@ -408,10 +408,12 @@ The caller posts each operation's input to `{base_url}/{operation}` and
 decodes the answer through the generated models, so the wire is the models'
 own. It depends on the standard library only. An operation marked
 `x-nexus-long-poll` also gets a loop method that re-issues the call until it
-answers with something or a deadline passes. See
-[`specs/json-schema/http-caller.md`](../specs/json-schema/http-caller.md) and
-[`specs/json-schema/long-poll.md`](../specs/json-schema/long-poll.md) for the
-generated shapes, the status handling and the loop. The `streams` sample's advanced
+answers with something or a deadline passes, and a service's `x-nexus-handle`
+key sets become handle types that bind those members once. See
+[`specs/json-schema/http-caller.md`](../specs/json-schema/http-caller.md),
+[`specs/json-schema/long-poll.md`](../specs/json-schema/long-poll.md) and
+[`specs/json-schema/handles.md`](../specs/json-schema/handles.md) for the
+generated shapes, the status handling, the loop and the handles. The `streams` sample's advanced
 output carries a generated caller in both languages.
 
 ## Validation

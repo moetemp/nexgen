@@ -1,0 +1,1 @@
+Added the `x-nexus-handle` service keyword: the `--client` HTTP callers emit handle types that bind a key set of input members once (a stream's identity, a producer's identity) and expose every operation carrying those members as a method with them filled in.

@@ -395,12 +395,25 @@ fn render_handle_method(
     output.push_str(")\n}\n\n");
 }
 
+/// Go refuses an unused import, so `errors` is imported only when some
+/// operation decodes an output, and `encoding/json` when one encodes or decodes.
 fn render_imports(output: &mut String, plan: &ClientPlan) {
+    let operations = || {
+        plan.services
+            .iter()
+            .flat_map(|service| service.operations.iter())
+    };
+    let decodes = operations().any(|operation| operation.output.is_some());
+    let encodes = operations().any(|operation| operation.input.is_some());
     output.push_str("import (\n");
     output.push_str("\t\"bytes\"\n");
     output.push_str("\t\"context\"\n");
-    output.push_str("\t\"encoding/json\"\n");
-    output.push_str("\t\"errors\"\n");
+    if encodes || decodes {
+        output.push_str("\t\"encoding/json\"\n");
+    }
+    if decodes {
+        output.push_str("\t\"errors\"\n");
+    }
     output.push_str("\t\"fmt\"\n");
     output.push_str("\t\"io\"\n");
     output.push_str("\t\"net/http\"\n");

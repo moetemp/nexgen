@@ -358,6 +358,7 @@ not yet lowered).
 | `$comment` | Full | Accepted, silently dropped. |
 | `services` / `operations` | Full | First-class (Nexus documents). |
 | `x-nexus-cursor` | Partial | Go and Python declare the named opaque token type; members stay strings. See [`specs/json-schema/cursor.md`](specs/json-schema/cursor.md). |
+| `x-nexus-stream-ref` | Partial | Python emits the model as the SDK's `temporalio.contrib.streams.StreamRef`; other targets keep the wire model. See [`specs/json-schema/stream-ref.md`](specs/json-schema/stream-ref.md). |
 | `x-nexus-long-poll` | Partial | Accepted by every target; the advanced `--client` HTTP callers (Go, Python) emit a loop method for it. See [`specs/json-schema/long-poll.md`](specs/json-schema/long-poll.md). |
 | `examples` | Planned | Accepted and ignored; pending the doc-comment feature. |
 | `readOnly` | Planned | Deferred; needs request/response split-types. |

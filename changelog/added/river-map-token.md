@@ -1,0 +1,1 @@
+Added the `x-nexus-stream-ref` model keyword: Python emits a marked, closed model as the SDK stream reference type `temporalio.contrib.streams.StreamRef`, so an operation hands its caller the value the SDK opens, while the wire stays the model's.

@@ -5,12 +5,25 @@
 //! emitters that honor them share one vocabulary. Nothing here holds
 //! target-language policy.
 //!
-//! See `specs/json-schema/long-poll.md` and `specs/json-schema/cursor.md` for
-//! the authoritative rules.
+//! See `specs/json-schema/long-poll.md`, `specs/json-schema/cursor.md` and
+//! `specs/json-schema/stream-ref.md` for the authoritative rules.
 
 use std::collections::BTreeSet;
 
 use serde_json::Value;
+
+/// Marks a `$defs` model as the SDK's stream reference: the value an operation
+/// takes or returns to hand a stream to its caller. The model's members are the
+/// wire form; a target with a stream SDK emits that SDK's own type in its place.
+pub const STREAM_REF_KEYWORD: &str = "x-nexus-stream-ref";
+
+/// Whether a schema node declares itself the stream reference.
+pub fn stream_ref_marked(schema: &Value) -> bool {
+    schema
+        .get(STREAM_REF_KEYWORD)
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
 
 /// Marks a `type: string` member as an opaque resume token. The value names the
 /// emitted token type, so every member naming the same type shares it.
@@ -181,6 +194,19 @@ mod tests {
                 "additionalProperties".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn reads_the_stream_ref_marker_off_a_model_root() {
+        let schema = json!({
+            "type": "object",
+            "x-nexus-stream-ref": true,
+            "properties": { "topic": { "type": "string" } },
+            "additionalProperties": false,
+        });
+        assert!(stream_ref_marked(&schema));
+        assert!(!stream_ref_marked(&json!({ "type": "object" })));
+        assert!(!stream_ref_marked(&json!({ "x-nexus-stream-ref": false })));
     }
 
     #[test]

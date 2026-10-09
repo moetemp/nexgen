@@ -35,7 +35,7 @@ pub(in crate::generator) fn render_client_file(
     output.push_str("\n\npackage ");
     output.push_str(package_name);
     output.push_str("\n\n");
-    render_imports(&mut output);
+    render_imports(&mut output, plan);
     render_status_error(&mut output);
     for service in &plan.services {
         render_service_client(&mut output, service);
@@ -43,12 +43,25 @@ pub(in crate::generator) fn render_client_file(
     Some(output)
 }
 
-fn render_imports(output: &mut String) {
+/// Go refuses an unused import, so `errors` is imported only when some
+/// operation decodes an output, and `encoding/json` when one encodes or decodes.
+fn render_imports(output: &mut String, plan: &ClientPlan) {
+    let operations = || {
+        plan.services
+            .iter()
+            .flat_map(|service| service.operations.iter())
+    };
+    let decodes = operations().any(|operation| operation.output.is_some());
+    let encodes = operations().any(|operation| operation.input.is_some());
     output.push_str("import (\n");
     output.push_str("\t\"bytes\"\n");
     output.push_str("\t\"context\"\n");
-    output.push_str("\t\"encoding/json\"\n");
-    output.push_str("\t\"errors\"\n");
+    if encodes || decodes {
+        output.push_str("\t\"encoding/json\"\n");
+    }
+    if decodes {
+        output.push_str("\t\"errors\"\n");
+    }
     output.push_str("\t\"fmt\"\n");
     output.push_str("\t\"io\"\n");
     output.push_str("\t\"net/http\"\n");

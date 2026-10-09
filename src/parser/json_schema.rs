@@ -400,10 +400,6 @@ use crate::json_schema::streaming::{
     LONG_POLL_WAIT_MEMBER as NEXUS_LONG_POLL_WAIT_MEMBER,
 };
 
-/// Keywords admitted by the strict schema-node grammar. This is deliberately
-/// an exact allowlist: supported keywords, specifically rejected keywords, and
-/// generator extensions all have an owner below. Anything else is a typo or a
-/// dialect feature the loader cannot preserve coherently.
 /// The identifiers the `--client` HTTP caller declares per service, with the
 /// role each plays, for the targets that emit one.
 fn http_caller_idents(language: Language, service_ident: &str) -> Vec<(String, &'static str)> {
@@ -418,6 +414,10 @@ fn http_caller_idents(language: Language, service_ident: &str) -> Vec<(String, &
     }
 }
 
+/// Keywords admitted by the strict schema-node grammar. This is deliberately
+/// an exact allowlist: supported keywords, specifically rejected keywords, and
+/// generator extensions all have an owner below. Anything else is a typo or a
+/// dialect feature the loader cannot preserve coherently.
 fn schema_extra_keyword_is_known(keyword: &str) -> bool {
     matches!(
         keyword,

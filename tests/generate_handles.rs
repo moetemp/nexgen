@@ -418,3 +418,20 @@ fn a_go_handle_request_type_named_like_a_model_is_refused() {
         "{message}"
     );
 }
+
+#[test]
+fn a_go_handle_method_for_a_void_output_returns_only_an_error() {
+    let contract = HANDLE_CONTRACT.replace(
+        "      ping:\n        fqn: ping\n",
+        "      close:\n        fqn: close\n        input: { $ref: \"#/$defs/ReadInput\" }\n",
+    );
+    let (temp_dir, files) = generate(Language::Go, &contract, true, "handles-go-void");
+    let client = file(&files, "client.go");
+    assert!(
+        client.contains(
+            "func (h *StreamHandle) Close(ctx context.Context, request StreamHandleCloseRequest) error {"
+        ),
+        "{client}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}

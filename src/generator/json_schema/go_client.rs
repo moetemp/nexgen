@@ -332,12 +332,14 @@ fn render_handle_method(
     if long_poll.is_some() {
         output.push_str(", deadline time.Duration");
     }
-    output.push_str(") (");
-    if let Some(model_output) = &operation.output {
-        output.push_str(&model_output.type_name);
-        output.push_str(", ");
+    match &operation.output {
+        Some(model_output) => {
+            output.push_str(") (");
+            output.push_str(&model_output.type_name);
+            output.push_str(", error) {\n\tfull := ");
+        }
+        None => output.push_str(") error {\n\tfull := "),
     }
-    output.push_str("error) {\n\tfull := ");
     output.push_str(&input.type_name);
     output.push_str("{\n");
     for (key, field) in handle.keys.iter().zip(&bound) {

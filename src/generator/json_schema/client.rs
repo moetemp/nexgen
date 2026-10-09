@@ -121,7 +121,9 @@ pub(in crate::generator) struct ClientHandleKey {
     pub(in crate::generator) property: Value,
     pub(in crate::generator) required: bool,
     /// The target's type for the member as a constructor parameter and a
-    /// stored field, optional when the member is.
+    /// stored field, optional when the member is. It is the first joining
+    /// operation's; a target that names a type after its model converts it
+    /// into each other operation's own.
     pub(in crate::generator) type_name: String,
 }
 

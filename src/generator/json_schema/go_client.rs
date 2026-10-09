@@ -113,6 +113,20 @@ fn constructor_name(base: &str) -> String {
     go_field_name(base)
 }
 
+/// `expr`, held as `from`, as a value of `to`. Go names an inline enum after
+/// the model that declares it, so one key can be two types over the same
+/// underlying type on two operations; a conversion between them is legal, and
+/// the loader has already refused a key whose shape differs.
+fn converted(expr: &str, from: &str, to: &str) -> String {
+    if from == to {
+        expr.to_string()
+    } else if to.starts_with('*') {
+        format!("({to})({expr})")
+    } else {
+        format!("{to}({expr})")
+    }
+}
+
 /// The constructor of `target` emitted on the flat caller (`parent` is `None`)
 /// or on a parent handle, which already holds every key but `extra`.
 fn render_handle_constructor(
@@ -175,11 +189,16 @@ fn render_handle_constructor(
         output.push_str("\t\t");
         output.push_str(&field);
         output.push_str(": ");
-        if taken.iter().any(|given| given.wire_name == key.wire_name) {
-            output.push_str(&field);
-        } else {
-            output.push_str("h.");
-            output.push_str(&field);
+        match parent {
+            Some((parent, _)) if !taken.iter().any(|given| given.wire_name == key.wire_name) => {
+                let held = parent
+                    .keys
+                    .iter()
+                    .find(|held| held.wire_name == key.wire_name)
+                    .map_or(key.type_name.as_str(), |held| held.type_name.as_str());
+                output.push_str(&converted(&format!("h.{field}"), held, &key.type_name));
+            }
+            _ => output.push_str(&field),
         }
         output.push_str(",\n");
     }
@@ -343,10 +362,17 @@ fn render_handle_method(
     output.push_str(&input.type_name);
     output.push_str("{\n");
     for (key, field) in handle.keys.iter().zip(&bound) {
+        let wanted = input
+            .member_type(&key.wire_name)
+            .unwrap_or_else(|_| key.type_name.clone());
         output.push_str("\t\t");
         output.push_str(field);
-        output.push_str(": h.");
-        output.push_str(&key_field(key));
+        output.push_str(": ");
+        output.push_str(&converted(
+            &format!("h.{}", key_field(key)),
+            &key.type_name,
+            &wanted,
+        ));
         output.push_str(",\n");
     }
     for (wire, member) in input.members() {

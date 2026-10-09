@@ -420,6 +420,37 @@ fn a_go_handle_request_type_named_like_a_model_is_refused() {
 }
 
 #[test]
+fn a_go_handle_converts_an_enum_key_into_each_operations_own_type() {
+    // Go names an inline enum after its model, so `append` and `read` type the
+    // one `mode` key as two types over the same string.
+    let contract = handle_variant(
+        "    x-nexus-handle:\n      ModeHandle: [workflowId, mode]\n      ModeReader: [workflowId, mode, afterToken]\n",
+    )
+    .replace(
+        "      finish: { type: boolean }\n",
+        "      finish: { type: boolean }\n      mode: { type: string, enum: [fast, safe] }\n",
+    )
+    .replace(
+        "      afterToken: { type: string, x-nexus-cursor: StreamCursor }\n",
+        "      afterToken: { type: string, x-nexus-cursor: StreamCursor }\n      mode: { type: string, enum: [fast, safe] }\n",
+    );
+    let (temp_dir, files) = generate(Language::Go, &contract, true, "handles-go-enum-key");
+    let client = file(&files, "client.go");
+    assert!(client.contains("\tmode *AppendInputMode\n"), "{client}");
+    assert!(
+        client.contains("\t\tMode: (*ReadInputMode)(h.mode),\n"),
+        "{client}"
+    );
+    // The child is built from the parent, which holds the other model's type.
+    assert!(
+        client.contains("\t\tmode: (*ReadInputMode)(h.mode),\n"),
+        "{client}"
+    );
+    assert!(client.contains("\t\tMode: h.mode,\n"), "{client}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn a_go_handle_method_for_a_void_output_returns_only_an_error() {
     let contract = HANDLE_CONTRACT.replace(
         "      ping:\n        fqn: ping\n",

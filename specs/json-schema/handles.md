@@ -77,7 +77,11 @@ Each target cases the result.
 | Long-poll loop | rides along, sharing the request type; the loop sets the wait member | rides along, without the wait member in its signature |
 
 Key and member types are the models' own field types, so the handle hands the
-model exactly what its field holds.
+model exactly what its field holds. A key's type is the first joining
+operation's. Go names an inline enum after its model, so another operation can
+type the same key as another enum over the same underlying type; the handle
+converts the value into that operation's type, and a child handle converts what
+its parent holds.
 
 ## Property-testing matrix
 
@@ -88,6 +92,7 @@ model exactly what its field holds.
 | Two handles, one extending the other | both emitted; the child built from the parent and from the flat caller |
 | An operation missing a key | stays off that handle |
 | A long-poll operation | the loop method rides the handle |
+| An inline enum key on two inputs | Go converts between the two models' enum types; the package compiles |
 | No `--client` | no handle emitted; models and services unchanged |
 | TypeScript, Java | nothing emitted |
 

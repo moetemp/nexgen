@@ -756,6 +756,69 @@ fn the_generated_go_handles_compile_and_bind_their_keys() {
     .expect_ok("go test over the generated handles");
 }
 
+/// Generates a Go caller for `contract` and runs `go vet` over it, which
+/// type-checks the package.
+fn go_vet_generated(tag: &str, contract: &str) {
+    let workspace = Workspace::new(tag);
+    let root = prepare_go_module(&workspace).expect("prepare the go module");
+    generate_client_from(&workspace, Target::Go, "handles", contract);
+    run(command("go")
+        .current_dir(&root)
+        .env("GOFLAGS", "-mod=mod")
+        .args(["vet", "./..."]))
+    .expect_ok("go vet over the generated handles");
+}
+
+/// An enum key both inputs declare inline, once plain and once nullable. Go
+/// names an enum per model, so the handle holds one model's type and the other
+/// operation and the child handle take another.
+const ENUM_KEY_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    x-nexus-handle:
+      ModeHandle: [workflowId, mode, level]
+      ModeReader: [workflowId, mode, level, afterToken]
+    operations:
+      append:
+        fqn: append
+        input: { $ref: "#/$defs/AppendInput" }
+        output: { $ref: "#/$defs/Ack" }
+      read:
+        fqn: read
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/Ack" }
+$defs:
+  Ack:
+    type: object
+    properties:
+      ok: { type: boolean }
+    additionalProperties: false
+  AppendInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      mode: { type: string, enum: [fast, safe] }
+      level: { oneOf: [{ type: integer, enum: [1, 2] }, { type: "null" }] }
+    required: [workflowId]
+    additionalProperties: false
+  ReadInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      mode: { type: string, enum: [fast, safe] }
+      level: { oneOf: [{ type: integer, enum: [1, 2] }, { type: "null" }] }
+      afterToken: { type: string }
+    required: [workflowId]
+    additionalProperties: false
+"##;
+
+#[test]
+fn the_generated_go_handles_compile_with_an_enum_key_each_model_names() {
+    go_vet_generated("http-caller-go-enum-key-toolchain", ENUM_KEY_CONTRACT);
+}
+
 /// Drives the Python handles with the transport swapped for a recorder.
 const PYTHON_HANDLE_DRIVER: &str = r#"
 import asyncio

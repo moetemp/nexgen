@@ -94,35 +94,6 @@ $defs:
     additionalProperties: false
 "##;
 
-/// A required wait hint, which a target holds by value rather than behind an
-/// optional.
-const REQUIRED_WAIT_CONTRACT: &str = r##"
-nexusrpc: "1.0.0"
-services:
-  StreamService:
-    fqn: example.streams.v1.StreamService
-    operations:
-      read:
-        fqn: read
-        x-nexus-long-poll:
-          wait-field: waitMs
-          result-field: records
-        input: { $ref: "#/$defs/ReadInput" }
-        output: { $ref: "#/$defs/ReadOutput" }
-$defs:
-  ReadInput:
-    type: object
-    properties:
-      waitMs: { type: integer }
-    required: [waitMs]
-    additionalProperties: false
-  ReadOutput:
-    type: object
-    properties:
-      records: { type: array, items: { type: string } }
-    additionalProperties: false
-"##;
-
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 fn unique_output_path(label: &str) -> PathBuf {
@@ -374,17 +345,25 @@ fn go_caller_loops_the_long_poll_operation_through_a_pointer_wait_hint() {
 }
 
 #[test]
-fn go_caller_assigns_a_required_wait_hint_by_value() {
+fn go_caller_reports_a_cancelled_context_during_a_retry_pause() {
     let (temp_dir, files) = generate_contract(
         Language::Go,
-        REQUIRED_WAIT_CONTRACT,
+        LONG_POLL_CONTRACT,
         true,
-        "http-caller-go-required-wait",
+        "http-caller-go-retry-cancel",
     );
     let client = file(&files, "client.go");
-    assert!(client.contains("attempt.WaitMs = milliseconds"), "{client}");
+    // Both pauses, the one after a retryable status and the one pacing an empty
+    // answer, hand back the context's error when the context ends first.
+    assert_eq!(
+        client
+            .matches("if paused := longPollPause(ctx, backoff, end); paused != nil {\n")
+            .count(),
+        2,
+        "{client}"
+    );
     assert!(
-        !client.contains("attempt.WaitMs = &milliseconds"),
+        !client.contains("paused != nil {\n\t\t\t\treturn answer, err\n"),
         "{client}"
     );
     fs::remove_dir_all(temp_dir).unwrap();

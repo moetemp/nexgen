@@ -401,10 +401,6 @@ use crate::json_schema::streaming::{
     STREAM_REF_KEYWORD as NEXUS_STREAM_REF_KEYWORD,
 };
 
-/// Keywords admitted by the strict schema-node grammar. This is deliberately
-/// an exact allowlist: supported keywords, specifically rejected keywords, and
-/// generator extensions all have an owner below. Anything else is a typo or a
-/// dialect feature the loader cannot preserve coherently.
 /// The identifiers the `--client` HTTP caller declares per service, with the
 /// role each plays, for the targets that emit one.
 fn http_caller_idents(language: Language, service_ident: &str) -> Vec<(String, &'static str)> {
@@ -419,6 +415,10 @@ fn http_caller_idents(language: Language, service_ident: &str) -> Vec<(String, &
     }
 }
 
+/// Keywords admitted by the strict schema-node grammar. This is deliberately
+/// an exact allowlist: supported keywords, specifically rejected keywords, and
+/// generator extensions all have an owner below. Anything else is a typo or a
+/// dialect feature the loader cannot preserve coherently.
 fn schema_extra_keyword_is_known(keyword: &str) -> bool {
     matches!(
         keyword,
@@ -6420,14 +6420,14 @@ fn build_long_poll(
                 ),
             });
         };
-        let properties = if let Some(reference) = &schema.reference {
+        let model = if let Some(reference) = &schema.reference {
             resolve_ref(path, canonical_path, reference, docs, models)?
                 .schema
-                .properties
                 .clone()
         } else {
-            schema.properties.clone()
+            schema.clone()
         };
+        let properties = model.properties.clone();
         // A generated loop reaches both members by name, and nothing downstream
         // resolves a name against a map or a union, so a model without
         // `properties` would emit an accessor for a member that does not exist.
@@ -6456,6 +6456,32 @@ fn build_long_poll(
                     "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` {label} member `{member}` must be `type: {required_type}`; a generated loop assigns the wait hint as a number of milliseconds and ends on the result array being non-empty"
                 ),
             });
+        }
+        // The loop sets the wait member on every attempt, so a caller never
+        // supplies it and no default ever applies; either would make the
+        // single-shot call and the loop disagree about what the field holds.
+        if label == "input" {
+            let required = model
+                .required
+                .as_ref()
+                .and_then(Value::as_array)
+                .is_some_and(|names| names.iter().any(|name| name.as_str() == Some(member)));
+            if required {
+                return Err(Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!(
+                        "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` input member `{member}` must be optional; the loop sets it on each attempt, so remove it from `required`"
+                    ),
+                });
+            }
+            if property.extra.contains_key("default") {
+                return Err(Error::InvalidJsonSchema {
+                    path: path.to_path_buf(),
+                    reason: format!(
+                        "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` input member `{member}` must not declare a `default`; the loop sets it on each attempt, so remove the `default`"
+                    ),
+                });
+            }
         }
     }
     Ok(Some(spec))
@@ -11228,6 +11254,47 @@ $defs:
             error.contains("requires a `properties`-shaped output model"),
             "{error}"
         );
+    }
+
+    #[test]
+    fn rejects_a_wait_member_the_caller_must_set_or_that_has_a_default() {
+        for (wait, required, expected) in [
+            (
+                "{ type: integer }",
+                "    required: [wait_ms]\n",
+                "input member `wait_ms` must be optional",
+            ),
+            (
+                "{ type: integer, default: 5000 }",
+                "",
+                "input member `wait_ms` must not declare a `default`",
+            ),
+        ] {
+            let error = doc_reject(&format!(
+                r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        x-nexus-long-poll:
+          wait-field: wait_ms
+          result-field: records
+        input: {{ $ref: "#/$defs/ReadInput" }}
+        output: {{ $ref: "#/$defs/ReadOutput" }}
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      wait_ms: {wait}
+{required}  ReadOutput:
+    type: object
+    properties:
+      records: {{ type: array, items: {{ type: string }} }}
+"##
+            ));
+            assert!(error.contains(expected), "{wait}: {error}");
+        }
     }
 
     #[test]

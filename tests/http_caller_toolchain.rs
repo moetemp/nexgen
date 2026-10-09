@@ -45,8 +45,8 @@ $defs:
     additionalProperties: false
 "##;
 
-/// A long-pollable read with a required wait hint, which a target holds by
-/// value rather than behind an optional.
+/// A long-pollable read. The loader keeps the wait hint optional, because the
+/// loop sets it on each attempt.
 const LONG_POLL_CONTRACT: &str = r##"
 nexusrpc: "1.0.0"
 services:
@@ -65,7 +65,6 @@ $defs:
     type: object
     properties:
       waitMs: { type: integer }
-    required: [waitMs]
     additionalProperties: false
   ReadOutput:
     type: object

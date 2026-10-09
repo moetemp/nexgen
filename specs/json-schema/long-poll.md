@@ -15,7 +15,7 @@ services:
     operations:
       read:
         x-nexus-long-poll:
-          wait-field: waitMs      # input member, type: integer, milliseconds
+          wait-field: waitMs      # optional input member, type: integer, milliseconds
           result-field: records   # output member, type: array
         input: { $ref: "#/$defs/ReadInput" }
         output: { $ref: "#/$defs/ReadOutput" }
@@ -46,9 +46,10 @@ The defining choices (citing [[PRINCIPLES.md]]):
 - **Not gated (P7.1, P1).** A gated keyword would make one contract load under
   one build of the binary and fail under another. The keyword is admitted
   everywhere; a target with no caller accepts it and emits nothing for it.
-- **Pinned member shapes (P7.1).** The wait member must be `type: integer` and
-  the result member `type: array`, and both models must be
-  `properties`-shaped. Pinning the shapes keeps every emitted loop one numeric
+- **Pinned member shapes (P7.1).** The wait member must be an optional
+  `type: integer` with no `default`, the result member `type: array`, and both
+  models `properties`-shaped. The loop sets the wait member on every attempt, so
+  a caller never supplies it and a default would never apply. Pinning the shapes keeps every emitted loop one numeric
   assignment and one length test, and a name that does not resolve is a load
   reject rather than a compile error inside generated code, far from the
   contract that caused it.
@@ -66,7 +67,7 @@ the call site: `read_until_records`.
 | Aspect | Go | Python |
 |---|---|---|
 | Signature | `ReadUntilRecords(ctx, request ReadInput, deadline time.Duration) (ReadOutput, error)` | `async def read_until_records(self, request: ReadInput, *, deadline: float) -> ReadOutput` |
-| Wait assignment | `attempt.WaitMs = milliseconds` when required, `= &milliseconds` when optional | `dataclasses.replace(request, wait_ms=int(wait * 1000))` |
+| Wait assignment | `attempt.WaitMs = &milliseconds` | `dataclasses.replace(request, wait_ms=int(wait * 1000))` |
 | Done test | `len(answer.Records) > 0` | `if answer.records:` |
 
 Each attempt:
@@ -84,7 +85,8 @@ Each attempt:
    again as fast as the network allows.
 4. **Errors.** A status error that is retryable (`429`, `5xx`) is retried with
    the same backoff while the deadline allows; any other error ends the loop.
-   In Go a cancelled context ends the loop with the context's error.
+   In Go a context that ends during either pause ends the loop with the
+   context's error.
 
 ## Property-testing matrix
 
@@ -94,7 +96,6 @@ Each attempt:
 |---|---|
 | Marked `read` beside an unmarked `append` | loop on `read` only; single shot kept |
 | Optional wait member | Go assigns through a pointer |
-| Required wait member | Go assigns by value |
 | Contract without the keyword | no loop, no `time` import |
 
 ### Rejected at load time (negative)
@@ -106,6 +107,8 @@ Each attempt:
 | Missing or empty member | no `result-field` |
 | Named member not declared | `result-field: entries` on a model without it |
 | Wrong member type | `waitMs: { type: string }` |
+| Wait member required | `required: [waitMs]` |
+| Wait member with a default | `waitMs: { type: integer, default: 5000 }` |
 | Operation without the side | marked operation with no `output` |
 | Model without `properties` | output is `additionalProperties: { type: string }` |
 

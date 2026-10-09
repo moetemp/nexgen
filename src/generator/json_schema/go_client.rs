@@ -417,7 +417,6 @@ fn render_long_poll_method(
         model_output.member(&long_poll.result_member),
         &long_poll.result_member,
     );
-    let wait_required = input.member_required(&long_poll.wait_member);
     render_wrapped_go_doc_comment(
         output,
         "",
@@ -448,13 +447,10 @@ fn render_long_poll_method(
     output.push_str("\t\twait := c.pollBudget(time.Until(end))\n");
     output.push_str("\t\tattempt := request\n");
     output.push_str("\t\tmilliseconds := wait.Milliseconds()\n");
+    // The loader keeps the wait member optional, so it is always a pointer.
     output.push_str("\t\tattempt.");
     output.push_str(&wait_field);
-    if wait_required {
-        output.push_str(" = milliseconds\n");
-    } else {
-        output.push_str(" = &milliseconds\n");
-    }
+    output.push_str(" = &milliseconds\n");
     output.push_str("\t\tstarted := time.Now()\n");
     output.push_str("\t\tnext, err := c.");
     output.push_str(&operation.name);
@@ -466,7 +462,7 @@ fn render_long_poll_method(
     );
     output.push_str("\t\t\t\treturn answer, err\n\t\t\t}\n");
     output.push_str("\t\t\tif paused := longPollPause(ctx, backoff, end); paused != nil {\n");
-    output.push_str("\t\t\t\treturn answer, err\n\t\t\t}\n");
+    output.push_str("\t\t\t\treturn answer, paused\n\t\t\t}\n");
     output.push_str("\t\t\tbackoff = longPollNextBackoff(backoff)\n");
     output.push_str("\t\t\tcontinue\n\t\t}\n");
     output.push_str("\t\tanswer = next\n");

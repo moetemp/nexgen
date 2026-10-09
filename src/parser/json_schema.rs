@@ -1787,9 +1787,9 @@ fn validate_schema_keyword_allowlist(path: &Path, schema: &Schema, context: &str
 
 /// Validates `x-nexus-stream-ref` on a node.
 ///
-/// A target with a stream SDK builds the SDK type from the wire members by
-/// name, so the model has to declare them, and a member the reference does not
-/// know could only be dropped, so the object has to be closed.
+/// A target with a mapped type builds that type from the wire members by name,
+/// so the model has to declare them, and a member the reference does not know
+/// could only be dropped, so the object has to be closed.
 fn validate_stream_ref(path: &Path, schema: &Schema, context: &str) -> Result<()> {
     let Some(value) = schema.extra.get(NEXUS_STREAM_REF_KEYWORD) else {
         return Ok(());
@@ -1800,13 +1800,46 @@ fn validate_stream_ref(path: &Path, schema: &Schema, context: &str) -> Result<()
             reason: format!("{context}: {reason}"),
         })
     };
-    if !value.is_boolean() {
-        return reject(format!(
-            "`{NEXUS_STREAM_REF_KEYWORD}` must be a boolean, got {value}"
-        ));
-    }
-    if value.as_bool() != Some(true) {
-        return Ok(());
+    match value {
+        Value::Bool(false) => return Ok(()),
+        Value::Bool(true) => {}
+        Value::Object(mapping) => {
+            if mapping.is_empty() {
+                return reject(format!(
+                    "`{NEXUS_STREAM_REF_KEYWORD}` must map at least one language; use `true` to mark the model without a mapping"
+                ));
+            }
+            for (target, path) in mapping {
+                if !crate::json_schema::streaming::STREAM_REF_MAPPED_TARGETS
+                    .contains(&target.as_str())
+                {
+                    return reject(format!(
+                        "`{NEXUS_STREAM_REF_KEYWORD}` maps `{target}`, which has no stream reference mapping; only `py` does, and every other target emits the model"
+                    ));
+                }
+                let valid = path.as_str().is_some_and(|path| {
+                    let segments = path.split('.').collect::<Vec<_>>();
+                    segments.len() >= 2
+                        && segments.iter().all(|segment| {
+                            let mut chars = segment.chars();
+                            chars
+                                .next()
+                                .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+                                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+                        })
+                });
+                if !valid {
+                    return reject(format!(
+                        "`{NEXUS_STREAM_REF_KEYWORD}.{target}` must be a dotted `module.Type` path naming the type to emit, got {path}"
+                    ));
+                }
+            }
+        }
+        _ => {
+            return reject(format!(
+                "`{NEXUS_STREAM_REF_KEYWORD}` must be `true` or a map from a language to a `module.Type` path, got {value}"
+            ));
+        }
     }
     let is_object = schema.ty.as_ref().and_then(Value::as_str) == Some("object");
     let has_members = schema
@@ -11547,6 +11580,36 @@ $defs:
     }
 
     #[test]
+    fn rejects_a_malformed_stream_ref_mapping() {
+        for (value, expected) in [
+            ("{ go: example.StreamRef }", "maps `go`"),
+            ("{ py: StreamRef }", "must be a dotted `module.Type` path"),
+            ("{ py: 3 }", "must be a dotted `module.Type` path"),
+            ("{}", "must map at least one language"),
+        ] {
+            let error = doc_reject(&format!(
+                r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        input: {{ $ref: "#/$defs/StreamRef" }}
+$defs:
+  StreamRef:
+    type: object
+    x-nexus-stream-ref: {value}
+    properties:
+      topic: {{ type: string }}
+    required: [topic]
+    additionalProperties: false
+"##
+            ));
+            assert!(error.contains(expected), "{value}: {error}");
+        }
+    }
+
+    #[test]
     fn rejects_a_stream_ref_marker_that_is_not_a_boolean() {
         let error = doc_reject(
             r##"
@@ -11567,7 +11630,7 @@ $defs:
 "##,
         );
         assert!(
-            error.contains("`x-nexus-stream-ref` must be a boolean"),
+            error.contains("`x-nexus-stream-ref` must be `true` or a map"),
             "{error}"
         );
     }

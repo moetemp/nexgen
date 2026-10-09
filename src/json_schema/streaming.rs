@@ -12,17 +12,29 @@ use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-/// Marks a `$defs` model as the SDK's stream reference: the value an operation
-/// takes or returns to hand a stream to its caller. The model's members are the
-/// wire form; a target with a stream SDK emits that SDK's own type in its place.
+/// Marks a `$defs` model as the stream reference: the value an operation takes
+/// or returns to hand a stream to its caller. The model's members are the wire
+/// form. The value is `true`, or a map from a target's `x-<lang>-name` token to
+/// the type that target emits in the model's place.
 pub const STREAM_REF_KEYWORD: &str = "x-nexus-stream-ref";
+
+/// The targets a stream reference can be mapped for, by their `x-<lang>-name`
+/// token.
+pub const STREAM_REF_MAPPED_TARGETS: [&str; 1] = ["py"];
 
 /// Whether a schema node declares itself the stream reference.
 pub fn stream_ref_marked(schema: &Value) -> bool {
-    schema
-        .get(STREAM_REF_KEYWORD)
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+    match schema.get(STREAM_REF_KEYWORD) {
+        Some(Value::Bool(marked)) => *marked,
+        Some(Value::Object(_)) => true,
+        _ => false,
+    }
+}
+
+/// The type a stream reference maps to for one target, as a dotted
+/// `module.Type` path, when the contract supplies one.
+pub fn stream_ref_mapping<'a>(schema: &'a Value, target: &str) -> Option<&'a str> {
+    schema.get(STREAM_REF_KEYWORD)?.get(target)?.as_str()
 }
 
 /// Marks a `type: string` member as an opaque resume token. The value names the
@@ -207,6 +219,13 @@ mod tests {
         assert!(stream_ref_marked(&schema));
         assert!(!stream_ref_marked(&json!({ "type": "object" })));
         assert!(!stream_ref_marked(&json!({ "x-nexus-stream-ref": false })));
+        let mapped = json!({ "x-nexus-stream-ref": { "py": "sdk.streams.StreamRef" } });
+        assert!(stream_ref_marked(&mapped));
+        assert_eq!(
+            stream_ref_mapping(&mapped, "py"),
+            Some("sdk.streams.StreamRef")
+        );
+        assert_eq!(stream_ref_mapping(&schema, "py"), None);
     }
 
     #[test]

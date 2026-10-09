@@ -514,7 +514,7 @@ $defs:
     additionalProperties: false
   StreamRef:
     type: object
-    x-nexus-stream-ref: true
+    x-nexus-stream-ref: { py: example_sdk.streams.StreamRef }
     properties:
       owner: { type: string, enum: [workflow, activity, standalone] }
       workflow_id: { oneOf: [{ type: string }, { type: "null" }] }
@@ -538,12 +538,11 @@ $defs:
 
 /// Runs the emitted stream-reference converter against the type it builds.
 ///
-/// The generated module imports `temporalio.contrib.streams.StreamRef` by name,
-/// which the SDK release the sample environment installs does not carry yet,
-/// so the driver stands one in with the members the contract declares. What is
-/// checked is the emitted code's contract with that type: built by keyword
-/// from the wire members, read back by attribute, the SDK's own nulls accepted,
-/// and the value a caller gets back from an operation being that type.
+/// The contract maps the reference to `example_sdk.streams.StreamRef`, which
+/// the driver defines with the members the contract declares. What is checked
+/// is the emitted code's contract with that type: built by keyword from the
+/// wire members, read back by attribute, an SDK's own nulls accepted, and the
+/// value a caller gets back from an operation being that type.
 const PYTHON_STREAM_REF_DRIVER: &str = r#"
 import asyncio
 import dataclasses
@@ -564,12 +563,12 @@ class StreamRef:
     run_id: str | None = None
 
 
-import temporalio.contrib
-
-streams = types.ModuleType("temporalio.contrib.streams")
+sdk = types.ModuleType("example_sdk")
+streams = types.ModuleType("example_sdk.streams")
 streams.StreamRef = StreamRef
-sys.modules["temporalio.contrib.streams"] = streams
-temporalio.contrib.streams = streams
+sdk.streams = streams
+sys.modules["example_sdk"] = sdk
+sys.modules["example_sdk.streams"] = streams
 
 models = importlib.import_module(f"{package.name}.models")
 client_module = importlib.import_module(f"{package.name}.client")

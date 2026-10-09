@@ -892,8 +892,9 @@ pub(in crate::generator) fn render_external_models(
         push_section(&mut body);
         render_model_converter(&mut body, model, &schema, json_models)?;
         push_section(&mut body);
-        if crate::json_schema::streaming::stream_ref_marked(&model.schema) {
-            render_stream_ref_alias(&mut body, model, &schema);
+        if let Some(mapped) = crate::json_schema::streaming::stream_ref_mapping(&model.schema, "py")
+        {
+            render_stream_ref_alias(&mut body, model, &schema, mapped);
         } else {
             render_model_dataclass(&mut body, model, &schema)?;
         }
@@ -967,14 +968,19 @@ pub(in crate::generator) fn render_external_models(
     // Each is emitted only when the rendered body actually references the module
     // (a materialized temporal field, a `multipleOf` on a number, a hoisted
     // `pattern`/`format` regex); the shared import writer does that filtering.
-    let module_imports = BTreeSet::from([
+    let mut module_imports = BTreeSet::from([
         "temporalio.converter".to_string(),
         "temporalio.exceptions".to_string(),
-        "temporalio.contrib.streams".to_string(),
         "datetime".to_string(),
         "math".to_string(),
         "re".to_string(),
     ]);
+    // A stream reference mapped to another type imports that type's module.
+    module_imports.extend(json_models.iter().filter_map(|model| {
+        crate::json_schema::streaming::stream_ref_mapping(&model.schema, "py")
+            .and_then(|path| path.rsplit_once('.'))
+            .map(|(module, _)| module.to_string())
+    }));
     let mut relative_imports = BTreeMap::<String, BTreeSet<String>>::new();
     // Import exactly the runtime symbols the emitted body references. Longer
     // names are checked as whole identifiers so `_parse_base64url` does not drag
@@ -1005,22 +1011,25 @@ pub(in crate::generator) fn render_external_models(
     })
 }
 
-/// The SDK type a stream reference is emitted as (`x-nexus-stream-ref`).
-const PYTHON_STREAM_REF_TYPE: &str = "temporalio.contrib.streams.StreamRef";
-
-/// Emits a stream-reference model as the SDK's own type rather than a wire
-/// dataclass, so an operation that takes or returns one hands the caller the
-/// value the SDK opens, with no copy in between.
+/// Emits a stream-reference model as the type the contract maps it to
+/// (`x-nexus-stream-ref: {py: ...}`) rather than a wire dataclass, so an
+/// operation that takes or returns one hands the caller the value its SDK
+/// opens, with no copy in between.
 ///
 /// The model's converter is still emitted and still owns the wire form: it
 /// builds the SDK type from the declared members by keyword and reads them back
 /// by attribute, which is why the loader requires the model to declare them.
 /// Only the class body is replaced, so a member typed by the model, and an
 /// operation whose input or output is the model, name the alias unchanged.
-fn render_stream_ref_alias(output: &mut String, model: &PlannedJsonType, schema: &Schema) {
+fn render_stream_ref_alias(
+    output: &mut String,
+    model: &PlannedJsonType,
+    schema: &Schema,
+    mapped: &str,
+) {
     output.push_str(&model.model_name);
     output.push_str(": typing.TypeAlias = ");
-    output.push_str(PYTHON_STREAM_REF_TYPE);
+    output.push_str(mapped);
     output.push('\n');
     render_python_docstring(
         output,

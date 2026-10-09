@@ -208,6 +208,38 @@ fn the_generated_go_caller_posts_to_a_local_endpoint() {
     .expect_ok("go test over the generated caller");
 }
 
+/// Operations that answer with no output, so the caller decodes nothing.
+const VOID_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    operations:
+      close:
+        fqn: close
+        input: { $ref: "#/$defs/CloseInput" }
+      ping:
+        fqn: ping
+$defs:
+  CloseInput:
+    type: object
+    properties:
+      stream: { type: string }
+    additionalProperties: false
+"##;
+
+#[test]
+fn the_generated_go_caller_imports_only_what_it_uses() {
+    let workspace = Workspace::new("http-caller-go-imports-toolchain");
+    let root = prepare_go_module(&workspace).expect("prepare the go module");
+    generate_client_from(&workspace, Target::Go, "void", VOID_CONTRACT);
+    run(command("go")
+        .current_dir(&root)
+        .env("GOFLAGS", "-mod=mod")
+        .args(["vet", "./..."]))
+    .expect_ok("go vet over a caller with nothing to decode");
+}
+
 /// Drives the caller against a local `http.server` endpoint.
 const PYTHON_DRIVER: &str = r#"
 import asyncio

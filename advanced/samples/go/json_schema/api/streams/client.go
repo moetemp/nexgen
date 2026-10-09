@@ -219,7 +219,7 @@ func (c *StreamServiceHTTPClient) ReadUntilRecords(ctx context.Context, request 
 				return answer, err
 			}
 			if paused := longPollPause(ctx, backoff, end); paused != nil {
-				return answer, err
+				return answer, paused
 			}
 			backoff = longPollNextBackoff(backoff)
 			continue

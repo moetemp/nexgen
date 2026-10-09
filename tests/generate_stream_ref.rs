@@ -1,8 +1,9 @@
-//! The stream reference `x-nexus-stream-ref` marks.
+//! The stream reference `x-nexus-stream-ref` marks, and the per-language type
+//! a contract maps it to.
 //!
-//! The committed samples carry no marked model, because the sample projects
-//! type-check against an SDK release without the stream module; these pin the
-//! emission instead, and `http_caller_toolchain.rs` runs it.
+//! The committed samples carry no marked model, because a mapped type has to
+//! exist wherever the samples type-check; these pin the emission instead, and
+//! `http_caller_toolchain.rs` runs it against a stand-in type.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -41,7 +42,7 @@ $defs:
     additionalProperties: false
   StreamRef:
     type: object
-    x-nexus-stream-ref: true
+    x-nexus-stream-ref: { py: example_sdk.streams.StreamRef }
     description: "A stream: its owner and the topic on it."
     properties:
       owner: { type: string, enum: [workflow, activity, standalone] }
@@ -77,11 +78,20 @@ fn unique_output_path(label: &str) -> PathBuf {
 }
 
 fn generate(language: Language, client: bool, label: &str) -> (PathBuf, Vec<(String, String)>) {
+    generate_contract(language, CONTRACT, client, label)
+}
+
+fn generate_contract(
+    language: Language,
+    contract: &str,
+    client: bool,
+    label: &str,
+) -> (PathBuf, Vec<(String, String)>) {
     let temp_dir = unique_output_path(label);
     let input_dir = temp_dir.join("input");
     fs::create_dir_all(&input_dir).unwrap();
     let input_path = input_dir.join("scores.nexusrpc.yaml");
-    fs::write(&input_path, CONTRACT).unwrap();
+    fs::write(&input_path, contract).unwrap();
     let output_path = temp_dir.join("scores");
     generate_to_file(&GenerateRequest {
         config: NexgenConfig {
@@ -126,17 +136,14 @@ fn file<'a>(files: &'a [(String, String)], name: &str) -> &'a str {
 }
 
 #[test]
-fn python_emits_the_stream_reference_as_the_sdk_type() {
+fn python_emits_the_stream_reference_as_the_mapped_type() {
     let (temp_dir, files) = generate(Language::Python, false, "stream-ref-python");
     let models = file(&files, "models.py");
-    // The SDK's own type stands where the wire dataclass would, so a value
-    // read off an operation is the one the SDK opens.
+    // The mapped type stands where the wire dataclass would, so a value read
+    // off an operation is the one the SDK opens.
+    assert!(models.contains("import example_sdk.streams\n"), "{models}");
     assert!(
-        models.contains("import temporalio.contrib.streams\n"),
-        "{models}"
-    );
-    assert!(
-        models.contains("StreamRef: typing.TypeAlias = temporalio.contrib.streams.StreamRef\n"),
+        models.contains("StreamRef: typing.TypeAlias = example_sdk.streams.StreamRef\n"),
         "{models}"
     );
     assert!(
@@ -162,7 +169,7 @@ fn python_emits_the_stream_reference_as_the_sdk_type() {
 }
 
 #[test]
-fn python_caller_hands_back_the_sdk_stream_reference() {
+fn python_caller_hands_back_the_mapped_stream_reference() {
     let (temp_dir, files) = generate(Language::Python, true, "stream-ref-python-client");
     let client = file(&files, "client.py");
     assert!(client.contains(") -> StreamRef:"), "{client}");
@@ -193,10 +200,31 @@ fn the_other_targets_keep_the_wire_model() {
         let (temp_dir, files) = generate(language, false, "stream-ref-other-targets");
         for (name, contents) in &files {
             assert!(
-                !contents.contains("x-nexus-") && !contents.contains("contrib.streams"),
+                !contents.contains("x-nexus-") && !contents.contains("example_sdk"),
                 "{language:?} {name} acted on the marker"
             );
         }
         fs::remove_dir_all(temp_dir).unwrap();
     }
+}
+
+#[test]
+fn a_marker_without_a_mapping_keeps_the_wire_model() {
+    // No SDK type is assumed: without a mapping for the target, the marked
+    // model is emitted like any other.
+    let contract = CONTRACT.replace(
+        "x-nexus-stream-ref: { py: example_sdk.streams.StreamRef }",
+        "x-nexus-stream-ref: true",
+    );
+    let (temp_dir, files) = generate_contract(
+        Language::Python,
+        &contract,
+        false,
+        "stream-ref-python-unmapped",
+    );
+    let models = file(&files, "models.py");
+    assert!(models.contains("class StreamRef"), "{models}");
+    assert!(!models.contains("TypeAlias = "), "{models}");
+    assert!(!models.contains("example_sdk"), "{models}");
+    fs::remove_dir_all(temp_dir).unwrap();
 }

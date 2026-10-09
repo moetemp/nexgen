@@ -395,7 +395,7 @@ impl Schema {
 const LANG_NAME_KEYWORDS: [&str; 4] = ["x-go-name", "x-ts-name", "x-py-name", "x-java-name"];
 
 use crate::json_schema::streaming::{
-    LONG_POLL_KEYWORD as NEXUS_LONG_POLL_KEYWORD,
+    CURSOR_KEYWORD as NEXUS_CURSOR_KEYWORD, LONG_POLL_KEYWORD as NEXUS_LONG_POLL_KEYWORD,
     LONG_POLL_RESULT_MEMBER as NEXUS_LONG_POLL_RESULT_MEMBER,
     LONG_POLL_WAIT_MEMBER as NEXUS_LONG_POLL_WAIT_MEMBER,
 };
@@ -474,6 +474,41 @@ fn schema_extra_keyword_is_known(keyword: &str) -> bool {
             | "x-go-enum-names"
             | "x-java-enum-names"
     ) || LANG_NAME_KEYWORDS.contains(&keyword)
+        || keyword == NEXUS_CURSOR_KEYWORD
+}
+
+/// Validates the streaming keywords a schema node may carry.
+fn validate_nexus_annotations(path: &Path, schema: &Schema, context: &str) -> Result<()> {
+    let Some(value) = schema.extra.get(NEXUS_CURSOR_KEYWORD) else {
+        return Ok(());
+    };
+    let reject = |reason: String| -> Result<()> {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!("{context}: {reason}"),
+        })
+    };
+    let Some(name) = value.as_str() else {
+        return reject(format!(
+            "`{NEXUS_CURSOR_KEYWORD}` must be a string naming the emitted token type, got {value}"
+        ));
+    };
+    if !name_matches(name, true) {
+        return reject(format!(
+            "`{NEXUS_CURSOR_KEYWORD}` name `{name}` must match `^[A-Z][a-zA-Z\\d]+$`; it names an emitted type"
+        ));
+    }
+    if schema.ty.as_ref().and_then(Value::as_str) != Some("string") {
+        return reject(format!(
+            "`{NEXUS_CURSOR_KEYWORD}` requires `type: string`; a resume token travels as text"
+        ));
+    }
+    if schema.extra.contains_key("contentEncoding") {
+        return reject(format!(
+            "`{NEXUS_CURSOR_KEYWORD}` and `contentEncoding` are mutually exclusive; a token is never decoded, so it has no encoding"
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -2379,6 +2414,7 @@ fn unsupported_keyword_reason(keyword: &str) -> &'static str {
 fn validate_schema_common(path: &Path, schema: &Schema, context: &str) -> Result<()> {
     validate_schema_keyword_allowlist(path, schema, context)?;
     validate_legacy_dependencies(path, schema, context)?;
+    validate_nexus_annotations(path, schema, context)?;
     // A malformed `type` is its own defect, not an absent one. It used to be
     // reported as "a leaf schema requires an explicit `type`" — and on a node
     // that also carries `$ref` or `oneOf` it was never reported at all, because
@@ -8073,16 +8109,36 @@ fn json_model_spec(
 ) -> Result<JsonModelSpec<Symbol>> {
     let schema =
         resolve_schema_refs_for_generation(model, &model.schema, docs, models, module_paths)?;
+    let value = serde_json::to_value(&schema).map_err(|error| Error::InvalidJsonSchema {
+        path: PathBuf::from("<json-schema>"),
+        reason: format!(
+            "failed to preserve JSON schema model `{}`: {error}",
+            model.full_name
+        ),
+    })?;
+    validate_cursor_positions(&model.canonical_path, &model.full_name, &value)?;
     Ok(JsonModelSpec {
         name: json_model_symbol(model, module_paths),
         model_name: model.model_name.clone(),
-        schema: serde_json::to_value(&schema).map_err(|error| Error::InvalidJsonSchema {
-            path: PathBuf::from("<json-schema>"),
-            reason: format!(
-                "failed to preserve JSON schema model `{}`: {error}",
-                model.full_name
-            ),
-        })?,
+        schema: value,
+    })
+}
+
+/// Refuses an `x-nexus-cursor` off a model's direct property. The keyword is
+/// spelled correctly and sits on a string there, so the grammar accepts it, but
+/// it marks nothing a caller reads its resume position from.
+fn validate_cursor_positions(path: &Path, full_name: &str, schema: &Value) -> Result<()> {
+    let misplaced = crate::json_schema::streaming::misplaced_cursors(schema);
+    if misplaced.is_empty() {
+        return Ok(());
+    }
+    Err(Error::InvalidJsonSchema {
+        path: path.to_path_buf(),
+        reason: format!(
+            "model `{full_name}`: `{NEXUS_CURSOR_KEYWORD}` at {} is not on a direct property of \
+             the model; move it to the `type: string` member that carries the token",
+            misplaced.join(", ")
+        ),
     })
 }
 
@@ -9010,6 +9066,23 @@ pub(crate) fn build_name_manifest(
                     language,
                     ident.clone(),
                     format!("generated semantic predicate `{ident}`"),
+                )?;
+            }
+        }
+        // The token types `x-nexus-cursor` declares share this scope in the two
+        // targets that emit them. Several members may name one type, so each
+        // name enters once.
+        if matches!(language, Language::Go | Language::Python) {
+            let schemas = ns_models
+                .iter()
+                .filter(|model| in_scope(&model.module_key))
+                .filter_map(|model| serde_json::to_value(&model.schema).ok())
+                .collect::<Vec<_>>();
+            for name in crate::json_schema::streaming::cursor_type_names(&schemas) {
+                top.insert(
+                    language,
+                    name.clone(),
+                    format!("token type `{name}` (`{NEXUS_CURSOR_KEYWORD}`)"),
                 )?;
             }
         }
@@ -11092,6 +11165,101 @@ services:
             error.contains("`x-nexus-long-poll` must be an object"),
             "{error}"
         );
+    }
+
+    /// A read whose input carries `member` in place of a plain token member.
+    fn cursor_contract(member: &str) -> String {
+        format!(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        input: {{ $ref: "#/$defs/ReadInput" }}
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      afterToken: {member}
+"##
+        )
+    }
+
+    #[test]
+    fn keeps_the_cursor_annotation_on_the_loaded_model() {
+        let schema = model_schema(
+            &cursor_contract("{ type: string, x-nexus-cursor: StreamCursor }"),
+            "ReadInput",
+        );
+        assert_eq!(
+            schema["properties"]["afterToken"]["x-nexus-cursor"],
+            "StreamCursor"
+        );
+    }
+
+    #[test]
+    fn rejects_a_malformed_cursor() {
+        for (member, expected) in [
+            (
+                "{ type: integer, x-nexus-cursor: StreamCursor }",
+                "requires `type: string`",
+            ),
+            (
+                "{ type: string, x-nexus-cursor: streamCursor }",
+                "must match `^[A-Z]",
+            ),
+            (
+                "{ type: string, x-nexus-cursor: true }",
+                "must be a string naming",
+            ),
+            (
+                "{ type: string, contentEncoding: base64, x-nexus-cursor: StreamCursor }",
+                "mutually exclusive",
+            ),
+        ] {
+            let error = doc_reject(&cursor_contract(member));
+            assert!(error.contains(expected), "{member}: {error}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_cursor_off_a_direct_property() {
+        let error = doc_reject(&cursor_contract(
+            "{ type: array, items: { type: string, x-nexus-cursor: PageCursor } }",
+        ));
+        assert!(
+            error.contains(
+                "`x-nexus-cursor` at properties.afterToken.items is not on a direct property"
+            ),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn rejects_a_cursor_named_like_a_model() {
+        for language in [Language::Go, Language::Python] {
+            let error = reject_for(
+                language,
+                r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        input: { $ref: "#/$defs/ReadInput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      afterToken: { type: string, x-nexus-cursor: ReadInput }
+"##,
+            );
+            assert!(
+                error.contains("ReadInput") && error.contains("token type"),
+                "{language:?}: {error}"
+            );
+        }
     }
 
     #[test]

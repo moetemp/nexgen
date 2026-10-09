@@ -2865,7 +2865,7 @@ pub(crate) fn render_tree_support_files(
 
     BTreeMap::from([(
         PathBuf::from("_definitions.py"),
-        python_json::render_support_file(),
+        python_json::render_support_file(&tree_cursor_type_names(branch)),
     )])
 }
 
@@ -2947,6 +2947,29 @@ pub(crate) fn tree_model_hoists(
     branch: &ApiSpecBranch<PlannedFamily>,
 ) -> Result<PythonModelHoists> {
     python_json::tree_model_hoists(branch)
+}
+
+/// The token types every JSON model in the tree declares (`x-nexus-cursor`).
+fn tree_cursor_type_names(branch: &ApiSpecBranch<PlannedFamily>) -> Vec<String> {
+    fn collect<'a>(
+        branch: &'a ApiSpecBranch<PlannedFamily>,
+        schemas: &mut Vec<&'a serde_json::Value>,
+    ) {
+        for node in branch.children.values() {
+            match node {
+                ApiSpecNode::Leaf(leaf) => schemas.extend(
+                    leaf.spec
+                        .external_types()
+                        .filter_map(|(_, binding)| binding.json_model())
+                        .map(|model| &model.schema),
+                ),
+                ApiSpecNode::Branch(branch) => collect(branch, schemas),
+            }
+        }
+    }
+    let mut schemas = Vec::new();
+    collect(branch, &mut schemas);
+    crate::json_schema::streaming::cursor_type_names(schemas)
 }
 
 fn branch_has_json_models(branch: &ApiSpecBranch<PlannedFamily>) -> bool {

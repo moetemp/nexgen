@@ -39,6 +39,7 @@ __all__ = [
     "_parse_time",
     "_quote",
     "_transfer_type_convertible",
+    "StreamCursor",
 ]
 
 
@@ -567,3 +568,14 @@ def _parse_base64url(
 
 def _format_base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
+
+
+StreamCursor = typing.NewType("StreamCursor", str)
+"""StreamCursor is an opaque resume token issued by the endpoint.
+
+The value is never parsed, compared or constructed by a caller; only the endpoint that
+issued it can interpret it.
+
+Pass one back to resume strictly after the record it names, so that record is never
+delivered twice.
+"""

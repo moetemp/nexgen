@@ -360,11 +360,14 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
         if !self.json_models.is_empty() || !self.hoisted_json_models.is_empty() {
             // Validation failures are part of the JSON backend's public runtime surface.
             // Keep the request even when every local model was moved to `_recursive`.
+            // The token types live beside it, declared once for the package so
+            // two modules naming one type share it.
             fragments.root_package_imports.insert(
                 "._definitions".to_string(),
                 JSON_PUBLIC_RUNTIME_NAMES
                     .iter()
                     .map(|name| (*name).to_string())
+                    .chain(self.cursor_type_names())
                     .collect(),
             );
         }
@@ -378,7 +381,7 @@ impl ExternalModelBackend<PlannedJsonType> for ModelBackend {
 
         Ok(BTreeMap::from([(
             PathBuf::from("_definitions.py"),
-            render_support_file(),
+            render_support_file(&self.cursor_type_names()),
         )]))
     }
 
@@ -426,6 +429,16 @@ impl ModelBackend {
         self.hoisted_json_models
             .iter()
             .any(|model| model.full_name == json_type.full_name)
+    }
+
+    /// The token types this backend's models declare (`x-nexus-cursor`).
+    fn cursor_type_names(&self) -> Vec<String> {
+        crate::json_schema::streaming::cursor_type_names(
+            self.json_models
+                .iter()
+                .chain(self.hoisted_json_models.iter())
+                .map(|model| &model.schema),
+        )
     }
 
     /// The HTTP caller's plan for this module. The models are the backend's own
@@ -812,8 +825,17 @@ fn python_relative_models_module(from: &ModulePath, to: &ModulePath) -> String {
     module
 }
 
-pub(in crate::generator) fn render_support_file() -> String {
-    render_json_runtime_module()
+/// The package's shared JSON runtime, with the token types `cursor_names`
+/// declares. `_definitions.py` is the one module of a package every models
+/// module shares, so a token type declared here is one type however many
+/// modules name it.
+pub(in crate::generator) fn render_support_file(cursor_names: &[String]) -> String {
+    let mut output = render_json_runtime_module(cursor_names);
+    if let Some(cursors) = render_cursor_types(cursor_names) {
+        output.push_str("\n\n");
+        output.push_str(&cursors);
+    }
+    output
 }
 
 fn root_python_runtime_module(module_path: &ModulePath) -> String {
@@ -978,6 +1000,37 @@ pub(in crate::generator) fn render_external_models(
     })
 }
 
+/// The opaque token types the contract declares (`x-nexus-cursor`), emitted
+/// into the package's shared runtime and re-exported from its root.
+///
+/// `NewType` rather than a type alias: a caller holding a token in a variable of
+/// this type cannot pass a bare `str` into its place, which is the whole point
+/// of an opaque token. The wire models keep `str`, so the JSON on the wire is
+/// unchanged.
+fn render_cursor_types(cursor_names: &[String]) -> Option<String> {
+    if cursor_names.is_empty() {
+        return None;
+    }
+    let mut output = String::new();
+    for name in cursor_names {
+        output.push_str(name);
+        output.push_str(" = typing.NewType(");
+        output.push_str(&python_string_literal(name));
+        output.push_str(", str)\n");
+        render_python_docstring(
+            &mut output,
+            "",
+            Some(&crate::json_schema::streaming::cursor_doc(name, "\n\n")),
+            &[],
+            None,
+            false,
+        );
+        output.push('\n');
+    }
+    output.push('\n');
+    Some(output)
+}
+
 /// The runtime symbols a generated model module may import from `_definitions`.
 const JSON_RUNTIME_SYMBOLS: &[&str] = &[
     "Violation",
@@ -1054,7 +1107,7 @@ fn is_python_union_model(model: &PlannedJsonType) -> bool {
     })
 }
 
-fn render_json_runtime_module() -> String {
+fn render_json_runtime_module(cursor_names: &[String]) -> String {
     let mut output = String::new();
     output.push_str(crate::generator::python::GENERATED_HEADER);
     output.push_str("\n\n");
@@ -1098,7 +1151,10 @@ fn render_json_runtime_module() -> String {
         "_parse_time",
         "_quote",
         "_transfer_type_convertible",
-    ] {
+    ]
+    .into_iter()
+    .chain(cursor_names.iter().map(String::as_str))
+    {
         output.push_str("    \"");
         output.push_str(name);
         output.push_str("\",\n");

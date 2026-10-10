@@ -146,7 +146,7 @@ fn render_handle_constructor(
     let bound = target
         .keys
         .iter()
-        .map(|key| key.wire_name.clone())
+        .map(|key| member_field(Some(&key.property), &key.wire_name))
         .collect::<Vec<_>>()
         .join(", ");
     let (receiver, receiver_type, client_expr) = match parent {
@@ -212,7 +212,7 @@ fn render_handle(output: &mut String, service: &ClientService, handle: &ClientHa
     let bound = handle
         .keys
         .iter()
-        .map(|key| key.wire_name.clone())
+        .map(|key| member_field(Some(&key.property), &key.wire_name))
         .collect::<Vec<_>>()
         .join(", ");
     render_wrapped_go_doc_comment(
@@ -304,9 +304,24 @@ fn render_handle_request_type(
     output.push_str("type ");
     output.push_str(&type_name);
     output.push_str(" struct {\n");
+    let looped = operation.long_poll.as_ref().zip(operation.output.as_ref());
     for (wire, member) in &free {
+        let field = member_field(Some(member), wire);
+        if let Some((long_poll, model_output)) = looped
+            && long_poll.wait_member == *wire
+        {
+            render_wrapped_go_doc_comment(
+                output,
+                "\t",
+                &format!(
+                    "{field} is for {}. {} ignores it and sets the wait on each attempt.",
+                    operation.name,
+                    long_poll_method_name(operation, long_poll, model_output)
+                ),
+            );
+        }
         output.push('\t');
-        output.push_str(&member_field(Some(member), wire));
+        output.push_str(&field);
         output.push(' ');
         output.push_str(&input.member_type(wire).unwrap_or_default());
         output.push('\n');

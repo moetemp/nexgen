@@ -431,7 +431,7 @@ fn render_handle_constructor(
     let bound = target
         .keys
         .iter()
-        .map(|key| format!("`{}`", key.wire_name))
+        .map(|key| format!("`{}`", key_attribute(key)))
         .collect::<Vec<_>>()
         .join(", ");
     render_docstring(
@@ -474,7 +474,7 @@ fn render_handle_class(output: &mut String, service: &ClientService, handle: &Cl
     let bound = handle
         .keys
         .iter()
-        .map(|key| format!("`{}`", key.wire_name))
+        .map(|key| format!("`{}`", key_attribute(key)))
         .collect::<Vec<_>>()
         .join(", ");
     render_docstring(
@@ -609,13 +609,21 @@ fn render_handle_method(
     output.push_str(&return_annotation);
     output.push_str(":\n");
     let mut lines = Vec::new();
-    if let Some(doc) = &operation.doc {
-        lines.push(doc.clone());
+    match long_poll {
+        Some((long_poll, model_output)) => {
+            lines.extend(long_poll_paragraphs(
+                operation,
+                long_poll,
+                input,
+                model_output,
+            ));
+        }
+        None => lines.extend(operation.doc.clone()),
     }
     let bound = handle
         .keys
         .iter()
-        .map(|key| format!("`{}`", key.wire_name))
+        .map(|key| format!("`{}`", key_attribute(key)))
         .collect::<Vec<_>>()
         .join(", ");
     let pronoun = if handle.keys.len() == 1 { "it" } else { "them" };
@@ -733,16 +741,6 @@ fn render_long_poll_method(
     input: &ClientModel,
     model_output: &ClientModel,
 ) {
-    let wait_attribute =
-        member_attribute(input.member(&long_poll.wait_member), &long_poll.wait_member);
-    let result_attribute = member_attribute(
-        model_output.member(&long_poll.result_member),
-        &long_poll.result_member,
-    );
-    let done_attribute = long_poll
-        .done_member
-        .as_ref()
-        .map(|(done, _)| member_attribute(model_output.member(done), done));
     output.push_str("    async def ");
     output.push_str(&long_poll_method_name(operation, long_poll, model_output));
     output.push_str("(\n        self,\n        request: ");
@@ -753,27 +751,68 @@ fn render_long_poll_method(
     render_docstring(
         output,
         "        ",
-        &[
-            format!(
-                "Calls `{}` until it answers with something, or until `deadline`.",
-                operation.name
-            ),
-            format!(
-                "Each attempt sets `{wait_attribute}` from the budget left, so the endpoint \
+        &long_poll_paragraphs(operation, long_poll, input, model_output),
+    );
+    render_long_poll_body(output, operation, long_poll, input, model_output);
+}
+
+/// What a loop method does, shared by the flat caller and every handle that
+/// carries the operation.
+fn long_poll_paragraphs(
+    operation: &ClientOperation,
+    long_poll: &ClientLongPoll,
+    input: &ClientModel,
+    model_output: &ClientModel,
+) -> Vec<String> {
+    let wait_attribute =
+        member_attribute(input.member(&long_poll.wait_member), &long_poll.wait_member);
+    let result_attribute = member_attribute(
+        model_output.member(&long_poll.result_member),
+        &long_poll.result_member,
+    );
+    let done_attribute = long_poll
+        .done_member
+        .as_ref()
+        .map(|(done, _)| member_attribute(model_output.member(done), done));
+    vec![
+        format!(
+            "Calls `{}` until it answers with something, or until `deadline`.",
+            operation.name
+        ),
+        format!(
+            "Each attempt sets `{wait_attribute}` from the budget left, so the endpoint \
                  parks for the caller instead of the caller spinning. The first answer whose \
                  `{result_attribute}` is non-empty{done} is returned. When the deadline passes \
                  first, the last answer is returned, which still carries the caller's resume \
                  position.",
-                done = done_attribute
-                    .as_ref()
-                    .map(|done| format!(", or whose `{done}` is true,"))
-                    .unwrap_or_default(),
-            ),
-            "`deadline` is the whole budget in seconds. The single-shot method stays \
+            done = done_attribute
+                .as_ref()
+                .map(|done| format!(", or whose `{done}` is true,"))
+                .unwrap_or_default(),
+        ),
+        "`deadline` is the whole budget in seconds. The single-shot method stays \
              available for a caller that wants one attempt."
-                .to_string(),
-        ],
+            .to_string(),
+    ]
+}
+
+fn render_long_poll_body(
+    output: &mut String,
+    operation: &ClientOperation,
+    long_poll: &ClientLongPoll,
+    input: &ClientModel,
+    model_output: &ClientModel,
+) {
+    let wait_attribute =
+        member_attribute(input.member(&long_poll.wait_member), &long_poll.wait_member);
+    let result_attribute = member_attribute(
+        model_output.member(&long_poll.result_member),
+        &long_poll.result_member,
     );
+    let done_attribute = long_poll
+        .done_member
+        .as_ref()
+        .map(|(done, _)| member_attribute(model_output.member(done), done));
     output.push_str("        end = time.monotonic() + deadline\n");
     output.push_str("        answer: ");
     output.push_str(&model_output.type_name);

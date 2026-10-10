@@ -267,7 +267,7 @@ func (c *StreamServiceHTTPClient) ReadUntilRecords(ctx context.Context, request 
 	}
 }
 
-// WorkflowStreams binds workflowId for the example.streams.v1.StreamService service.
+// WorkflowStreams binds WorkflowID for the example.streams.v1.StreamService service.
 // Every method posts through the StreamServiceHTTPClient it was built from with the
 // bound members filled in, so a caller states a stream's identity once. The flat caller
 // stays available for a call that spells every member out.
@@ -276,7 +276,7 @@ type WorkflowStreams struct {
 	workflowID string
 }
 
-// WorkflowStreams binds workflowId into a WorkflowStreams.
+// WorkflowStreams binds WorkflowID into a WorkflowStreams.
 func (c *StreamServiceHTTPClient) WorkflowStreams(workflowID string) *WorkflowStreams {
 	return &WorkflowStreams{
 		client:     c,
@@ -317,7 +317,8 @@ type WorkflowStreamsReadRequest struct {
 	Stream     *string
 	AfterToken *string
 	MaxRecords *int64
-	WaitMs     *int64
+	// WaitMs is for Read. ReadUntilRecords ignores it and sets the wait on each attempt.
+	WaitMs *int64
 }
 
 // Read posts through the caller with the bound WorkflowID filled in from this handle.
@@ -345,7 +346,7 @@ func (h *WorkflowStreams) ReadUntilRecords(ctx context.Context, request Workflow
 	return h.client.ReadUntilRecords(ctx, full, deadline)
 }
 
-// StreamProducer binds workflowId, stream, producerId, attempt into a StreamProducer:
+// StreamProducer binds WorkflowID, Stream, ProducerID, Attempt into a StreamProducer:
 // this handle's own members and the ones given here.
 func (h *WorkflowStreams) StreamProducer(stream string, producerID string, attempt int64) *StreamProducer {
 	return &StreamProducer{
@@ -357,7 +358,7 @@ func (h *WorkflowStreams) StreamProducer(stream string, producerID string, attem
 	}
 }
 
-// StreamProducer binds workflowId, stream, producerId, attempt for the
+// StreamProducer binds WorkflowID, Stream, ProducerID, Attempt for the
 // example.streams.v1.StreamService service. Every method posts through the
 // StreamServiceHTTPClient it was built from with the bound members filled in, so a
 // caller states a stream's identity once. The flat caller stays available for a call
@@ -370,7 +371,7 @@ type StreamProducer struct {
 	attempt    int64
 }
 
-// StreamProducer binds workflowId, stream, producerId, attempt into a StreamProducer.
+// StreamProducer binds WorkflowID, Stream, ProducerID, Attempt into a StreamProducer.
 func (c *StreamServiceHTTPClient) StreamProducer(workflowID string, stream string, producerID string, attempt int64) *StreamProducer {
 	return &StreamProducer{
 		client:     c,

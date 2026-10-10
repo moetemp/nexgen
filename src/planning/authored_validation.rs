@@ -1186,7 +1186,15 @@ fn authored_field_matches_singular_proto(
         ) => matches!(authored_type, TypeSpec::Int(_)),
         Some(Type::Bool) => matches!(authored_type, TypeSpec::Bool),
         Some(Type::String) => matches!(authored_type, TypeSpec::String),
-        Some(Type::Bytes) => matches!(authored_type, TypeSpec::Bytes),
+        // `add-rpc` scaffolds proto `bytes` as WIT `list<u8>`. Only here, where a
+        // proto field backs it, is it planned as bytes, so a record without a
+        // proto keeps its list wire form. WIT integer widths are not kept past
+        // the parser, so any integer list matches.
+        Some(Type::Bytes) => match authored_type {
+            TypeSpec::Bytes => true,
+            TypeSpec::List(inner) => matches!(inner.as_ref(), TypeSpec::Int(_)),
+            _ => false,
+        },
         Some(Type::Enum | Type::Message | Type::Group) => match authored_type {
             TypeSpec::External(ExternalTypeSpec::Proto(proto_name)) => field
                 .type_name

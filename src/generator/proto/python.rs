@@ -937,6 +937,9 @@ fn message_from_proto_expr(
     }
 }
 
+// A statement-level `for` binds at function scope, so these loops reserve the
+// local names `element` and `key` in the generated converter. Nothing else the
+// converter emits may read or write them.
 fn repeated_to_proto_lines(
     resolved_type: &ResolvedFieldType,
     value_expr: &str,

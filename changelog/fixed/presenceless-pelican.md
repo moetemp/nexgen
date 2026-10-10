@@ -1,1 +1,1 @@
-Python proto converters no longer call `HasField` on repeated or map fields, which raised `ValueError` for repeated messages and maps.
+Proto planning no longer gives repeated or map fields presence, so Python converters stop calling `HasField` on them (which raised `ValueError`), and the TypeScript and .NET proto emitters, which share the plan, stop treating them as optional too.

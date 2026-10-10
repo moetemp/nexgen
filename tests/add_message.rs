@@ -15,7 +15,7 @@ use nexgen::{add_message_to_string, add_rpc_to_string};
 use prost::Message;
 use prost_types::field_descriptor_proto::{Label, Type};
 use prost_types::{
-    DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet,
+    DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet, MessageOptions,
     MethodDescriptorProto, OneofDescriptorProto, ServiceDescriptorProto,
 };
 
@@ -679,4 +679,125 @@ fn add_message_rejects_malformed_and_colliding_oneofs() {
     );
     let error = add_message_to_string(&[malformed], "Malformed", &[]).unwrap_err();
     assert!(error.to_string().contains("unknown oneof index 3"));
+}
+
+#[test]
+fn scaffold_commands_render_proto_maps_as_wit_maps() {
+    let root = project_root();
+    let rendered = add_message_to_string(
+        &[descriptor_path(&root)],
+        "temporal.api.common.v1.Callback.Nexus",
+        &[linked_inputs_path(&root)],
+    )
+    .unwrap();
+    assert!(rendered.contains("header: map<string, string>,"));
+    assert!(!rendered.contains("header-entry"));
+
+    let rendered = add_message_to_string(
+        &[descriptor_path(&root)],
+        "temporal.api.sdk.v1.EnhancedStackTrace",
+        &[linked_inputs_path(&root)],
+    )
+    .unwrap();
+    assert!(rendered.contains("sources: map<string, stack-trace-file-slice>,"));
+    assert!(rendered.contains("record stack-trace-file-slice {"));
+    assert!(!rendered.contains("sources-entry"));
+}
+
+#[test]
+fn scaffolded_map_wit_passes_compiler_planning() {
+    let root = project_root();
+    let rendered = add_message_to_string(
+        &[descriptor_path(&root)],
+        "temporal.api.sdk.v1.EnhancedStackTrace",
+        &[linked_inputs_path(&root)],
+    )
+    .unwrap();
+    let wit_path = write_temp_wit("planned-scaffolded-map", &rendered);
+    let spec = load_api_spec_from_wit_for_language_with_inputs(
+        Language::Python,
+        &[wit_path, linked_inputs_path(&root)],
+    )
+    .unwrap();
+    let descriptors = DescriptorIndex::load(&descriptor_path(&root)).unwrap();
+
+    generate_source(Language::Python, spec, &descriptors, "unused_support").unwrap();
+}
+
+fn write_map_descriptor() -> PathBuf {
+    let labels_entry = DescriptorProto {
+        name: Some("LabelsEntry".to_string()),
+        field: vec![
+            proto_field("key", 1, Type::String, None, None),
+            proto_field("value", 2, Type::String, None, None),
+        ],
+        options: Some(MessageOptions {
+            map_entry: Some(true),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    let tagged = DescriptorProto {
+        name: Some("Tagged".to_string()),
+        field: vec![
+            proto_field("name", 1, Type::String, None, None),
+            FieldDescriptorProto {
+                label: Some(Label::Repeated as i32),
+                ..proto_field(
+                    "labels",
+                    2,
+                    Type::Message,
+                    Some(".acme.map.v1.Tagged.LabelsEntry"),
+                    None,
+                )
+            },
+        ],
+        nested_type: vec![labels_entry],
+        ..Default::default()
+    };
+    let set = FileDescriptorSet {
+        file: vec![FileDescriptorProto {
+            name: Some("acme/map/v1/service.proto".to_string()),
+            package: Some("acme.map.v1".to_string()),
+            syntax: Some("proto3".to_string()),
+            message_type: vec![tagged],
+            service: vec![ServiceDescriptorProto {
+                name: Some("MapService".to_string()),
+                method: vec![MethodDescriptorProto {
+                    name: Some("Tag".to_string()),
+                    input_type: Some(".acme.map.v1.Tagged".to_string()),
+                    output_type: Some(".acme.map.v1.Tagged".to_string()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    };
+    let temp_dir = unique_temp_dir("map-descriptor");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let path = temp_dir.join("api.bin");
+    fs::write(&path, set.encode_to_vec()).unwrap();
+    path
+}
+
+#[test]
+fn add_rpc_regenerates_over_its_own_map_and_a_refined_map() {
+    let descriptor = write_map_descriptor();
+    let scaffold = add_rpc_to_string(&[descriptor.clone()], "MapService.Tag", &[]).unwrap();
+    assert!(scaffold.contains("labels: map<string, string>,"));
+    assert!(!scaffold.contains("labels-entry"));
+
+    let input_path = write_temp_wit("add-rpc-existing-map", &scaffold);
+    let rendered =
+        add_rpc_to_string(&[descriptor.clone()], "MapService.Tag", &[input_path]).unwrap();
+    assert_eq!(rendered, scaffold);
+
+    let refined = scaffold.replace(
+        "labels: map<string, string>,",
+        "labels: option<map<string, string>>,",
+    );
+    let input_path = write_temp_wit("add-rpc-refined-map", &refined);
+    let rendered = add_rpc_to_string(&[descriptor], "MapService.Tag", &[input_path]).unwrap();
+    assert_eq!(rendered, refined);
 }

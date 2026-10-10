@@ -239,3 +239,34 @@ fn python_refuses_a_reader_package_named_like_a_service_file_name() {
     let error = python_reject(&contract);
     assert!(error.contains("`Token`"), "{error}");
 }
+
+#[test]
+fn python_refuses_an_operation_named_like_a_client_member() {
+    for member in ["_endpoint", "_nexus_client"] {
+        let contract = CONTRACT.replace(
+            "      ping:\n        fqn: ping\n",
+            &format!("      ping:\n        fqn: ping\n        x-py-name: {member}\n"),
+        );
+        let error = python_reject(&contract);
+        assert!(error.contains(&format!("`{member}`")), "{error}");
+        assert!(error.contains("x-py-name"), "{error}");
+    }
+}
+
+#[test]
+fn python_reader_refusals_name_the_contract_file_and_the_authored_operation() {
+    let method_clash = CONTRACT.replace(
+        "      ping:\n        fqn: ping\n",
+        "      ping:\n        fqn: ping\n        x-py-name: read_chat_stream\n",
+    );
+    let package_clash = CONTRACT.replace(
+        "reader: { py: example_sdk.streams.OperationStreamReader }",
+        "reader: { py: Token.streams.OperationStreamReader }",
+    );
+    for contract in [method_clash, package_clash] {
+        let error = python_reject(&contract);
+        assert!(error.contains("chat.nexusrpc.yaml"), "{error}");
+        assert!(!error.contains("<json-schema>"), "{error}");
+        assert!(error.contains("operation `chat`"), "{error}");
+    }
+}

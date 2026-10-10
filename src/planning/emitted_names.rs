@@ -265,6 +265,7 @@ fn manifest_services(language: Language, api_plan: &PlannedSpec) -> Vec<Manifest
                 .iter()
                 .map(|operation| crate::parser::StreamReaderOperation {
                     name: &operation.name,
+                    label: None,
                     python_code_name: operation.code_name.for_language(Language::Python),
                     python_reader: operation.stream_result.as_ref().and_then(|stream_result| {
                         stream_result.reader.for_language(Language::Python)
@@ -285,6 +286,7 @@ fn manifest_services(language: Language, api_plan: &PlannedSpec) -> Vec<Manifest
         })
         .map(
             |(service, stream_readers, client_operation_idents)| ManifestService {
+                source_path: None,
                 stream_readers,
                 client_operation_idents,
                 name: service.name.clone(),

@@ -1404,6 +1404,9 @@ fn api_spec_from_parsed_json_documents(
     // The file each service came from, by position, so a check that runs on the
     // assembled spec can still name it.
     let mut service_paths = Vec::new();
+    // The authored operation keys of each service, in the order its operations
+    // are built, so a diagnostic can name an operation as the contract does.
+    let mut operation_keys = Vec::new();
     for canonical_path in canonical_paths {
         let Some((path, doc)) = parsed.docs.get(canonical_path) else {
             continue;
@@ -1414,6 +1417,7 @@ fn api_spec_from_parsed_json_documents(
         validate_service_key_scope(path, language, service_specs)?;
         for (service_key, service) in service_specs {
             service_paths.push(path.clone());
+            operation_keys.push(service.operations.keys().cloned().collect::<Vec<_>>());
             services.push(build_service(
                 path,
                 canonical_path,
@@ -1466,7 +1470,7 @@ fn api_spec_from_parsed_json_documents(
         model_scope: None,
         types,
     };
-    validate_identifier_namespace(language, &spec)?;
+    validate_identifier_namespace(language, &spec, &service_paths, &operation_keys)?;
     validate_http_caller_handle_names(language, &spec, &service_paths)?;
     Ok(spec)
 }
@@ -9515,6 +9519,8 @@ pub(crate) struct ManifestModel {
 /// One service handed to [`build_name_manifest`]. Services live in the root
 /// module scope of the file that declares them (the single-input scope).
 pub(crate) struct ManifestService {
+    /// The contract file the service came from, when the check knows it.
+    pub(crate) source_path: Option<PathBuf>,
     pub(crate) name: String,
     /// The verbatim per-language service code-identifier override
     /// (`x-<lang>-name`), if the active target carries one. `None` derives from
@@ -9547,6 +9553,21 @@ pub(crate) struct ManifestStreamReader {
 }
 
 impl ManifestService {
+    /// Names the service's contract file in a refusal that had none.
+    fn locate(&self, error: Error) -> Error {
+        match (error, &self.source_path) {
+            (Error::InvalidJsonSchema { path, reason }, Some(source))
+                if path == Path::new("<json-schema>") =>
+            {
+                Error::InvalidJsonSchema {
+                    path: source.clone(),
+                    reason,
+                }
+            }
+            (error, _) => error,
+        }
+    }
+
     /// The emitted service code identifier for `language`: the verbatim override
     /// when present, else the derived name.
     ///
@@ -9947,32 +9968,53 @@ fn validate_service_file_scopes(
             // its SDK type is imported as `import pkg.mod`, which binds `pkg`.
             for reader in &service.stream_readers {
                 if let Some(type_ident) = manifest.type_name(&reader.item_ref) {
-                    scope.insert(
-                        language,
-                        type_ident.to_string(),
-                        format!("operation I/O type `{}`", reader.item_ref),
-                    )?;
+                    scope
+                        .insert(
+                            language,
+                            type_ident.to_string(),
+                            format!("operation I/O type `{}`", reader.item_ref),
+                        )
+                        .map_err(|error| service.locate(error))?;
                 }
-                scope.insert(
-                    language,
-                    reader.package.clone(),
-                    format!(
-                        "package `{}` imported for the stream reader of operation `{}` (`{NEXUS_STREAM_RESULT_KEYWORD}`)",
-                        reader.package, reader.operation
-                    ),
-                )?;
+                scope
+                    .insert(
+                        language,
+                        reader.package.clone(),
+                        format!(
+                            "package `{}` imported for the stream reader of operation `{}` (`{NEXUS_STREAM_RESULT_KEYWORD}`)",
+                            reader.package, reader.operation
+                        ),
+                    )
+                    .map_err(|error| service.locate(error))?;
             }
-            if !service.stream_readers.is_empty() {
+            if !service.client_operation_idents.is_empty() {
                 let mut members = Namespace::default();
+                let mut reserved = vec!["_nexus_client"];
+                if !service.stream_readers.is_empty() {
+                    reserved.push("_endpoint");
+                }
+                for member in reserved {
+                    members
+                        .insert(
+                            language,
+                            member.to_string(),
+                            format!("the Workflow client's `self.{member}`"),
+                        )
+                        .map_err(|error| service.locate(error))?;
+                }
                 for (ident, operation) in &service.client_operation_idents {
-                    members.insert(language, ident.clone(), format!("operation `{operation}`"))?;
+                    members
+                        .insert(language, ident.clone(), format!("operation `{operation}`"))
+                        .map_err(|error| service.locate(error))?;
                 }
                 for reader in &service.stream_readers {
-                    members.insert(
-                        language,
-                        reader.method.clone(),
-                        format!("the stream reader of operation `{}`", reader.operation),
-                    )?;
+                    members
+                        .insert(
+                            language,
+                            reader.method.clone(),
+                            format!("the stream reader of operation `{}`", reader.operation),
+                        )
+                        .map_err(|error| service.locate(error))?;
                 }
             }
             for reference in &service.io_type_refs {
@@ -10117,6 +10159,8 @@ const fn scope_is_run_wide(language: Language) -> bool {
 fn manifest_inputs_from_spec(
     language: Language,
     spec: &ApiSpec,
+    service_paths: &[PathBuf],
+    operation_keys: &[Vec<String>],
 ) -> (Vec<ManifestModel>, Vec<ManifestService>) {
     let mut models = Vec::new();
     for (_full_name, binding) in spec.external_types() {
@@ -10139,7 +10183,9 @@ fn manifest_inputs_from_spec(
     let services = spec
         .services
         .iter()
-        .map(|service| ManifestService {
+        .enumerate()
+        .map(|(index, service)| ManifestService {
+            source_path: service_paths.get(index).cloned(),
             name: service.name.clone(),
             code_name: service.code_name.for_language(language).map(str::to_string),
             module_key: spec.module_path.as_module_key(),
@@ -10177,12 +10223,15 @@ fn manifest_inputs_from_spec(
         })
         .collect::<Vec<_>>();
     let mut services = services;
-    for (manifest, service) in services.iter_mut().zip(&spec.services) {
+    for (index, (manifest, service)) in services.iter_mut().zip(&spec.services).enumerate() {
+        let keys = operation_keys.get(index);
         let operations = service
             .operations
             .iter()
-            .map(|operation| StreamReaderOperation {
+            .enumerate()
+            .map(|(position, operation)| StreamReaderOperation {
                 name: &operation.name,
+                label: keys.and_then(|keys| keys.get(position)).map(String::as_str),
                 python_code_name: operation.code_name.for_language(Language::Python),
                 python_reader: operation
                     .stream_result
@@ -10202,10 +10251,12 @@ fn manifest_inputs_from_spec(
     (models, services)
 }
 
-/// One operation as the stream-reader checks see it: its name, its `x-py-name`
-/// override, its Python reader type and its item model's full name.
+/// One operation as the stream-reader checks see it: its name, the name a
+/// diagnostic shows (the authored key when known), its `x-py-name` override,
+/// its Python reader type and its item model's full name.
 pub(crate) struct StreamReaderOperation<'a> {
     pub(crate) name: &'a str,
+    pub(crate) label: Option<&'a str>,
     pub(crate) python_code_name: Option<&'a str>,
     pub(crate) python_reader: Option<&'a str>,
     pub(crate) item_ref: Option<String>,
@@ -10239,27 +10290,36 @@ pub(crate) fn stream_reader_manifest(
             let reader = operation.python_reader?;
             Some(ManifestStreamReader {
                 method: format!("read_{}_stream", method(operation)),
-                operation: operation.name.to_string(),
+                operation: operation.label.unwrap_or(operation.name).to_string(),
                 package: reader.split('.').next().unwrap_or(reader).to_string(),
                 item_ref: operation.item_ref.clone().unwrap_or_default(),
             })
         })
         .collect::<Vec<_>>();
-    let methods = if readers.is_empty() {
-        Vec::new()
-    } else {
-        operations
-            .iter()
-            .map(|operation| (method(operation), operation.name.to_string()))
-            .collect()
-    };
+    // Every Python Workflow client holds members its methods could shadow, so
+    // the methods are checked for every service, not only one with readers.
+    let methods = operations
+        .iter()
+        .map(|operation| {
+            (
+                method(operation),
+                operation.label.unwrap_or(operation.name).to_string(),
+            )
+        })
+        .collect();
     (readers, methods)
 }
 
 /// The load-time P15 collision check: builds the manifest and discards it,
 /// surfacing any collision as a load reject. Runs once per emitted target.
-fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<()> {
-    let (models, services) = manifest_inputs_from_spec(language, spec);
+fn validate_identifier_namespace(
+    language: Language,
+    spec: &ApiSpec,
+    service_paths: &[PathBuf],
+    operation_keys: &[Vec<String>],
+) -> Result<()> {
+    let (models, services) =
+        manifest_inputs_from_spec(language, spec, service_paths, operation_keys);
     build_name_manifest(language, &models, &services)?;
     Ok(())
 }

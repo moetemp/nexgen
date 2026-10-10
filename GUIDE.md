@@ -488,6 +488,10 @@ Whether a field is required or optional is determined by the WIT `option<>`
 wrapper (for WIT-direct fields) or proto field presence semantics (for
 proto-backed fields).
 
+`list<u8>` is a byte string, not a list of integers: `bytes` in Python,
+`Uint8Array` in TypeScript, `[]byte` in Go. It is also the form that matches
+a proto `bytes` field.
+
 ---
 
 ## Resources

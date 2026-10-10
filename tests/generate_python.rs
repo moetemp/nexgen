@@ -1453,6 +1453,101 @@ fn python_notification_models_do_not_emit_an_empty_service() {
     assert!(!package_init.contains("NotificationServiceClient"));
 }
 
+/// Proto-backed repeated and map fields. Protobuf gives neither presence, so
+/// `HasField` on them raises.
+const PROTO_COLLECTIONS_WIT: &str = r#"package temporal:nexus@1.0.0;
+
+world system {
+  export collections;
+}
+
+interface collections {
+  /// @nexus.proto "temporal.api.taskqueue.v1.TaskQueuePartitionMetadata"
+  record task-queue-partition-metadata {
+    key: string,
+    owner-host-name: string,
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.ListTaskQueuePartitionsResponse"
+  record list-task-queue-partitions-response {
+    activity-task-queue-partitions: option<list<task-queue-partition-metadata>>,
+    workflow-task-queue-partitions: option<list<task-queue-partition-metadata>>,
+  }
+
+  /// @nexus.proto "temporal.api.common.v1.Callback.Nexus"
+  record callback-nexus {
+    url: string,
+    header: option<map<string, string>>,
+  }
+}
+"#;
+
+const PROTO_COLLECTIONS_READ_CHECK: &str = r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.common.v1 import Callback
+from temporalio.api.taskqueue.v1 import TaskQueuePartitionMetadata
+from temporalio.api.workflowservice.v1 import ListTaskQueuePartitionsResponse
+
+response = ListTaskQueuePartitionsResponse(
+    activity_task_queue_partitions=[
+        TaskQueuePartitionMetadata(key="a", owner_host_name="h")
+    ]
+)
+converter = models._ListTaskQueuePartitionsResponseTransferTypeConverter()
+model = converter.from_transfer_type(response, models.ListTaskQueuePartitionsResponse)
+assert [p.key for p in model.activity_task_queue_partitions] == ["a"], model
+assert model.workflow_task_queue_partitions == [], model
+
+nexus = Callback.Nexus(url="http://x", header={"k": "v"})
+converter = models._CallbackNexusTransferTypeConverter()
+model = converter.from_transfer_type(nexus, models.CallbackNexus)
+assert model.header == {"k": "v"}, model
+"#;
+
+fn generate_python_package_from_wit(label: &str, wit: &str) -> PathBuf {
+    let root = project_root();
+    let temp_dir = unique_output_path(label);
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("input.wit");
+    fs::write(&input_path, wit).unwrap();
+    generate_to_file(&GenerateRequest {
+        config: Default::default(),
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_path, linked_inputs_path(&root)],
+        support_package: Some("temporal_support".into()),
+        descriptor_paths: vec![descriptor_path(&root)],
+        output_path: temp_dir.join("generated"),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    temp_dir
+}
+
+#[test]
+fn python_proto_repeated_and_map_fields_are_read_without_presence() {
+    let root = project_root();
+    let temp_dir =
+        generate_python_package_from_wit("python-proto-collections", PROTO_COLLECTIONS_WIT);
+    let models = fs::read_to_string(temp_dir.join("generated/models.py")).unwrap();
+
+    assert!(!models.contains("HasField(\"activity_task_queue_partitions\")"));
+    assert!(!models.contains("HasField(\"header\")"));
+    assert_python_script_succeeds(
+        PROTO_COLLECTIONS_READ_CHECK,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 #[test]
 fn python_non_proto_variants_remain_tagged_tuples_without_transfer_converters() {
     let root = project_root();

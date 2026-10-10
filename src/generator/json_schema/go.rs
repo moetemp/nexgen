@@ -1835,11 +1835,6 @@ fn render_validator_core(output: &mut String) {
     output.push_str("\tb, err := json.Marshal(v)\n\tif err != nil {\n\t\tmergeNested(errs, memberPath(key), err)\n\t\treturn\n\t}\n\tout[key] = b\n}\n\n");
 }
 
-/// Renders the closed-value (`const`/`enum`) defined types and their typed value
-/// constants. Each scalar `const`/`enum` field synthesizes a defined type over
-/// the primitive (`type ShowcaseStatus string`) plus one typed constant per
-/// member (`const ShowcaseStatusActive ShowcaseStatus = "active"`). See
-/// `specs/json-schema/features/{const,enum}.md`.
 /// The HTTP caller's plan for one input file in the generate closure.
 ///
 /// The models are the whole closure's, name-resolved exactly as
@@ -1888,6 +1883,11 @@ pub(in crate::generator) fn client_plan(
     )
 }
 
+/// Renders the closed-value (`const`/`enum`) defined types and their typed value
+/// constants. Each scalar `const`/`enum` field synthesizes a defined type over
+/// the primitive (`type ShowcaseStatus string`) plus one typed constant per
+/// member (`const ShowcaseStatusActive ShowcaseStatus = "active"`). See
+/// `specs/json-schema/features/{const,enum}.md`.
 fn render_const_discriminators(output: &mut String, models: &[&PlannedJsonType]) -> Result<()> {
     struct Declared {
         type_name: String,

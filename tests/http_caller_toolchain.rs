@@ -166,13 +166,24 @@ func TestTheCallerPostsAndReads(t *testing.T) {
 }
 
 func TestAnAnswerThatIsNotASynchronousResultIsReported(t *testing.T) {
-	for status, retryable := range map[int]bool{
-		http.StatusCreated:            false,
-		http.StatusBadRequest:         false,
-		http.StatusTooManyRequests:    true,
-		http.StatusServiceUnavailable: true,
+	for _, c := range []struct {
+		status    int
+		header    string
+		retryable bool
+	}{
+		{http.StatusCreated, "", false},
+		{http.StatusBadRequest, "", false},
+		{http.StatusTooManyRequests, "", true},
+		{http.StatusServiceUnavailable, "", true},
+		// The handler's own word wins over the status rule.
+		{http.StatusInternalServerError, "false", false},
+		{http.StatusBadRequest, "true", true},
 	} {
+		status, retryable := c.status, c.retryable
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if c.header != "" {
+				w.Header().Set("Nexus-Request-Retryable", c.header)
+			}
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(`{"token": "started"}`))
 		}))
@@ -257,6 +268,7 @@ models = importlib.import_module(f"{package.name}.models")
 
 seen = []
 status_for = {}
+retryable_for = {}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -268,6 +280,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path.endswith("/ping") and status == 200:
             status = 204
         self.send_response(status)
+        if self.path in retryable_for:
+            self.send_header("Nexus-Request-Retryable", retryable_for[self.path])
         self.end_headers()
         if status != 204:
             self.wfile.write(b'{"records": ["a", "b"], "nextToken": "t2"}')
@@ -287,8 +301,20 @@ async def main():
     assert answer.records == ["a", "b"] and answer.next_token == "t2", answer
     assert await client.ping() is None
 
-    for status, retryable in [(201, False), (400, False), (429, True), (503, True)]:
+    cases = [
+        (201, None, False),
+        (400, None, False),
+        (429, None, True),
+        (503, None, True),
+        # The handler's own word wins over the status rule.
+        (500, "false", False),
+        (400, "true", True),
+    ]
+    for status, header, retryable in cases:
         status_for["/svc/streams%2Fread%20%7Bv1%7D"] = status
+        retryable_for.pop("/svc/streams%2Fread%20%7Bv1%7D", None)
+        if header is not None:
+            retryable_for["/svc/streams%2Fread%20%7Bv1%7D"] = header
         try:
             await client.read(models.ReadInput(stream="s"))
         except client_module.HTTPStatusError as error:

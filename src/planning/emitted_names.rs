@@ -259,43 +259,71 @@ fn manifest_services(language: Language, api_plan: &PlannedSpec) -> Vec<Manifest
     api_plan
         .services
         .iter()
-        .map(|service| ManifestService {
-            name: service.name.clone(),
-            code_name: service.code_name.for_language(language).map(str::to_string),
-            module_key: api_plan.module_path.as_module_key(),
-            io_type_refs: service
+        .map(|service| {
+            let operations = service
                 .operations
                 .iter()
-                .flat_map(|operation| [operation.input.as_ref(), operation.output.as_ref()])
-                .flatten()
-                .filter_map(|ty| match ty {
-                    crate::spec::TypeSpec::External(crate::spec::ExternalTypeSpec::Json(json)) => {
-                        Some(json.full_name.clone())
-                    }
-                    _ => None,
+                .map(|operation| crate::parser::StreamReaderOperation {
+                    name: &operation.name,
+                    python_code_name: operation.code_name.for_language(Language::Python),
+                    python_reader: operation.stream_result.as_ref().and_then(|stream_result| {
+                        stream_result.reader.for_language(Language::Python)
+                    }),
+                    item_ref: operation.stream_result.as_ref().and_then(|stream_result| {
+                        match &stream_result.item {
+                            crate::spec::TypeSpec::External(
+                                crate::spec::ExternalTypeSpec::Json(json),
+                            ) => Some(json.full_name.clone()),
+                            _ => None,
+                        }
+                    }),
                 })
-                .collect(),
-            handle_idents: crate::parser::http_caller_handle_idents(
-                language,
-                &service.handles,
-                &service
+                .collect::<Vec<_>>();
+            let (stream_readers, client_operation_idents) =
+                crate::parser::stream_reader_manifest(language, &operations);
+            (service, stream_readers, client_operation_idents)
+        })
+        .map(
+            |(service, stream_readers, client_operation_idents)| ManifestService {
+                stream_readers,
+                client_operation_idents,
+                name: service.name.clone(),
+                code_name: service.code_name.for_language(language).map(str::to_string),
+                module_key: api_plan.module_path.as_module_key(),
+                io_type_refs: service
                     .operations
                     .iter()
-                    .map(|operation| {
-                        let input = match operation.input.as_ref() {
-                            Some(crate::spec::TypeSpec::External(
-                                crate::spec::ExternalTypeSpec::Json(json),
-                            )) => Some(&json.schema),
-                            _ => None,
-                        };
-                        crate::parser::http_caller_handle_operation(
-                            &operation.name,
-                            operation.code_name.for_language(Language::Go),
-                            input,
-                        )
+                    .flat_map(|operation| [operation.input.as_ref(), operation.output.as_ref()])
+                    .flatten()
+                    .filter_map(|ty| match ty {
+                        crate::spec::TypeSpec::External(crate::spec::ExternalTypeSpec::Json(
+                            json,
+                        )) => Some(json.full_name.clone()),
+                        _ => None,
                     })
-                    .collect::<Vec<_>>(),
-            ),
-        })
+                    .collect(),
+                handle_idents: crate::parser::http_caller_handle_idents(
+                    language,
+                    &service.handles,
+                    &service
+                        .operations
+                        .iter()
+                        .map(|operation| {
+                            let input = match operation.input.as_ref() {
+                                Some(crate::spec::TypeSpec::External(
+                                    crate::spec::ExternalTypeSpec::Json(json),
+                                )) => Some(&json.schema),
+                                _ => None,
+                            };
+                            crate::parser::http_caller_handle_operation(
+                                &operation.name,
+                                operation.code_name.for_language(Language::Go),
+                                input,
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                ),
+            },
+        )
         .collect()
 }

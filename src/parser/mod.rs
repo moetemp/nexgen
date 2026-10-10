@@ -14,8 +14,9 @@ pub use json_schema::{
 };
 
 pub(crate) use json_schema::{
-    ManifestModel, ManifestService, NameManifest, build_name_manifest, http_caller_handle_idents,
-    http_caller_handle_operation, ts_transfer_type_converter_name,
+    ManifestModel, ManifestService, NameManifest, StreamReaderOperation, build_name_manifest,
+    http_caller_handle_idents, http_caller_handle_operation, stream_reader_manifest,
+    ts_transfer_type_converter_name,
 };
 pub use wit::{load_api_spec_from_wit_for_language_with_inputs, write_prepared_wit_directory};
 

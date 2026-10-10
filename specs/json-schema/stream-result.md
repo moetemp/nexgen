@@ -69,7 +69,11 @@ The defining choices (citing [[PRINCIPLES.md]]):
 - **P15.** The reader method, `read_<op>_stream`, shares the Workflow client
   with the operation methods, and the reader's package is imported as
   `import pkg.mod`, which binds `pkg` in the service file. Both join the
-  collision pass; a clash is refused with `x-py-name` as the remedy.
+  collision pass; a clash is refused with `x-py-name` as the remedy. The
+  client's own members, `_nexus_client` and, with a reader, `_endpoint`, are
+  in that pass too, since an operation method named like one would be hidden
+  by the instance attribute. A refusal names the contract file and the
+  operation as authored.
 
 ## Emission (Python)
 
@@ -119,6 +123,7 @@ What the SDK reader does, and the generated code does not:
 |---|---|
 | Marked `chat` beside an unmarked `ping` | reader method for `chat` only; `ping` unchanged |
 | No `py` reader | no method, no import, no stored endpoint |
+| A service with a fixed `endpoint` | the keyword is accepted and no reader method is emitted |
 | Go, TypeScript, Java | generate; nothing of the keyword appears |
 
 ### Rejected at load time (negative)
@@ -134,6 +139,7 @@ What the SDK reader does, and the generated code does not:
 | A target with no reader | `reader: { go: example.Reader }` |
 | Not a dotted path, or a keyword segment | `{ py: Reader }`, `{ py: example.import.Reader }` |
 | Reader method clashes with an operation | an operation with `x-py-name: read_chat_stream` |
+| An operation named like a client member | `x-py-name: _endpoint` or `_nexus_client` |
 | Reader package clashes in the service file | `{ py: Token.streams.Reader }` beside a `Token` model |
 
 ### Runtime fixtures

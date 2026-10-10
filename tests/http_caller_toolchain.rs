@@ -1036,15 +1036,12 @@ $defs:
     additionalProperties: false
 "##;
 
-#[test]
-fn the_generated_python_handle_annotations_resolve() {
-    let workspace = Workspace::new("http-caller-python-annotations-toolchain");
-    let package = generate_client_from(
-        &workspace,
-        Target::Python,
-        "handles",
-        PYTHON_ANNOTATION_CONTRACT,
-    );
+/// Generates a Python caller for `contract`, imports it, and type-checks it.
+/// The module postpones its annotations, so an unimported name surfaces only
+/// to a type checker.
+fn python_check_generated(tag: &str, contract: &str) {
+    let workspace = Workspace::new(tag);
+    let package = generate_client_from(&workspace, Target::Python, "handles", contract);
     let interpreter = python_interpreter();
     let interpreter = interpreter.to_string_lossy();
     let import = format!(
@@ -1059,8 +1056,6 @@ fn the_generated_python_handle_annotations_resolve() {
             .to_string_lossy()
     );
     run(command(&interpreter).args(["-c", &import])).expect_ok("import the generated caller");
-    // The module postpones its annotations, so an unimported name surfaces only
-    // to a type checker.
     run(command(&interpreter)
         .args([
             "-m",
@@ -1072,6 +1067,57 @@ fn the_generated_python_handle_annotations_resolve() {
         ])
         .arg(package.join("client.py")))
     .expect_ok("type-check the generated caller");
+}
+
+#[test]
+fn the_generated_python_handle_annotations_resolve() {
+    python_check_generated(
+        "http-caller-python-annotations-toolchain",
+        PYTHON_ANNOTATION_CONTRACT,
+    );
+}
+
+/// A key named `client` and a free member named `deadline` beside a loop
+/// method, both renamed for Python with `x-py-name`, which the loader names as
+/// the remedy when it refuses them unrenamed.
+const PYTHON_RENAMED_PARAMETER_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    x-nexus-handle:
+      StreamHandle: [workflowId, client]
+    operations:
+      read:
+        fqn: read
+        x-nexus-long-poll:
+          wait-field: waitMs
+          result-field: records
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      client: { type: string, x-py-name: client_name }
+      deadline: { type: number, x-py-name: read_deadline }
+      waitMs: { type: integer, minimum: 0 }
+    required: [workflowId, client]
+    additionalProperties: false
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+    additionalProperties: false
+"##;
+
+#[test]
+fn the_generated_python_handles_import_with_renamed_parameters() {
+    python_check_generated(
+        "http-caller-python-renamed-toolchain",
+        PYTHON_RENAMED_PARAMETER_CONTRACT,
+    );
 }
 
 #[test]

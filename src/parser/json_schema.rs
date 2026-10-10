@@ -9927,7 +9927,11 @@ fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<(
 /// Checks the names a `--client` caller derives for a service's handles, on the
 /// target's own spelling, since `x-<lang>-name` and each target's casing decide
 /// them: a constructor against the methods of the object it lands on and
-/// against the other constructors there.
+/// against the other constructors there, and in Python each keyword parameter
+/// against the names its method already binds (`self`, a handle's `client`,
+/// the loop method's `deadline`). Python parameter names are part of a call, so
+/// a clash is refused with the override as the remedy; Go renames a clashing
+/// local instead.
 fn validate_http_caller_handle_names(language: Language, spec: &ApiSpec) -> Result<()> {
     let (name_keyword, case): (&str, fn(&str) -> String) = match language {
         Language::Go => ("x-go-name", crate::generator::go::go_field_name),
@@ -9947,14 +9951,15 @@ fn validate_http_caller_handle_names(language: Language, spec: &ApiSpec) -> Resu
             _ => None,
         }
     }
-    /// One operation as the caller emits it: its method names and its input
-    /// members.
-    struct CallerOperation {
+    /// One operation as the caller emits it: its method names, its input
+    /// members and, when it loops, the wait member the loop sets.
+    struct CallerOperation<'a> {
         method: String,
         loop_method: Option<String>,
         input: serde_json::Map<String, Value>,
+        wait: Option<&'a str>,
     }
-    impl CallerOperation {
+    impl CallerOperation<'_> {
         fn methods(&self) -> impl Iterator<Item = String> + '_ {
             std::iter::once(self.method.clone()).chain(self.loop_method.clone())
         }
@@ -10005,6 +10010,10 @@ fn validate_http_caller_handle_names(language: Language, spec: &ApiSpec) -> Resu
                 method,
                 loop_method,
                 input,
+                wait: operation
+                    .long_poll
+                    .as_ref()
+                    .map(|long_poll| long_poll.wait_field.as_str()),
             });
         }
         let joining = |keys: &[String]| {
@@ -10021,6 +10030,41 @@ fn validate_http_caller_handle_names(language: Language, spec: &ApiSpec) -> Resu
         let mut on_flat = BTreeMap::new();
         for handle in &service.handles {
             let joined = joining(&handle.keys);
+            if language == Language::Python {
+                if let Some(first) = joined.first() {
+                    for key in &handle.keys {
+                        let name = member_name(first.input.get(key), key);
+                        if matches!(name.as_str(), "client" | "self") {
+                            return reject(format!(
+                                "handle `{}` would take `{name}` for key `{key}`, a name its constructor already binds; rename the member for Python with `x-py-name`",
+                                handle.name
+                            ));
+                        }
+                    }
+                }
+                for operation in &joined {
+                    for (wire_name, member) in &operation.input {
+                        if handle.keys.contains(wire_name) || member.get("const").is_some() {
+                            continue;
+                        }
+                        let name = member_name(Some(member), wire_name);
+                        let clash = if name == "self" {
+                            Some(operation.method.clone())
+                        } else if name == "deadline" && operation.wait != Some(wire_name.as_str()) {
+                            operation.loop_method.clone()
+                        } else {
+                            None
+                        };
+                        if let Some(method) = clash {
+                            return reject(format!(
+                                "handle `{}` would take `{name}` on `{method}` for member `{wire_name}` of `{}`, a name the method already binds; rename the member for Python with `x-py-name`",
+                                handle.name, operation.method
+                            ));
+                        }
+                    }
+                }
+            }
+
             let constructor = case(&crate::json_schema::streaming::handle_constructor_base(
                 &handle.name,
                 None,

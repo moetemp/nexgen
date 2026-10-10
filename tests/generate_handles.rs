@@ -480,6 +480,52 @@ fn a_go_key_named_like_a_receiver_takes_a_suffix() {
 }
 
 #[test]
+fn a_python_handle_parameter_named_like_one_the_caller_uses_is_refused() {
+    // A free member named `deadline` beside the loop method's own budget.
+    let contract = HANDLE_CONTRACT.replace(
+        "      waitMs: { type: integer, minimum: 0 }\n",
+        "      waitMs: { type: integer, minimum: 0 }\n      deadline: { type: number }\n",
+    );
+    let message = refusal_for(Language::Python, &contract, "handles-python-deadline");
+    assert!(
+        message.contains("handle `StreamHandle` would take `deadline` on `read_until_records`")
+            && message.contains("`x-py-name`"),
+        "{message}"
+    );
+    // The single-shot method has no budget, and Go takes the member in a
+    // request struct, so both still generate.
+    let (temp_dir, files) = generate(Language::Go, &contract, true, "handles-go-deadline");
+    assert!(file(&files, "client.go").contains("\tDeadline *float64\n"));
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    // A key named `client` beside the handle's caller.
+    let contract =
+        handle_variant("    x-nexus-handle:\n      StreamHandle: [workflowId, client]\n").replace(
+            "      finish: { type: boolean }\n",
+            "      finish: { type: boolean }\n      client: { type: string }\n",
+        );
+    let message = refusal_for(Language::Python, &contract, "handles-python-client-key");
+    assert!(
+        message.contains("handle `StreamHandle` would take `client`")
+            && message.contains("`x-py-name`"),
+        "{message}"
+    );
+    // The override is the remedy.
+    let renamed = contract.replace(
+        "      client: { type: string }\n",
+        "      client: { type: string, x-py-name: client_name }\n",
+    );
+    let (temp_dir, files) = generate(
+        Language::Python,
+        &renamed,
+        true,
+        "handles-python-client-renamed",
+    );
+    assert!(file(&files, "client.py").contains("        client_name: str | None = None,\n"));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn a_constructor_is_checked_against_the_emitted_operation_names() {
     // `read` is emitted as `stream` / `Stream`, which `StreamHandle` is built by.
     let renamed_onto = HANDLE_CONTRACT.replace(

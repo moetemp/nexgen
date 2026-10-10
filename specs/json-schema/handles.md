@@ -56,6 +56,12 @@ The defining choices (citing [[PRINCIPLES.md]]):
   names. Derived constructor names are checked per target, on the names the
   target emits (`x-<lang>-name` and its casing), against the methods and the
   other constructors of the object they land on.
+- **Python parameter names are API.** A Python handle takes its keys and free
+  members as keyword parameters, so a member whose Python name is one its
+  method already binds (`self`, a handle's `client`, the loop method's
+  `deadline`) is refused, with `x-py-name` as the remedy. Go takes free members
+  in a request struct, and a key's Go parameter name is not part of a call, so
+  Go suffixes a clashing local instead.
 - **Stateless (P1).** A handle binds at construction and carries no other state.
   An optional key may be bound absent, and the handle sends what it holds.
 
@@ -108,6 +114,7 @@ its parent holds.
 | A key declared two ways | `attempt` required on one input, optional on another |
 | A key with one admissible value | `finish: { type: boolean, const: true }` |
 | A constructor named like an operation | handle `Read` beside operation `read`; handle `StreamHandle` beside an operation with `x-py-name: stream` |
+| Python: a parameter named like one its method binds | key `client`; free member `deadline` beside `read_until_records` |
 | A name already in scope | handle `ReadInput` beside model `ReadInput`; Go request type `StreamHandleReadRequest` beside a model of that name |
 
 ### Runtime fixtures

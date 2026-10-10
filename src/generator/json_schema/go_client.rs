@@ -96,14 +96,16 @@ fn key_field(key: &ClientHandleKey) -> String {
 }
 
 /// A parameter or field name derived from an exported field name. A Go keyword
-/// takes a suffix rather than a leading underscore, which gofmt frowns on.
+/// takes a suffix rather than a leading underscore, which gofmt frowns on, and
+/// so do the names a constructor already binds: its receiver (`c` on the flat
+/// caller, `h` on a parent handle) and the handle's `client` field.
 fn local_name(field: &str) -> String {
     let mut chars = field.chars();
     let mut name = match chars.next() {
         Some(first) => first.to_lowercase().chain(chars).collect::<String>(),
         None => String::new(),
     };
-    if is_go_keyword(&name) || name == "client" {
+    if is_go_keyword(&name) || matches!(name.as_str(), "client" | "c" | "h") {
         name.push_str("Value");
     }
     name

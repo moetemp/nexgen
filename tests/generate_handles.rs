@@ -451,6 +451,31 @@ fn a_go_handle_converts_an_enum_key_into_each_operations_own_type() {
 }
 
 #[test]
+fn a_go_key_named_like_a_receiver_takes_a_suffix() {
+    let contract = handle_variant(
+        "    x-nexus-handle:\n      Parent: [workflowId, c]\n      Child: [workflowId, c, h]\n",
+    )
+    .replace(
+        "      finish: { type: boolean }\n",
+        "      finish: { type: boolean }\n      c: { type: string }\n      h: { type: string }\n",
+    );
+    let (temp_dir, files) = generate(Language::Go, &contract, true, "handles-go-receiver-keys");
+    let client = file(&files, "client.go");
+    assert!(
+        client.contains(
+            "func (c *StreamServiceHTTPClient) Parent(workflowID string, cValue *string) *Parent {"
+        ),
+        "{client}"
+    );
+    assert!(
+        client.contains("func (h *Parent) Child(hValue *string) *Child {"),
+        "{client}"
+    );
+    assert!(client.contains("\t\tC: h.cValue,\n"), "{client}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn a_go_handle_method_for_a_void_output_returns_only_an_error() {
     let contract = HANDLE_CONTRACT.replace(
         "      ping:\n        fqn: ping\n",

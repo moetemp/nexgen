@@ -851,6 +851,45 @@ fn the_generated_go_handles_compile_with_an_enum_key_each_model_names() {
     go_vet_generated("http-caller-go-enum-key-toolchain", ENUM_KEY_CONTRACT);
 }
 
+/// Keys whose Go parameter names would be the constructors' receivers: `c` on
+/// the flat caller and `h` on a parent handle.
+const RECEIVER_KEY_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    x-nexus-handle:
+      Parent: [workflowId, c]
+      Child: [workflowId, c, h]
+    operations:
+      append:
+        fqn: append
+        input: { $ref: "#/$defs/AppendInput" }
+        output: { $ref: "#/$defs/AppendOutput" }
+$defs:
+  AppendInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      c: { type: string }
+      h: { type: string }
+    required: [workflowId, c, h]
+    additionalProperties: false
+  AppendOutput:
+    type: object
+    properties:
+      cursor: { type: string }
+    additionalProperties: false
+"##;
+
+#[test]
+fn the_generated_go_handles_compile_with_keys_named_like_the_receivers() {
+    go_vet_generated(
+        "http-caller-go-receiver-keys-toolchain",
+        RECEIVER_KEY_CONTRACT,
+    );
+}
+
 /// Drives the Python handles with the transport swapped for a recorder.
 const PYTHON_HANDLE_DRIVER: &str = r#"
 import asyncio

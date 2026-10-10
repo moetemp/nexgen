@@ -717,6 +717,10 @@ fn render_long_poll_method(
         model_output.member(&long_poll.result_member),
         &long_poll.result_member,
     );
+    let done_attribute = long_poll
+        .done_member
+        .as_ref()
+        .map(|(done, _)| member_attribute(model_output.member(done), done));
     output.push_str("    async def ");
     output.push_str(&long_poll_method_name(operation, long_poll, model_output));
     output.push_str("(\n        self,\n        request: ");
@@ -735,8 +739,13 @@ fn render_long_poll_method(
             format!(
                 "Each attempt sets `{wait_attribute}` from the budget left, so the endpoint \
                  parks for the caller instead of the caller spinning. The first answer whose \
-                 `{result_attribute}` is non-empty is returned. When the deadline passes first, \
-                 the last answer is returned, which still carries the caller's resume position.",
+                 `{result_attribute}` is non-empty{done} is returned. When the deadline passes \
+                 first, the last answer is returned, which still carries the caller's resume \
+                 position.",
+                done = done_attribute
+                    .as_ref()
+                    .map(|done| format!(", or whose `{done}` is true,"))
+                    .unwrap_or_default(),
             ),
             "`deadline` is the whole budget in seconds. The single-shot method stays \
              available for a caller that wants one attempt."
@@ -769,6 +778,10 @@ fn render_long_poll_method(
     output.push_str("                continue\n");
     output.push_str("            if answer.");
     output.push_str(&result_attribute);
+    if let Some(done) = &done_attribute {
+        output.push_str(" or answer.");
+        output.push_str(done);
+    }
     output.push_str(":\n");
     output.push_str("                return answer\n");
     output.push_str("            if time.monotonic() >= end:\n");

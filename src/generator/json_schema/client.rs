@@ -90,11 +90,14 @@ impl ClientModel {
     }
 }
 
-/// The two member names a long-poll loop drives.
+/// The member names a long-poll loop drives.
 #[derive(Debug, Clone)]
 pub(in crate::generator) struct ClientLongPoll {
     pub(in crate::generator) wait_member: String,
     pub(in crate::generator) result_member: String,
+    /// The output's done flag, and whether the output requires it, which
+    /// decides whether a target holds it behind an optional.
+    pub(in crate::generator) done_member: Option<(String, bool)>,
 }
 
 #[derive(Debug, Clone)]
@@ -267,6 +270,20 @@ pub(in crate::generator) fn build_client_plan(
     for service in &api_plan.services {
         let mut operations = Vec::new();
         for operation in &service.operations {
+            let output = client_model(operation.output.as_ref())?;
+            let long_poll = operation
+                .long_poll
+                .as_ref()
+                .map(|long_poll| ClientLongPoll {
+                    wait_member: long_poll.wait_field.clone(),
+                    result_member: long_poll.result_field.clone(),
+                    done_member: long_poll.done_field.as_ref().map(|done| {
+                        let required = output
+                            .as_ref()
+                            .is_some_and(|model| model.member_required(done));
+                        (done.clone(), required)
+                    }),
+                });
             operations.push(ClientOperation {
                 name: (naming.operation)(operation),
                 wire_name: operation.wire_name.clone(),
@@ -274,14 +291,8 @@ pub(in crate::generator) fn build_client_plan(
                 doc: operation.doc.for_language(language).map(str::to_string),
                 deprecated: operation.deprecated,
                 input: client_model(operation.input.as_ref())?,
-                output: client_model(operation.output.as_ref())?,
-                long_poll: operation
-                    .long_poll
-                    .as_ref()
-                    .map(|long_poll| ClientLongPoll {
-                        wait_member: long_poll.wait_field.clone(),
-                        result_member: long_poll.result_field.clone(),
-                    }),
+                output,
+                long_poll,
             });
         }
         let handles = plan_handles(&service.handles, &operations)?;

@@ -396,6 +396,7 @@ const LANG_NAME_KEYWORDS: [&str; 4] = ["x-go-name", "x-ts-name", "x-py-name", "x
 
 use crate::json_schema::streaming::{
     CURSOR_KEYWORD as NEXUS_CURSOR_KEYWORD, HANDLE_KEYWORD as NEXUS_HANDLE_KEYWORD,
+    LONG_POLL_DONE_MEMBER as NEXUS_LONG_POLL_DONE_MEMBER,
     LONG_POLL_KEYWORD as NEXUS_LONG_POLL_KEYWORD,
     LONG_POLL_RESULT_MEMBER as NEXUS_LONG_POLL_RESULT_MEMBER,
     LONG_POLL_WAIT_MEMBER as NEXUS_LONG_POLL_WAIT_MEMBER,
@@ -1759,14 +1760,24 @@ fn validate_long_poll_grammar(path: &Path, operation_name: &str, value: &Value) 
         ));
     };
     for member in members.keys() {
-        if member != NEXUS_LONG_POLL_WAIT_MEMBER && member != NEXUS_LONG_POLL_RESULT_MEMBER {
+        if member != NEXUS_LONG_POLL_WAIT_MEMBER
+            && member != NEXUS_LONG_POLL_RESULT_MEMBER
+            && member != NEXUS_LONG_POLL_DONE_MEMBER
+        {
             return reject(format!(
-                "`{NEXUS_LONG_POLL_KEYWORD}` has unknown member `{member}`; it takes `{NEXUS_LONG_POLL_WAIT_MEMBER}` and `{NEXUS_LONG_POLL_RESULT_MEMBER}`"
+                "`{NEXUS_LONG_POLL_KEYWORD}` has unknown member `{member}`; it takes `{NEXUS_LONG_POLL_WAIT_MEMBER}`, `{NEXUS_LONG_POLL_RESULT_MEMBER}` and optionally `{NEXUS_LONG_POLL_DONE_MEMBER}`"
             ));
         }
     }
-    for member in [NEXUS_LONG_POLL_WAIT_MEMBER, NEXUS_LONG_POLL_RESULT_MEMBER] {
+    for member in [
+        NEXUS_LONG_POLL_WAIT_MEMBER,
+        NEXUS_LONG_POLL_RESULT_MEMBER,
+        NEXUS_LONG_POLL_DONE_MEMBER,
+    ] {
         let Some(named) = members.get(member) else {
+            if member == NEXUS_LONG_POLL_DONE_MEMBER {
+                continue;
+            }
             return reject(format!("`{NEXUS_LONG_POLL_KEYWORD}` requires `{member}`"));
         };
         match named.as_str() {
@@ -1943,6 +1954,16 @@ fn validate_stream_ref(path: &Path, schema: &Schema, context: &str) -> Result<()
                 if !valid {
                     return reject(format!(
                         "`{NEXUS_STREAM_REF_KEYWORD}.{target}` must be a dotted `module.Type` path naming the type to emit, got {path}"
+                    ));
+                }
+                // The path is emitted verbatim as `import a.b` and `a.b.T`, so a
+                // keyword segment would be a syntax error in the models module.
+                if let Some(keyword) = path.as_str().and_then(|path| {
+                    path.split('.')
+                        .find(|segment| crate::generator::python::is_python_keyword(segment))
+                }) {
+                    return reject(format!(
+                        "`{NEXUS_STREAM_REF_KEYWORD}.{target}` path {path} contains the Python keyword `{keyword}`, which cannot name a module or a type"
                     ));
                 }
             }
@@ -6671,9 +6692,10 @@ fn build_handles(
 /// as a compile error inside generated caller code, far from the contract that
 /// caused it.
 ///
-/// The wait hint must be an `integer` (milliseconds) and the emptiness test an
-/// `array`. Pinning both keeps every target's emitted loop a fixed shape: one
-/// numeric assignment and one length test.
+/// The wait hint must be an `integer` (milliseconds), the emptiness test an
+/// `array`, and the optional done flag a `boolean`. Pinning them keeps every
+/// target's emitted loop a fixed shape: one numeric assignment, one length
+/// test and one flag test.
 fn build_long_poll(
     path: &Path,
     canonical_path: &Path,
@@ -6699,9 +6721,13 @@ fn build_long_poll(
     let spec = OperationLongPollSpec {
         wait_field: named(NEXUS_LONG_POLL_WAIT_MEMBER),
         result_field: named(NEXUS_LONG_POLL_RESULT_MEMBER),
+        done_field: members
+            .get(NEXUS_LONG_POLL_DONE_MEMBER)
+            .and_then(Value::as_str)
+            .map(str::to_string),
     };
 
-    for (label, member, required_type, schema) in [
+    let mut checked = vec![
         (
             "input",
             spec.wait_field.as_str(),
@@ -6714,7 +6740,16 @@ fn build_long_poll(
             "array",
             operation.output.as_ref(),
         ),
-    ] {
+    ];
+    if let Some(done) = &spec.done_field {
+        checked.push((
+            "output",
+            done.as_str(),
+            "boolean",
+            operation.output.as_ref(),
+        ));
+    }
+    for (label, member, required_type, schema) in checked {
         let Some(schema) = schema else {
             return Err(Error::InvalidJsonSchema {
                 path: path.to_path_buf(),
@@ -6756,7 +6791,7 @@ fn build_long_poll(
             return Err(Error::InvalidJsonSchema {
                 path: path.to_path_buf(),
                 reason: format!(
-                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` {label} member `{member}` must be `type: {required_type}`; a generated loop assigns the wait hint as a number of milliseconds and ends on the result array being non-empty"
+                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` {label} member `{member}` must be `type: {required_type}`; a generated loop assigns the wait hint as a number of milliseconds, ends on the result array being non-empty, and ends on the done flag being true"
                 ),
             });
         }
@@ -9498,6 +9533,29 @@ pub(crate) fn build_name_manifest(
                     format!("token type `{name}` (`{NEXUS_CURSOR_KEYWORD}`)"),
                 )?;
             }
+            // A mapped stream reference is imported as `import pkg.mod`, which
+            // binds `pkg` in the models module beside the models, so a model of
+            // that name would be shadowed. Several models may map into one
+            // package, so each name enters once.
+            if language == Language::Python {
+                let packages = schemas
+                    .iter()
+                    .filter_map(|schema| {
+                        crate::json_schema::streaming::stream_ref_mapping(schema, "py")
+                    })
+                    .filter_map(|path| path.split('.').next())
+                    .map(str::to_string)
+                    .collect::<BTreeSet<_>>();
+                for package in packages {
+                    top.insert(
+                        language,
+                        package.clone(),
+                        format!(
+                            "package `{package}` imported for a mapped stream reference (`{NEXUS_STREAM_REF_KEYWORD}`)"
+                        ),
+                    )?;
+                }
+            }
         }
         // The fixed runtime boilerplate each generator emits into (or imports
         // into) every module that carries models shares this top-level scope, so
@@ -11818,6 +11876,46 @@ $defs:
     }
 
     #[test]
+    fn rejects_a_done_member_that_is_missing_or_not_a_boolean() {
+        for (done, expected) in [
+            (
+                "",
+                "output member `done`, which the output model does not declare",
+            ),
+            (
+                "      done: { type: string }\n",
+                "output member `done` must be `type: boolean`",
+            ),
+        ] {
+            let error = doc_reject(&format!(
+                r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    operations:
+      read:
+        x-nexus-long-poll:
+          wait-field: wait_ms
+          result-field: records
+          done-field: done
+        input: {{ $ref: "#/$defs/ReadInput" }}
+        output: {{ $ref: "#/$defs/ReadOutput" }}
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      wait_ms: {{ type: integer }}
+  ReadOutput:
+    type: object
+    properties:
+      records: {{ type: array, items: {{ type: string }} }}
+{done}"##
+            ));
+            assert!(error.contains(expected), "{done}: {error}");
+        }
+    }
+
+    #[test]
     fn rejects_a_long_poll_value_that_is_not_an_object() {
         let error = doc_reject(
             r##"
@@ -12072,6 +12170,10 @@ $defs:
             ("{ go: example.StreamRef }", "maps `go`"),
             ("{ py: StreamRef }", "must be a dotted `module.Type` path"),
             ("{ py: 3 }", "must be a dotted `module.Type` path"),
+            (
+                "{ py: example.class.StreamRef }",
+                "the Python keyword `class`",
+            ),
             ("{}", "must map at least one language"),
         ] {
             let error = doc_reject(&format!(

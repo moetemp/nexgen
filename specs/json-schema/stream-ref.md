@@ -60,8 +60,7 @@ The defining choices (citing [[PRINCIPLES.md]]):
   and reads them back by attribute. A mapped and an unmapped target agree on the
   wire.
 - **No dependency by default (P4).** An unmapped reference adds no import. A
-  mapped one imports only the module the contract names; P4 holds when that
-  module is in the Temporal SDK closure, which is the contract author's choice.
+  mapped one imports the module the contract names, and nothing else.
 - **Closed, declared members (P7.1).** A mapped type is built from the members
   by name, so the model has to declare them, and a member the type does not know
   could only be dropped, so the object has to be closed.
@@ -70,6 +69,24 @@ The defining choices (citing [[PRINCIPLES.md]]):
   refuses an explicit `null` on a member the contract did not make nullable.
   Requiring `oneOf: [{type: ...}, {type: "null"}]` on each optional member keeps
   the SDK's encoding and the generated one interchangeable.
+
+**Why `true` without a mapping is admitted (P7.1).** A marker that changes no
+emitted code would be a keyword that does nothing, which P7.1 refuses. `true`
+does something the contract needs even where no target maps it: it says which
+model is the stream reference. A handle key (`x-nexus-handle`) that binds a
+whole stream binds that model, and a later stream-typed operation result is
+typed by it, so both find it by the marker rather than by a model name. It also holds the model
+to the reference's shape rules (closed, members declared, optional members
+nullable) before any target maps it, so adding a mapping later never turns a
+valid contract into an invalid one.
+
+**Open question for the nexgen owners (P4).** A mapping lets a contract make the
+generated Python import a module the contract names. That relaxes P4, which
+keeps generated code to the generator's own dependencies: the generator cannot
+tell whether the module is part of the Temporal SDK or an arbitrary package.
+Options are to accept it as the contract author's choice (as implemented), to
+restrict mappings to an allowlist of SDK modules, or to make a mapping a
+generator option rather than contract text. This needs the owners' decision.
 
 **Limitation.** The loader cannot see the mapped type, so it does not check that
 each member's Python name (its snake-cased wire name, or `x-py-name`) is a field
@@ -108,6 +125,8 @@ it unchanged.
 | Empty map | `x-nexus-stream-ref: {}` |
 | A target without a mapping | `{ go: example.StreamRef }` |
 | Not a `module.Type` path | `{ py: StreamRef }` |
+| A Python keyword in the path | `{ py: example.class.StreamRef }` |
+| A package named like a model (P15) | `{ py: GameRequest.streams.StreamRef }` beside model `GameRequest` |
 | Not an object with members | `type: string` |
 | Open object | no `additionalProperties: false` |
 | Plain optional member | `run_id: { type: string }` not in `required` |

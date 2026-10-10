@@ -7669,7 +7669,7 @@ pub(in crate::generator) fn python_string_literal(value: &str) -> String {
     format!("{value:?}")
 }
 
-fn is_python_keyword(name: &str) -> bool {
+pub(crate) fn is_python_keyword(name: &str) -> bool {
     matches!(
         name,
         "False"

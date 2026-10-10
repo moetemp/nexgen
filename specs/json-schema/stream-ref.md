@@ -103,7 +103,9 @@ checker rather than the loader.
 
 The Python alias keeps the model's name, so a member typed by the model, an
 operation whose input or output is the model, and the [[http-caller]] all name
-it unchanged.
+it unchanged. The alias lives in the models module only. The package root does
+not re-export it, since the type is the SDK's and a second public home makes
+doc tools treat it as the generated package's own.
 
 ## Property-testing matrix
 

@@ -649,6 +649,12 @@ pub struct OperationLongPollSpec {
     /// contract declares one. An answer with it set ends the loop even when the
     /// result is empty.
     pub done_field: Option<String>,
+    /// The smallest wait the input member accepts, from its `minimum` or
+    /// `exclusiveMinimum`, when it declares one.
+    pub wait_minimum: Option<i64>,
+    /// The largest wait the input member accepts, from its `maximum` or
+    /// `exclusiveMaximum`, when it declares one. A loop never sends more.
+    pub wait_maximum: Option<i64>,
 }
 
 /// An operation whose start hands its caller a stream. Like

@@ -262,7 +262,9 @@ fn go_projects_handles_over_the_flat_caller() {
     // builds the operation's own input from both.
     assert!(
         client.contains(
-            "type StreamHandleReadRequest struct {\n\tAfterToken *string\n\tWaitMs *int64\n}"
+            "type StreamHandleReadRequest struct {\n\tAfterToken *string\n\t// WaitMs is for \
+             Read. ReadUntilRecords ignores it and sets the wait on each attempt.\n\tWaitMs \
+             *int64\n}"
         ),
         "{client}"
     );
@@ -277,6 +279,49 @@ fn go_projects_handles_over_the_flat_caller() {
     assert!(client.contains("type StreamProducerAppendRequest struct {\n\tBatchIndex int64\n\tPayloads [][]byte\n\tFinish *bool\n}"), "{client}");
     assert!(client.contains("func (h *StreamProducer) Append(ctx context.Context, request StreamProducerAppendRequest) (AppendOutput, error) {\n\tfull := AppendInput{\n\t\tWorkflowID: h.workflowID,\n\t\tStream: h.stream,\n\t\tProducerID: h.producerID,\n\t\tAttempt: h.attempt,\n\t\tBatchIndex: request.BatchIndex,\n"), "{client}");
     assert!(!client.contains("func (h *StreamHandle) Ping("), "{client}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn handle_docs_name_the_targets_own_members() {
+    let (temp_dir, files) = generate(
+        Language::Python,
+        HANDLE_CONTRACT,
+        true,
+        "handles-python-docs",
+    );
+    let client = file(&files, "client.py");
+    let handle = client
+        .split("class StreamHandle:")
+        .nth(1)
+        .and_then(|rest| rest.split("class StreamProducer:").next())
+        .unwrap_or_default();
+    // A reader looks for the names in the signature, not the wire names.
+    assert!(handle.contains("Binds `workflow_id`, `stream`"), "{handle}");
+    assert!(!handle.contains("`workflowId`"), "{handle}");
+    // The loop method on a handle explains the loop and its deadline.
+    let looped = handle
+        .split("async def read_until_records(")
+        .nth(1)
+        .unwrap_or_default();
+    assert!(looped.contains("or until `deadline`"), "{looped}");
+    assert!(
+        looped.contains("This handle supplies `workflow_id`"),
+        "{looped}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    let (temp_dir, files) = generate(Language::Go, HANDLE_CONTRACT, true, "handles-go-docs");
+    let client = file(&files, "client.go");
+    assert!(
+        client.contains("StreamHandle binds WorkflowID, Stream"),
+        "{client}"
+    );
+    // The loop sets the wait itself, so the shared request type says so.
+    assert!(
+        client.contains("ReadUntilRecords ignores it and sets the wait on each attempt."),
+        "{client}"
+    );
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

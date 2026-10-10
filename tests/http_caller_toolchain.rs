@@ -986,6 +986,94 @@ assert direct["workflowId"] == "wf-2" and direct["producerId"] == "other", direc
 print("ok")
 "#;
 
+/// Handle parameters typed by a model key, `$ref` and hoisted models, a list
+/// of models, `datetime` types and a literal whose value reads like a name, so
+/// every name a handle annotation uses has to be imported.
+const PYTHON_ANNOTATION_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    x-nexus-handle:
+      ScopeHandle: [workflowId, scope]
+    operations:
+      append:
+        fqn: append
+        input: { $ref: "#/$defs/AppendInput" }
+        output: { $ref: "#/$defs/AppendOutput" }
+$defs:
+  Scope:
+    type: object
+    properties:
+      name: { type: string }
+    additionalProperties: false
+  Options:
+    type: object
+    properties:
+      level: { type: integer }
+    additionalProperties: false
+  AppendInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      scope: { $ref: "#/$defs/Scope" }
+      at: { type: string, format: date-time }
+      day: { type: string, format: date }
+      options: { $ref: "#/$defs/Options" }
+      tags: { type: array, items: { $ref: "#/$defs/Options" } }
+      meta:
+        type: object
+        properties:
+          note: { type: string }
+        additionalProperties: false
+      mode: { type: string, enum: [Unknown, fast] }
+    required: [workflowId, scope]
+    additionalProperties: false
+  AppendOutput:
+    type: object
+    properties:
+      cursor: { type: string }
+    additionalProperties: false
+"##;
+
+#[test]
+fn the_generated_python_handle_annotations_resolve() {
+    let workspace = Workspace::new("http-caller-python-annotations-toolchain");
+    let package = generate_client_from(
+        &workspace,
+        Target::Python,
+        "handles",
+        PYTHON_ANNOTATION_CONTRACT,
+    );
+    let interpreter = python_interpreter();
+    let interpreter = interpreter.to_string_lossy();
+    let import = format!(
+        "import sys; sys.path.insert(0, {:?}); import {}.client",
+        package
+            .parent()
+            .expect("a package parent")
+            .to_string_lossy(),
+        package
+            .file_name()
+            .expect("a package name")
+            .to_string_lossy()
+    );
+    run(command(&interpreter).args(["-c", &import])).expect_ok("import the generated caller");
+    // The module postpones its annotations, so an unimported name surfaces only
+    // to a type checker.
+    run(command(&interpreter)
+        .args([
+            "-m",
+            "basedpyright",
+            "--pythonpath",
+            &interpreter,
+            "--level",
+            "error",
+        ])
+        .arg(package.join("client.py")))
+    .expect_ok("type-check the generated caller");
+}
+
 #[test]
 fn the_generated_python_handles_bind_their_keys() {
     let workspace = Workspace::new("http-caller-python-handles-toolchain");

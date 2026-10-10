@@ -83,6 +83,12 @@ fn render_imports(output: &mut String, plan: &ClientPlan) {
     if plan.has_long_poll() {
         output.push_str("import dataclasses\n");
     }
+    if handle_annotation_names(plan)
+        .iter()
+        .any(|name| name.starts_with("datetime."))
+    {
+        output.push_str("import datetime\n");
+    }
     output.push_str("import json\n");
     if plan.has_long_poll() {
         output.push_str("import time\n");
@@ -92,8 +98,88 @@ fn render_imports(output: &mut String, plan: &ClientPlan) {
     output.push_str("import urllib.request\n\n");
 }
 
+/// The names the handles' parameter annotations use, which the flat caller's
+/// own signatures do not: a handle spells out its keys and free members by the
+/// models' field types. String literals (`typing.Literal` values) are not
+/// names and are skipped.
+fn handle_annotation_names(plan: &ClientPlan) -> std::collections::BTreeSet<String> {
+    let mut annotations = Vec::new();
+    for service in &plan.services {
+        for handle in &service.handles {
+            annotations.extend(handle.keys.iter().map(|key| key.type_name.clone()));
+            for index in &handle.operations {
+                if let Some(input) = &service.operations[*index].input {
+                    annotations.extend(
+                        input
+                            .members()
+                            .into_iter()
+                            .filter_map(|(wire, _)| input.member_type(wire).ok()),
+                    );
+                }
+            }
+        }
+    }
+    let mut names = std::collections::BTreeSet::new();
+    for annotation in annotations {
+        let mut unquoted = String::new();
+        let mut quote = None;
+        let mut escaped = false;
+        for ch in annotation.chars() {
+            match quote {
+                Some(open) => {
+                    if escaped {
+                        escaped = false;
+                    } else if ch == '\\' {
+                        escaped = true;
+                    } else if ch == open {
+                        quote = None;
+                    }
+                }
+                None if ch == '"' || ch == '\'' => {
+                    quote = Some(ch);
+                    unquoted.push(' ');
+                }
+                None => unquoted.push(ch),
+            }
+        }
+        names.extend(
+            unquoted
+                .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+                .filter(|token| token.starts_with(|c: char| c.is_alphabetic() || c == '_'))
+                .map(str::to_string),
+        );
+    }
+    names
+}
+
+/// A bare annotation name the module does not have to import.
+fn is_python_builtin_name(name: &str) -> bool {
+    matches!(
+        name,
+        "None"
+            | "True"
+            | "False"
+            | "str"
+            | "int"
+            | "float"
+            | "bool"
+            | "bytes"
+            | "list"
+            | "dict"
+            | "tuple"
+            | "set"
+            | "frozenset"
+            | "object"
+    )
+}
+
 fn render_model_imports(output: &mut String, plan: &ClientPlan) {
     let mut names = std::collections::BTreeSet::new();
+    names.extend(
+        handle_annotation_names(plan)
+            .into_iter()
+            .filter(|name| !name.contains('.') && !is_python_builtin_name(name)),
+    );
     for service in &plan.services {
         for operation in &service.operations {
             for model in [operation.input.as_ref(), operation.output.as_ref()]

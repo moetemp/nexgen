@@ -382,3 +382,33 @@ fn a_caller_without_a_long_poll_carries_no_loop() {
     assert!(!client.contains("Until"), "{client}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+#[test]
+fn a_done_flag_ends_the_loop_in_both_callers() {
+    let contract = LONG_POLL_CONTRACT
+        .replace(
+            "          result-field: records\n",
+            "          result-field: records\n          done-field: done\n",
+        )
+        .replace(
+            "      records: { type: array, items: { type: string } }\n    additionalProperties: false\n",
+            "      records: { type: array, items: { type: string } }\n      done: { type: boolean }\n    required: [done]\n    additionalProperties: false\n",
+        );
+    assert!(contract.contains("required: [done]"), "{contract}");
+    let (temp_dir, files) = generate_contract(Language::Go, &contract, true, "http-caller-go-done");
+    // A required flag is a plain bool in Go.
+    assert!(
+        file(&files, "client.go").contains("if len(answer.Records) > 0 || answer.Done {"),
+        "{}",
+        file(&files, "client.go")
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+    let (temp_dir, files) =
+        generate_contract(Language::Python, &contract, true, "http-caller-python-done");
+    assert!(
+        file(&files, "client.py").contains("            if answer.records or answer.done:\n"),
+        "{}",
+        file(&files, "client.py")
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}

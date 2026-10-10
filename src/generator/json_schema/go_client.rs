@@ -430,6 +430,24 @@ fn render_long_poll_method(
         model_output.member(&long_poll.result_member),
         &long_poll.result_member,
     );
+    let done_test = long_poll.done_member.as_ref().map(|(done, required)| {
+        let field = member_field(model_output.member(done), done);
+        if *required {
+            format!("answer.{field}")
+        } else {
+            format!("(answer.{field} != nil && *answer.{field})")
+        }
+    });
+    let done_doc = long_poll
+        .done_member
+        .as_ref()
+        .map(|(done, _)| {
+            format!(
+                ", or whose {} is true,",
+                member_field(model_output.member(done), done)
+            )
+        })
+        .unwrap_or_default();
     render_wrapped_go_doc_comment(
         output,
         "",
@@ -437,8 +455,8 @@ fn render_long_poll_method(
             "{method} calls {} until it answers with something, or until the deadline. Each \
              attempt sets {wait_field} from the budget left, so the endpoint parks for the \
              caller instead of the caller spinning. The first answer whose {result_field} is \
-             non-empty is returned. When the deadline passes first, the last answer is \
-             returned, which still carries the caller's resume position. The single-shot \
+             non-empty{done_doc} is returned. When the deadline passes first, the last answer \
+             is returned, which still carries the caller's resume position. The single-shot \
              method stays available for a caller that wants one attempt.",
             operation.name
         ),
@@ -481,7 +499,12 @@ fn render_long_poll_method(
     output.push_str("\t\tanswer = next\n");
     output.push_str("\t\tif len(answer.");
     output.push_str(&result_field);
-    output.push_str(") > 0 {\n\t\t\treturn answer, nil\n\t\t}\n");
+    output.push_str(") > 0");
+    if let Some(done) = &done_test {
+        output.push_str(" || ");
+        output.push_str(done);
+    }
+    output.push_str(" {\n\t\t\treturn answer, nil\n\t\t}\n");
     output.push_str("\t\tif !time.Now().Before(end) {\n\t\t\treturn answer, nil\n\t\t}\n");
     // An endpoint that answers empty without parking for the wait it was given
     // would otherwise be asked again as fast as the network allows.

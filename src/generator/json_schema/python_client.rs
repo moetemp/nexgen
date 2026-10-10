@@ -162,23 +162,36 @@ fn render_post_helper(output: &mut String) {
     another attempt could still get.
     """
 
-    def __init__(self, url: str, status: int, detail: str) -> None:
+    def __init__(
+        self, url: str, status: int, detail: str, retryable: bool | None = None
+    ) -> None:
         super().__init__(f"{url} failed ({status}): {detail}")
         # Annotated explicitly: a target's strict type checker asks for it on a
         # class it cannot prove closed.
         self.url: str = url
         self.status: int = status
         self.detail: str = detail
+        self._retryable: bool | None = retryable
 
     @property
     def retryable(self) -> bool:
         """Whether the same request could answer differently.
 
-        Too many requests and the server-side failures are the endpoint's own
-        transient conditions; every other status is about this request, and
-        repeating it changes nothing.
+        The handler's ``Nexus-Request-Retryable`` header decides when it is
+        set. Otherwise too many requests and the server-side failures are the
+        endpoint's own transient conditions; every other status is about this
+        request, and repeating it changes nothing.
         """
+        if self._retryable is not None:
+            return self._retryable
         return self.status == 429 or self.status >= 500
+
+
+def _retryable_header(headers: typing.Any) -> bool | None:
+    value = headers.get("Nexus-Request-Retryable") if headers is not None else None
+    if value is None:
+        return None
+    return str(value).strip().lower() == "true"
 
 
 def _post(
@@ -187,20 +200,29 @@ def _post(
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json", **headers},
+        headers={
+            "Content-Type": "application/json",
+            # Tells the handler how long this caller waits, so it can cut a
+            # long poll short instead of being cut off.
+            "Request-Timeout": f"{int(timeout * 1000)}ms",
+            **headers,
+        },
         method="POST",
     )
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             status = typing.cast("int", response.status)
             answer = typing.cast("bytes", response.read())
+            retryable = _retryable_header(response.headers)
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")
-        raise HTTPStatusError(url, error.code, detail) from error
+        raise HTTPStatusError(
+            url, error.code, detail, _retryable_header(error.headers)
+        ) from error
     # A 201 means the handler started the operation asynchronously and answered
     # with a token, which this caller cannot read as the operation's result.
     if status not in (200, 204):
-        raise HTTPStatusError(url, status, answer.decode(errors="replace"))
+        raise HTTPStatusError(url, status, answer.decode(errors="replace"), retryable)
     return answer
 
 
@@ -388,10 +410,21 @@ fn render_long_poll_method(
     output.push_str("        backoff = _LONG_POLL_MIN_BACKOFF\n");
     output.push_str("        while True:\n");
     output.push_str("            wait = self._poll_budget(end - time.monotonic())\n");
+    output.push_str("            wait_ms = int(wait * 1000)\n");
+    // The model refuses a wait outside the member's declared range.
+    if let Some(maximum) = long_poll.wait_maximum {
+        output.push_str(&format!("            wait_ms = min(wait_ms, {maximum})\n"));
+    }
+    if let Some(minimum) = long_poll.wait_minimum {
+        output.push_str(&format!("            wait_ms = max(wait_ms, {minimum})\n"));
+    }
+    if long_poll.wait_maximum.is_some() || long_poll.wait_minimum.is_some() {
+        output.push_str("            wait = wait_ms / 1000\n");
+    }
     output.push_str("            attempt = dataclasses.replace(\n");
     output.push_str("                request, ");
     output.push_str(&wait_attribute);
-    output.push_str("=int(wait * 1000)\n");
+    output.push_str("=wait_ms\n");
     output.push_str("            )\n");
     output.push_str("            started = time.monotonic()\n");
     output.push_str("            try:\n");

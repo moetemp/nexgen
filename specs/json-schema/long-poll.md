@@ -71,7 +71,7 @@ the call site: `read_until_records`.
 | Aspect | Go | Python |
 |---|---|---|
 | Signature | `ReadUntilRecords(ctx, request ReadInput, deadline time.Duration) (ReadOutput, error)` | `async def read_until_records(self, request: ReadInput, *, deadline: float) -> ReadOutput` |
-| Wait assignment | `attempt.WaitMs = &milliseconds` | `dataclasses.replace(request, wait_ms=int(wait * 1000))` |
+| Wait assignment | `attempt.WaitMs = &milliseconds` | `dataclasses.replace(request, wait_ms=wait_ms)` |
 | Done test | `len(answer.Records) > 0`, plus `\|\| answer.Done` (a pointer test when optional) with `done-field` | `if answer.records:`, plus `or answer.done` with `done-field` |
 
 Each attempt:
@@ -79,7 +79,11 @@ Each attempt:
    90% of the transport's own timeout (the Go `http.Client.Timeout` when set,
    the Python caller's `timeout`) and to at least one millisecond. Asking for
    longer than the transport will wait is a socket timeout dressed as a long
-   poll.
+   poll. When the wait member declares `minimum`, `maximum` or their exclusive
+   forms, the wait is then clamped to that range, because the model refuses a
+   wait outside it. Every request also carries `Request-Timeout` (in Go the
+   smaller of `http.Client.Timeout` and the context deadline), so the handler
+   can cut its park short instead of being cut off.
 2. **Answer.** The first answer whose result member is non-empty, or whose
    done member is true, is returned.
    When the deadline passes first, the **last answer** is returned, because it
@@ -88,7 +92,8 @@ Each attempt:
    asked for is followed by a pause, doubling from 50 ms up to 2 s and never
    past the deadline. An endpoint that ignores the wait hint is otherwise asked
    again as fast as the network allows.
-4. **Errors.** A status error that is retryable (`429`, `5xx`) is retried with
+4. **Errors.** A status error that is retryable (`429`, `5xx`, or what the
+   handler's `Nexus-Request-Retryable` header says) is retried with
    the same backoff while the deadline allows; any other error ends the loop.
    In Go a context that ends during either pause ends the loop with the
    context's error.

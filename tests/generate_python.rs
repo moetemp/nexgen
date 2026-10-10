@@ -1416,3 +1416,18 @@ $defs:
         fs::remove_dir_all(temp_dir).unwrap();
     }
 }
+
+/// Each registry entry is parameterized by its own operation's types, and mypy
+/// joins differing ones to `object` unless the registry is annotated.
+#[test]
+fn python_operation_registry_is_annotated_for_several_operations() {
+    let root = project_root();
+    let rendered = generate_python_to_string(
+        &example_input_paths(&root, "multi-operation-service"),
+        &[descriptor_path(&root)],
+    );
+
+    assert!(rendered.contains(
+        "__nexus_operation_registry__: dict[tuple[str, str], _NexusOperationInfo[typing.Any, typing.Any]] = {\n"
+    ));
+}

@@ -1579,6 +1579,52 @@ fn python_accepts_bare_lists_and_maps_on_proto_collection_fields() {
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
+/// WIT spells a byte string `list<u8>`, the form `add-rpc` scaffolds for proto `bytes`.
+#[test]
+fn python_reads_wit_byte_lists_as_proto_bytes() {
+    let root = project_root();
+    let temp_dir = generate_python_package_from_wit(
+        "python-proto-bytes",
+        r#"package temporal:nexus@1.0.0;
+
+world system {
+  export callbacks;
+}
+
+interface callbacks {
+  /// @nexus.proto "temporal.api.common.v1.Callback.Internal"
+  record callback-internal {
+    data: list<u8>,
+  }
+}
+"#,
+    );
+    let models = fs::read_to_string(temp_dir.join("generated/models.py")).unwrap();
+
+    assert!(models.contains("    data: bytes\n"));
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.common.v1 import Callback
+
+internal = Callback.Internal(data=b"\x00\xff")
+converter = models._CallbackInternalTransferTypeConverter()
+model = converter.from_transfer_type(internal, models.CallbackInternal)
+assert model.data == b"\x00\xff", model
+assert converter.to_transfer_type(model) == internal
+"#,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 /// A map of messages and a list of messages, each followed by another field.
 const PROTO_MESSAGE_COLLECTIONS_WIT: &str = r#"package temporal:nexus@1.0.0;
 

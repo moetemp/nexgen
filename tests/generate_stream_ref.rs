@@ -228,3 +228,40 @@ fn a_marker_without_a_mapping_keeps_the_wire_model() {
     assert!(!models.contains("example_sdk"), "{models}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+#[test]
+fn a_mapped_package_named_like_a_model_is_refused() {
+    // `import GameRequest.streams` would bind `GameRequest` over the model.
+    let contract = CONTRACT.replace(
+        "x-nexus-stream-ref: { py: example_sdk.streams.StreamRef }",
+        "x-nexus-stream-ref: { py: GameRequest.streams.StreamRef }",
+    );
+    let temp_dir = unique_output_path("stream-ref-package-clash");
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(&input_dir).unwrap();
+    let input_path = input_dir.join("scores.nexusrpc.yaml");
+    fs::write(&input_path, contract).unwrap();
+    let outcome = generate_to_file(&GenerateRequest {
+        config: NexgenConfig {
+            mode: GenerationMode::DefinitionsOnly,
+            ..Default::default()
+        },
+        language: Language::Python,
+        input_paths: vec![input_path],
+        support_package: None,
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("scores"),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    });
+    let message = match outcome {
+        Ok(()) => panic!("the loader accepted a package that shadows a model"),
+        Err(error) => error.to_string(),
+    };
+    assert!(
+        message.contains("GameRequest") && message.contains("mapped stream reference"),
+        "{message}"
+    );
+    fs::remove_dir_all(temp_dir).ok();
+}

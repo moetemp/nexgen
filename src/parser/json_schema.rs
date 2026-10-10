@@ -1844,6 +1844,16 @@ fn validate_stream_ref(path: &Path, schema: &Schema, context: &str) -> Result<()
                         "`{NEXUS_STREAM_REF_KEYWORD}.{target}` must be a dotted `module.Type` path naming the type to emit, got {path}"
                     ));
                 }
+                // The path is emitted verbatim as `import a.b` and `a.b.T`, so a
+                // keyword segment would be a syntax error in the models module.
+                if let Some(keyword) = path.as_str().and_then(|path| {
+                    path.split('.')
+                        .find(|segment| crate::generator::python::is_python_keyword(segment))
+                }) {
+                    return reject(format!(
+                        "`{NEXUS_STREAM_REF_KEYWORD}.{target}` path {path} contains the Python keyword `{keyword}`, which cannot name a module or a type"
+                    ));
+                }
             }
         }
         _ => {
@@ -9250,6 +9260,29 @@ pub(crate) fn build_name_manifest(
                     format!("token type `{name}` (`{NEXUS_CURSOR_KEYWORD}`)"),
                 )?;
             }
+            // A mapped stream reference is imported as `import pkg.mod`, which
+            // binds `pkg` in the models module beside the models, so a model of
+            // that name would be shadowed. Several models may map into one
+            // package, so each name enters once.
+            if language == Language::Python {
+                let packages = schemas
+                    .iter()
+                    .filter_map(|schema| {
+                        crate::json_schema::streaming::stream_ref_mapping(schema, "py")
+                    })
+                    .filter_map(|path| path.split('.').next())
+                    .map(str::to_string)
+                    .collect::<BTreeSet<_>>();
+                for package in packages {
+                    top.insert(
+                        language,
+                        package.clone(),
+                        format!(
+                            "package `{package}` imported for a mapped stream reference (`{NEXUS_STREAM_REF_KEYWORD}`)"
+                        ),
+                    )?;
+                }
+            }
         }
         // The fixed runtime boilerplate each generator emits into (or imports
         // into) every module that carries models shares this top-level scope, so
@@ -11650,6 +11683,10 @@ $defs:
             ("{ go: example.StreamRef }", "maps `go`"),
             ("{ py: StreamRef }", "must be a dotted `module.Type` path"),
             ("{ py: 3 }", "must be a dotted `module.Type` path"),
+            (
+                "{ py: example.class.StreamRef }",
+                "the Python keyword `class`",
+            ),
             ("{}", "must map at least one language"),
         ] {
             let error = doc_reject(&format!(

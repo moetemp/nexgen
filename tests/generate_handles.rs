@@ -297,7 +297,10 @@ fn handle_docs_name_the_targets_own_members() {
         .and_then(|rest| rest.split("class StreamProducer:").next())
         .unwrap_or_default();
     // A reader looks for the names in the signature, not the wire names.
-    assert!(handle.contains("Binds ``workflow_id``, ``stream``"), "{handle}");
+    assert!(
+        handle.contains("Binds ``workflow_id``, ``stream``"),
+        "{handle}"
+    );
     assert!(!handle.contains("``workflowId``"), "{handle}");
     // The loop method on a handle explains the loop and its deadline.
     let looped = handle

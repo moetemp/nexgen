@@ -166,13 +166,24 @@ func TestTheCallerPostsAndReads(t *testing.T) {
 }
 
 func TestAnAnswerThatIsNotASynchronousResultIsReported(t *testing.T) {
-	for status, retryable := range map[int]bool{
-		http.StatusCreated:            false,
-		http.StatusBadRequest:         false,
-		http.StatusTooManyRequests:    true,
-		http.StatusServiceUnavailable: true,
+	for _, c := range []struct {
+		status    int
+		header    string
+		retryable bool
+	}{
+		{http.StatusCreated, "", false},
+		{http.StatusBadRequest, "", false},
+		{http.StatusTooManyRequests, "", true},
+		{http.StatusServiceUnavailable, "", true},
+		// The handler's own word wins over the status rule.
+		{http.StatusInternalServerError, "false", false},
+		{http.StatusBadRequest, "true", true},
 	} {
+		status, retryable := c.status, c.retryable
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if c.header != "" {
+				w.Header().Set("Nexus-Request-Retryable", c.header)
+			}
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(`{"token": "started"}`))
 		}))
@@ -257,6 +268,7 @@ models = importlib.import_module(f"{package.name}.models")
 
 seen = []
 status_for = {}
+retryable_for = {}
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -268,6 +280,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path.endswith("/ping") and status == 200:
             status = 204
         self.send_response(status)
+        if self.path in retryable_for:
+            self.send_header("Nexus-Request-Retryable", retryable_for[self.path])
         self.end_headers()
         if status != 204:
             self.wfile.write(b'{"records": ["a", "b"], "nextToken": "t2"}')
@@ -287,8 +301,20 @@ async def main():
     assert answer.records == ["a", "b"] and answer.next_token == "t2", answer
     assert await client.ping() is None
 
-    for status, retryable in [(201, False), (400, False), (429, True), (503, True)]:
+    cases = [
+        (201, None, False),
+        (400, None, False),
+        (429, None, True),
+        (503, None, True),
+        # The handler's own word wins over the status rule.
+        (500, "false", False),
+        (400, "true", True),
+    ]
+    for status, header, retryable in cases:
         status_for["/svc/streams%2Fread%20%7Bv1%7D"] = status
+        retryable_for.pop("/svc/streams%2Fread%20%7Bv1%7D", None)
+        if header is not None:
+            retryable_for["/svc/streams%2Fread%20%7Bv1%7D"] = header
         try:
             await client.read(models.ReadInput(stream="s"))
         except client_module.HTTPStatusError as error:
@@ -1264,4 +1290,167 @@ fn the_generated_python_long_poll_loop_stops_when_the_stream_ends() {
         .arg(&package))
     .expect_ok("drive the generated loop");
     assert!(output.contains("ok"), "{output}");
+}
+
+/// A long poll whose wait member declares a range, as the sdk-python stream
+/// service contract does. A transport timeout far above the range must not
+/// push the wait past it.
+const BOUNDED_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    operations:
+      read:
+        fqn: read
+        x-nexus-long-poll:
+          wait-field: waitMs
+          result-field: records
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      waitMs: { type: integer, minimum: 0, maximum: 1000 }
+    additionalProperties: false
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+    additionalProperties: false
+"##;
+
+const PYTHON_BOUNDED_DRIVER: &str = r#"
+import asyncio
+import http.server
+import importlib
+import json
+import pathlib
+import sys
+import threading
+
+package = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+models = importlib.import_module(f"{package.name}.models")
+
+waits = []
+timeouts = []
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        waits.append(json.loads(self.rfile.read(length))["waitMs"])
+        timeouts.append(self.headers.get("Request-Timeout"))
+        answer = b'{"records": ["a"]}' if len(waits) >= 3 else b'{"records": []}'
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(answer)
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+client = client_module.StreamServiceHttpClient(
+    f"http://127.0.0.1:{server.server_port}", timeout=120.0
+)
+
+
+async def main():
+    answer = await client.read_until_records(models.ReadInput(), deadline=300.0)
+    assert answer.records == ["a"], answer
+    assert waits and all(0 <= wait <= 1000 for wait in waits), waits
+    assert timeouts and all(value == "120000ms" for value in timeouts), timeouts
+
+
+asyncio.run(main())
+server.shutdown()
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_long_poll_loop_keeps_the_wait_in_its_range() {
+    let workspace = Workspace::new("http-caller-python-bounded-toolchain");
+    let package = generate_client_from(&workspace, Target::Python, "polls", BOUNDED_CONTRACT);
+    let driver = workspace.root().join("drive_bounded.py");
+    fs::write(&driver, PYTHON_BOUNDED_DRIVER).expect("write the driver");
+
+    let interpreter = python_interpreter();
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package))
+    .expect_ok("drive the generated loop");
+    assert!(output.contains("ok"), "{output}");
+}
+
+const GO_BOUNDED_DRIVER: &str = r#"package polls
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestTheLoopKeepsTheWaitInItsRange(t *testing.T) {
+	var mu sync.Mutex
+	var waits []float64
+	var timeouts []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var decoded map[string]any
+		_ = json.Unmarshal(body, &decoded)
+		mu.Lock()
+		waits = append(waits, decoded["waitMs"].(float64))
+		timeouts = append(timeouts, r.Header.Get("Request-Timeout"))
+		calls := len(waits)
+		mu.Unlock()
+		if calls >= 3 {
+			_, _ = w.Write([]byte(`{"records": ["a"]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"records": []}`))
+	}))
+	defer server.Close()
+	client := NewStreamServiceHTTPClient(server.URL, &StreamServiceHTTPClientOptions{
+		HTTPClient: &http.Client{Timeout: 2 * time.Minute},
+	})
+	answer, err := client.ReadUntilRecords(context.Background(), ReadInput{}, 5*time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(answer.Records) != 1 {
+		t.Fatalf("loop answered %+v", answer)
+	}
+	for i, wait := range waits {
+		if wait < 0 || wait > 1000 {
+			t.Fatalf("wait hint %v outside the declared range", wait)
+		}
+		if timeouts[i] != "120000ms" {
+			t.Fatalf("Request-Timeout %q, want the transport timeout", timeouts[i])
+		}
+	}
+}
+"#;
+
+#[test]
+fn the_generated_go_long_poll_loop_keeps_the_wait_in_its_range() {
+    let workspace = Workspace::new("http-caller-go-bounded-toolchain");
+    let root = prepare_go_module(&workspace).expect("prepare the go module");
+    let package = generate_client_from(&workspace, Target::Go, "polls", BOUNDED_CONTRACT);
+    fs::write(package.join("bounded_test.go"), GO_BOUNDED_DRIVER).expect("write the driver");
+
+    run(command("go")
+        .current_dir(&root)
+        .env("GOFLAGS", "-mod=mod")
+        .args(["test", "./..."]))
+    .expect_ok("go test over the generated loop");
 }

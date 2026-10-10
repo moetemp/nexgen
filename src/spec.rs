@@ -626,6 +626,10 @@ pub struct OperationLongPollSpec {
     /// The output member whose emptiness means the call collected nothing, so a
     /// caller that is still inside its deadline should poll again.
     pub result_field: String,
+    /// The boolean output member that says nothing more will arrive, when the
+    /// contract declares one. An answer with it set ends the loop even when the
+    /// result is empty.
+    pub done_field: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -17,12 +17,16 @@ services:
         x-nexus-long-poll:
           wait-field: waitMs      # optional input member, type: integer, milliseconds
           result-field: records   # output member, type: array
+          done-field: done        # optional output member, type: boolean
         input: { $ref: "#/$defs/ReadInput" }
         output: { $ref: "#/$defs/ReadOutput" }
 ```
 
-- The value is an object with exactly two members, `wait-field` and
-  `result-field`, each a non-empty string.
+- The value is an object with `wait-field` and `result-field`, and optionally
+  `done-field`, each a non-empty string.
+- `done-field` names a boolean the endpoint sets when nothing more will arrive,
+  such as a stream whose writer has closed. Without it, an answer that ends the
+  stream with no records is asked again until the deadline.
 - Both name **wire** members (the authored property names), not emitted
   identifiers, because the authored contract is the only thing both ends of the
   call agree on. Each emitter resolves them through its own `x-<lang>-name`
@@ -68,7 +72,7 @@ the call site: `read_until_records`.
 |---|---|---|
 | Signature | `ReadUntilRecords(ctx, request ReadInput, deadline time.Duration) (ReadOutput, error)` | `async def read_until_records(self, request: ReadInput, *, deadline: float) -> ReadOutput` |
 | Wait assignment | `attempt.WaitMs = &milliseconds` | `dataclasses.replace(request, wait_ms=int(wait * 1000))` |
-| Done test | `len(answer.Records) > 0` | `if answer.records:` |
+| Done test | `len(answer.Records) > 0`, plus `\|\| answer.Done` (a pointer test when optional) with `done-field` | `if answer.records:`, plus `or answer.done` with `done-field` |
 
 Each attempt:
 1. **Budget.** The wait sent is the time left before the deadline, clamped to
@@ -76,7 +80,8 @@ Each attempt:
    the Python caller's `timeout`) and to at least one millisecond. Asking for
    longer than the transport will wait is a socket timeout dressed as a long
    poll.
-2. **Answer.** The first answer whose result member is non-empty is returned.
+2. **Answer.** The first answer whose result member is non-empty, or whose
+   done member is true, is returned.
    When the deadline passes first, the **last answer** is returned, because it
    still carries the caller's resume position.
 3. **Pacing.** An empty answer that came back in less than half the wait it
@@ -106,7 +111,7 @@ Each attempt:
 | Unknown member | `deadline: 30` beside the two |
 | Missing or empty member | no `result-field` |
 | Named member not declared | `result-field: entries` on a model without it |
-| Wrong member type | `waitMs: { type: string }` |
+| Wrong member type | `waitMs: { type: string }`; `done: { type: string }` |
 | Wait member required | `required: [waitMs]` |
 | Wait member with a default | `waitMs: { type: integer, default: 5000 }` |
 | Operation without the side | marked operation with no `output` |
@@ -117,7 +122,8 @@ Each attempt:
 `tests/http_caller_toolchain.rs` drives both loops against a local endpoint:
 two empty answers, a `503`, then records (four attempts, each wait inside the
 budget); a deadline that passes on empty answers (the last answer, with its
-resume token, comes back); a `400` (returned at once).
+resume token, comes back); a `400` (returned at once); an answer with `done`
+set and no records (returned after one request, well inside the deadline).
 
 ## Interactions
 

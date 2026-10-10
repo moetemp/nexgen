@@ -658,3 +658,128 @@ fn the_generated_python_stream_reference_round_trips_through_the_sdk_type() {
     .expect_ok("round-trip the stream reference");
     assert!(output.contains("ok"), "{output}");
 }
+
+/// A long poll whose answer can say the stream ended. `done` is optional, so
+/// Go holds it behind a pointer.
+const DONE_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    operations:
+      read:
+        fqn: read
+        x-nexus-long-poll:
+          wait-field: waitMs
+          result-field: records
+          done-field: done
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      waitMs: { type: integer }
+    additionalProperties: false
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+      done: { type: boolean }
+    additionalProperties: false
+"##;
+
+/// An endpoint that has ended the stream answers at once with no records; the
+/// loop must hand that answer back rather than ask again until its deadline.
+const GO_DONE_DRIVER: &str = r#"package polls
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+func TestTheLoopReturnsAnAnswerThatEndsTheStream(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = w.Write([]byte(`{"records": [], "done": true}`))
+	}))
+	defer server.Close()
+	started := time.Now()
+	answer, err := NewStreamServiceHTTPClient(server.URL, nil).ReadUntilRecords(context.Background(), ReadInput{}, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answer.Done == nil || !*answer.Done || len(answer.Records) != 0 {
+		t.Fatalf("loop answered %+v", answer)
+	}
+	if calls.Load() != 1 || time.Since(started) > time.Second {
+		t.Fatalf("loop asked %d times over %v after the stream ended", calls.Load(), time.Since(started))
+	}
+}
+"#;
+
+#[test]
+fn the_generated_go_long_poll_loop_stops_when_the_stream_ends() {
+    let workspace = Workspace::new("http-caller-go-long-poll-done-toolchain");
+    let root = prepare_go_module(&workspace).expect("prepare the go module");
+    let package = generate_client_from(&workspace, Target::Go, "polls", DONE_CONTRACT);
+    fs::write(package.join("done_test.go"), GO_DONE_DRIVER).expect("write the driver");
+    run(command("go")
+        .current_dir(&root)
+        .env("GOFLAGS", "-mod=mod")
+        .args(["test", "./..."]))
+    .expect_ok("go test over the generated loop");
+}
+
+const PYTHON_DONE_DRIVER: &str = r#"
+import asyncio
+import importlib
+import pathlib
+import sys
+import time
+
+package = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+models = importlib.import_module(f"{package.name}.models")
+
+calls = []
+
+
+def fake_post(url, body, headers, timeout):
+    calls.append(url)
+    return b'{"records": [], "done": true}'
+
+
+client_module._post = fake_post
+
+
+async def main():
+    client = client_module.StreamServiceHttpClient("http://endpoint")
+    started = time.monotonic()
+    answer = await client.read_until_records(models.ReadInput(), deadline=5.0)
+    assert answer.done is True and answer.records == [], answer
+    assert len(calls) == 1 and time.monotonic() - started < 1.0, (calls, started)
+
+
+asyncio.run(main())
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_long_poll_loop_stops_when_the_stream_ends() {
+    let workspace = Workspace::new("http-caller-python-long-poll-done-toolchain");
+    let package = generate_client_from(&workspace, Target::Python, "polls", DONE_CONTRACT);
+    let driver = workspace.root().join("drive_done.py");
+    fs::write(&driver, PYTHON_DONE_DRIVER).expect("write the driver");
+    let output = run(command(&python_interpreter().to_string_lossy())
+        .arg(&driver)
+        .arg(&package))
+    .expect_ok("drive the generated loop");
+    assert!(output.contains("ok"), "{output}");
+}

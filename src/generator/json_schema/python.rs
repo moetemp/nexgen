@@ -999,8 +999,13 @@ pub(in crate::generator) fn render_external_models(
         module_imports,
         relative_imports,
         root_package_imports: BTreeMap::new(),
+        // A stream reference mapped to an SDK type is the SDK's: the models
+        // module names it, but the package exports only what it declares.
         exported_names: json_models
             .iter()
+            .filter(|model| {
+                crate::json_schema::streaming::stream_ref_mapping(&model.schema, "py").is_none()
+            })
             .map(|model| model.model_name.clone())
             .collect(),
         module_exported_names: BTreeSet::new(),

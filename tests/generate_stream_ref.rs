@@ -164,7 +164,10 @@ fn python_emits_the_stream_reference_as_the_mapped_type() {
     // A member typed by the model names the alias like any other model.
     assert!(models.contains("stream: StreamRef\n"), "{models}");
     assert!(file(&files, "services.py").contains("StreamRef,"));
-    assert!(file(&files, "__init__.py").contains("\"StreamRef\""));
+    // The package exports what it declares. The mapped type is the SDK's, and
+    // re-exporting it gives it a second public home, which doc tools take as
+    // its own and then fail to link the SDK's references to it.
+    assert!(!file(&files, "__init__.py").contains("StreamRef"));
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

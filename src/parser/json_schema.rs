@@ -1396,6 +1396,9 @@ fn api_spec_from_parsed_json_documents(
     }
 
     let mut services = Vec::new();
+    // The file each service came from, by position, so a check that runs on the
+    // assembled spec can still name it.
+    let mut service_paths = Vec::new();
     for canonical_path in canonical_paths {
         let Some((path, doc)) = parsed.docs.get(canonical_path) else {
             continue;
@@ -1405,6 +1408,7 @@ fn api_spec_from_parsed_json_documents(
         };
         validate_service_key_scope(path, language, service_specs)?;
         for (service_key, service) in service_specs {
+            service_paths.push(path.clone());
             services.push(build_service(
                 path,
                 canonical_path,
@@ -1458,7 +1462,7 @@ fn api_spec_from_parsed_json_documents(
         types,
     };
     validate_identifier_namespace(language, &spec)?;
-    validate_http_caller_handle_names(language, &spec)?;
+    validate_http_caller_handle_names(language, &spec, &service_paths)?;
     Ok(spec)
 }
 
@@ -9990,7 +9994,11 @@ fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<(
 /// the loop method's `deadline`). Python parameter names are part of a call, so
 /// a clash is refused with the override as the remedy; Go renames a clashing
 /// local instead.
-fn validate_http_caller_handle_names(language: Language, spec: &ApiSpec) -> Result<()> {
+fn validate_http_caller_handle_names(
+    language: Language,
+    spec: &ApiSpec,
+    service_paths: &[PathBuf],
+) -> Result<()> {
     let (name_keyword, case): (&str, fn(&str) -> String) = match language {
         Language::Go => ("x-go-name", crate::generator::go::go_field_name),
         Language::Python => ("x-py-name", crate::generator::python::python_field_name),
@@ -10023,13 +10031,17 @@ fn validate_http_caller_handle_names(language: Language, spec: &ApiSpec) -> Resu
         }
     }
 
-    for service in &spec.services {
+    for (index, service) in spec.services.iter().enumerate() {
         if service.handles.is_empty() {
             continue;
         }
+        let path = service_paths
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from("<json-schema>"));
         let reject = |reason: String| -> Result<()> {
             Err(Error::InvalidJsonSchema {
-                path: PathBuf::from("<json-schema>"),
+                path: path.clone(),
                 reason: format!(
                     "service `{}`: `{NEXUS_HANDLE_KEYWORD}` {reason}",
                     service.name

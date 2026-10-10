@@ -539,6 +539,11 @@ fn a_constructor_is_checked_against_the_emitted_operation_names() {
                 && message.contains("which is also an operation"),
             "{language:?}: {message}"
         );
+        // Like every other handle refusal, it names the file the service is in.
+        assert!(
+            message.contains("streams.nexusrpc.yaml"),
+            "{language:?}: {message}"
+        );
     }
     // An operation keyed `stream` but emitted under another name leaves the
     // constructor free.

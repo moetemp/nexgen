@@ -27,23 +27,36 @@ class HTTPStatusError(RuntimeError):
     another attempt could still get.
     """
 
-    def __init__(self, url: str, status: int, detail: str) -> None:
+    def __init__(
+        self, url: str, status: int, detail: str, retryable: bool | None = None
+    ) -> None:
         super().__init__(f"{url} failed ({status}): {detail}")
         # Annotated explicitly: a target's strict type checker asks for it on a
         # class it cannot prove closed.
         self.url: str = url
         self.status: int = status
         self.detail: str = detail
+        self._retryable: bool | None = retryable
 
     @property
     def retryable(self) -> bool:
         """Whether the same request could answer differently.
 
-        Too many requests and the server-side failures are the endpoint's own
-        transient conditions; every other status is about this request, and
-        repeating it changes nothing.
+        The handler's ``Nexus-Request-Retryable`` header decides when it is
+        set. Otherwise too many requests and the server-side failures are the
+        endpoint's own transient conditions; every other status is about this
+        request, and repeating it changes nothing.
         """
+        if self._retryable is not None:
+            return self._retryable
         return self.status == 429 or self.status >= 500
+
+
+def _retryable_header(headers: typing.Any) -> bool | None:
+    value = headers.get("Nexus-Request-Retryable") if headers is not None else None
+    if value is None:
+        return None
+    return str(value).strip().lower() == "true"
 
 
 def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> bytes:
@@ -57,13 +70,16 @@ def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> byt
         with urllib.request.urlopen(request, timeout=timeout) as response:
             status = typing.cast("int", response.status)
             answer = typing.cast("bytes", response.read())
+            retryable = _retryable_header(response.headers)
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")
-        raise HTTPStatusError(url, error.code, detail) from error
+        raise HTTPStatusError(
+            url, error.code, detail, _retryable_header(error.headers)
+        ) from error
     # A 201 means the handler started the operation asynchronously and answered
     # with a token, which this caller cannot read as the operation's result.
     if status not in (200, 204):
-        raise HTTPStatusError(url, status, answer.decode(errors="replace"))
+        raise HTTPStatusError(url, status, answer.decode(errors="replace"), retryable)
     return answer
 
 

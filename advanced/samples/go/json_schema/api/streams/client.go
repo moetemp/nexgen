@@ -20,17 +20,24 @@ type HTTPStatusError struct {
 	URL        string
 	StatusCode int
 	Body       string
+	// RetryableHeader is the handler's Nexus-Request-Retryable answer, nil when
+	// it sent none.
+	RetryableHeader *bool
 }
 
 func (e *HTTPStatusError) Error() string {
 	return fmt.Sprintf("%s failed (%d): %s", e.URL, e.StatusCode, e.Body)
 }
 
-// Retryable reports whether the same request could answer differently. Too many
-// requests and the server-side failures are the endpoint's own transient
+// Retryable reports whether the same request could answer differently. The
+// handler's Nexus-Request-Retryable header decides when it is set. Otherwise too
+// many requests and the server-side failures are the endpoint's own transient
 // conditions; every other status is about this request, and repeating it
 // changes nothing.
 func (e *HTTPStatusError) Retryable() bool {
+	if e.RetryableHeader != nil {
+		return *e.RetryableHeader
+	}
 	return e.StatusCode == http.StatusTooManyRequests || e.StatusCode >= 500
 }
 
@@ -96,7 +103,12 @@ func (c *StreamServiceHTTPClient) post(ctx context.Context, segment string, body
 	// A 201 means the handler started the operation asynchronously and answered
 	// with a token, which this caller cannot read as the operation's result.
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNoContent {
-		return nil, &HTTPStatusError{URL: url, StatusCode: response.StatusCode, Body: string(raw)}
+		statusErr := &HTTPStatusError{URL: url, StatusCode: response.StatusCode, Body: string(raw)}
+		if value := response.Header.Get("Nexus-Request-Retryable"); value != "" {
+			retryable := strings.EqualFold(strings.TrimSpace(value), "true")
+			statusErr.RetryableHeader = &retryable
+		}
+		return nil, statusErr
 	}
 	return raw, nil
 }

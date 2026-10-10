@@ -67,7 +67,7 @@ Not done, and why:
 | Void output | `error` only | `-> None` |
 | Encode | `json.Marshal(request)` (the model's `MarshalJSON`) | `_<In>TransferTypeConverter().to_transfer_type(request)` |
 | Decode | `json.Unmarshal(raw, &answer)` | `_<Out>TransferTypeConverter().from_transfer_type(answer, Out)` |
-| Status error | `*HTTPStatusError{URL, StatusCode, Body}` with `Retryable()` | `HTTPStatusError(url, status, detail)` with `.retryable` |
+| Status error | `*HTTPStatusError{URL, StatusCode, Body, RetryableHeader}` with `Retryable()` | `HTTPStatusError(url, status, detail, retryable=None)` with `.retryable` |
 
 `<Service>` and `<Op>` are the binding's own identifiers, so an `x-<lang>-name`
 moves the caller with the binding. Go spells the fixed vocabulary
@@ -75,9 +75,11 @@ idiomatically (`HTTPClient`, `HTTPStatusError`) because it is not derived from
 an authored name; the [[properties]] acronym folding applies to derived names
 only.
 
-`Retryable` is true for `429` and every `5xx`: the endpoint's own transient
-conditions. Every other status is about the request, and repeating it changes
-nothing.
+When the handler sends `Nexus-Request-Retryable`, that header decides
+`Retryable`. A Temporal handler error that isn't retryable comes back as a
+`5xx` with the header set to `false`. Without the header, `Retryable` is true
+for `429` and every `5xx`, the endpoint's own transient conditions. Every
+other status is about the request, and repeating it changes nothing.
 
 ## Wire behavior
 
@@ -94,6 +96,15 @@ nothing.
   for a void output.
 - **Not retried.** The caller makes one attempt. A transport error is whatever
   the caller's own client settings make it.
+- **Cancel.** The Python caller runs the request in a worker thread. A cancelled
+  task doesn't stop that thread, so the request holds its connection until the
+  endpoint answers or `timeout` passes. Keep `timeout` short for a caller that
+  cancels long polls often.
+- **Redirects.** Both targets use the platform's default redirect handling, and
+  a `301`, `302` or `303` turns the `POST` into a `GET` with no body. A Nexus
+  ingress doesn't redirect operation calls. A Go caller that wants a redirect
+  to fail can pass an `http.Client` whose `CheckRedirect` returns
+  `http.ErrUseLastResponse`.
 
 ## File layout & namespacing
 

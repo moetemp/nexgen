@@ -1755,6 +1755,77 @@ fn python_operation_registry_is_annotated_for_several_operations() {
     ));
 }
 
+/// A proto oneof whose members are messages with authored records, as `add-rpc`
+/// scaffolds it.
+#[test]
+fn python_proto_oneof_cases_carry_their_authored_records() {
+    let root = project_root();
+    let temp_dir = generate_python_package_from_wit(
+        "python-proto-oneof-records",
+        r#"package temporal:nexus@1.0.0;
+
+world system {
+  export endpoints;
+}
+
+interface endpoints {
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget.Worker"
+  record endpoint-target-worker {
+    namespace: string,
+    task-queue: string,
+  }
+
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget.External"
+  record endpoint-target-external {
+    url: string,
+  }
+
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget.variant"
+  variant endpoint-target-variant {
+    worker(endpoint-target-worker),
+    external(endpoint-target-external),
+  }
+
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget"
+  record endpoint-target {
+    %variant: option<endpoint-target-variant>,
+  }
+}
+"#,
+    );
+
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.nexus.v1 import EndpointTarget
+
+converter = models._EndpointTargetTransferTypeConverter()
+for target in [
+    EndpointTarget(worker=EndpointTarget.Worker(namespace="ns", task_queue="tq")),
+    EndpointTarget(external=EndpointTarget.External(url="http://x")),
+    EndpointTarget(),
+]:
+    model = converter.from_transfer_type(target, models.EndpointTarget)
+    assert converter.to_transfer_type(model) == target, model
+model = converter.from_transfer_type(
+    EndpointTarget(worker=EndpointTarget.Worker(namespace="ns", task_queue="tq")),
+    models.EndpointTarget,
+)
+assert isinstance(model.variant, models.EndpointTargetVariantWorker), model
+assert model.variant.value == models.EndpointTargetWorker(namespace="ns", task_queue="tq")
+"#,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 /// A map of messages and a list of messages, each followed by another field.
 const PROTO_MESSAGE_COLLECTIONS_WIT: &str = r#"package temporal:nexus@1.0.0;
 

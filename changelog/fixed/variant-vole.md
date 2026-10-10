@@ -1,0 +1,1 @@
+A proto oneof whose members are messages with authored WIT records now plans its variant cases as those records, so Python generation no longer panics with "message conversion should be model-shaped".

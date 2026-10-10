@@ -60,6 +60,10 @@ fn generate(
 
 /// Generates one contract and answers with the loader's refusal, if it made one.
 fn refusal(contract: &str, label: &str) -> String {
+    refusal_for(Language::Go, contract, label)
+}
+
+fn refusal_for(language: Language, contract: &str, label: &str) -> String {
     let temp_dir = unique_output_path(label);
     let input_dir = temp_dir.join("input");
     fs::create_dir_all(&input_dir).unwrap();
@@ -71,7 +75,7 @@ fn refusal(contract: &str, label: &str) -> String {
             client: true,
             ..Default::default()
         },
-        language: Language::Go,
+        language,
         input_paths: vec![input_path],
         support_package: None,
         descriptor_paths: Vec::new(),
@@ -473,6 +477,42 @@ fn a_go_key_named_like_a_receiver_takes_a_suffix() {
     );
     assert!(client.contains("\t\tC: h.cValue,\n"), "{client}");
     fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn a_constructor_is_checked_against_the_emitted_operation_names() {
+    // `read` is emitted as `stream` / `Stream`, which `StreamHandle` is built by.
+    let renamed_onto = HANDLE_CONTRACT.replace(
+        "      read:\n        fqn: read\n",
+        "      read:\n        fqn: read\n        x-py-name: stream\n        x-go-name: Stream\n",
+    );
+    for language in [Language::Python, Language::Go] {
+        let message = refusal_for(language, &renamed_onto, "handles-ctor-renamed-onto");
+        assert!(
+            message.contains("handle `StreamHandle` would be built by")
+                && message.contains("which is also an operation"),
+            "{language:?}: {message}"
+        );
+    }
+    // An operation keyed `stream` but emitted under another name leaves the
+    // constructor free.
+    let renamed_away = HANDLE_CONTRACT.replace(
+        "      read:\n        fqn: read\n",
+        "      stream:\n        fqn: read\n        x-py-name: open_stream\n        x-go-name: OpenStream\n",
+    );
+    for language in [Language::Python, Language::Go] {
+        let (temp_dir, files) =
+            generate(language, &renamed_away, true, "handles-ctor-renamed-away");
+        let client = match language {
+            Language::Python => file(&files, "client.py"),
+            _ => file(&files, "client.go"),
+        };
+        assert!(
+            client.contains("def stream(") || client.contains(") Stream("),
+            "{language:?}: {client}"
+        );
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
 }
 
 #[test]

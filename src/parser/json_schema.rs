@@ -1457,6 +1457,7 @@ fn api_spec_from_parsed_json_documents(
         types,
     };
     validate_identifier_namespace(language, &spec)?;
+    validate_http_caller_handle_names(language, &spec)?;
     Ok(spec)
 }
 
@@ -6508,15 +6509,9 @@ fn build_operation(
     })
 }
 
-/// Lowers `x-nexus-long-poll` and checks the two members it names against the
-/// operation's models. The grammar is already validated; a name that does not
-/// resolve, or resolves to a shape a loop cannot drive, would otherwise surface
-/// as a compile error inside generated caller code, far from the contract that
-/// caused it.
-///
-/// The wait hint must be an `integer` (milliseconds) and the emptiness test an
-/// `array`. Pinning both keeps every target's emitted loop a fixed shape: one
-/// numeric assignment and one length test.
+/// An input's top-level members by wire name, and the names it requires.
+type InputMembers<'a> = (&'a IndexMap<String, Schema>, BTreeSet<String>);
+
 /// The top-level members an operation's input declares, with the required set,
 /// looking through a `$ref` to the model. `None` when the operation has no
 /// input or its input is not `properties`-shaped, which no handle can join.
@@ -6526,7 +6521,7 @@ fn operation_input_members<'a>(
     operation: &'a Operation,
     docs: &'a IndexMap<PathBuf, (PathBuf, Document)>,
     models: &'a BTreeMap<TypeKey, JsonModel>,
-) -> Result<Option<(&'a IndexMap<String, Schema>, BTreeSet<String>)>> {
+) -> Result<Option<InputMembers<'a>>> {
     let Some(input) = operation.input.as_ref() else {
         return Ok(None);
     };
@@ -6575,10 +6570,10 @@ fn same_member_shape(left: &Schema, right: &Schema) -> bool {
 /// cannot decide on its own: that at least one operation joins each handle,
 /// that every operation joining a handle declares its key members the same
 /// way (a handle holds one value per key and injects it into every request,
-/// so two shapes for one key would make one of those requests invalid), that
-/// no two handles bind the same key set, and that the derived constructor
-/// names stay apart from the operations and each other. A handle's type name
-/// enters the P15 collision pass with the rest of the caller's names.
+/// so two shapes for one key would make one of those requests invalid), and
+/// that no two handles bind the same key set. A handle's type name enters the
+/// P15 collision pass with the rest of the caller's names, and the names it
+/// derives are checked per target by [`validate_http_caller_handle_names`].
 fn build_handles(
     path: &Path,
     canonical_path: &Path,
@@ -6667,57 +6662,18 @@ fn build_handles(
         }
     }
 
-    // Constructor names are derived, so two handles can arrive at one. On the
-    // flat caller a constructor also sits beside the operation methods.
-    let snake = |name: &str| name.to_snake_case();
-    let operation_names = service
-        .operations
-        .keys()
-        .map(|key| snake(key))
-        .collect::<BTreeSet<_>>();
-    let mut flat = BTreeMap::new();
-    for handle in &handles {
-        let base = crate::json_schema::streaming::handle_constructor_base(&handle.name, None);
-        if operation_names.contains(&snake(&base)) {
-            return reject(format!(
-                "handle `{}` would be built by `{base}`, which is also an operation of the service",
-                handle.name
-            ));
-        }
-        if let Some(previous) = flat.insert(snake(&base), handle.name.clone()) {
-            return reject(format!(
-                "handles `{previous}` and `{}` would both be built by `{base}` on the flat caller",
-                handle.name
-            ));
-        }
-        let parent_keys = handle.keys.iter().collect::<BTreeSet<_>>();
-        let mut on_parent = BTreeMap::new();
-        for child in &handles {
-            let child_keys = child.keys.iter().collect::<BTreeSet<_>>();
-            if child_keys.len() <= parent_keys.len() || !parent_keys.is_subset(&child_keys) {
-                continue;
-            }
-            let base = crate::json_schema::streaming::handle_constructor_base(
-                &child.name,
-                Some(&handle.name),
-            );
-            if operation_names.contains(&snake(&base)) {
-                return reject(format!(
-                    "handle `{}` would be built from `{}` by `{base}`, which is also an operation the handle carries",
-                    child.name, handle.name
-                ));
-            }
-            if let Some(previous) = on_parent.insert(snake(&base), child.name.clone()) {
-                return reject(format!(
-                    "handles `{previous}` and `{}` would both be built from `{}` by `{base}`",
-                    child.name, handle.name
-                ));
-            }
-        }
-    }
     Ok(handles)
 }
 
+/// Lowers `x-nexus-long-poll` and checks the two members it names against the
+/// operation's models. The grammar is already validated; a name that does not
+/// resolve, or resolves to a shape a loop cannot drive, would otherwise surface
+/// as a compile error inside generated caller code, far from the contract that
+/// caused it.
+///
+/// The wait hint must be an `integer` (milliseconds) and the emptiness test an
+/// `array`. Pinning both keeps every target's emitted loop a fixed shape: one
+/// numeric assignment and one length test.
 fn build_long_poll(
     path: &Path,
     canonical_path: &Path,
@@ -9965,6 +9921,152 @@ fn manifest_inputs_from_spec(
 fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<()> {
     let (models, services) = manifest_inputs_from_spec(language, spec);
     build_name_manifest(language, &models, &services)?;
+    Ok(())
+}
+
+/// Checks the names a `--client` caller derives for a service's handles, on the
+/// target's own spelling, since `x-<lang>-name` and each target's casing decide
+/// them: a constructor against the methods of the object it lands on and
+/// against the other constructors there.
+fn validate_http_caller_handle_names(language: Language, spec: &ApiSpec) -> Result<()> {
+    let (name_keyword, case): (&str, fn(&str) -> String) = match language {
+        Language::Go => ("x-go-name", crate::generator::go::go_field_name),
+        Language::Python => ("x-py-name", crate::generator::python::python_field_name),
+        _ => return Ok(()),
+    };
+    let member_name = |member: Option<&Value>, wire_name: &str| -> String {
+        member
+            .and_then(|member| member.get(name_keyword))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| case(wire_name))
+    };
+    fn json_schema(type_spec: Option<&TypeSpec>) -> Option<&Value> {
+        match type_spec {
+            Some(TypeSpec::External(ExternalTypeSpec::Json(json))) => Some(&json.schema),
+            _ => None,
+        }
+    }
+    /// One operation as the caller emits it: its method names and its input
+    /// members.
+    struct CallerOperation {
+        method: String,
+        loop_method: Option<String>,
+        input: serde_json::Map<String, Value>,
+    }
+    impl CallerOperation {
+        fn methods(&self) -> impl Iterator<Item = String> + '_ {
+            std::iter::once(self.method.clone()).chain(self.loop_method.clone())
+        }
+    }
+
+    for service in &spec.services {
+        if service.handles.is_empty() {
+            continue;
+        }
+        let reject = |reason: String| -> Result<()> {
+            Err(Error::InvalidJsonSchema {
+                path: PathBuf::from("<json-schema>"),
+                reason: format!(
+                    "service `{}`: `{NEXUS_HANDLE_KEYWORD}` {reason}",
+                    service.name
+                ),
+            })
+        };
+        let mut operations = Vec::new();
+        for operation in &service.operations {
+            let method = operation
+                .code_name
+                .for_language(language)
+                .map(str::to_string)
+                .unwrap_or_else(|| case(&operation.name));
+            let loop_method = operation
+                .long_poll
+                .as_ref()
+                .zip(json_schema(operation.output.as_ref()))
+                .map(|(long_poll, output)| {
+                    let result = member_name(
+                        output
+                            .get("properties")
+                            .and_then(|members| members.get(&long_poll.result_field)),
+                        &long_poll.result_field,
+                    );
+                    match language {
+                        Language::Go => format!("{method}Until{result}"),
+                        _ => format!("{method}_until_{result}"),
+                    }
+                });
+            let input = json_schema(operation.input.as_ref())
+                .and_then(|schema| schema.get("properties"))
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            operations.push(CallerOperation {
+                method,
+                loop_method,
+                input,
+            });
+        }
+        let joining = |keys: &[String]| {
+            operations
+                .iter()
+                .filter(|operation| keys.iter().all(|key| operation.input.contains_key(key)))
+                .collect::<Vec<_>>()
+        };
+
+        let flat_methods = operations
+            .iter()
+            .flat_map(CallerOperation::methods)
+            .collect::<BTreeSet<_>>();
+        let mut on_flat = BTreeMap::new();
+        for handle in &service.handles {
+            let joined = joining(&handle.keys);
+            let constructor = case(&crate::json_schema::streaming::handle_constructor_base(
+                &handle.name,
+                None,
+            ));
+            if flat_methods.contains(&constructor) {
+                return reject(format!(
+                    "handle `{}` would be built by `{constructor}`, which is also an operation of the service",
+                    handle.name
+                ));
+            }
+            if let Some(previous) = on_flat.insert(constructor.clone(), handle.name.clone()) {
+                return reject(format!(
+                    "handles `{previous}` and `{}` would both be built by `{constructor}` on the flat caller",
+                    handle.name
+                ));
+            }
+            let parent_keys = handle.keys.iter().collect::<BTreeSet<_>>();
+            let parent_methods = joined
+                .iter()
+                .flat_map(|operation| operation.methods())
+                .collect::<BTreeSet<_>>();
+            let mut on_parent = BTreeMap::new();
+            for child in &service.handles {
+                let child_keys = child.keys.iter().collect::<BTreeSet<_>>();
+                if child_keys.len() <= parent_keys.len() || !parent_keys.is_subset(&child_keys) {
+                    continue;
+                }
+                let constructor = case(&crate::json_schema::streaming::handle_constructor_base(
+                    &child.name,
+                    Some(&handle.name),
+                ));
+                if parent_methods.contains(&constructor) {
+                    return reject(format!(
+                        "handle `{}` would be built from `{}` by `{constructor}`, which is also an operation the handle carries",
+                        child.name, handle.name
+                    ));
+                }
+                if let Some(previous) = on_parent.insert(constructor.clone(), child.name.clone()) {
+                    return reject(format!(
+                        "handles `{previous}` and `{}` would both be built from `{}` by `{constructor}`",
+                        child.name, handle.name
+                    ));
+                }
+            }
+        }
+    }
     Ok(())
 }
 

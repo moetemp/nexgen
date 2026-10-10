@@ -53,8 +53,9 @@ The defining choices (citing [[PRINCIPLES.md]]):
   second emits one projection twice under two names.
 - **Names reject at load (P15).** A handle's type name, and in Go each
   `<Handle><Op>Request` type, enter the collision pass with the caller's other
-  names. Derived constructor names are checked against the operations and each
-  other on the object they land on.
+  names. Derived constructor names are checked per target, on the names the
+  target emits (`x-<lang>-name` and its casing), against the methods and the
+  other constructors of the object they land on.
 - **Stateless (P1).** A handle binds at construction and carries no other state.
   An optional key may be bound absent, and the handle sends what it holds.
 
@@ -106,7 +107,7 @@ its parent holds.
 | Two handles, one key set | `[workflowId, stream]` and `[stream, workflowId]` |
 | A key declared two ways | `attempt` required on one input, optional on another |
 | A key with one admissible value | `finish: { type: boolean, const: true }` |
-| A constructor named like an operation | handle `Read` beside operation `read` |
+| A constructor named like an operation | handle `Read` beside operation `read`; handle `StreamHandle` beside an operation with `x-py-name: stream` |
 | A name already in scope | handle `ReadInput` beside model `ReadInput`; Go request type `StreamHandleReadRequest` beside a model of that name |
 
 ### Runtime fixtures

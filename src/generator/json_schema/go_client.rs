@@ -420,10 +420,38 @@ fn render_imports(output: &mut String, plan: &ClientPlan) {
     output.push_str("\t\"io\"\n");
     output.push_str("\t\"net/http\"\n");
     output.push_str("\t\"strings\"\n");
-    if plan.has_long_poll() {
+    if plan.has_long_poll() || handles_name_time(plan) {
         output.push_str("\t\"time\"\n");
     }
     output.push_str(")\n\n");
+}
+
+/// Whether a handle spells out a `time` type: a key, or a member of a joined
+/// operation's request type. The flat caller only names the models, which
+/// import `time` themselves.
+fn handles_name_time(plan: &ClientPlan) -> bool {
+    let names_time = |type_name: &str| {
+        type_name
+            .split(|c: char| !(c.is_alphanumeric() || c == '_' || c == '.'))
+            .any(|token| token.starts_with("time."))
+    };
+    plan.services.iter().any(|service| {
+        service.handles.iter().any(|handle| {
+            handle.keys.iter().any(|key| names_time(&key.type_name))
+                || handle.operations.iter().any(|index| {
+                    service.operations[*index]
+                        .input
+                        .as_ref()
+                        .is_some_and(|input| {
+                            input.members().into_iter().any(|(wire, _)| {
+                                input
+                                    .member_type(wire)
+                                    .is_ok_and(|type_name| names_time(&type_name))
+                            })
+                        })
+                })
+        })
+    })
 }
 
 fn render_status_error(output: &mut String) {

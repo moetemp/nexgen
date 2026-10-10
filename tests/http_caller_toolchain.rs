@@ -890,6 +890,44 @@ fn the_generated_go_handles_compile_with_keys_named_like_the_receivers() {
     );
 }
 
+/// A `date-time` key and a `date-time` free member on a handle, with no long
+/// poll, so only the handle needs `time`.
+const TIME_MEMBER_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    x-nexus-handle:
+      WindowHandle: [workflowId, since]
+    operations:
+      append:
+        fqn: append
+        input: { $ref: "#/$defs/AppendInput" }
+        output: { $ref: "#/$defs/AppendOutput" }
+$defs:
+  AppendInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      since: { type: string, format: date-time }
+      at: { type: string, format: date-time }
+    required: [workflowId, since]
+    additionalProperties: false
+  AppendOutput:
+    type: object
+    properties:
+      cursor: { type: string }
+    additionalProperties: false
+"##;
+
+#[test]
+fn the_generated_go_handles_compile_with_time_members_and_no_long_poll() {
+    go_vet_generated(
+        "http-caller-go-time-members-toolchain",
+        TIME_MEMBER_CONTRACT,
+    );
+}
+
 /// Drives the Python handles with the transport swapped for a recorder.
 const PYTHON_HANDLE_DRIVER: &str = r#"
 import asyncio

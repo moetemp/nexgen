@@ -90,8 +90,9 @@ class StreamServiceHttpClient:
     batches and an append carries one batch per call, because a call per record
     costs too much for a token stream.
 
-    Every method posts to `{base_url}/{operation}`, so `base_url` is the service's
-    address on the Nexus HTTP ingress, up to but not including the operation name.
+    Every method posts to ``{base_url}/{operation}``, so ``base_url`` is the
+    service's address on the Nexus HTTP ingress, up to but not including the
+    operation name.
     """
 
     def __init__(
@@ -165,14 +166,14 @@ class StreamServiceHttpClient:
         *,
         deadline: float,
     ) -> ReadOutput:
-        """Calls `read` until it answers with something, or until `deadline`.
+        """Calls ``read`` until it answers with something, or until ``deadline``.
 
-        Each attempt sets `wait_ms` from the budget left, so the endpoint parks
+        Each attempt sets ``wait_ms`` from the budget left, so the endpoint parks
         for the caller instead of the caller spinning. The first answer whose
-        `records` is non-empty is returned. When the deadline passes first, the
+        ``records`` is non-empty is returned. When the deadline passes first, the
         last answer is returned, which still carries the caller's resume position.
 
-        `deadline` is the whole budget in seconds. The single-shot method stays
+        ``deadline`` is the whole budget in seconds. The single-shot method stays
         available for a caller that wants one attempt.
         """
         end = time.monotonic() + deadline
@@ -205,7 +206,7 @@ class StreamServiceHttpClient:
         *,
         workflow_id: str,
     ) -> "WorkflowStreams":
-        """A `WorkflowStreams` bound to `workflowId`."""
+        """A ``WorkflowStreams`` bound to ``workflowId``."""
         return WorkflowStreams(
             self,
             workflow_id=workflow_id,
@@ -219,8 +220,8 @@ class StreamServiceHttpClient:
         producer_id: str,
         attempt: int,
     ) -> "StreamProducer":
-        """A `StreamProducer` bound to `workflowId`, `stream`, `producerId`,
-        `attempt`.
+        """A ``StreamProducer`` bound to ``workflowId``, ``stream``, ``producerId``,
+        ``attempt``.
         """
         return StreamProducer(
             self,
@@ -232,9 +233,9 @@ class StreamServiceHttpClient:
 
 
 class WorkflowStreams:
-    """Binds `workflowId` for the example.streams.v1.StreamService service.
+    """Binds ``workflowId`` for the example.streams.v1.StreamService service.
 
-    Every method posts through the `StreamServiceHttpClient` it was built from
+    Every method posts through the ``StreamServiceHttpClient`` it was built from
     with the bound members filled in, so a caller states a stream's identity once.
     The flat caller stays available for a call that spells every member out.
     """
@@ -261,7 +262,7 @@ class WorkflowStreams:
         """Append one batch of records. A repeated batchIndex for the same producer
         attempt is dropped, so a retried call writes once.
 
-        This handle supplies `workflowId`; the flat caller's `append` takes it
+        This handle supplies ``workflowId``; the flat caller's ``append`` takes it
         spelled out.
         """
         return await self._client.append(
@@ -288,7 +289,7 @@ class WorkflowStreams:
         parks until it has maxRecords records or waitMs elapses, whichever comes
         first, and answers with whatever it collected.
 
-        This handle supplies `workflowId`; the flat caller's `read` takes it
+        This handle supplies ``workflowId``; the flat caller's ``read`` takes it
         spelled out.
         """
         return await self._client.read(
@@ -313,8 +314,8 @@ class WorkflowStreams:
         parks until it has maxRecords records or waitMs elapses, whichever comes
         first, and answers with whatever it collected.
 
-        This handle supplies `workflowId`; the flat caller's `read_until_records`
-        takes it spelled out.
+        This handle supplies ``workflowId``; the flat caller's
+        ``read_until_records`` takes it spelled out.
         """
         return await self._client.read_until_records(
             ReadInput(
@@ -333,8 +334,8 @@ class WorkflowStreams:
         producer_id: str,
         attempt: int,
     ) -> "StreamProducer":
-        """A `StreamProducer` bound to `workflowId`, `stream`, `producerId`,
-        `attempt`: this handle's own members and the ones given here.
+        """A ``StreamProducer`` bound to ``workflowId``, ``stream``, ``producerId``,
+        ``attempt``: this handle's own members and the ones given here.
         """
         return StreamProducer(
             self._client,
@@ -346,10 +347,10 @@ class WorkflowStreams:
 
 
 class StreamProducer:
-    """Binds `workflowId`, `stream`, `producerId`, `attempt` for the
+    """Binds ``workflowId``, ``stream``, ``producerId``, ``attempt`` for the
     example.streams.v1.StreamService service.
 
-    Every method posts through the `StreamServiceHttpClient` it was built from
+    Every method posts through the ``StreamServiceHttpClient`` it was built from
     with the bound members filled in, so a caller states a stream's identity once.
     The flat caller stays available for a call that spells every member out.
     """
@@ -379,8 +380,8 @@ class StreamProducer:
         """Append one batch of records. A repeated batchIndex for the same producer
         attempt is dropped, so a retried call writes once.
 
-        This handle supplies `workflowId`, `stream`, `producerId`, `attempt`; the
-        flat caller's `append` takes them spelled out.
+        This handle supplies ``workflowId``, ``stream``, ``producerId``,
+        ``attempt``; the flat caller's ``append`` takes them spelled out.
         """
         return await self._client.append(
             AppendInput(

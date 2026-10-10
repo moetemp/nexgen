@@ -1,0 +1,1 @@
+The generated Python HTTP caller, its handles and the Workflow stream reader mark code in docstrings with reStructuredText literals. A stream reference mapped to an SDK type is no longer re-exported from the generated package root, so documentation tools keep the SDK as its home.

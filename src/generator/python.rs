@@ -4990,10 +4990,10 @@ fn render_endpoint_service_object_stream_reader(
     output.push('[');
     output.push_str(&reader.item_annotation);
     output.push_str("]:\n");
-    output.push_str("        \"\"\"Read the stream the `");
+    output.push_str("        \"\"\"Read the stream the ``");
     output.push_str(&operation.attr_name);
     output.push_str(
-        "` operation returns.\n\n        The stream is read through the stream service on `endpoint`, the client's own\n        endpoint by default.\n        \"\"\"\n",
+        "`` operation returns.\n\n        The stream is read through the stream service on ``endpoint``, the client's own\n        endpoint by default.\n        \"\"\"\n",
     );
     output.push_str("        return ");
     output.push_str(&reader.reader_type);

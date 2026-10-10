@@ -155,6 +155,10 @@ fn python_emits_a_typed_reader_for_a_stream_returning_operation() {
         "{services}"
     );
     assert!(!services.contains("read_ping_stream"), "{services}");
+    assert!(
+        services.contains("\"\"\"Read the stream the ``chat`` operation returns."),
+        "{services}"
+    );
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

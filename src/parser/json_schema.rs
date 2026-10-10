@@ -1700,7 +1700,8 @@ fn validate_long_poll_grammar(path: &Path, operation_name: &str, value: &Value) 
     };
     let Some(members) = value.as_object() else {
         return reject(format!(
-            "`{NEXUS_LONG_POLL_KEYWORD}` must be an object with `{NEXUS_LONG_POLL_WAIT_MEMBER}` and `{NEXUS_LONG_POLL_RESULT_MEMBER}`, got {value}"
+            "`{NEXUS_LONG_POLL_KEYWORD}` must be an object with \
+             `{NEXUS_LONG_POLL_WAIT_MEMBER}` and `{NEXUS_LONG_POLL_RESULT_MEMBER}`, got {value}"
         ));
     };
     for member in members.keys() {
@@ -1709,7 +1710,9 @@ fn validate_long_poll_grammar(path: &Path, operation_name: &str, value: &Value) 
             && member != NEXUS_LONG_POLL_DONE_MEMBER
         {
             return reject(format!(
-                "`{NEXUS_LONG_POLL_KEYWORD}` has unknown member `{member}`; it takes `{NEXUS_LONG_POLL_WAIT_MEMBER}`, `{NEXUS_LONG_POLL_RESULT_MEMBER}` and optionally `{NEXUS_LONG_POLL_DONE_MEMBER}`"
+                "`{NEXUS_LONG_POLL_KEYWORD}` has unknown member `{member}`; it takes \
+                 `{NEXUS_LONG_POLL_WAIT_MEMBER}`, `{NEXUS_LONG_POLL_RESULT_MEMBER}` and \
+                 optionally `{NEXUS_LONG_POLL_DONE_MEMBER}`"
             ));
         }
     }
@@ -1728,7 +1731,8 @@ fn validate_long_poll_grammar(path: &Path, operation_name: &str, value: &Value) 
             Some(name) if !name.trim().is_empty() => {}
             _ => {
                 return reject(format!(
-                    "`{NEXUS_LONG_POLL_KEYWORD}.{member}` must be a non-empty string naming a member of the operation's model, got {named}"
+                    "`{NEXUS_LONG_POLL_KEYWORD}.{member}` must be a non-empty string naming a \
+                     member of the operation's model, got {named}"
                 ));
             }
         }
@@ -6324,15 +6328,18 @@ fn build_long_poll(
             .unwrap_or_default()
             .to_string()
     };
-    let spec = OperationLongPollSpec {
+    let mut spec = OperationLongPollSpec {
         wait_field: named(NEXUS_LONG_POLL_WAIT_MEMBER),
         result_field: named(NEXUS_LONG_POLL_RESULT_MEMBER),
         done_field: members
             .get(NEXUS_LONG_POLL_DONE_MEMBER)
             .and_then(Value::as_str)
             .map(str::to_string),
+        wait_minimum: None,
+        wait_maximum: None,
     };
 
+    let mut wait_range = (None, None);
     let mut checked = vec![
         (
             "input",
@@ -6360,7 +6367,8 @@ fn build_long_poll(
             return Err(Error::InvalidJsonSchema {
                 path: path.to_path_buf(),
                 reason: format!(
-                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` names the {label} member `{member}`, but the operation declares no {label}"
+                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` names the {label} \
+                     member `{member}`, but the operation declares no {label}"
                 ),
             });
         };
@@ -6389,7 +6397,8 @@ fn build_long_poll(
             return Err(Error::InvalidJsonSchema {
                 path: path.to_path_buf(),
                 reason: format!(
-                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` names the {label} member `{member}`, which the {label} model does not declare"
+                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` names the {label} \
+                     member `{member}`, which the {label} model does not declare"
                 ),
             });
         };
@@ -6397,7 +6406,10 @@ fn build_long_poll(
             return Err(Error::InvalidJsonSchema {
                 path: path.to_path_buf(),
                 reason: format!(
-                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` {label} member `{member}` must be `type: {required_type}`; a generated loop assigns the wait hint as a number of milliseconds, ends on the result array being non-empty, and ends on the done flag being true"
+                    "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` {label} member \
+                     `{member}` must be `type: {required_type}`; a generated loop assigns the \
+                     wait hint as a number of milliseconds, ends on the result array being \
+                     non-empty, and ends on the done flag being true"
                 ),
             });
         }
@@ -6414,7 +6426,9 @@ fn build_long_poll(
                 return Err(Error::InvalidJsonSchema {
                     path: path.to_path_buf(),
                     reason: format!(
-                        "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` input member `{member}` must be optional; the loop sets it on each attempt, so remove it from `required`"
+                        "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` input member \
+                         `{member}` must be optional; the loop sets it on each attempt, so \
+                         remove it from `required`"
                     ),
                 });
             }
@@ -6422,12 +6436,22 @@ fn build_long_poll(
                 return Err(Error::InvalidJsonSchema {
                     path: path.to_path_buf(),
                     reason: format!(
-                        "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` input member `{member}` must not declare a `default`; the loop sets it on each attempt, so remove the `default`"
+                        "operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` input member \
+                         `{member}` must not declare a `default`; the loop sets it on each \
+                         attempt, so remove the `default`"
                     ),
                 });
             }
+            // The model refuses a wait outside the member's range, so the loop
+            // keeps every wait it sends inside it.
+            let bound = |key: &str| property.extra.get(key).and_then(Value::as_i64);
+            wait_range = (
+                bound("minimum").or(bound("exclusiveMinimum").map(|value| value + 1)),
+                bound("maximum").or(bound("exclusiveMaximum").map(|value| value - 1)),
+            );
         }
     }
+    (spec.wait_minimum, spec.wait_maximum) = wait_range;
     Ok(Some(spec))
 }
 

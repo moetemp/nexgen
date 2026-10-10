@@ -102,9 +102,8 @@ fn render_imports(output: &mut String, plan: &ClientPlan) {
     output.push_str("\t\"io\"\n");
     output.push_str("\t\"net/http\"\n");
     output.push_str("\t\"strings\"\n");
-    if plan.has_long_poll() {
-        output.push_str("\t\"time\"\n");
-    }
+    // Every request reads the transport timeout for its Request-Timeout header.
+    output.push_str("\t\"time\"\n");
     output.push_str(")\n\n");
 }
 
@@ -117,17 +116,24 @@ type HTTPStatusError struct {
 	URL        string
 	StatusCode int
 	Body       string
+	// RetryableHeader is the handler's Nexus-Request-Retryable answer, nil when
+	// it sent none.
+	RetryableHeader *bool
 }
 
 func (e *HTTPStatusError) Error() string {
 	return fmt.Sprintf("%s failed (%d): %s", e.URL, e.StatusCode, e.Body)
 }
 
-// Retryable reports whether the same request could answer differently. Too many
-// requests and the server-side failures are the endpoint's own transient
+// Retryable reports whether the same request could answer differently. The
+// handler's Nexus-Request-Retryable header decides when it is set. Otherwise too
+// many requests and the server-side failures are the endpoint's own transient
 // conditions; every other status is about this request, and repeating it
 // changes nothing.
 func (e *HTTPStatusError) Retryable() bool {
+	if e.RetryableHeader != nil {
+		return *e.RetryableHeader
+	}
 	return e.StatusCode == http.StatusTooManyRequests || e.StatusCode >= 500
 }
 
@@ -317,6 +323,15 @@ fn render_post_method(output: &mut String, type_name: &str) {
 		}
 	}
 	request.Header.Set("Content-Type", "application/json")
+	// Tells the handler how long this caller waits, so it can cut a long poll
+	// short instead of being cut off.
+	timeout := c.httpClient.Timeout
+	if deadline, ok := ctx.Deadline(); ok && (timeout <= 0 || time.Until(deadline) < timeout) {
+		timeout = time.Until(deadline)
+	}
+	if timeout > 0 && request.Header.Get("Request-Timeout") == "" {
+		request.Header.Set("Request-Timeout", fmt.Sprintf("%dms", timeout.Milliseconds()))
+	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
 		return nil, err
@@ -329,7 +344,12 @@ fn render_post_method(output: &mut String, type_name: &str) {
 	// A 201 means the handler started the operation asynchronously and answered
 	// with a token, which this caller cannot read as the operation's result.
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNoContent {
-		return nil, &HTTPStatusError{URL: url, StatusCode: response.StatusCode, Body: string(raw)}
+		statusErr := &HTTPStatusError{URL: url, StatusCode: response.StatusCode, Body: string(raw)}
+		if value := response.Header.Get("Nexus-Request-Retryable"); value != "" {
+			retryable := strings.EqualFold(strings.TrimSpace(value), "true")
+			statusErr.RetryableHeader = &retryable
+		}
+		return nil, statusErr
 	}
 	return raw, nil
 }
@@ -478,6 +498,20 @@ fn render_long_poll_method(
     output.push_str("\t\twait := c.pollBudget(time.Until(end))\n");
     output.push_str("\t\tattempt := request\n");
     output.push_str("\t\tmilliseconds := wait.Milliseconds()\n");
+    // The model refuses a wait outside the member's declared range.
+    if let Some(maximum) = long_poll.wait_maximum {
+        output.push_str(&format!(
+            "\t\tif milliseconds > {maximum} {{\n\t\t\tmilliseconds = {maximum}\n\t\t}}\n"
+        ));
+    }
+    if let Some(minimum) = long_poll.wait_minimum {
+        output.push_str(&format!(
+            "\t\tif milliseconds < {minimum} {{\n\t\t\tmilliseconds = {minimum}\n\t\t}}\n"
+        ));
+    }
+    if long_poll.wait_maximum.is_some() || long_poll.wait_minimum.is_some() {
+        output.push_str("\t\twait = time.Duration(milliseconds) * time.Millisecond\n");
+    }
     // The loader keeps the wait member optional, so it is always a pointer.
     output.push_str("\t\tattempt.");
     output.push_str(&wait_field);

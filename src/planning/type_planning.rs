@@ -530,9 +530,16 @@ impl<'a> TypePlanningContext<'a> {
             let Some(source_variant) = source_spec.variant(variant_name) else {
                 continue;
             };
-            for (planned_case, source_case) in
-                planned_variant.cases.iter_mut().zip(&source_variant.cases)
-            {
+            for planned_case in &mut planned_variant.cases {
+                // Matched by name, so a planning pass that drops or reorders a
+                // case can never move a payload onto another case.
+                let Some(source_case) = source_variant
+                    .cases
+                    .iter()
+                    .find(|source_case| source_case.name == planned_case.name)
+                else {
+                    continue;
+                };
                 if let Some(TypeSpec::External(ExternalTypeSpec::Proto(proto_name))) =
                     &source_case.payload
                 {

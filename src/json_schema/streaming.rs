@@ -15,3 +15,7 @@ pub const LONG_POLL_WAIT_MEMBER: &str = "wait-field";
 
 /// The `x-nexus-long-poll` member naming the output's emptiness-test member.
 pub const LONG_POLL_RESULT_MEMBER: &str = "result-field";
+
+/// The optional `x-nexus-long-poll` member naming the output's boolean that
+/// says the endpoint will answer nothing more, so the loop stops on it.
+pub const LONG_POLL_DONE_MEMBER: &str = "done-field";

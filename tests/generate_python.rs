@@ -1548,6 +1548,37 @@ fn python_proto_repeated_and_map_fields_are_read_without_presence() {
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
+/// `add-rpc` scaffolds a repeated field as a bare `list<T>` and a map as a bare
+/// `map<K, V>`; both are optional collections, as in WIT-direct records.
+#[test]
+fn python_accepts_bare_lists_and_maps_on_proto_collection_fields() {
+    let root = project_root();
+    let wit = PROTO_COLLECTIONS_WIT
+        .replace(
+            "option<list<task-queue-partition-metadata>>",
+            "list<task-queue-partition-metadata>",
+        )
+        .replace("option<map<string, string>>", "map<string, string>");
+    let temp_dir = generate_python_package_from_wit("python-proto-bare-collections", &wit);
+    let models = fs::read_to_string(temp_dir.join("generated/models.py")).unwrap();
+
+    assert!(models.contains(
+        "activity_task_queue_partitions: list[TaskQueuePartitionMetadata] | None = dataclasses.field(default_factory=list)"
+    ));
+    assert!(
+        models.contains("header: dict[str, str] | None = dataclasses.field(default_factory=dict)")
+    );
+    assert_python_script_succeeds(
+        PROTO_COLLECTIONS_READ_CHECK,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 /// A map of messages and a list of messages, each followed by another field.
 const PROTO_MESSAGE_COLLECTIONS_WIT: &str = r#"package temporal:nexus@1.0.0;
 

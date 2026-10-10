@@ -565,10 +565,22 @@ pub(in crate::generator) fn enum_value(value_type: &PlannedType) -> Option<Pytho
         });
     }
 
+    let Some(reference) = enum_python_ref(&enum_type.proto) else {
+        return Some(PythonProtoEnumValue {
+            annotation: enum_type.name.clone(),
+            module_import: None,
+            conversion: None,
+        });
+    };
+    // `ValueType` is `int` at runtime; calling it in both directions keeps the
+    // proto field's declared type for type checkers.
     Some(PythonProtoEnumValue {
-        annotation: enum_type.name.clone(),
-        module_import: enum_python_ref(&enum_type.proto).map(|reference| reference.module_path),
-        conversion: None,
+        annotation: reference.type_ref.clone(),
+        module_import: Some(reference.module_path),
+        conversion: Some(PythonProtoEnumConversion {
+            from_proto: reference.type_ref.clone(),
+            to_proto: reference.type_ref,
+        }),
     })
 }
 

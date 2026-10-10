@@ -1625,6 +1625,121 @@ assert converter.to_transfer_type(model) == internal
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
+/// A proto-backed enum with no replacement type reads and writes as the proto
+/// enum's own value type.
+#[test]
+fn python_proto_enums_without_a_replacement_use_the_proto_enum_type() {
+    let root = project_root();
+    let temp_dir = generate_python_package_from_wit(
+        "python-proto-enum",
+        r#"package temporal:nexus@1.0.0;
+
+world system {
+  export alerts;
+}
+
+interface alerts {
+  /// @nexus.proto "temporal.api.enums.v1.Severity"
+  enum severity {
+    severity-unspecified,
+    severity-high,
+    severity-medium,
+    severity-low,
+  }
+
+  /// @nexus.proto "temporal.api.version.v1.Alert"
+  record alert {
+    message: string,
+    severity: option<severity>,
+  }
+}
+"#,
+    );
+    let models = fs::read_to_string(temp_dir.join("generated/models.py")).unwrap();
+
+    assert!(
+        models.contains(
+            "severity: temporalio.api.enums.v1.common_pb2.Severity.ValueType | None = None"
+        )
+    );
+    assert!(models.contains(
+        "message.severity = temporalio.api.enums.v1.common_pb2.Severity.ValueType(value.severity)"
+    ));
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.enums.v1 import Severity
+from temporalio.api.version.v1 import Alert
+
+alert = Alert(message="m", severity=Severity.SEVERITY_MEDIUM)
+converter = models._AlertTransferTypeConverter()
+model = converter.from_transfer_type(alert, models.Alert)
+assert model.severity == Severity.SEVERITY_MEDIUM, model
+assert converter.to_transfer_type(model) == alert
+model = converter.from_transfer_type(Alert(message="m"), models.Alert)
+assert model.severity is None, model
+"#,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn python_proto_enum_defaults_name_the_proto_enum_value() {
+    let root = project_root();
+    let temp_dir = generate_python_package_from_wit(
+        "python-proto-enum-default",
+        r#"package temporal:nexus@1.0.0;
+
+world system {
+  export alerts;
+}
+
+interface alerts {
+  /// @nexus.proto "temporal.api.enums.v1.Severity"
+  enum severity {
+    severity-unspecified,
+    severity-high,
+    severity-medium,
+    severity-low,
+  }
+
+  /// @nexus.proto "temporal.api.version.v1.Alert"
+  record alert {
+    message: string,
+    /// @nexus.default "severity-low"
+    severity: severity,
+  }
+}
+"#,
+    );
+
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.enums.v1 import Severity
+
+assert models.Alert(message="m").severity == Severity.SEVERITY_LOW
+"#,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 /// A map of messages and a list of messages, each followed by another field.
 const PROTO_MESSAGE_COLLECTIONS_WIT: &str = r#"package temporal:nexus@1.0.0;
 

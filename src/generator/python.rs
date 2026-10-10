@@ -3302,6 +3302,10 @@ pub(in crate::generator) fn enum_default_expr(
     resolved_type: &ResolvedFieldType,
     enum_case: &str,
 ) -> String {
+    // A proto enum's values live on its wrapper, not on its `ValueType`.
+    if let Some(proto_enum) = resolved_type.annotation.strip_suffix(".ValueType") {
+        return format!("{proto_enum}.{}", enum_case.to_shouty_snake_case());
+    }
     let value_name = if resolved_type.wire_conversion.is_some() {
         enum_case.to_shouty_snake_case()
     } else {

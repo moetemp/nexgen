@@ -1460,9 +1460,9 @@ fn resolve_authored_field_type_spec(
                 TypeDefKind::Option(inner) => Ok(TypeSpec::Option(Box::new(
                     resolve_authored_field_type_spec(resolve, inner, path, &type_context)?,
                 ))),
-                TypeDefKind::List(inner) => {
-                    resolve_authored_list_type_spec(resolve, inner, path, &type_context)
-                }
+                TypeDefKind::List(inner) => Ok(TypeSpec::List(Box::new(
+                    resolve_authored_field_type_spec(resolve, inner, path, &type_context)?,
+                ))),
                 TypeDefKind::Tuple(tuple) => Ok(TypeSpec::Tuple(
                     tuple
                         .types
@@ -1622,21 +1622,6 @@ fn find_owned_resource_name_for_type_def(resolve: &Resolve, type_def: &TypeDef) 
     }
 }
 
-/// `list<u8>` is how WIT spells a byte string.
-fn resolve_authored_list_type_spec(
-    resolve: &Resolve,
-    inner: &Type,
-    path: &Path,
-    context: &str,
-) -> Result<TypeSpec> {
-    if matches!(inner, Type::U8) {
-        return Ok(TypeSpec::Bytes);
-    }
-    Ok(TypeSpec::List(Box::new(resolve_authored_field_type_spec(
-        resolve, inner, path, context,
-    )?)))
-}
-
 fn resolve_authored_type_def_kind(
     resolve: &Resolve,
     type_def: &TypeDef,
@@ -1650,9 +1635,9 @@ fn resolve_authored_type_def_kind(
         TypeDefKind::Option(inner) => Ok(Some(TypeSpec::Option(Box::new(
             resolve_authored_field_type_spec(resolve, inner, path, context)?,
         )))),
-        TypeDefKind::List(inner) => Ok(Some(resolve_authored_list_type_spec(
-            resolve, inner, path, context,
-        )?)),
+        TypeDefKind::List(inner) => Ok(Some(TypeSpec::List(Box::new(
+            resolve_authored_field_type_spec(resolve, inner, path, context)?,
+        )))),
         TypeDefKind::Tuple(tuple) => Ok(Some(TypeSpec::Tuple(
             tuple
                 .types

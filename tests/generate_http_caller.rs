@@ -279,7 +279,8 @@ fn python_caller_loops_the_long_poll_operation_and_keeps_the_single_shot() {
     let client = file(&files, "client.py");
     assert!(client.contains("async def read_until_records("), "{client}");
     assert!(client.contains("deadline: float,"), "{client}");
-    assert!(client.contains("wait_ms=int(wait * 1000)"), "{client}");
+    assert!(client.contains("wait_ms = int(wait * 1000)"), "{client}");
+    assert!(client.contains("request, wait_ms=wait_ms"), "{client}");
     assert!(client.contains("if answer.records:"), "{client}");
     // The single-shot call is what the loop drives, and stays callable.
     assert!(
@@ -378,8 +379,7 @@ fn a_caller_without_a_long_poll_carries_no_loop() {
     fs::remove_dir_all(temp_dir).unwrap();
     let (temp_dir, files) = generate(Language::Go, true, "http-caller-go-no-poll");
     let client = file(&files, "client.go");
-    assert!(!client.contains("\"time\""), "{client}");
-    assert!(!client.contains("Until"), "{client}");
+    assert!(!client.contains("UntilRecords"), "{client}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
 

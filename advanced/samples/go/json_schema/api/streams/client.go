@@ -124,6 +124,15 @@ func (c *StreamServiceHTTPClient) post(ctx context.Context, segment string, body
 		}
 	}
 	request.Header.Set("Content-Type", "application/json")
+	// Tells the handler how long this caller waits, so it can cut a long poll
+	// short instead of being cut off.
+	timeout := c.httpClient.Timeout
+	if deadline, ok := ctx.Deadline(); ok && (timeout <= 0 || time.Until(deadline) < timeout) {
+		timeout = time.Until(deadline)
+	}
+	if timeout > 0 && request.Header.Get("Request-Timeout") == "" {
+		request.Header.Set("Request-Timeout", fmt.Sprintf("%dms", timeout.Milliseconds()))
+	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
 		return nil, err
@@ -222,6 +231,10 @@ func (c *StreamServiceHTTPClient) ReadUntilRecords(ctx context.Context, request 
 		wait := c.pollBudget(time.Until(end))
 		attempt := request
 		milliseconds := wait.Milliseconds()
+		if milliseconds < 0 {
+			milliseconds = 0
+		}
+		wait = time.Duration(milliseconds) * time.Millisecond
 		attempt.WaitMs = &milliseconds
 		started := time.Now()
 		next, err := c.Read(ctx, attempt)

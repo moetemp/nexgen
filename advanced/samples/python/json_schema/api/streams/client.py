@@ -65,7 +65,13 @@ def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> byt
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json", **headers},
+        headers={
+            "Content-Type": "application/json",
+            # Tells the handler how long this caller waits, so it can cut a
+            # long poll short instead of being cut off.
+            "Request-Timeout": f"{int(timeout * 1000)}ms",
+            **headers,
+        },
         method="POST",
     )
     try:
@@ -196,7 +202,10 @@ class StreamServiceHttpClient:
         backoff = _LONG_POLL_MIN_BACKOFF
         while True:
             wait = self._poll_budget(end - time.monotonic())
-            attempt = dataclasses.replace(request, wait_ms=int(wait * 1000))
+            wait_ms = int(wait * 1000)
+            wait_ms = max(wait_ms, 0)
+            wait = wait_ms / 1000
+            attempt = dataclasses.replace(request, wait_ms=wait_ms)
             started = time.monotonic()
             try:
                 answer = await self.read(attempt)

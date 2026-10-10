@@ -200,7 +200,13 @@ def _post(
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json", **headers},
+        headers={
+            "Content-Type": "application/json",
+            # Tells the handler how long this caller waits, so it can cut a
+            # long poll short instead of being cut off.
+            "Request-Timeout": f"{int(timeout * 1000)}ms",
+            **headers,
+        },
         method="POST",
     )
     try:
@@ -404,10 +410,21 @@ fn render_long_poll_method(
     output.push_str("        backoff = _LONG_POLL_MIN_BACKOFF\n");
     output.push_str("        while True:\n");
     output.push_str("            wait = self._poll_budget(end - time.monotonic())\n");
+    output.push_str("            wait_ms = int(wait * 1000)\n");
+    // The model refuses a wait outside the member's declared range.
+    if let Some(maximum) = long_poll.wait_maximum {
+        output.push_str(&format!("            wait_ms = min(wait_ms, {maximum})\n"));
+    }
+    if let Some(minimum) = long_poll.wait_minimum {
+        output.push_str(&format!("            wait_ms = max(wait_ms, {minimum})\n"));
+    }
+    if long_poll.wait_maximum.is_some() || long_poll.wait_minimum.is_some() {
+        output.push_str("            wait = wait_ms / 1000\n");
+    }
     output.push_str("            attempt = dataclasses.replace(\n");
     output.push_str("                request, ");
     output.push_str(&wait_attribute);
-    output.push_str("=int(wait * 1000)\n");
+    output.push_str("=wait_ms\n");
     output.push_str("            )\n");
     output.push_str("            started = time.monotonic()\n");
     output.push_str("            try:\n");

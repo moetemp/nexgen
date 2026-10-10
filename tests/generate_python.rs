@@ -978,6 +978,43 @@ fn generated_wit_examples_remain_python_310_compatible() {
     }
 }
 
+/// Fails when a docstring in the given modules marks code with single
+/// backticks. reStructuredText (and so pydoctor, Sphinx) reads `x` as a link to
+/// resolve, not as code; the literal is ``x``.
+const SINGLE_BACKTICK_DOCSTRING_CHECK: &str = r#"
+import ast
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+single = re.compile(r"(?<!`)`[^`]+`(?!`)")
+found = []
+for name in sys.argv[2:]:
+    for path in sorted(root.rglob(name)):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                doc = ast.get_docstring(node, clean=False)
+                if doc and single.search(doc):
+                    found.append(f"{path.name}:{getattr(node, 'name', '<module>')}: {single.findall(doc)}")
+assert not found, "\n".join(found)
+"#;
+
+#[test]
+fn python_json_generated_helper_docstrings_mark_code_as_literals() {
+    let root = project_root();
+    for example_id in ["chat", "kb", "showcase", "temporal"] {
+        let output_path = unique_output_path(&format!("python-json-docstrings-{example_id}"));
+        generate_formatted_json_python_output(&root, example_id, &output_path, false);
+        assert_python_script_succeeds(
+            SINGLE_BACKTICK_DOCSTRING_CHECK,
+            &[output_path.to_str().unwrap(), "_definitions.py"],
+        );
+        fs::remove_dir_all(output_path).unwrap();
+    }
+}
+
 #[test]
 fn python_json_examples_expose_expected_runtime_features() {
     let root = project_root();

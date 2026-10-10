@@ -938,7 +938,8 @@ fn repeated_to_proto_lines(
     let indent = if optional_guard { "    " } else { "" };
     match resolved_type.kind {
         ResolvedFieldKind::Message => {
-            lines.push(format!("{indent}for value in {value_expr}:"));
+            // A statement loop binds at function scope, so it must not rebind `value`.
+            lines.push(format!("{indent}for element in {value_expr}:"));
             lines.push(format!("{indent}    item = message.{proto_name}.add()"));
             lines.push(format!(
                 "{indent}    item.CopyFrom({})",
@@ -946,7 +947,7 @@ fn repeated_to_proto_lines(
                     .wire_conversion
                     .as_ref()
                     .expect("message conversion should be present")
-                    .to_wire_expr("value")
+                    .to_wire_expr("element")
             ));
         }
         ResolvedFieldKind::Enum => lines.push(format!(
@@ -971,14 +972,14 @@ fn map_value_to_proto_lines(
     let indent = if optional_guard { "    " } else { "" };
     match map_value_type.kind {
         ResolvedFieldKind::Message => {
-            lines.push(format!("{indent}for key, value in {value_expr}.items():"));
+            lines.push(format!("{indent}for key, element in {value_expr}.items():"));
             lines.push(format!(
                 "{indent}    message.{proto_name}[key].CopyFrom({})",
                 map_value_type
                     .wire_conversion
                     .as_ref()
                     .expect("message conversion should be present")
-                    .to_wire_expr("value")
+                    .to_wire_expr("element")
             ));
         }
         ResolvedFieldKind::Enum => lines.push(format!(

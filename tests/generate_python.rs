@@ -1548,6 +1548,95 @@ fn python_proto_repeated_and_map_fields_are_read_without_presence() {
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
+/// A map of messages and a list of messages, each followed by another field.
+const PROTO_MESSAGE_COLLECTIONS_WIT: &str = r#"package temporal:nexus@1.0.0;
+
+world system {
+  export stack-traces;
+}
+
+interface stack-traces {
+  /// @nexus.proto "temporal.api.sdk.v1.StackTraceSDKInfo"
+  record stack-trace-sdk-info {
+    name: string,
+    version: string,
+  }
+
+  /// @nexus.proto "temporal.api.sdk.v1.StackTraceFileSlice"
+  record stack-trace-file-slice {
+    line-offset: option<u32>,
+    content: string,
+  }
+
+  /// @nexus.proto "temporal.api.sdk.v1.StackTraceFileLocation"
+  record stack-trace-file-location {
+    file-path: string,
+    line: option<s32>,
+    column: option<s32>,
+    function-name: string,
+    internal-code: option<bool>,
+  }
+
+  /// @nexus.proto "temporal.api.sdk.v1.StackTrace"
+  record stack-trace {
+    locations: option<list<stack-trace-file-location>>,
+  }
+
+  /// @nexus.proto "temporal.api.sdk.v1.EnhancedStackTrace"
+  record enhanced-stack-trace {
+    sdk: option<stack-trace-sdk-info>,
+    sources: option<map<string, stack-trace-file-slice>>,
+    stacks: option<list<stack-trace>>,
+  }
+}
+"#;
+
+const PROTO_MESSAGE_COLLECTIONS_WRITE_CHECK: &str = r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.sdk.v1 import (
+    EnhancedStackTrace,
+    StackTrace,
+    StackTraceFileLocation,
+    StackTraceFileSlice,
+    StackTraceSDKInfo,
+)
+
+trace = EnhancedStackTrace(
+    sdk=StackTraceSDKInfo(name="sdk", version="1"),
+    sources={"a.py": StackTraceFileSlice(line_offset=3, content="pass")},
+    stacks=[
+        StackTrace(
+            locations=[StackTraceFileLocation(file_path="a.py", function_name="f")]
+        )
+    ],
+)
+converter = models._EnhancedStackTraceTransferTypeConverter()
+model = converter.from_transfer_type(trace, models.EnhancedStackTrace)
+assert converter.to_transfer_type(model) == trace
+"#;
+
+#[test]
+fn python_proto_repeated_and_map_message_fields_are_written_in_full() {
+    let root = project_root();
+    let temp_dir = generate_python_package_from_wit(
+        "python-proto-message-collections",
+        PROTO_MESSAGE_COLLECTIONS_WIT,
+    );
+
+    assert_python_script_succeeds(
+        PROTO_MESSAGE_COLLECTIONS_WRITE_CHECK,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 #[test]
 fn python_non_proto_variants_remain_tagged_tuples_without_transfer_converters() {
     let root = project_root();

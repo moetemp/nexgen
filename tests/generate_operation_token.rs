@@ -38,9 +38,9 @@ $defs:
     properties:
       kind: { type: string }
       workflow_id: { type: string }
-      run_id: { type: string }
+      run_id: { oneOf: [{ type: string }, { type: "null" }] }
       topic: { type: string }
-    required: [kind, workflow_id, run_id, topic]
+    required: [kind, workflow_id, topic]
     additionalProperties: false
   StreamOperationToken:
     type: object
@@ -54,8 +54,8 @@ $defs:
     additionalProperties: false
 "##;
 
-/// The token the Python SDK's stream operation writes for the driver's value.
-const SDK_TOKEN: &str = "eyJhdHRhY2giOiJhdHRhY2gtcmVxdWVzdCIsImNoYWluIjoicnVuLWlkIiwicmVmIjp7ImtpbmQiOiJ3b3JrZmxvdyIsInJ1bl9pZCI6IiIsInRvcGljIjoidG9rZW5zIiwid29ya2Zsb3dfaWQiOiJjaGF0LTEifSwidiI6Mn0";
+/// Core's shared token vectors. See `tests/fixtures/README.md` for the source.
+const VECTORS: &str = "tests/fixtures/operation_token_vectors.json";
 
 fn generate_into(output_path: &Path, language: Language, contract: &str) -> Result<(), String> {
     let contract_path = output_path.with_extension("nexusrpc.yaml");
@@ -191,54 +191,57 @@ fn the_token_model_must_be_closed() {
 
 const PYTHON_DRIVER: &str = r#"
 import importlib
+import json
 import pathlib
 import sys
 
 package = pathlib.Path(sys.argv[1])
-expected = sys.argv[2]
+vectors = json.loads(pathlib.Path(sys.argv[2]).read_text())
 sys.path.insert(0, str(package.parent))
 models = importlib.import_module(f"{package.name}.models")
 
-token = models.StreamOperationToken(
-    ref=models.StreamRef(kind="workflow", workflow_id="chat-1", run_id="", topic="tokens"),
-    attach="attach-request",
-    chain="run-id",
-)
-assert token.to_token() == expected, token.to_token()
-assert models.StreamOperationToken.from_token(expected) == token
 
-# Another version, a token of something else, and text that isn't one.
-import base64
-import json
-
-
-def encoded(value):
-    text = json.dumps(value, separators=(",", ":"), sort_keys=True)
-    return base64.urlsafe_b64encode(text.encode()).decode().rstrip("=")
+def token_of(vector):
+    ref = vector["ref"]
+    return models.StreamOperationToken(
+        ref=models.StreamRef(
+            kind=ref["kind"],
+            workflow_id=ref["workflow_id"],
+            run_id=ref.get("run_id"),
+            topic=ref["topic"],
+        ),
+        attach=vector["attach"],
+        chain=vector["chain"],
+    )
 
 
-other_version = json.loads(base64.urlsafe_b64decode(expected + "=="))
-other_version["v"] = 3
-for bad in (encoded(other_version), encoded({"prompt": "hi"}), "not a token!", ""):
+for vector in vectors["vectors"]:
+    expected = token_of(vector)
+    assert expected.to_token() == vector["token"], (expected.to_token(), vector["token"])
+    assert models.StreamOperationToken.from_token(vector["token"]) == expected
+for vector in vectors["decode_only"]:
+    assert models.StreamOperationToken.from_token(vector["token"]) == token_of(vector)
+for bad in vectors["refused"]:
     try:
         models.StreamOperationToken.from_token(bad)
     except ValueError:
         continue
     raise AssertionError(f"{bad!r} was read as a token")
-print("ok")
+print("ok", len(vectors["vectors"]), len(vectors["decode_only"]), len(vectors["refused"]))
 "#;
 
 #[test]
-fn the_generated_token_matches_the_sdk_and_refuses_other_versions() {
+fn the_generated_token_reads_and_writes_cores_vectors() {
     let workspace = Workspace::new("token-python-toolchain");
     let package = workspace.package_path(Target::Python, "tokens");
     fs::create_dir_all(package.parent().expect("a package parent")).expect("create the parent");
     generate_into(&package, Language::Python, CONTRACT).expect("generate the models");
     let driver = workspace.root().join("drive_token.py");
     fs::write(&driver, PYTHON_DRIVER).expect("write the driver");
+    let vectors = Path::new(env!("CARGO_MANIFEST_DIR")).join(VECTORS);
     let mut python = python_runtime_command().expect("a Python with the SDK");
-    let output = run(python.arg(&driver).arg(&package).arg(SDK_TOKEN)).expect_ok("drive the token");
-    assert!(output.contains("ok"), "{output}");
+    let output = run(python.arg(&driver).arg(&package).arg(&vectors)).expect_ok("drive the token");
+    assert!(output.contains("ok 4 1 6"), "{output}");
 }
 
 #[test]

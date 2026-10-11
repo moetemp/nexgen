@@ -41,5 +41,7 @@ encoder is tested against the same vectors as the generated helpers.
 
 `tests/generate_operation_token.rs` asserts the emitted helpers, the imports
 they need and nothing else does, and each rule the parser holds the model to.
-It also reads and writes a token in Python against a token the Python SDK
-writes, and checks that another version, another model and bad text fail.
+It also runs the generated helpers in Python against Core's shared vectors
+(`tests/fixtures/operation_token_vectors.json`): each token is written byte for
+byte and read back, the decode-only tokens read, and every refused token fails,
+including another version and an extra member.

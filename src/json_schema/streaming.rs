@@ -87,6 +87,22 @@ pub const STREAM_RESULT_READER_MEMBER: &str = "reader";
 /// The targets a stream result's reader can be mapped for.
 pub const STREAM_RESULT_MAPPED_TARGETS: [&str; 1] = ["py"];
 
+/// Marks a model as an operation token. A target that supports it gives the
+/// model a way to write itself as a token and to read one back.
+pub const OPERATION_TOKEN_KEYWORD: &str = "x-nexus-operation-token";
+
+/// The `x-nexus-operation-token` member naming the model's version member, a
+/// required integer with a `const`, so a token of another version is refused.
+pub const OPERATION_TOKEN_VERSION_MEMBER: &str = "version-field";
+
+/// The version member a model marked as an operation token names.
+pub fn operation_token_version_field(schema: &Value) -> Option<&str> {
+    schema
+        .get(OPERATION_TOKEN_KEYWORD)?
+        .get(OPERATION_TOKEN_VERSION_MEMBER)?
+        .as_str()
+}
+
 /// Marks an `operations:` entry as long-pollable.
 pub const LONG_POLL_KEYWORD: &str = "x-nexus-long-poll";
 

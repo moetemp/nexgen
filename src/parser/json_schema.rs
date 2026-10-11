@@ -401,6 +401,8 @@ use crate::json_schema::streaming::{
     LONG_POLL_KEYWORD as NEXUS_LONG_POLL_KEYWORD,
     LONG_POLL_RESULT_MEMBER as NEXUS_LONG_POLL_RESULT_MEMBER,
     LONG_POLL_WAIT_MEMBER as NEXUS_LONG_POLL_WAIT_MEMBER,
+    OPERATION_TOKEN_KEYWORD as NEXUS_OPERATION_TOKEN_KEYWORD,
+    OPERATION_TOKEN_VERSION_MEMBER as NEXUS_OPERATION_TOKEN_VERSION_MEMBER,
     STREAM_REF_KEYWORD as NEXUS_STREAM_REF_KEYWORD,
     STREAM_RESULT_ITEM_MEMBER as NEXUS_STREAM_RESULT_ITEM_MEMBER,
     STREAM_RESULT_KEYWORD as NEXUS_STREAM_RESULT_KEYWORD,
@@ -530,12 +532,16 @@ fn schema_extra_keyword_is_known(keyword: &str) -> bool {
             | "x-go-enum-names"
             | "x-java-enum-names"
     ) || LANG_NAME_KEYWORDS.contains(&keyword)
-        || matches!(keyword, NEXUS_CURSOR_KEYWORD | NEXUS_STREAM_REF_KEYWORD)
+        || matches!(
+            keyword,
+            NEXUS_CURSOR_KEYWORD | NEXUS_STREAM_REF_KEYWORD | NEXUS_OPERATION_TOKEN_KEYWORD
+        )
 }
 
 /// Validates the streaming keywords a schema node may carry.
 fn validate_nexus_annotations(path: &Path, schema: &Schema, context: &str) -> Result<()> {
     validate_stream_ref(path, schema, context)?;
+    validate_operation_token(path, schema, context)?;
     let Some(value) = schema.extra.get(NEXUS_CURSOR_KEYWORD) else {
         return Ok(());
     };
@@ -2098,6 +2104,77 @@ fn validate_stream_ref(path: &Path, schema: &Schema, context: &str) -> Result<()
                 "`{NEXUS_STREAM_REF_KEYWORD}` requires the optional member `{name}` to be nullable, as `oneOf: [{{type: ...}}, {{type: \"null\"}}]`; an SDK writes null for a member its reference leaves unset"
             ));
         }
+    }
+    Ok(())
+}
+
+/// Validates `x-nexus-operation-token` on a node.
+///
+/// A token is read back by whoever holds it, so the version has to be a member
+/// the decoder checks, and the object has to be closed so a token round-trips
+/// to the same text.
+fn validate_operation_token(path: &Path, schema: &Schema, context: &str) -> Result<()> {
+    let Some(value) = schema.extra.get(NEXUS_OPERATION_TOKEN_KEYWORD) else {
+        return Ok(());
+    };
+    let reject = |reason: String| -> Result<()> {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!("{context}: {reason}"),
+        })
+    };
+    let Some(members) = value.as_object() else {
+        return reject(format!(
+            "`{NEXUS_OPERATION_TOKEN_KEYWORD}` must be an object naming the version member, got {value}"
+        ));
+    };
+    if let Some(unknown) = members
+        .keys()
+        .find(|key| key.as_str() != NEXUS_OPERATION_TOKEN_VERSION_MEMBER)
+    {
+        return reject(format!(
+            "`{NEXUS_OPERATION_TOKEN_KEYWORD}` has unknown member `{unknown}`"
+        ));
+    }
+    let Some(version) = members
+        .get(NEXUS_OPERATION_TOKEN_VERSION_MEMBER)
+        .and_then(Value::as_str)
+    else {
+        return reject(format!(
+            "`{NEXUS_OPERATION_TOKEN_KEYWORD}` requires `{NEXUS_OPERATION_TOKEN_VERSION_MEMBER}`, a string naming the version member"
+        ));
+    };
+    let is_object = schema.ty.as_ref().and_then(Value::as_str) == Some("object");
+    if !is_object || schema.properties.is_none() {
+        return reject(format!(
+            "`{NEXUS_OPERATION_TOKEN_KEYWORD}` requires a `type: object` model with `properties`; the members are the token's content"
+        ));
+    }
+    if schema.additional_properties.as_ref() != Some(&Value::Bool(false)) {
+        return reject(format!(
+            "`{NEXUS_OPERATION_TOKEN_KEYWORD}` requires `additionalProperties: false`; a token carries nothing its model does not declare"
+        ));
+    }
+    let Some(property) = schema
+        .properties
+        .as_ref()
+        .and_then(|properties| properties.get(version))
+    else {
+        return reject(format!(
+            "`{NEXUS_OPERATION_TOKEN_KEYWORD}` names version member `{version}`, which the model does not declare"
+        ));
+    };
+    let required = schema
+        .required
+        .as_ref()
+        .and_then(Value::as_array)
+        .is_some_and(|names| names.iter().any(|name| name.as_str() == Some(version)));
+    let is_integer = property.ty.as_ref().and_then(Value::as_str) == Some("integer");
+    let pinned = property.extra.get("const").is_some_and(Value::is_i64);
+    if !required || !is_integer || !pinned {
+        return reject(format!(
+            "`{NEXUS_OPERATION_TOKEN_KEYWORD}` requires version member `{version}` to be a required `type: integer` with an integer `const`; the decoder refuses a token of any other version"
+        ));
     }
     Ok(())
 }

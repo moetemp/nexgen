@@ -3674,9 +3674,11 @@ fn render_optional_python_imports_with_skipped_language_modules(
     skipped_language_modules: &BTreeSet<String>,
 ) -> bool {
     let simple_imports = [
+        ("import base64\n", "base64"),
         ("import collections.abc\n", "collections.abc"),
         ("import dataclasses\n", "dataclasses"),
         ("import enum\n", "enum"),
+        ("import json\n", "json"),
         ("import typing\n", "typing"),
         ("import typing_extensions\n", "typing_extensions"),
     ];

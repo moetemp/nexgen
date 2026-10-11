@@ -3911,10 +3911,54 @@ fn render_model_dataclass(
         render_model_init(output, schema)?;
         render_default_properties(output, schema)?;
     }
+    if crate::json_schema::streaming::operation_token_version_field(&model.schema).is_some() {
+        render_operation_token_methods(output, &model.model_name);
+        members += 1;
+    }
     if members == 0 {
         output.push_str("\n    pass\n");
     }
     Ok(())
+}
+
+/// Emits `to_token` and `from_token` on a model marked `x-nexus-operation-token`.
+///
+/// The token is the transfer form as JSON with sorted keys and no spaces, in
+/// base64url with no padding. That text depends on nothing a language chooses,
+/// so a token one SDK or Core writes reads back in any other. The converter
+/// checks the version member's `const`, so a token of another version fails.
+fn render_operation_token_methods(output: &mut String, model_name: &str) {
+    let converter = converter_class_name(model_name);
+    output.push_str(&format!(
+        r#"
+    def to_token(self) -> str:
+        """This value as an operation token.
+
+        The token is the JSON transfer form with sorted keys and no spaces, in
+        base64url with no padding, so any implementation writes the same text.
+        """
+        transfer: typing.Any = {converter}().to_transfer_type(self)
+        text = json.dumps(transfer, separators=(",", ":"), sort_keys=True)
+        return base64.urlsafe_b64encode(text.encode()).decode().rstrip("=")
+
+    @classmethod
+    def from_token(cls, token: str) -> "{model_name}":
+        """Reads an operation token that ``to_token`` wrote.
+
+        Raises:
+            ValueError: ``token`` is not one, or it names another version.
+        """
+        try:
+            text = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
+            transfer: typing.Any = json.loads(text)
+        except ValueError as error:
+            raise ValueError(f"not a {model_name}: {{error}}") from None
+        try:
+            return {converter}().from_transfer_type(transfer, cls)
+        except temporalio.exceptions.ApplicationError as error:
+            raise ValueError(f"not a {model_name}: {{error}}") from None
+"#
+    ));
 }
 
 /// Emits the public keyword-only constructor for a dataclass whose defaulted

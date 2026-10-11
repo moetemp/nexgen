@@ -729,7 +729,7 @@ impl<'a> ApiPlanner<'a> {
         if crate::nexgen_config::current().forwarder
             && let Some(forwarder_source) = python_forwarder::render_forwarder_module(
                 &self.external_models.client_plan(self.api_plan)?,
-            )
+            )?
         {
             files.insert(
                 python_forwarder::FORWARDER_MODULE,

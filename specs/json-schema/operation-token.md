@@ -14,9 +14,11 @@ as the content of an operation token. Like [[cursor]], it adapts the
 - Python gives the model `to_token()` and the class method `from_token(token)`.
   The token is the transfer form as JSON with sorted keys and no spaces
   (`separators=(",", ":")`), in base64url with no padding.
-- `from_token` restores the padding, decodes, and reads the JSON through the
-  model's own converter. That converter checks the version member's `const`,
-  so a token of another version fails. Every failure is a `ValueError`.
+- `from_token` refuses text outside the base64url alphabet (padding is
+  allowed), restores the padding, decodes, and refuses a version member that
+  isn't an integer. It then reads the JSON through the model's own converter,
+  which checks the version member's `const`, so a token of another version
+  fails. So it refuses what Core refuses. Every failure is a `ValueError`.
 - The other targets emit the model as they would without the keyword.
 
 ## Support decision

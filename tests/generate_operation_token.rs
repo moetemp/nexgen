@@ -227,6 +227,25 @@ for bad in vectors["refused"]:
     except ValueError:
         continue
     raise AssertionError(f"{bad!r} was read as a token")
+
+# What Core refuses too: characters outside the base64url alphabet, the
+# standard alphabet's + and /, and a version that isn't an integer.
+import base64
+import json
+
+good = vectors["vectors"][0]["token"]
+assert models.StreamOperationToken.from_token(good + "=" * (-len(good) % 4))
+body = json.loads(base64.urlsafe_b64decode(good + "=="))
+body["v"] = 2.0
+not_integer = base64.urlsafe_b64encode(
+    json.dumps(body, separators=(",", ":"), sort_keys=True).encode()
+).decode().rstrip("=")
+for bad in (good + "!", good[:8] + "!" + good[8:], not_integer):
+    try:
+        models.StreamOperationToken.from_token(bad)
+    except ValueError:
+        continue
+    raise AssertionError(f"{bad!r} was read as a token")
 print("ok", len(vectors["vectors"]), len(vectors["decode_only"]), len(vectors["refused"]))
 "#;
 

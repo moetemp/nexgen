@@ -6,6 +6,7 @@
 //! no protocol rule, so each SDK keeps only what the runtime can't do, such as
 //! running user code before the call.
 
+use crate::error::{Error, Result};
 use crate::generator::json_schema::client::{ClientOperation, ClientPlan, ClientService};
 use crate::generator::json_schema::python::converter_class_name;
 use crate::generator::json_schema::python_client::render_docstring;
@@ -22,10 +23,27 @@ fn literal(value: &str) -> String {
     serde_json::to_string(value).expect("a Rust string is always JSON-serializable")
 }
 
+/// The members the class declares beside its operations.
+const FORWARDER_MEMBERS: [&str; 1] = ["forward"];
+
 /// Renders the whole module, or `None` when the module declares no service.
-pub(in crate::generator) fn render_forwarder_module(plan: &ClientPlan) -> Option<String> {
+///
+/// An operation that takes a member's name would replace that member, so it
+/// is refused rather than emitted.
+pub(in crate::generator) fn render_forwarder_module(plan: &ClientPlan) -> Result<Option<String>> {
+    for service in &plan.services {
+        for operation in &service.operations {
+            if FORWARDER_MEMBERS.contains(&operation.name.as_str()) {
+                return Err(Error::ForwarderMemberClash {
+                    service: service.wire_name.clone(),
+                    operation: operation.wire_name.clone(),
+                    name: operation.name.clone(),
+                });
+            }
+        }
+    }
     if plan.is_empty() {
-        return None;
+        return Ok(None);
     }
     let mut output = String::new();
     render_generated_file_header(&mut output);
@@ -39,7 +57,7 @@ pub(in crate::generator) fn render_forwarder_module(plan: &ClientPlan) -> Option
         output.push_str("\n\n");
         render_forwarder_class(&mut output, service);
     }
-    Some(output)
+    Ok(Some(output))
 }
 
 fn render_model_imports(output: &mut String, plan: &ClientPlan) {

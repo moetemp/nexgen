@@ -155,6 +155,15 @@ pub enum Error {
         field: String,
     },
 
+    #[error(
+        "operation `{operation}` of service `{service}` takes the Python name `{name}`, which the `--forwarder` class's own `{name}` method has; give the operation another name with `x-py-name`"
+    )]
+    ForwarderMemberClash {
+        service: String,
+        operation: String,
+        name: String,
+    },
+
     #[error("Java code generation does not support protobuf-backed model `{message}`")]
     UnsupportedJavaProtoModel { message: String },
 

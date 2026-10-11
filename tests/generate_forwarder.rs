@@ -301,3 +301,32 @@ fn the_generated_forwarder_registers_and_round_trips_each_operation() {
     let output = run(python.arg(&driver).arg(&package)).expect_ok("drive the forwarder");
     assert!(output.contains("ok"), "{output}");
 }
+
+#[test]
+fn an_operation_named_like_a_forwarder_member_is_refused() {
+    let contract = CONTRACT.replace(
+        "      ping:\n        fqn: ping\n",
+        "      forward:\n        fqn: forward\n",
+    );
+    assert!(contract.contains("fqn: forward"), "{contract}");
+    let workspace = Workspace::new("forwarder-member-clash");
+    let error = generate_into(
+        &workspace.root().join("streams"),
+        &workspace.root().join("streams.nexusrpc.yaml"),
+        Language::Python,
+        &contract,
+        true,
+    )
+    .expect_err("an operation named `forward` should be refused");
+    assert!(
+        error.contains("`forward`") && error.contains("x-py-name"),
+        "{error}"
+    );
+    // Renamed for Python, it no longer clashes.
+    let renamed = contract.replace(
+        "      forward:\n        fqn: forward\n",
+        "      forward:\n        fqn: forward\n        x-py-name: forward_call\n",
+    );
+    let (_workspace, files) = generate(Language::Python, &renamed, true, "forwarder-renamed");
+    assert!(file(&files, "forwarder.py").contains("async def forward_call("));
+}

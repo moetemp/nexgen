@@ -260,7 +260,7 @@ fn the_generated_token_reads_and_writes_cores_vectors() {
     let vectors = Path::new(env!("CARGO_MANIFEST_DIR")).join(VECTORS);
     let mut python = python_runtime_command().expect("a Python with the SDK");
     let output = run(python.arg(&driver).arg(&package).arg(&vectors)).expect_ok("drive the token");
-    assert!(output.contains("ok 4 1 6"), "{output}");
+    assert!(output.contains("ok 5 1 6"), "{output}");
 }
 
 #[test]

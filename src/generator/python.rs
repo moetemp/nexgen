@@ -8,6 +8,7 @@ use crate::error::{Error, Result};
 use crate::generator::json_schema::client::ClientPlan;
 use crate::generator::json_schema::python as python_json;
 use crate::generator::json_schema::python_client;
+use crate::generator::json_schema::python_forwarder;
 use crate::generator::proto::python as python_proto;
 use crate::generator::render_request_plan;
 use crate::generator::{
@@ -723,6 +724,17 @@ impl<'a> ApiPlanner<'a> {
                 "_system_nexus_interceptor.py",
                 render_system_nexus_interceptor(services),
                 GeneratedFileOrigin::fixed("generated Python system Nexus interceptor"),
+            )?;
+        }
+        if crate::nexgen_config::current().forwarder
+            && let Some(forwarder_source) = python_forwarder::render_forwarder_module(
+                &self.external_models.client_plan(self.api_plan)?,
+            )
+        {
+            files.insert(
+                python_forwarder::FORWARDER_MODULE,
+                forwarder_source,
+                GeneratedFileOrigin::fixed("generated Python forwarding handler"),
             )?;
         }
         if crate::nexgen_config::current().client

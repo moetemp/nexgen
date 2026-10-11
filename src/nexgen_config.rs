@@ -16,6 +16,10 @@ pub struct NexgenConfig {
     /// emits calls Nexus through a workflow, while this one is for a process
     /// outside the worker talking to the HTTP ingress.
     pub client: bool,
+    /// Emit a handler for each service that forwards every operation's JSON
+    /// transfer form to one method, for a runtime that serves the contract
+    /// itself. Only Python emits one today.
+    pub forwarder: bool,
 }
 
 impl Default for NexgenConfig {
@@ -24,6 +28,7 @@ impl Default for NexgenConfig {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: false,
             client: false,
+            forwarder: false,
         }
     }
 }

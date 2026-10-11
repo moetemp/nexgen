@@ -9827,6 +9827,15 @@ pub(crate) fn build_name_manifest(
                     format!("{} HTTP caller {role}", service.origin_label()),
                 )?;
             }
+            // The `--forwarder` module imports the operation models by name
+            // beside its one class, so the class name is reserved the same way.
+            if language == Language::Python {
+                top.insert(
+                    language,
+                    format!("{service_ident}Forwarder"),
+                    format!("{} forwarding handler", service.origin_label()),
+                )?;
+            }
         }
         if matches!(language, Language::Go | Language::Python)
             && services.iter().any(|service| in_scope(&service.module_key))

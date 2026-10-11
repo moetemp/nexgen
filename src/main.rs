@@ -31,7 +31,7 @@ enum Commands {
     #[command(about = "Generate Java bindings")]
     Java(JavaGenerateArgs),
     #[command(about = "Generate Python bindings")]
-    Python(HttpCallerGenerateArgs),
+    Python(PythonGenerateArgs),
     #[command(alias = "ts", about = "Generate TypeScript bindings (alias: ts)")]
     Typescript(TypescriptGenerateArgs),
     #[cfg(feature = "advanced")]
@@ -104,6 +104,18 @@ struct HttpCallerGenerateArgs {
     #[cfg(feature = "advanced")]
     #[arg(long)]
     client: bool,
+}
+
+#[derive(Args)]
+struct PythonGenerateArgs {
+    #[command(flatten)]
+    caller: HttpCallerGenerateArgs,
+    /// Also emit a handler for each service that forwards every operation's
+    /// JSON transfer form to one `forward` method, for a runtime that serves
+    /// the contract itself.
+    #[cfg(feature = "advanced")]
+    #[arg(long)]
+    forwarder: bool,
 }
 
 #[derive(Args)]
@@ -205,7 +217,11 @@ fn main() -> ExitCode {
             Some(args.package_name),
             None,
         )),
-        Commands::Python(args) => {
+        Commands::Python(PythonGenerateArgs {
+            caller: args,
+            #[cfg(feature = "advanced")]
+            forwarder,
+        }) => {
             #[cfg(feature = "advanced")]
             {
                 let system_nexus = args.common.system_nexus;
@@ -217,6 +233,7 @@ fn main() -> ExitCode {
                     },
                     system_nexus,
                     client: args.client,
+                    forwarder,
                 };
                 let mut request = generate_request(
                     Language::Python,

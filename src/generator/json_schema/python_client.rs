@@ -870,7 +870,11 @@ fn render_long_poll_body(
 /// A docstring with one paragraph per entry. The shared Python docstring writer
 /// takes a single summary plus tagged sections, which is the wrong shape for
 /// prose paragraphs.
-fn render_docstring(output: &mut String, indent: &str, paragraphs: &[String]) {
+pub(in crate::generator) fn render_docstring(
+    output: &mut String,
+    indent: &str,
+    paragraphs: &[String],
+) {
     let paragraphs = paragraphs
         .iter()
         .map(|paragraph| paragraph.trim())

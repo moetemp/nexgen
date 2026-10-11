@@ -774,7 +774,7 @@ fn long_poll_paragraphs(
         .done_member
         .as_ref()
         .map(|(done, _)| member_attribute(model_output.member(done), done));
-    vec![
+    let mut paragraphs = vec![
         format!(
             "Calls ``{}`` until it answers with something, or until ``deadline``.",
             operation.name
@@ -793,7 +793,18 @@ fn long_poll_paragraphs(
         "``deadline`` is the whole budget in seconds. The single-shot method stays \
              available for a caller that wants one attempt."
             .to_string(),
-    ]
+    ];
+    if let Some(state) = &long_poll.state_member {
+        paragraphs.insert(
+            2,
+            format!(
+                "After an answer with nothing, the next attempt sends the ``{}`` that answer \
+                 carried, so the endpoint keeps nothing between calls.",
+                member_attribute(input.member(state), state)
+            ),
+        );
+    }
+    paragraphs
 }
 
 fn render_long_poll_body(
@@ -856,6 +867,15 @@ fn render_long_poll_body(
     }
     output.push_str(":\n");
     output.push_str("                return answer\n");
+    if let Some(state) = &long_poll.state_member {
+        let input_state = member_attribute(input.member(state), state);
+        let output_state = member_attribute(model_output.member(state), state);
+        output.push_str("            request = dataclasses.replace(request, ");
+        output.push_str(&input_state);
+        output.push_str("=answer.");
+        output.push_str(&output_state);
+        output.push_str(")\n");
+    }
     output.push_str("            if time.monotonic() >= end:\n");
     output.push_str("                return answer\n");
     // An endpoint that answers empty without parking for the wait it was given

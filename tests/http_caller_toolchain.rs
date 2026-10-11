@@ -547,6 +547,106 @@ fn the_generated_python_long_poll_loop_runs_against_a_local_endpoint() {
     assert!(output.contains("ok"), "{output}");
 }
 
+/// A long-pollable read whose endpoint keeps no state: each answer carries the
+/// state the next attempt sends back.
+const LONG_POLL_STATE_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    operations:
+      read:
+        fqn: read
+        x-nexus-long-poll:
+          wait-field: waitMs
+          result-field: records
+          state-field: state
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      waitMs: { type: integer }
+      state: { type: string }
+    additionalProperties: false
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+      state: { type: string }
+    additionalProperties: false
+"##;
+
+const PYTHON_LONG_POLL_STATE_DRIVER: &str = r#"
+import asyncio
+import http.server
+import importlib
+import json
+import pathlib
+import sys
+import threading
+
+package = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+models = importlib.import_module(f"{package.name}.models")
+
+script = [
+    b'{"records": [], "state": "s1"}',
+    b'{"records": [], "state": "s2"}',
+    b'{"records": ["a"], "state": "s3"}',
+]
+sent = []
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        sent.append(json.loads(self.rfile.read(length)).get("state"))
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(script.pop(0))
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+client = client_module.StreamServiceHttpClient(f"http://127.0.0.1:{server.server_port}")
+
+
+async def main():
+    answer = await client.read_until_records(models.ReadInput(state="s0"), deadline=5.0)
+    assert answer.records == ["a"] and answer.state == "s3", answer
+    assert sent == ["s0", "s1", "s2"], sent
+
+
+asyncio.run(main())
+server.shutdown()
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_long_poll_loop_sends_back_each_answers_state() {
+    let workspace = Workspace::new("http-caller-python-long-poll-state");
+    let package = generate_client_from(
+        &workspace,
+        Target::Python,
+        "stateful",
+        LONG_POLL_STATE_CONTRACT,
+    );
+    let driver = workspace.root().join("drive_state.py");
+    fs::write(&driver, PYTHON_LONG_POLL_STATE_DRIVER).expect("write the driver");
+    let interpreter = python_interpreter();
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package))
+    .expect_ok("drive the generated loop");
+    assert!(output.contains("ok"), "{output}");
+}
+
 /// An operation that hands back a stream reference and a read that takes one,
 /// so the emitted converter is run against the SDK type it builds.
 const STREAM_REF_CONTRACT: &str = r##"

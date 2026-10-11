@@ -1,0 +1,1 @@
+`x-nexus-long-poll` takes an optional `state-field`, an opaque member of both models. The Python HTTP caller's loop sends each empty answer's state back on its next attempt, so the endpoint keeps nothing between calls.

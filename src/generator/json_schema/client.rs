@@ -98,6 +98,9 @@ pub(in crate::generator) struct ClientLongPoll {
     /// The output's done flag, and whether the output requires it, which
     /// decides whether a target holds it behind an optional.
     pub(in crate::generator) done_member: Option<(String, bool)>,
+    /// The state member the input and output both declare, which the loop
+    /// passes back on each attempt.
+    pub(in crate::generator) state_member: Option<String>,
     /// The wait member's declared range in milliseconds, which every wait the
     /// loop sends stays inside.
     pub(in crate::generator) wait_minimum: Option<i64>,
@@ -281,6 +284,7 @@ pub(in crate::generator) fn build_client_plan(
                 .map(|long_poll| ClientLongPoll {
                     wait_member: long_poll.wait_field.clone(),
                     result_member: long_poll.result_field.clone(),
+                    state_member: long_poll.state_field.clone(),
                     done_member: long_poll.done_field.as_ref().map(|done| {
                         let required = output
                             .as_ref()

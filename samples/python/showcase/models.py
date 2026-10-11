@@ -1771,7 +1771,7 @@ class _ShowcaseTransferTypeConverter(
                 if revision_value_parsed not in (1,):
                     violations.append(Violation(path="revision", reason="must equal 1"))
                 else:
-                    revision_value = revision_value_parsed
+                    revision_value = typing.cast("typing.Any", revision_value_parsed)
 
         enabled_value: typing.Literal[True] = typing.cast("typing.Any", None)
         if "enabled" not in raw or raw["enabled"] is None:
@@ -1819,7 +1819,7 @@ class _ShowcaseTransferTypeConverter(
                         )
                     )
                 else:
-                    tier_value = tier_value_parsed
+                    tier_value = typing.cast("typing.Any", tier_value_parsed)
 
         scale_value: float = typing.cast("typing.Any", None)
         if "scale" not in raw or raw["scale"] is None:

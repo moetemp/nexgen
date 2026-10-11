@@ -22,6 +22,8 @@ Like [[http-caller]], it adapts the `features/<keyword>.md` skeleton.
 - The flag is gated behind the `advanced` Cargo feature. It adds a file. It
   never changes a model, a binding, or the wire. `{Service}Forwarder` is
   reserved whether or not the flag is set, as the caller's names are.
+- With the flag, an operation whose Python name is `forward` is refused,
+  since it would replace the class's own method. `x-py-name` renames it.
 
 ## Support decision
 

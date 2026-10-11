@@ -3911,8 +3911,10 @@ fn render_model_dataclass(
         render_model_init(output, schema)?;
         render_default_properties(output, schema)?;
     }
-    if crate::json_schema::streaming::operation_token_version_field(&model.schema).is_some() {
-        render_operation_token_methods(output, &model.model_name);
+    if let Some(version_field) =
+        crate::json_schema::streaming::operation_token_version_field(&model.schema)
+    {
+        render_operation_token_methods(output, &model.model_name, version_field);
         members += 1;
     }
     if members == 0 {
@@ -3927,8 +3929,9 @@ fn render_model_dataclass(
 /// base64url with no padding. That text depends on nothing a language chooses,
 /// so a token one SDK or Core writes reads back in any other. The converter
 /// checks the version member's `const`, so a token of another version fails.
-fn render_operation_token_methods(output: &mut String, model_name: &str) {
+fn render_operation_token_methods(output: &mut String, model_name: &str, version_field: &str) {
     let converter = converter_class_name(model_name);
+    let version = python_string_literal(version_field);
     output.push_str(&format!(
         r#"
     def to_token(self) -> str:
@@ -3948,11 +3951,19 @@ fn render_operation_token_methods(output: &mut String, model_name: &str) {
         Raises:
             ValueError: ``token`` is not one, or it names another version.
         """
+        # The decoder drops characters outside the alphabet and takes the
+        # standard one, so the alphabet is checked first, as Core does.
+        letters = token.rstrip("=").replace("-", "").replace("_", "")
+        if not (letters.isascii() and letters.isalnum()):
+            raise ValueError("not a {model_name}: not base64url text")
         try:
             text = base64.urlsafe_b64decode(token + "=" * (-len(token) % 4))
             transfer: typing.Any = json.loads(text)
         except ValueError as error:
             raise ValueError(f"not a {model_name}: {{error}}") from None
+        # The converter takes 2.0 as 2, and Core doesn't.
+        if not isinstance(transfer, dict) or type(transfer.get({version})) is not int:
+            raise ValueError("not a {model_name}: the version is not an integer")
         try:
             return {converter}().from_transfer_type(transfer, cls)
         except temporalio.exceptions.ApplicationError as error:

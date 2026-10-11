@@ -592,9 +592,10 @@ sys.path.insert(0, str(package.parent))
 client_module = importlib.import_module(f"{package.name}.client")
 models = importlib.import_module(f"{package.name}.models")
 
+# The second answer carries no state, so the caller keeps the one it had.
 script = [
     b'{"records": [], "state": "s1"}',
-    b'{"records": [], "state": "s2"}',
+    b'{"records": []}',
     b'{"records": ["a"], "state": "s3"}',
 ]
 sent = []
@@ -620,7 +621,7 @@ client = client_module.StreamServiceHttpClient(f"http://127.0.0.1:{server.server
 async def main():
     answer = await client.read_until_records(models.ReadInput(state="s0"), deadline=5.0)
     assert answer.records == ["a"] and answer.state == "s3", answer
-    assert sent == ["s0", "s1", "s2"], sent
+    assert sent == ["s0", "s1", "s1"], sent
 
 
 asyncio.run(main())

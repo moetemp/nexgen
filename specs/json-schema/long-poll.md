@@ -29,7 +29,8 @@ services:
   output both declare, with the same `contentEncoding`. It is optional on the
   input, since a first call has none. After an answer with nothing, the Python
   loop sends the state that answer carried on its next attempt, so the endpoint
-  keeps nothing between calls. The Go loop doesn't carry it yet, so each Go
+  keeps nothing between calls. An answer without a state leaves the caller's
+  own. The Go loop doesn't carry it yet, so each Go
   attempt sends the caller's own state.
 - `done-field` names a boolean the endpoint sets when nothing more will arrive,
   such as a stream whose writer has closed. Without it, an answer that ends the

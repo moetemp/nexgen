@@ -448,6 +448,7 @@ fn a_state_member_rides_each_python_attempt() {
     assert!(
         client.contains(
             "            if answer.records:\n                return answer\n            \
+             if answer.state is not None:\n                \
              request = dataclasses.replace(request, state=answer.state)\n"
         ),
         "{client}"

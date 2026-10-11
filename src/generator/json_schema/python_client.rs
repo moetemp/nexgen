@@ -870,7 +870,11 @@ fn render_long_poll_body(
     if let Some(state) = &long_poll.state_member {
         let input_state = member_attribute(input.member(state), state);
         let output_state = member_attribute(model_output.member(state), state);
-        output.push_str("            request = dataclasses.replace(request, ");
+        // An answer with no state leaves the caller's own.
+        output.push_str("            if answer.");
+        output.push_str(&output_state);
+        output.push_str(" is not None:\n");
+        output.push_str("                request = dataclasses.replace(request, ");
         output.push_str(&input_state);
         output.push_str("=answer.");
         output.push_str(&output_state);

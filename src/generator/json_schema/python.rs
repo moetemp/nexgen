@@ -4990,16 +4990,17 @@ fn render_value_parser(
             ));
             output.push_str(indent);
             output.push_str(&format!("if {parsed} is not None:\n"));
-            // The membership test narrows the normalized `int` to the closed
-            // literal type it declares, so the member takes it as it is — no
-            // cast, unlike the pre-normalization form where the comparison ran
-            // against an `int | float`.
+            // pyright narrows the normalized `int` to the closed literal type
+            // through the membership test, but mypy doesn't. A cast to the
+            // literal would be unnecessary to pyright, so the value goes
+            // through `typing.Any`, which both accept.
+            let assignment = format!("typing.cast(\"typing.Any\", {parsed})");
             render_py_closed_value_membership(
                 output,
                 "if",
                 &literals,
                 &parsed,
-                &parsed,
+                &assignment,
                 target,
                 path_expr,
                 &format!("{indent}    "),

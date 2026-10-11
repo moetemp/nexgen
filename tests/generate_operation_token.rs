@@ -240,3 +240,14 @@ fn the_generated_token_matches_the_sdk_and_refuses_other_versions() {
     let output = run(python.arg(&driver).arg(&package).arg(SDK_TOKEN)).expect_ok("drive the token");
     assert!(output.contains("ok"), "{output}");
 }
+
+#[test]
+fn an_integer_version_reaches_its_literal_member_through_a_cast() {
+    // mypy, unlike pyright, doesn't narrow the parsed `int` to the member's
+    // `Literal` through the membership test.
+    let models = python_models(CONTRACT, "token-version-cast");
+    assert!(
+        models.contains("v_value = typing.cast(\"typing.Any\", v_value_parsed)"),
+        "{models}"
+    );
+}

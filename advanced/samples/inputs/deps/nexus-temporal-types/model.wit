@@ -90,6 +90,8 @@ interface model {
   ///   signature="signal-call"
   ///   args-field="signal-input"
   ///   alternate-type="string"
+  ///   go-value-type="string"
+  ///   go-args-type="any"
   ///   python-converter="signal_function_to_proto"
   ///   typescript-name-extractor="signalFunctionName"
   ///   dotnet-name-extractor="TemporalFunctionNames.SignalName"

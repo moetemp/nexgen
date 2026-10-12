@@ -199,6 +199,7 @@ fn collect_external_type_module_imports(
             collect_symbol_module_import(source_module, &alias.name, imports);
             collect_type_module_imports(source_module, Some(&alias.target), imports);
         }
+        ExternalTypeSpec::Named(_) => {}
     }
 }
 
@@ -261,6 +262,7 @@ fn collect_authored_external_type_module_imports(
             collect_symbol_module_import(source_module, &alias.name, imports);
             collect_authored_type_module_imports(source_module, &alias.target, imports);
         }
+        ExternalTypeSpec::Named(_) => {}
     }
 }
 
@@ -325,9 +327,16 @@ fn collect_symbol_module_import(
 
 use super::*;
 use crate::spec::{
-    FunctionTypeDescriptorSpec, OperationOutputTransformSpec, OperationStreamResultSpec,
-    ResourceResultSpec,
+    FunctionTypeDescriptorSpec, NamedTypeSpec, OperationOutputTransformSpec,
+    OperationStreamResultSpec, ResourceResultSpec,
 };
+
+fn planned_named_type(named: &NamedTypeSpec<OperationLoweredFamily>) -> PlannedType {
+    TypeSpec::External(ExternalTypeSpec::Named(NamedTypeSpec {
+        name: named.name.clone(),
+        type_name: materialize_selected_text(&named.type_name),
+    }))
+}
 
 pub(super) struct TypePlanningContext<'a> {
     pub(super) spec: ApiSpec<OperationLoweredFamily>,
@@ -707,6 +716,9 @@ impl<'a> TypePlanningContext<'a> {
             Some(TypeSpec::External(ExternalTypeSpec::Json(json_type))) => Ok(Some(
                 TypeSpec::External(ExternalTypeSpec::Json(self.map_json_type(json_type))),
             )),
+            Some(TypeSpec::External(ExternalTypeSpec::Named(named))) => {
+                Ok(Some(planned_named_type(named)))
+            }
             Some(TypeSpec::Record(record_name)) => {
                 let record = self
                     .spec
@@ -753,6 +765,9 @@ impl<'a> TypePlanningContext<'a> {
             Some(TypeSpec::External(ExternalTypeSpec::Json(json_type))) => Ok(Some(
                 TypeSpec::External(ExternalTypeSpec::Json(self.map_json_type(json_type))),
             )),
+            Some(TypeSpec::External(ExternalTypeSpec::Named(named))) => {
+                Ok(Some(planned_named_type(named)))
+            }
             Some(TypeSpec::Record(record_name)) => {
                 let record = self
                     .spec
@@ -811,6 +826,13 @@ impl<'a> TypePlanningContext<'a> {
                     service: service.name.clone(),
                     operation: operation.name.clone(),
                     type_name: name.as_str().to_string(),
+                });
+            }
+            ExternalTypeSpec::Named(NamedTypeSpec { name, .. }) => {
+                return Err(Error::UnknownOperationOutputProto {
+                    service: service.name.clone(),
+                    operation: operation.name.clone(),
+                    type_name: name.clone(),
                 });
             }
         };
@@ -974,6 +996,20 @@ impl<'a> TypePlanningContext<'a> {
                 type_name: LanguageStringSpec {
                     default: type_name.for_language(self.language).map(ToOwned::to_owned),
                     default_import: type_name
+                        .import_for_language(self.language)
+                        .map(ToOwned::to_owned),
+                    ..Default::default()
+                },
+            }),
+            ExternalTypeSpec::Named(named) => ExternalTypeSpec::Named(NamedTypeSpec {
+                name: named.name.clone(),
+                type_name: LanguageStringSpec {
+                    default: named
+                        .type_name
+                        .for_language(self.language)
+                        .map(ToOwned::to_owned),
+                    default_import: named
+                        .type_name
                         .import_for_language(self.language)
                         .map(ToOwned::to_owned),
                     ..Default::default()
@@ -1198,6 +1234,7 @@ impl<'a> TypePlanningContext<'a> {
             TypeSpec::External(ExternalTypeSpec::Json(json_type)) => {
                 TypeSpec::External(ExternalTypeSpec::Json(self.map_json_type(json_type)))
             }
+            TypeSpec::External(ExternalTypeSpec::Named(named)) => planned_named_type(named),
             TypeSpec::Record(record_name) => self
                 .spec
                 .record(record_name.as_str())

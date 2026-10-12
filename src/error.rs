@@ -164,6 +164,17 @@ pub enum Error {
         name: String,
     },
 
+    #[error(
+        "operation `{operation}` of service `{service}` names an existing type for its \
+         {label}, and the `--client` caller and the `--forwarder` class work only with JSON \
+         transfer forms; generate this service without those flags"
+    )]
+    NamedTypeInJsonCaller {
+        service: String,
+        operation: String,
+        label: &'static str,
+    },
+
     #[error("Java code generation does not support protobuf-backed model `{message}`")]
     UnsupportedJavaProtoModel { message: String },
 

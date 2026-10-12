@@ -1573,6 +1573,15 @@ pub enum ExternalTypeSpec<F: TypeFamily = AuthoredFamily> {
     Proto(F::Proto),
     Json(F::Json),
     Alias(AliasTypeSpec<F>),
+    Named(NamedTypeSpec<F>),
+}
+
+/// A type the input names by a per-language reference instead of declaring
+/// its shape. The generator imports it and emits no model or converter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamedTypeSpec<F: TypeFamily = AuthoredFamily> {
+    pub name: String,
+    pub type_name: F::Text,
 }
 
 impl<F: TypeFamily> TypeSpec<F> {
@@ -1712,6 +1721,10 @@ impl<F: TypeFamily> ExternalTypeSpec<F> {
             ExternalTypeSpec::Proto(type_name) => ExternalTypeSpec::Proto(map.map_proto(type_name)),
             ExternalTypeSpec::Json(type_name) => ExternalTypeSpec::Json(map.map_json(type_name)),
             ExternalTypeSpec::Alias(alias) => ExternalTypeSpec::Alias(alias.map_names_with(map)),
+            ExternalTypeSpec::Named(named) => ExternalTypeSpec::Named(NamedTypeSpec {
+                name: named.name,
+                type_name: map.map_text(named.type_name),
+            }),
         }
     }
 }
@@ -1728,6 +1741,7 @@ where
             ExternalTypeSpec::Proto(type_name) => Some(type_name.as_ref()),
             ExternalTypeSpec::Json(type_name) => Some(type_name.as_ref()),
             ExternalTypeSpec::Alias(alias) => Some(alias.name.as_ref()),
+            ExternalTypeSpec::Named(named) => Some(named.name.as_str()),
         }
     }
 
@@ -1890,7 +1904,8 @@ where
             | TypeSpec::Flags(_)
             | TypeSpec::Resource(_)
             | TypeSpec::External(ExternalTypeSpec::Proto(_))
-            | TypeSpec::External(ExternalTypeSpec::Json(_)) => {}
+            | TypeSpec::External(ExternalTypeSpec::Json(_))
+            | TypeSpec::External(ExternalTypeSpec::Named(_)) => {}
         }
     }
 }

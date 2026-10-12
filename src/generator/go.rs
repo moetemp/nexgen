@@ -425,6 +425,9 @@ pub(in crate::generator) fn planned_field_kind(
 
 fn planned_value_type(value_type: &PlannedType, spec: &PlannedSpec) -> PlannedValueType {
     match value_type.without_option() {
+        TypeSpec::External(ExternalTypeSpec::Named(_)) => {
+            unreachable!("the parser names an existing type only for Python output")
+        }
         TypeSpec::Bool => PlannedValueType::Scalar(PlannedScalarType::Bool),
         TypeSpec::Int(IntSpec::I32) => PlannedValueType::Scalar(PlannedScalarType::Int32),
         TypeSpec::Int(IntSpec::I64) => PlannedValueType::Scalar(PlannedScalarType::Int64),
@@ -2463,6 +2466,9 @@ pub(in crate::generator) fn go_replacement_type_name(
 /// as `any`.
 pub(in crate::generator) fn go_authored_type_annotation(wit_type: &PlannedType) -> String {
     match wit_type {
+        TypeSpec::External(ExternalTypeSpec::Named(_)) => {
+            unreachable!("the parser names an existing type only for Python output")
+        }
         TypeSpec::Bool => "bool".to_string(),
         TypeSpec::Int(IntSpec::I32) => "int32".to_string(),
         TypeSpec::Int(IntSpec::I64) => "int64".to_string(),

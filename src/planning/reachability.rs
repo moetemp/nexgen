@@ -153,6 +153,7 @@ fn enqueue_external_type(
         }
         ExternalTypeSpec::Json(json) => add_name(spec, &json.full_name, reachable),
         ExternalTypeSpec::Alias(alias) => pending.push((*alias.target).clone()),
+        ExternalTypeSpec::Named(_) => {}
     }
 }
 

@@ -1,0 +1,1 @@
+An operation `input` or `output` can name an existing type with `$pythonRef` and the other `$<lang>Ref` keywords of the upstream nexus-rpc-gen schema. Python output imports the type and emits no model for it. The upstream service and operation key form loads too.

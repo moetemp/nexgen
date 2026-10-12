@@ -1354,6 +1354,9 @@ impl<'a> ApiPlanner<'a> {
 
     fn resolve_planned_value_type(&mut self, value_type: &PlannedType) -> ResolvedFieldType {
         match value_type {
+            PlannedType::External(ExternalTypeSpec::Named(_)) => {
+                unreachable!("the parser names an existing type only for Python output")
+            }
             PlannedType::TypeParameter(parameter) => ResolvedFieldType {
                 annotation: parameter.name.clone(),
                 kind: ResolvedFieldKind::Scalar,
@@ -2204,6 +2207,9 @@ fn collect_type_replacement_imports(
 
 fn collect_value_type_imports(value: &PlannedType, imports: &mut BTreeSet<LanguageImportSpec>) {
     match value {
+        PlannedType::External(ExternalTypeSpec::Named(_)) => {
+            unreachable!("the parser names an existing type only for Python output")
+        }
         PlannedType::Enum(_) | PlannedType::TypeParameter(_) => {}
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(enumeration))) => {
             collect_proto_type_imports(&enumeration.proto, imports);
@@ -2293,6 +2299,9 @@ fn collect_authored_type_imports(
     imports: &mut BTreeSet<LanguageImportSpec>,
 ) {
     match field_type {
+        TypeSpec::External(ExternalTypeSpec::Named(_)) => {
+            unreachable!("the parser names an existing type only for Python output")
+        }
         TypeSpec::Option(inner) | TypeSpec::List(inner) => {
             collect_authored_type_imports(inner, imports);
         }
@@ -2532,6 +2541,9 @@ pub(in crate::generator) fn typescript_authored_type_annotation(
     authored_type: &PlannedType,
 ) -> String {
     match authored_type {
+        TypeSpec::External(ExternalTypeSpec::Named(_)) => {
+            unreachable!("the parser names an existing type only for Python output")
+        }
         TypeSpec::Bool => "boolean".to_string(),
         TypeSpec::Int(IntSpec::I32) | TypeSpec::Float => "number".to_string(),
         TypeSpec::Int(IntSpec::I64) => "Long".to_string(),
@@ -5680,6 +5692,9 @@ fn typescript_resource_field_annotation(
 
 fn typescript_resource_value_annotation(value: &PlannedType) -> String {
     match value {
+        PlannedType::External(ExternalTypeSpec::Named(_)) => {
+            unreachable!("the parser names an existing type only for Python output")
+        }
         PlannedType::Int(IntSpec::I32) => "number".to_string(),
         PlannedType::Int(IntSpec::I64) => "Long".to_string(),
         PlannedType::Float => "number".to_string(),

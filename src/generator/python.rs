@@ -26,8 +26,8 @@ use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{
     AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec,
     FunctionFieldSpec, FunctionResultSpec, LanguageImportSpec, LanguageImportStyle,
-    LanguageStringSpec, ModulePath, OperationSpec, RecordFieldSpec, RecordFieldVisibility,
-    RecordSpec, TypeDeclSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
+    LanguageStringSpec, ModulePath, NamedTypeSpec, OperationSpec, RecordFieldSpec,
+    RecordFieldVisibility, RecordSpec, TypeDeclSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 
@@ -382,6 +382,11 @@ impl PythonExternalModels {
                 format!("{native_module}.{}", record.model_name),
                 Some(format!(".{native_module}")),
             ),
+            PlannedType::External(ExternalTypeSpec::Named(named)) => {
+                let reference = python_named_type_ref(named);
+                let module_path = python_qualified_module_paths(&reference).into_iter().next();
+                (reference, module_path)
+            }
             _ => panic!("operation service ref should be model-shaped"),
         }
     }
@@ -441,6 +446,9 @@ impl ExternalModelBackend for PythonExternalModels {
             PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
                 self.json.model_type_annotation(json_type)
             }
+            PlannedType::External(ExternalTypeSpec::Named(named)) => {
+                Some(python_named_type_ref(named))
+            }
             _ => None,
         }
     }
@@ -456,6 +464,19 @@ impl ExternalModelBackend for PythonExternalModels {
             }
             PlannedType::External(ExternalTypeSpec::Json(json_type)) => {
                 self.json.wire_conversion(json_type, planned_record)
+            }
+            // The payload converter reads and writes a named type itself.
+            PlannedType::External(ExternalTypeSpec::Named(named)) => {
+                let annotation = python_named_type_ref(named);
+                Some(WireValueConversion {
+                    imports: PythonImports {
+                        module_imports: python_qualified_module_paths(&annotation),
+                    },
+                    annotation,
+                    from_wire: "{wire}".to_string(),
+                    to_wire: "{value}".to_string(),
+                    supports_unpacked_input: false,
+                })
             }
             _ => None,
         }
@@ -1079,6 +1100,7 @@ impl<'a> ApiPlanner<'a> {
 
     fn python_resource_value_annotation(&self, value: &PlannedType) -> String {
         match value {
+            PlannedType::External(ExternalTypeSpec::Named(named)) => python_named_type_ref(named),
             PlannedType::Float => "float".to_string(),
             PlannedType::Int(_) => "int".to_string(),
             PlannedType::Bool => "bool".to_string(),
@@ -1207,6 +1229,7 @@ impl<'a> ApiPlanner<'a> {
                     PlannedProtoType::Message(_),
                 ))
                 | PlannedType::External(ExternalTypeSpec::Json(_))
+                | PlannedType::External(ExternalTypeSpec::Named(_))
                 | PlannedType::Record(_)),
             ) => {
                 let (output_ref, output_module_path) =
@@ -1389,7 +1412,8 @@ impl<'a> ApiPlanner<'a> {
     fn resolve_output_annotation(&mut self, model_type: &PlannedType) -> Result<String> {
         match model_type {
             PlannedType::External(ExternalTypeSpec::Proto(_))
-            | PlannedType::External(ExternalTypeSpec::Json(_)) => Ok(self
+            | PlannedType::External(ExternalTypeSpec::Json(_))
+            | PlannedType::External(ExternalTypeSpec::Named(_)) => Ok(self
                 .external_models
                 .model_type_annotation(model_type)
                 .expect("external model annotation should exist")),
@@ -1915,6 +1939,17 @@ fn resolve_python_value_type(
     value_type: &PlannedType,
 ) -> Result<ResolvedFieldType> {
     let resolved = match value_type {
+        PlannedType::External(ExternalTypeSpec::Named(named)) => {
+            let annotation = python_named_type_ref(named);
+            ResolvedFieldType {
+                imports: PythonImports {
+                    module_imports: python_qualified_module_paths(&annotation),
+                },
+                annotation,
+                kind: ResolvedFieldKind::Scalar,
+                wire_conversion: None,
+            }
+        }
         PlannedType::TypeParameter(parameter) => ResolvedFieldType {
             annotation: parameter.name.clone(),
             imports: PythonImports::default(),
@@ -2342,6 +2377,9 @@ fn collect_type_replacement_imports(
 
 fn collect_value_type_imports(value: &PlannedType, imports: &mut BTreeSet<LanguageImportSpec>) {
     match value {
+        PlannedType::External(ExternalTypeSpec::Named(named)) => {
+            collect_python_import(&named.type_name, imports)
+        }
         PlannedType::Enum(_) | PlannedType::TypeParameter(_) => {}
         PlannedType::Flags(_) | PlannedType::Variant(_) => {}
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(enumeration))) => {
@@ -2429,6 +2467,9 @@ fn collect_authored_type_imports(
     imports: &mut BTreeSet<LanguageImportSpec>,
 ) {
     match field_type {
+        TypeSpec::External(ExternalTypeSpec::Named(named)) => {
+            collect_python_import(&named.type_name, imports)
+        }
         TypeSpec::Option(inner) | TypeSpec::List(inner) => {
             collect_authored_type_imports(inner, imports);
         }
@@ -2497,6 +2538,15 @@ fn collect_python_import(spec: &LanguageStringSpec, imports: &mut BTreeSet<Langu
             import_style: LanguageImportStyle::Module,
         });
     }
+}
+
+/// The qualified name a `$pythonRef` gives, which the parser has already checked.
+fn python_named_type_ref(named: &NamedTypeSpec<PlannedFamily>) -> String {
+    named
+        .type_name
+        .for_language(Language::Python)
+        .expect("the parser keeps a named type only when it has a Python reference")
+        .to_string()
 }
 
 fn python_qualified_module_paths(expression: &str) -> BTreeSet<String> {
@@ -3078,6 +3128,7 @@ fn python_function_result_annotation(result: &FunctionResultSpec<PlannedFamily>)
 
 pub(in crate::generator) fn python_authored_type_annotation(authored_type: &PlannedType) -> String {
     match authored_type {
+        TypeSpec::External(ExternalTypeSpec::Named(named)) => python_named_type_ref(named),
         TypeSpec::Bool => "bool".to_string(),
         TypeSpec::Int(_) => "int".to_string(),
         TypeSpec::Float => "float".to_string(),

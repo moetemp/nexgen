@@ -14,7 +14,7 @@ use crate::generator::json_schema::{java, python, typescript};
 use crate::language::Language;
 use crate::spec::{
     ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelBindingSpec, JsonModelSpec,
-    LanguageStringSpec, ModulePath, OperationLongPollSpec, OperationSpec,
+    LanguageStringSpec, ModulePath, NamedTypeSpec, OperationLongPollSpec, OperationSpec,
     OperationStreamResultSpec, ServiceHandleSpec, ServiceSpec, Symbol, TypeDeclEntry, TypeDeclSpec,
     TypeSpec,
 };
@@ -54,6 +54,12 @@ struct Operation {
     description: Option<String>,
     input: Option<Schema>,
     output: Option<Schema>,
+    /// An `input` that names an existing type per language instead of a shape.
+    /// It is taken out of `input` before the schema passes run.
+    #[serde(skip)]
+    named_input: Option<LanguageStringSpec>,
+    #[serde(skip)]
+    named_output: Option<LanguageStringSpec>,
     #[serde(flatten)]
     extra: IndexMap<String, Value>,
 }
@@ -202,15 +208,234 @@ where
 /// `properties: {value: true}` or a boolean `oneOf` branch before we can name
 /// the member/branch and give the explicit-`type` remedy.
 fn parse_json_schema_document(path: &Path, input: &str) -> Result<Document> {
-    let raw = serde_yaml::from_str::<Value>(input).map_err(|error| Error::JsonSchemaParse {
+    let mut raw = serde_yaml::from_str::<Value>(input).map_err(|error| Error::JsonSchemaParse {
         path: path.to_path_buf(),
         message: error.to_string(),
     })?;
+    let upstream = lower_upstream_form(path, &mut raw)?;
     validate_raw_document_schema_positions(path, &raw)?;
-    serde_yaml::from_str::<Document>(input).map_err(|error| Error::JsonSchemaParse {
-        path: path.to_path_buf(),
-        message: error.to_string(),
-    })
+    let mut document = if upstream.changed {
+        serde_json::from_value::<Document>(raw).map_err(|error| Error::JsonSchemaParse {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })?
+    } else {
+        serde_yaml::from_str::<Document>(input).map_err(|error| Error::JsonSchemaParse {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })?
+    };
+    for ((service_key, operation_key, label), named) in upstream.named {
+        let operation = document
+            .services
+            .as_mut()
+            .and_then(|services| services.get_mut(&service_key))
+            .and_then(|service| service.operations.get_mut(&operation_key))
+            .expect("a named type belongs to an operation that was just parsed");
+        if label == "input" {
+            operation.named_input = Some(named);
+        } else {
+            operation.named_output = Some(named);
+        }
+    }
+    Ok(document)
+}
+
+/// The keywords by which the upstream nexus-rpc-gen schema names an existing
+/// type in one language, with the two that the Temporal api files also write.
+const LANGUAGE_REF_KEYWORDS: [(&str, Language); 7] = [
+    ("$csharpRef", Language::Dotnet),
+    ("$dotnetRef", Language::Dotnet),
+    ("$goRef", Language::Go),
+    ("$javaRef", Language::Java),
+    ("$pythonRef", Language::Python),
+    ("$rubyRef", Language::Ruby),
+    ("$typescriptRef", Language::TypeScript),
+];
+
+fn is_language_ref_keyword(keyword: &str) -> bool {
+    LANGUAGE_REF_KEYWORDS
+        .iter()
+        .any(|(candidate, _)| *candidate == keyword)
+}
+
+/// Operation inputs and outputs that name existing types, keyed by service,
+/// operation and `input` or `output`, after the keys are lowered.
+type NamedOperationTypes = BTreeMap<(String, String, &'static str), LanguageStringSpec>;
+
+#[derive(Default)]
+struct UpstreamForm {
+    changed: bool,
+    named: NamedOperationTypes,
+}
+
+/// Lowers the upstream nexus-rpc-gen form into this generator's form, so the
+/// passes after parsing see one form.
+///
+/// The upstream form keys a service by its qualified wire name and an
+/// operation by its wire name, and an `input` or `output` can name an existing
+/// type with `$<lang>Ref` instead of declaring a shape. A dotted service key
+/// becomes its last segment with the key as `fqn`. An operation key that
+/// starts uppercase becomes its lower camel form with the key as `fqn`. A
+/// named type leaves the schema, and the operation carries it apart.
+fn lower_upstream_form(path: &Path, raw: &mut Value) -> Result<UpstreamForm> {
+    let reject = |reason: String| {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason,
+        })
+    };
+    let mut form = UpstreamForm::default();
+    let Some(services) = raw
+        .as_object_mut()
+        .and_then(|document| document.get_mut("services"))
+        .and_then(Value::as_object_mut)
+    else {
+        return Ok(form);
+    };
+    let mut lowered_services = serde_json::Map::new();
+    let mut service_origins = BTreeMap::<String, String>::new();
+    for (service_key, mut service) in std::mem::take(services) {
+        let lowered_key = lowered_service_key(&service_key, &service);
+        if lowered_key.is_some() {
+            service
+                .as_object_mut()
+                .expect("only an object service has a lowered key")
+                .insert("fqn".to_string(), Value::String(service_key.clone()));
+            form.changed = true;
+        }
+        let key = lowered_key.unwrap_or_else(|| service_key.clone());
+        if let Some(previous) = service_origins.insert(key.clone(), service_key.clone()) {
+            return reject(format!(
+                "services `{previous}` and `{service_key}` both take the name `{key}`; give one \
+                 a key that matches `^[A-Z][a-zA-Z\\d]+$` and set its wire name via `fqn`"
+            ));
+        }
+        if let Some(operations) = service
+            .as_object_mut()
+            .and_then(|service| service.get_mut("operations"))
+            .and_then(Value::as_object_mut)
+        {
+            let mut lowered_operations = serde_json::Map::new();
+            let mut operation_origins = BTreeMap::<String, String>::new();
+            for (operation_key, mut operation) in std::mem::take(operations) {
+                let lowered_key = lowered_operation_key(&operation_key, &operation);
+                if lowered_key.is_some() {
+                    operation
+                        .as_object_mut()
+                        .expect("only an object operation has a lowered key")
+                        .insert("fqn".to_string(), Value::String(operation_key.clone()));
+                    form.changed = true;
+                }
+                let op_key = lowered_key.unwrap_or_else(|| operation_key.clone());
+                if let Some(previous) =
+                    operation_origins.insert(op_key.clone(), operation_key.clone())
+                {
+                    return reject(format!(
+                        "operations `{previous}` and `{operation_key}` of service `{service_key}` \
+                         both take the name `{op_key}`; rename one, and set its wire name via `fqn`"
+                    ));
+                }
+                if let Some(operation) = operation.as_object_mut() {
+                    for label in ["input", "output"] {
+                        let context =
+                            format!("services.{service_key}.operations.{operation_key}.{label}");
+                        let Some(named) = take_named_type(path, operation, label, &context)? else {
+                            continue;
+                        };
+                        form.changed = true;
+                        form.named
+                            .insert((key.clone(), op_key.clone(), label), named);
+                    }
+                }
+                lowered_operations.insert(op_key, operation);
+            }
+            *operations = lowered_operations;
+        }
+        lowered_services.insert(key, service);
+    }
+    *services = lowered_services;
+    Ok(form)
+}
+
+/// The key a qualified upstream service key lowers to. `None` keeps the key.
+fn lowered_service_key(service_key: &str, service: &Value) -> Option<String> {
+    let service = service.as_object()?;
+    if name_matches(service_key, true) || service.contains_key("fqn") {
+        return None;
+    }
+    let (package, name) = service_key.rsplit_once('.')?;
+    let package_ok = package.split('.').all(|segment| {
+        !segment.is_empty()
+            && segment
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+    });
+    (package_ok && name_matches(name, true)).then(|| name.to_string())
+}
+
+/// The key an upstream operation key that starts uppercase lowers to. `None`
+/// keeps the key.
+fn lowered_operation_key(operation_key: &str, operation: &Value) -> Option<String> {
+    let operation = operation.as_object()?;
+    if !name_matches(operation_key, true) || operation.contains_key("fqn") {
+        return None;
+    }
+    let mut chars = operation_key.chars();
+    let first = chars.next()?;
+    Some(first.to_ascii_lowercase().to_string() + chars.as_str())
+}
+
+/// Takes an operation's `input` or `output` out of the schema when it names an
+/// existing type, and returns the names by language.
+fn take_named_type(
+    path: &Path,
+    operation: &mut serde_json::Map<String, Value>,
+    label: &str,
+    context: &str,
+) -> Result<Option<LanguageStringSpec>> {
+    let reject = |reason: String| {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!("{context}: {reason}"),
+        })
+    };
+    let Some(schema) = operation.get(label).and_then(Value::as_object) else {
+        return Ok(None);
+    };
+    if !schema
+        .keys()
+        .any(|keyword| is_language_ref_keyword(keyword))
+    {
+        return Ok(None);
+    }
+    let mut named = LanguageStringSpec::default();
+    let mut seen = BTreeMap::<Language, &str>::new();
+    for (keyword, value) in schema {
+        if let Some((_, language)) = LANGUAGE_REF_KEYWORDS
+            .iter()
+            .find(|(candidate, _)| candidate == keyword)
+        {
+            let Some(name) = value.as_str().filter(|name| !name.trim().is_empty()) else {
+                return reject(format!(
+                    "`{keyword}` must be a non-empty string naming the type, got {value}"
+                ));
+            };
+            if let Some(previous) = seen.insert(*language, keyword) {
+                return reject(format!(
+                    "`{previous}` and `{keyword}` both name the {language} type; keep one"
+                ));
+            }
+            named.by_language.insert(*language, name.to_string());
+        } else if !matches!(keyword.as_str(), "description" | "title" | "$comment") {
+            return reject(format!(
+                "names an existing type by `$<lang>Ref`, so it can't also declare `{keyword}`; \
+                 remove `{keyword}`, or remove the `$<lang>Ref` keywords and declare the shape"
+            ));
+        }
+    }
+    operation.remove(label);
+    Ok(Some(named))
 }
 
 fn validate_raw_document_schema_positions(path: &Path, raw: &Value) -> Result<()> {
@@ -2015,6 +2240,15 @@ fn validate_schema_keyword_allowlist(path: &Path, schema: &Schema, context: &str
                 path: path.to_path_buf(),
                 reason: format!(
                     "{context}: OpenAPI `discriminator` is not yet supported; express a closed object union with `oneOf` branches carrying one shared required `const` property"
+                ),
+            });
+        }
+        if is_language_ref_keyword(keyword) {
+            return Err(Error::InvalidJsonSchema {
+                path: path.to_path_buf(),
+                reason: format!(
+                    "{context}: `{keyword}` names an existing type only on an operation `input` \
+                     or `output`; declare this schema's shape instead"
                 ),
             });
         }
@@ -6622,42 +6856,63 @@ fn build_operation(
         &format!("operation `{service_name}.{operation_key}`"),
     )?;
     let operation_name = operation_key.to_upper_camel_case();
-    let input = operation
-        .input
-        .as_ref()
-        .map(|schema| {
-            operation_model_type(
+    if (operation.named_input.is_some() || operation.named_output.is_some())
+        && let Some(keyword) = operation
+            .extra
+            .keys()
+            .find(|keyword| keyword.starts_with("x-nexus-"))
+    {
+        return Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!(
+                "operation `{service_name}.{operation_key}` names an existing type for its input \
+                 or output, which has no members for `{keyword}` to read; remove `{keyword}`, \
+                 or declare the shapes"
+            ),
+        });
+    }
+    let mut io_type = |named: Option<&LanguageStringSpec>,
+                       schema: Option<&Schema>,
+                       suffix: &str|
+     -> Result<Option<TypeSpec>> {
+        if let Some(named) = named {
+            return named_operation_type(
                 path,
-                canonical_path,
                 service_name,
                 operation_key,
-                "Input",
-                schema,
-                docs,
-                models,
-                module_paths,
-                external_types,
+                suffix,
+                named,
+                language,
             )
-        })
-        .transpose()?;
-    let output = operation
-        .output
-        .as_ref()
-        .map(|schema| {
-            operation_model_type(
-                path,
-                canonical_path,
-                service_name,
-                operation_key,
-                "Output",
-                schema,
-                docs,
-                models,
-                module_paths,
-                external_types,
-            )
-        })
-        .transpose()?;
+            .map(Some);
+        }
+        schema
+            .map(|schema| {
+                operation_model_type(
+                    path,
+                    canonical_path,
+                    service_name,
+                    operation_key,
+                    suffix,
+                    schema,
+                    docs,
+                    models,
+                    module_paths,
+                    external_types,
+                )
+            })
+            .transpose()
+    };
+    let input = io_type(
+        operation.named_input.as_ref(),
+        operation.input.as_ref(),
+        "Input",
+    )?;
+    let output = io_type(
+        operation.named_output.as_ref(),
+        operation.output.as_ref(),
+        "Output",
+    )?;
 
     // A per-language `x-<lang>-name` on the operation becomes the emitted code
     // identifier, verbatim (no recasing). It never affects `wire_name`.
@@ -7175,6 +7430,75 @@ fn check_long_poll_state(
         ));
     }
     Ok(())
+}
+
+/// The type of an operation `input` or `output` that names an existing type.
+///
+/// Only Python output resolves the names today. Another target refuses the
+/// operation rather than emit a model the input never declared.
+fn named_operation_type(
+    path: &Path,
+    service_name: &str,
+    operation_key: &str,
+    suffix: &str,
+    named: &LanguageStringSpec,
+    language: Language,
+) -> Result<TypeSpec> {
+    let label = suffix.to_lowercase();
+    let reject = |reason: String| {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!("operation `{service_name}.{operation_key}` {label}: {reason}"),
+        })
+    };
+    let keywords = |language: Language| {
+        LANGUAGE_REF_KEYWORDS
+            .iter()
+            .filter(|(_, candidate)| *candidate == language)
+            .map(|(keyword, _)| format!("`{keyword}`"))
+            .collect::<Vec<_>>()
+            .join(" or ")
+    };
+    if language != Language::Python {
+        return reject(format!(
+            "names an existing type by `$<lang>Ref`, which nexgen resolves only for Python \
+             output; generate Python, or replace the {} keywords with a schema",
+            keywords(language)
+        ));
+    }
+    let Some(reference) = named.by_language.get(&Language::Python) else {
+        let given = named
+            .by_language
+            .keys()
+            .map(|language| keywords(*language))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return reject(format!(
+            "names an existing type by {given} but not by `$pythonRef`; add `$pythonRef` with \
+             the qualified Python type name"
+        ));
+    };
+    let qualified = reference.split('.').count() > 1
+        && reference.split('.').all(|segment| {
+            let mut chars = segment.chars();
+            chars
+                .next()
+                .is_some_and(|first| first == '_' || first.is_ascii_alphabetic())
+                && chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+        });
+    if !qualified {
+        return reject(format!(
+            "`$pythonRef` `{reference}` must be a qualified Python type name, such as \
+             `package.module.Type`"
+        ));
+    }
+    Ok(TypeSpec::External(ExternalTypeSpec::Named(NamedTypeSpec {
+        name: format!(
+            "{service_name}.{}{suffix}",
+            operation_key.to_upper_camel_case()
+        ),
+        type_name: named.clone(),
+    })))
 }
 
 fn operation_model_type(
@@ -19758,7 +20082,7 @@ nexusrpc: "1.0.0"
 services:
   ChatService:
     operations:
-      PollMessages: {}
+      poll_messages: {}
 "##,
         );
         assert!(error.contains("must match `^[a-z]"), "{error}");

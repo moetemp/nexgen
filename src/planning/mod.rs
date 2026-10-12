@@ -105,6 +105,7 @@ pub(crate) fn planned_type_is_model_shaped(planned_type: &PlannedType) -> bool {
         planned_type,
         TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
             | TypeSpec::External(ExternalTypeSpec::Json(_))
+            | TypeSpec::External(ExternalTypeSpec::Named(_))
             | TypeSpec::Record(_)
     )
 }

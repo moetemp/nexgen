@@ -144,6 +144,9 @@ services:                       # map<service-name, service-def>
   default is the service name as-is, already PascalCase by its regex.)
 - A name violating its regex → **load reject** with a fix-it naming the
   service/operation and the required shape.
+  The upstream form, a dotted service key or an operation key that starts
+  uppercase, lowers to a matching key with the original as `fqn` first. See
+  [[language-refs]].
 - Service and operation objects use exact allowlists. Unknown members reject,
   including the undocumented `endpoint` field and OpenAPI's `discriminator`;
   neither has Nexus envelope semantics in this format.
@@ -176,6 +179,9 @@ payload is always a structured message:
   the P15 collision pass. A non-object inline form (`type: string`,
   `type: array`, a `oneOf` union, …) or a shapeless `type: object` →
   **load reject** (P7.1).
+- **`$<lang>Ref`** → names an existing type instead of a shape, as the
+  upstream nexus-rpc-gen schema allows. Python output imports the
+  `$pythonRef` type. See [[language-refs]].
 - **Omitted** → void / empty (this is *no* I/O, distinct from a non-object
   I/O), encoded per target: Go `nexus.NoValue`, TS `void`, Python `None`.
   **Java distinguishes the two sides** (verified below): an absent

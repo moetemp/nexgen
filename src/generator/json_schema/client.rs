@@ -277,6 +277,15 @@ pub(in crate::generator) fn build_client_plan(
     for service in &api_plan.services {
         let mut operations = Vec::new();
         for operation in &service.operations {
+            for (label, type_spec) in [("input", &operation.input), ("output", &operation.output)] {
+                if let Some(TypeSpec::External(ExternalTypeSpec::Named(_))) = type_spec {
+                    return Err(Error::NamedTypeInJsonCaller {
+                        service: service.wire_name.clone(),
+                        operation: operation.wire_name.clone(),
+                        label,
+                    });
+                }
+            }
             let output = client_model(operation.output.as_ref())?;
             let long_poll = operation
                 .long_poll

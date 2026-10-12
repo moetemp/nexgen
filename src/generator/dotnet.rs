@@ -1526,6 +1526,9 @@ impl<'a> ApiPlanner<'a> {
 
     fn dotnet_value_type(&self, value: &PlannedType) -> String {
         match value {
+            PlannedType::External(ExternalTypeSpec::Named(_)) => {
+                unreachable!("the parser names an existing type only for Python output")
+            }
             PlannedType::Float => "double".to_string(),
             PlannedType::Int(IntSpec::I32) => "int".to_string(),
             PlannedType::Int(IntSpec::I64) => "long".to_string(),
@@ -3783,6 +3786,9 @@ fn dotnet_function_args_wit_type(wit_type: &PlannedType) -> String {
 
 fn dotnet_authored_type(wit_type: &PlannedType) -> String {
     match wit_type {
+        TypeSpec::External(ExternalTypeSpec::Named(_)) => {
+            unreachable!("the parser names an existing type only for Python output")
+        }
         TypeSpec::Bool => "bool".to_string(),
         TypeSpec::Int(IntSpec::I32) => "int".to_string(),
         TypeSpec::Int(IntSpec::I64) => "long".to_string(),

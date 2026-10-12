@@ -80,6 +80,7 @@ interface model {
   ///   args-field="input"
   ///   result-type-parameter="WorkflowResult"
   ///   alternate-type="workflow-type"
+  ///   go-name-extractor="WorkflowFunctionName"
   ///   dotnet-name-extractor="TemporalFunctionNames.WorkflowName"
   ///   dotnet-call-extractor="TemporalFunctionNames.ExtractCall"
   /// @nexus.add-rpc-compatible-with "workflow-type"

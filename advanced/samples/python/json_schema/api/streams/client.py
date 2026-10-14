@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import ssl
 import time
 import typing
 import urllib.error
@@ -72,6 +73,7 @@ def _post(
     headers: dict[str, str],
     timeout: float,
     content_type: str = "application/json",
+    ssl_context: ssl.SSLContext | None = None,
 ) -> tuple[bytes, str]:
     request = urllib.request.Request(
         url,
@@ -86,7 +88,9 @@ def _post(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(
+            request, timeout=timeout, context=ssl_context
+        ) as response:
             status = typing.cast("int", response.status)
             answer = typing.cast("bytes", response.read())
             retryable = _retryable_header(response.headers)
@@ -118,6 +122,7 @@ async def _exchange(
     body: bytes,
     headers: dict[str, str],
     timeout: float,
+    ssl_context: ssl.SSLContext | None,
     payload_codec: temporalio.converter.PayloadCodec | None,
 ) -> bytes:
     """Posts a JSON body and answers with the JSON the endpoint sent back.
@@ -135,7 +140,13 @@ async def _exchange(
         body = encoded.SerializeToString()
         content_type = _PAYLOAD_CONTENT_TYPE
     answer, answer_type = await asyncio.to_thread(
-        _post, url, body, headers, timeout, content_type
+        _post,
+        url,
+        body,
+        headers,
+        timeout,
+        content_type=content_type,
+        ssl_context=ssl_context,
     )
     if answer_type.split(";")[0].strip().lower() != _PAYLOAD_CONTENT_TYPE:
         return answer
@@ -177,6 +188,9 @@ class StreamServiceHttpClient:
     service's address on the Nexus HTTP ingress, up to but not including the
     operation name.
 
+    ``ssl_context`` sets the TLS for an ``https`` ``base_url``, for example a
+    private certificate authority or a client certificate for mTLS.
+
     Give ``payload_codec`` the codec of the namespace that runs the handler. The
     input then crosses as an encoded payload, and an encoded result is decoded
     before it is parsed.
@@ -188,11 +202,13 @@ class StreamServiceHttpClient:
         *,
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
+        ssl_context: ssl.SSLContext | None = None,
         payload_codec: temporalio.converter.PayloadCodec | None = None,
     ) -> None:
         self._base_url: str = base_url.rstrip("/")
         self._headers: dict[str, str] = dict(headers or {})
         self._timeout: float = timeout
+        self._ssl_context: ssl.SSLContext | None = ssl_context
         self._payload_codec: temporalio.converter.PayloadCodec | None = payload_codec
 
     def _poll_budget(self, remaining: float) -> float:
@@ -218,6 +234,7 @@ class StreamServiceHttpClient:
             body,
             self._headers,
             self._timeout,
+            self._ssl_context,
             self._payload_codec,
         )
         if not raw:
@@ -242,6 +259,7 @@ class StreamServiceHttpClient:
             body,
             self._headers,
             self._timeout,
+            self._ssl_context,
             self._payload_codec,
         )
         if not raw:

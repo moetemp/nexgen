@@ -90,6 +90,7 @@ fn render_imports(output: &mut String, plan: &ClientPlan) {
         output.push_str("import datetime\n");
     }
     output.push_str("import json\n");
+    output.push_str("import ssl\n");
     if plan.has_long_poll() {
         output.push_str("import time\n");
     }
@@ -296,6 +297,7 @@ def _post(
     headers: dict[str, str],
     timeout: float,
     content_type: str = "application/json",
+    ssl_context: ssl.SSLContext | None = None,
 ) -> tuple[bytes, str]:
     request = urllib.request.Request(
         url,
@@ -310,7 +312,9 @@ def _post(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with urllib.request.urlopen(
+            request, timeout=timeout, context=ssl_context
+        ) as response:
             status = typing.cast("int", response.status)
             answer = typing.cast("bytes", response.read())
             retryable = _retryable_header(response.headers)
@@ -342,6 +346,7 @@ async def _exchange(
     body: bytes,
     headers: dict[str, str],
     timeout: float,
+    ssl_context: ssl.SSLContext | None,
     payload_codec: temporalio.converter.PayloadCodec | None,
 ) -> bytes:
     """Posts a JSON body and answers with the JSON the endpoint sent back.
@@ -359,7 +364,13 @@ async def _exchange(
         body = encoded.SerializeToString()
         content_type = _PAYLOAD_CONTENT_TYPE
     answer, answer_type = await asyncio.to_thread(
-        _post, url, body, headers, timeout, content_type
+        _post,
+        url,
+        body,
+        headers,
+        timeout,
+        content_type=content_type,
+        ssl_context=ssl_context,
     )
     if answer_type.split(";")[0].strip().lower() != _PAYLOAD_CONTENT_TYPE:
         return answer
@@ -393,6 +404,9 @@ fn render_service_client(output: &mut String, service: &ClientService) {
         "Every method posts to ``{base_url}/{operation}``, so ``base_url`` is the service's \
          address on the Nexus HTTP ingress, up to but not including the operation name."
             .to_string(),
+        "``ssl_context`` sets the TLS for an ``https`` ``base_url``, for example a private \
+         certificate authority or a client certificate for mTLS."
+            .to_string(),
         "Give ``payload_codec`` the codec of the namespace that runs the handler. The input \
          then crosses as an encoded payload, and an encoded result is decoded before it is \
          parsed."
@@ -408,6 +422,7 @@ fn render_service_client(output: &mut String, service: &ClientService) {
     output.push_str("        *,\n");
     output.push_str("        headers: dict[str, str] | None = None,\n");
     output.push_str("        timeout: float = 30.0,\n");
+    output.push_str("        ssl_context: ssl.SSLContext | None = None,\n");
     output.push_str("        payload_codec: temporalio.converter.PayloadCodec | None = None,\n");
     output.push_str("    ) -> None:\n");
     // Annotated explicitly: a target's strict type checker asks for it on a class
@@ -415,6 +430,7 @@ fn render_service_client(output: &mut String, service: &ClientService) {
     output.push_str("        self._base_url: str = base_url.rstrip(\"/\")\n");
     output.push_str("        self._headers: dict[str, str] = dict(headers or {})\n");
     output.push_str("        self._timeout: float = timeout\n");
+    output.push_str("        self._ssl_context: ssl.SSLContext | None = ssl_context\n");
     output.push_str(
         "        self._payload_codec: temporalio.converter.PayloadCodec | None = payload_codec\n",
     );
@@ -778,6 +794,7 @@ fn render_operation_method(output: &mut String, operation: &ClientOperation) {
     output.push_str("            body,\n");
     output.push_str("            self._headers,\n");
     output.push_str("            self._timeout,\n");
+    output.push_str("            self._ssl_context,\n");
     output.push_str("            self._payload_codec,\n");
     output.push_str("        )\n");
 

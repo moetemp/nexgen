@@ -66,8 +66,8 @@ Not done, and why:
 |---|---|---|
 | File | `client.go`, in the models' flat package | `client.py`, beside `models.py` |
 | Caller type | `<Service>HTTPClient` | `<Service>HttpClient` |
-| Construction | `New<Service>HTTPClient(baseURL string, options *<Service>HTTPClientOptions)` | `<Service>HttpClient(base_url, *, headers=None, timeout=30.0, payload_codec=None)` |
-| Options | `HTTPClient *http.Client` (nil is `http.DefaultClient`), `Header http.Header` | `headers` added to every request, `timeout` in seconds, `payload_codec` a `temporalio.converter.PayloadCodec` |
+| Construction | `New<Service>HTTPClient(baseURL string, options *<Service>HTTPClientOptions)` | `<Service>HttpClient(base_url, *, headers=None, timeout=30.0, ssl_context=None, payload_codec=None)` |
+| Options | `HTTPClient *http.Client` (nil is `http.DefaultClient`), `Header http.Header` | `headers` added to every request, `timeout` in seconds, `ssl_context` an `ssl.SSLContext`, `payload_codec` a `temporalio.converter.PayloadCodec` |
 | Method | `<Op>(ctx context.Context, request In) (Out, error)` | `async def <op>(self, request: In) -> Out` |
 | Void input | no `request` parameter, body `{}` | no `request` parameter, body `{}` |
 | Void output | `error` only | `-> None` |
@@ -96,6 +96,9 @@ other status is about the request, and repeating it changes nothing.
   characters pass through, so the segment is also safe inside each target's
   string literal and format string.
 - **Body.** `Content-Type: application/json`. A void input posts `{}`.
+- **TLS.** Python passes `ssl_context` to `urlopen`, so a caller sets a private
+  certificate authority or a client certificate for mTLS. Without it, `urllib`
+  uses its default context. Go takes TLS from the `http.Client` it is given.
 - **Payload codec (Python).** With `payload_codec`, the JSON body becomes a
   `json/plain` payload, the codec encodes it, and the caller posts the
   serialized payload as `application/x-temporal-payload`. That is the form the
@@ -162,7 +165,8 @@ toolchains and drives them against a local endpoint: the posted path and body,
 a header, a void operation, and `201`, `400`, `429`, `503` reported as status
 errors with the right retryability. A Python fixture runs a test codec both
 ways, reads a plain JSON answer with the codec set, and refuses an encoded
-answer without it.
+answer without it. Another drives an `https` endpoint with a self-signed
+certificate that only the given `ssl_context` trusts.
 
 ## Interactions
 

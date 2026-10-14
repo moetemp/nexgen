@@ -476,6 +476,98 @@ fn the_generated_python_caller_runs_the_payload_codec() {
     assert!(output.contains("ok"), "{output}");
 }
 
+/// An `https` endpoint with a certificate only the caller's own context trusts.
+const PYTHON_TLS_DRIVER: &str = r#"
+import asyncio
+import http.server
+import importlib
+import pathlib
+import ssl
+import sys
+import threading
+import urllib.error
+
+package = pathlib.Path(sys.argv[1])
+certificate, key = sys.argv[2], sys.argv[3]
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+models = importlib.import_module(f"{package.name}.models")
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'{"records": ["a"]}')
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+serving = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+serving.load_cert_chain(certificate, key)
+server.socket = serving.wrap_socket(server.socket, server_side=True)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+base = f"https://127.0.0.1:{server.server_port}/svc"
+
+
+async def main():
+    trusting = ssl.create_default_context(cafile=certificate)
+    client = client_module.StreamServiceHttpClient(base, ssl_context=trusting)
+    answer = await client.read(models.ReadInput(stream="scores"))
+    assert answer.records == ["a"], answer
+
+    # The default context does not trust the endpoint, so the option is what made it work.
+    try:
+        await client_module.StreamServiceHttpClient(base).read(
+            models.ReadInput(stream="scores")
+        )
+    except urllib.error.URLError as error:
+        assert isinstance(error.reason, ssl.SSLCertVerificationError), error
+    else:
+        raise AssertionError("the default context trusted a private certificate")
+
+
+asyncio.run(main())
+server.shutdown()
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_caller_uses_its_ssl_context() {
+    let workspace = Workspace::new("http-caller-python-tls");
+    let package = generate_client(&workspace, Target::Python, "secured");
+    let certificate = workspace.root().join("endpoint.pem");
+    let key = workspace.root().join("endpoint.key");
+    run(command("openssl")
+        .args([
+            "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+        ])
+        .args([
+            "-subj",
+            "/CN=127.0.0.1",
+            "-addext",
+            "subjectAltName=IP:127.0.0.1",
+        ])
+        .arg("-keyout")
+        .arg(&key)
+        .arg("-out")
+        .arg(&certificate))
+    .expect_ok("make a self-signed certificate");
+    let driver = workspace.root().join("drive_tls.py");
+    fs::write(&driver, PYTHON_TLS_DRIVER).expect("write the driver");
+    let interpreter = python_interpreter();
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package)
+        .arg(&certificate)
+        .arg(&key))
+    .expect_ok("drive the generated caller over TLS");
+    assert!(output.contains("ok"), "{output}");
+}
+
 /// Drives the loop against an endpoint that answers empty twice, fails once
 /// with a retryable status, then answers with records.
 const GO_LONG_POLL_DRIVER: &str = r#"package polls
@@ -873,7 +965,7 @@ sdk_wire = {"owner": "workflow", "topic": "scores", "workflow_id": "game-1", "ru
 assert alone.from_transfer_type(sdk_wire, StreamRef) == ref
 
 
-def fake_post(url, body, headers, timeout, content_type):
+def fake_post(url, body, headers, timeout, **options):
     return (
         b'{"owner": "workflow", "topic": "scores", "workflow_id": "game-1", "run_id": null}',
         "application/json",
@@ -1195,7 +1287,7 @@ client_module = importlib.import_module(f"{package.name}.client")
 posted = []
 
 
-def fake_post(url, body, headers, timeout, content_type):
+def fake_post(url, body, headers, timeout, **options):
     operation = url.rsplit("/", 1)[1]
     posted.append((operation, json.loads(body)))
     if operation == "append":
@@ -1485,7 +1577,7 @@ models = importlib.import_module(f"{package.name}.models")
 calls = []
 
 
-def fake_post(url, body, headers, timeout, content_type):
+def fake_post(url, body, headers, timeout, **options):
     calls.append(url)
     return b'{"records": [], "done": true}', "application/json"
 

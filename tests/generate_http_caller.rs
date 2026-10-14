@@ -277,6 +277,14 @@ fn python_caller_takes_a_payload_codec_for_each_call() {
             .contains("        payload_codec: temporalio.converter.PayloadCodec | None = None,\n"),
         "{client}"
     );
+    assert!(
+        client.contains("        ssl_context: ssl.SSLContext | None = None,\n"),
+        "{client}"
+    );
+    assert!(
+        client.contains("timeout=timeout, context=ssl_context"),
+        "{client}"
+    );
     // Every operation, a void one too, goes through the one exchange that runs the codec.
     assert_eq!(client.matches("await _exchange(").count(), 3, "{client}");
     assert_eq!(

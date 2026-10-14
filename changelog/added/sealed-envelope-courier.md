@@ -1,0 +1,1 @@
+The Python HTTP caller takes `payload_codec=`. It encodes each input as a Temporal payload and decodes an `application/x-temporal-payload` answer before it parses, so a caller reads a result that the handler's codec encoded.

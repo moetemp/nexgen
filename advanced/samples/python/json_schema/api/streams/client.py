@@ -9,6 +9,8 @@ import time
 import typing
 import urllib.error
 import urllib.request
+import temporalio.api.common.v1
+import temporalio.converter
 
 from .models import (
     AppendInput,
@@ -61,12 +63,21 @@ def _retryable_header(headers: typing.Any) -> bool | None:
     return str(value).strip().lower() == "true"
 
 
-def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> bytes:
+_PAYLOAD_CONTENT_TYPE = "application/x-temporal-payload"
+
+
+def _post(
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+    timeout: float,
+    content_type: str = "application/json",
+) -> tuple[bytes, str]:
     request = urllib.request.Request(
         url,
         data=body,
         headers={
-            "Content-Type": "application/json",
+            "Content-Type": content_type,
             # Tells the handler how long this caller waits, so it can cut a
             # long poll short instead of being cut off.
             "Request-Timeout": f"{int(timeout * 1000)}ms",
@@ -79,6 +90,7 @@ def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> byt
             status = typing.cast("int", response.status)
             answer = typing.cast("bytes", response.read())
             retryable = _retryable_header(response.headers)
+            answer_type = str(response.headers.get("Content-Type") or "")
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")
         raise HTTPStatusError(
@@ -88,7 +100,56 @@ def _post(url: str, body: bytes, headers: dict[str, str], timeout: float) -> byt
     # with a token, which this caller cannot read as the operation's result.
     if status not in (200, 204):
         raise HTTPStatusError(url, status, answer.decode(errors="replace"), retryable)
-    return answer
+    return answer, answer_type
+
+
+def _single_payload(
+    url: str, payloads: list[temporalio.api.common.v1.Payload]
+) -> temporalio.api.common.v1.Payload:
+    if len(payloads) != 1:
+        raise ValueError(
+            f"{url}: the payload codec gave {len(payloads)} payloads for one"
+        )
+    return payloads[0]
+
+
+async def _exchange(
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+    timeout: float,
+    payload_codec: temporalio.converter.PayloadCodec | None,
+) -> bytes:
+    """Posts a JSON body and answers with the JSON the endpoint sent back.
+
+    With a codec, the body crosses as an encoded Temporal payload, which the
+    handler's own codec decodes. The ingress sends a result that the handler's
+    codec encoded as a payload, and this caller decodes it before it parses.
+    """
+    content_type = "application/json"
+    if payload_codec is not None:
+        plain = temporalio.api.common.v1.Payload(
+            metadata={"encoding": b"json/plain"}, data=body
+        )
+        encoded = _single_payload(url, await payload_codec.encode([plain]))
+        body = encoded.SerializeToString()
+        content_type = _PAYLOAD_CONTENT_TYPE
+    answer, answer_type = await asyncio.to_thread(
+        _post, url, body, headers, timeout, content_type
+    )
+    if answer_type.split(";")[0].strip().lower() != _PAYLOAD_CONTENT_TYPE:
+        return answer
+    payload = temporalio.api.common.v1.Payload.FromString(answer)
+    if payload_codec is not None:
+        payload = _single_payload(url, await payload_codec.decode([payload]))
+    encoding = payload.metadata.get("encoding", b"").decode(errors="replace")
+    # A void result crosses as a null payload, which has no JSON to parse.
+    if encoding == "binary/null":
+        return b""
+    if not encoding.startswith("json/"):
+        hint = ", so pass payload_codec= to decode it" if payload_codec is None else ""
+        raise ValueError(f"{url} answered with a {encoding!r} payload{hint}")
+    return payload.data
 
 
 _LONG_POLL_MIN_BACKOFF = 0.05
@@ -115,6 +176,10 @@ class StreamServiceHttpClient:
     Every method posts to ``{base_url}/{operation}``, so ``base_url`` is the
     service's address on the Nexus HTTP ingress, up to but not including the
     operation name.
+
+    Give ``payload_codec`` the codec of the namespace that runs the handler. The
+    input then crosses as an encoded payload, and an encoded result is decoded
+    before it is parsed.
     """
 
     def __init__(
@@ -123,10 +188,12 @@ class StreamServiceHttpClient:
         *,
         headers: dict[str, str] | None = None,
         timeout: float = 30.0,
+        payload_codec: temporalio.converter.PayloadCodec | None = None,
     ) -> None:
         self._base_url: str = base_url.rstrip("/")
         self._headers: dict[str, str] = dict(headers or {})
         self._timeout: float = timeout
+        self._payload_codec: temporalio.converter.PayloadCodec | None = payload_codec
 
     def _poll_budget(self, remaining: float) -> float:
         """How long one attempt may ask the endpoint to park, in seconds.
@@ -146,12 +213,12 @@ class StreamServiceHttpClient:
         """
         wire: typing.Any = _AppendInputTransferTypeConverter().to_transfer_type(request)
         body = json.dumps(wire).encode()
-        raw = await asyncio.to_thread(
-            _post,
+        raw = await _exchange(
             f"{self._base_url}/append",
             body,
             self._headers,
             self._timeout,
+            self._payload_codec,
         )
         if not raw:
             raise ValueError("append answered with an empty body")
@@ -170,12 +237,12 @@ class StreamServiceHttpClient:
         """
         wire: typing.Any = _ReadInputTransferTypeConverter().to_transfer_type(request)
         body = json.dumps(wire).encode()
-        raw = await asyncio.to_thread(
-            _post,
+        raw = await _exchange(
             f"{self._base_url}/read",
             body,
             self._headers,
             self._timeout,
+            self._payload_codec,
         )
         if not raw:
             raise ValueError("read answered with an empty body")

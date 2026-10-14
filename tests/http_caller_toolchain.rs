@@ -354,6 +354,128 @@ fn the_generated_python_caller_posts_to_a_local_endpoint() {
     assert!(output.contains("ok"), "{output}");
 }
 
+/// An endpoint that reads and answers as the Nexus HTTP ingress does for a handler whose codec
+/// encodes: a body with the payload content type is a serialized Temporal payload.
+const PYTHON_CODEC_DRIVER: &str = r#"
+import asyncio
+import http.server
+import importlib
+import json
+import pathlib
+import sys
+import threading
+
+from temporalio.api.common.v1 import Payload
+from temporalio.converter import PayloadCodec
+
+package = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+models = importlib.import_module(f"{package.name}.models")
+
+PAYLOAD = "application/x-temporal-payload"
+
+
+def reversed_payload(encoding, data):
+    return Payload(
+        metadata={"encoding": b"binary/reversed", "inner": encoding}, data=data[::-1]
+    )
+
+
+class ReversingCodec(PayloadCodec):
+    async def encode(self, payloads):
+        return [reversed_payload(p.metadata["encoding"], p.data) for p in payloads]
+
+    async def decode(self, payloads):
+        return [
+            Payload(metadata={"encoding": p.metadata["inner"]}, data=p.data[::-1])
+            for p in payloads
+        ]
+
+
+seen = []
+answer_plain = []
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        content_type = self.headers.get("Content-Type")
+        if content_type == PAYLOAD:
+            payload = Payload.FromString(raw)
+            assert payload.metadata["encoding"] == b"binary/reversed", payload
+            assert payload.metadata["inner"] == b"json/plain", payload
+            raw = payload.data[::-1]
+        seen.append((content_type, json.loads(raw)))
+        if self.path.endswith("/ping"):
+            answer = reversed_payload(b"binary/null", b"").SerializeToString()
+        elif answer_plain:
+            answer = b'{"records": ["plain"]}'
+        else:
+            answer = reversed_payload(
+                b"json/plain", b'{"records": ["a"], "nextToken": "t2"}'
+            ).SerializeToString()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json" if answer_plain else PAYLOAD)
+        self.end_headers()
+        self.wfile.write(answer)
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+base = f"http://127.0.0.1:{server.server_port}/svc"
+
+
+async def main():
+    client = client_module.StreamServiceHttpClient(base, payload_codec=ReversingCodec())
+    answer = await client.read(models.ReadInput(stream="scores", after_token="t1"))
+    assert answer.records == ["a"] and answer.next_token == "t2", answer
+    assert await client.ping() is None
+    assert seen == [
+        (PAYLOAD, {"stream": "scores", "afterToken": "t1"}),
+        (PAYLOAD, {}),
+    ], seen
+
+    # A handler with no codec answers JSON, which the caller reads as it is.
+    answer_plain.append(True)
+    answer = await client.read(models.ReadInput(stream="scores"))
+    assert answer.records == ["plain"], answer
+    answer_plain.clear()
+
+    # Without the codec, an encoded answer is refused with the reason.
+    plain_client = client_module.StreamServiceHttpClient(base)
+    try:
+        await plain_client.read(models.ReadInput(stream="scores"))
+    except ValueError as error:
+        assert "binary/reversed" in str(error) and "payload_codec" in str(error), error
+    else:
+        raise AssertionError("an encoded answer was read without a codec")
+    assert seen[-1] == ("application/json", {"stream": "scores"}), seen[-1]
+
+
+asyncio.run(main())
+server.shutdown()
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_caller_runs_the_payload_codec() {
+    let workspace = Workspace::new("http-caller-python-codec");
+    let package = generate_client(&workspace, Target::Python, "encoded");
+    let driver = workspace.root().join("drive_codec.py");
+    fs::write(&driver, PYTHON_CODEC_DRIVER).expect("write the driver");
+    let interpreter = python_interpreter();
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package))
+    .expect_ok("drive the generated caller with a codec");
+    assert!(output.contains("ok"), "{output}");
+}
+
 /// Drives the loop against an endpoint that answers empty twice, fails once
 /// with a retryable status, then answers with records.
 const GO_LONG_POLL_DRIVER: &str = r#"package polls
@@ -751,8 +873,11 @@ sdk_wire = {"owner": "workflow", "topic": "scores", "workflow_id": "game-1", "ru
 assert alone.from_transfer_type(sdk_wire, StreamRef) == ref
 
 
-def fake_post(url, body, headers, timeout):
-    return b'{"owner": "workflow", "topic": "scores", "workflow_id": "game-1", "run_id": null}'
+def fake_post(url, body, headers, timeout, content_type):
+    return (
+        b'{"owner": "workflow", "topic": "scores", "workflow_id": "game-1", "run_id": null}',
+        "application/json",
+    )
 
 
 client_module._post = fake_post
@@ -1070,12 +1195,12 @@ client_module = importlib.import_module(f"{package.name}.client")
 posted = []
 
 
-def fake_post(url, body, headers, timeout):
+def fake_post(url, body, headers, timeout, content_type):
     operation = url.rsplit("/", 1)[1]
     posted.append((operation, json.loads(body)))
     if operation == "append":
-        return b'{"cursor": "c1"}'
-    return b'{"records": ["x"], "nextToken": "t2"}'
+        return b'{"cursor": "c1"}', "application/json"
+    return b'{"records": ["x"], "nextToken": "t2"}', "application/json"
 
 
 client_module._post = fake_post
@@ -1360,9 +1485,9 @@ models = importlib.import_module(f"{package.name}.models")
 calls = []
 
 
-def fake_post(url, body, headers, timeout):
+def fake_post(url, body, headers, timeout, content_type):
     calls.append(url)
-    return b'{"records": [], "done": true}'
+    return b'{"records": [], "done": true}', "application/json"
 
 
 client_module._post = fake_post

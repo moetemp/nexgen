@@ -269,6 +269,33 @@ fn the_other_targets_emit_no_caller() {
 }
 
 #[test]
+fn python_caller_takes_a_payload_codec_for_each_call() {
+    let (temp_dir, files) = generate(Language::Python, true, "http-caller-python-codec");
+    let client = file(&files, "client.py");
+    assert!(
+        client
+            .contains("        payload_codec: temporalio.converter.PayloadCodec | None = None,\n"),
+        "{client}"
+    );
+    // Every operation, a void one too, goes through the one exchange that runs the codec.
+    assert_eq!(client.matches("await _exchange(").count(), 3, "{client}");
+    assert_eq!(
+        client.matches("            self._payload_codec,\n").count(),
+        3,
+        "{client}"
+    );
+    assert!(
+        client.contains("_PAYLOAD_CONTENT_TYPE = \"application/x-temporal-payload\""),
+        "{client}"
+    );
+    assert!(
+        client.contains("metadata={\"encoding\": b\"json/plain\"}, data=body"),
+        "{client}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn python_caller_loops_the_long_poll_operation_and_keeps_the_single_shot() {
     let (temp_dir, files) = generate_contract(
         Language::Python,

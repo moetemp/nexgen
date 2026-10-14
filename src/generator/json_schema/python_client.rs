@@ -95,7 +95,10 @@ fn render_imports(output: &mut String, plan: &ClientPlan) {
     }
     output.push_str("import typing\n");
     output.push_str("import urllib.error\n");
-    output.push_str("import urllib.request\n\n");
+    output.push_str("import urllib.request\n");
+    // The models module already imports the SDK, so the codec hook adds no dependency.
+    output.push_str("import temporalio.api.common.v1\n");
+    output.push_str("import temporalio.converter\n\n");
 }
 
 /// The names the handles' parameter annotations use, which the flat caller's
@@ -284,14 +287,21 @@ def _retryable_header(headers: typing.Any) -> bool | None:
     return str(value).strip().lower() == "true"
 
 
+_PAYLOAD_CONTENT_TYPE = "application/x-temporal-payload"
+
+
 def _post(
-    url: str, body: bytes, headers: dict[str, str], timeout: float
-) -> bytes:
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+    timeout: float,
+    content_type: str = "application/json",
+) -> tuple[bytes, str]:
     request = urllib.request.Request(
         url,
         data=body,
         headers={
-            "Content-Type": "application/json",
+            "Content-Type": content_type,
             # Tells the handler how long this caller waits, so it can cut a
             # long poll short instead of being cut off.
             "Request-Timeout": f"{int(timeout * 1000)}ms",
@@ -304,6 +314,7 @@ def _post(
             status = typing.cast("int", response.status)
             answer = typing.cast("bytes", response.read())
             retryable = _retryable_header(response.headers)
+            answer_type = str(response.headers.get("Content-Type") or "")
     except urllib.error.HTTPError as error:
         detail = error.read().decode(errors="replace")
         raise HTTPStatusError(
@@ -313,7 +324,56 @@ def _post(
     # with a token, which this caller cannot read as the operation's result.
     if status not in (200, 204):
         raise HTTPStatusError(url, status, answer.decode(errors="replace"), retryable)
-    return answer
+    return answer, answer_type
+
+
+def _single_payload(
+    url: str, payloads: list[temporalio.api.common.v1.Payload]
+) -> temporalio.api.common.v1.Payload:
+    if len(payloads) != 1:
+        raise ValueError(
+            f"{url}: the payload codec gave {len(payloads)} payloads for one"
+        )
+    return payloads[0]
+
+
+async def _exchange(
+    url: str,
+    body: bytes,
+    headers: dict[str, str],
+    timeout: float,
+    payload_codec: temporalio.converter.PayloadCodec | None,
+) -> bytes:
+    """Posts a JSON body and answers with the JSON the endpoint sent back.
+
+    With a codec, the body crosses as an encoded Temporal payload, which the
+    handler's own codec decodes. The ingress sends a result that the handler's
+    codec encoded as a payload, and this caller decodes it before it parses.
+    """
+    content_type = "application/json"
+    if payload_codec is not None:
+        plain = temporalio.api.common.v1.Payload(
+            metadata={"encoding": b"json/plain"}, data=body
+        )
+        encoded = _single_payload(url, await payload_codec.encode([plain]))
+        body = encoded.SerializeToString()
+        content_type = _PAYLOAD_CONTENT_TYPE
+    answer, answer_type = await asyncio.to_thread(
+        _post, url, body, headers, timeout, content_type
+    )
+    if answer_type.split(";")[0].strip().lower() != _PAYLOAD_CONTENT_TYPE:
+        return answer
+    payload = temporalio.api.common.v1.Payload.FromString(answer)
+    if payload_codec is not None:
+        payload = _single_payload(url, await payload_codec.decode([payload]))
+    encoding = payload.metadata.get("encoding", b"").decode(errors="replace")
+    # A void result crosses as a null payload, which has no JSON to parse.
+    if encoding == "binary/null":
+        return b""
+    if not encoding.startswith("json/"):
+        hint = ", so pass payload_codec= to decode it" if payload_codec is None else ""
+        raise ValueError(f"{url} answered with a {encoding!r} payload{hint}")
+    return payload.data
 
 
 "#,
@@ -333,6 +393,10 @@ fn render_service_client(output: &mut String, service: &ClientService) {
         "Every method posts to ``{base_url}/{operation}``, so ``base_url`` is the service's \
          address on the Nexus HTTP ingress, up to but not including the operation name."
             .to_string(),
+        "Give ``payload_codec`` the codec of the namespace that runs the handler. The input \
+         then crosses as an encoded payload, and an encoded result is decoded before it is \
+         parsed."
+            .to_string(),
     ];
     if service.deprecated {
         paragraphs.push("This service is deprecated.".to_string());
@@ -344,12 +408,16 @@ fn render_service_client(output: &mut String, service: &ClientService) {
     output.push_str("        *,\n");
     output.push_str("        headers: dict[str, str] | None = None,\n");
     output.push_str("        timeout: float = 30.0,\n");
+    output.push_str("        payload_codec: temporalio.converter.PayloadCodec | None = None,\n");
     output.push_str("    ) -> None:\n");
     // Annotated explicitly: a target's strict type checker asks for it on a class
     // it cannot prove closed.
     output.push_str("        self._base_url: str = base_url.rstrip(\"/\")\n");
     output.push_str("        self._headers: dict[str, str] = dict(headers or {})\n");
     output.push_str("        self._timeout: float = timeout\n");
+    output.push_str(
+        "        self._payload_codec: temporalio.converter.PayloadCodec | None = payload_codec\n",
+    );
 
     if service
         .operations
@@ -700,17 +768,17 @@ fn render_operation_method(output: &mut String, operation: &ClientOperation) {
         None => output.push_str("        body = b\"{}\"\n"),
     }
     output.push_str(if operation.output.is_some() {
-        "        raw = await asyncio.to_thread(\n"
+        "        raw = await _exchange(\n"
     } else {
-        "        await asyncio.to_thread(\n"
+        "        await _exchange(\n"
     });
-    output.push_str("            _post,\n");
     output.push_str("            f\"{self._base_url}/");
     output.push_str(&operation.path_segment);
     output.push_str("\",\n");
     output.push_str("            body,\n");
     output.push_str("            self._headers,\n");
     output.push_str("            self._timeout,\n");
+    output.push_str("            self._payload_codec,\n");
     output.push_str("        )\n");
 
     let Some(model_output) = &operation.output else {

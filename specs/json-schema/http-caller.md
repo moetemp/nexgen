@@ -40,7 +40,9 @@ The defining choices (citing [[PRINCIPLES.md]]):
   handler (P10, P12).
 - **Standard library only (P4).** Python uses `urllib` inside
   `asyncio.to_thread`; Go uses `net/http`. A caller is often not in a worker
-  process, so it depends on nothing beyond the models module next to it.
+  process, so it depends on nothing beyond the models module next to it. The
+  Python codec hook uses the SDK's `Payload` and `PayloadCodec`, which the
+  models module already imports.
 - **Behind `advanced`.** `advanced` holds the CLI surface the root README does
   not document. The workflow-side `{Service}Client` is already reachable only
   through the `advanced`-gated `--native-api`, and a second caller kind should
@@ -50,6 +52,8 @@ The defining choices (citing [[PRINCIPLES.md]]):
   one accept set for every invocation, as for the native client.
 
 Not done, and why:
+- **A Go codec hook.** The Go caller posts JSON only, because no Go consumer
+  asks for a codec yet.
 - **TypeScript, Java and .NET** emit no caller. Each needs its own HTTP stack
   and an async story, and no consumer asks for one yet. A library request that
   sets `client` for them emits nothing.
@@ -62,8 +66,8 @@ Not done, and why:
 |---|---|---|
 | File | `client.go`, in the models' flat package | `client.py`, beside `models.py` |
 | Caller type | `<Service>HTTPClient` | `<Service>HttpClient` |
-| Construction | `New<Service>HTTPClient(baseURL string, options *<Service>HTTPClientOptions)` | `<Service>HttpClient(base_url, *, headers=None, timeout=30.0)` |
-| Options | `HTTPClient *http.Client` (nil is `http.DefaultClient`), `Header http.Header` | `headers` added to every request, `timeout` in seconds |
+| Construction | `New<Service>HTTPClient(baseURL string, options *<Service>HTTPClientOptions)` | `<Service>HttpClient(base_url, *, headers=None, timeout=30.0, payload_codec=None)` |
+| Options | `HTTPClient *http.Client` (nil is `http.DefaultClient`), `Header http.Header` | `headers` added to every request, `timeout` in seconds, `payload_codec` a `temporalio.converter.PayloadCodec` |
 | Method | `<Op>(ctx context.Context, request In) (Out, error)` | `async def <op>(self, request: In) -> Out` |
 | Void input | no `request` parameter, body `{}` | no `request` parameter, body `{}` |
 | Void output | `error` only | `-> None` |
@@ -92,6 +96,16 @@ other status is about the request, and repeating it changes nothing.
   characters pass through, so the segment is also safe inside each target's
   string literal and format string.
 - **Body.** `Content-Type: application/json`. A void input posts `{}`.
+- **Payload codec (Python).** With `payload_codec`, the JSON body becomes a
+  `json/plain` payload, the codec encodes it, and the caller posts the
+  serialized payload as `application/x-temporal-payload`. That is the form the
+  ingress gives the handler unchanged, so the handler's own codec decodes it.
+- **Encoded answer (Python).** The ingress answers
+  `application/x-temporal-payload` when no plain content type holds the result
+  payload's metadata, as for an encoded payload. The caller parses the payload, decodes it
+  with `payload_codec`, and reads its data as the JSON answer. A `binary/null`
+  payload is no answer. Without a codec, a payload that is not JSON is refused
+  with a `ValueError` that names `payload_codec`.
 - **Answer.** `200` is decoded as the output. An empty `200` for an operation
   that declares an output is an error: reading it as the all-defaults value
   would hand the caller a value the endpoint never produced. `204` is accepted
@@ -146,7 +160,9 @@ pass whether or not `--client` is set:
 `tests/http_caller_toolchain.rs` builds both callers with their real
 toolchains and drives them against a local endpoint: the posted path and body,
 a header, a void operation, and `201`, `400`, `429`, `503` reported as status
-errors with the right retryability.
+errors with the right retryability. A Python fixture runs a test codec both
+ways, reads a plain JSON answer with the codec set, and refuses an encoded
+answer without it.
 
 ## Interactions
 

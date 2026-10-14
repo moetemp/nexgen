@@ -266,6 +266,11 @@ fn render_post_helper(output: &mut String) {
         self.status: int = status
         self.detail: str = detail
         self._retryable: bool | None = retryable
+        failure_type, failure_message = _application_failure(detail)
+        # The application failure type the handler raised, such as a stream error
+        # class, and its message. Both are None when the body names none.
+        self.failure_type: str | None = failure_type
+        self.failure_message: str | None = failure_message
 
     @property
     def retryable(self) -> bool:
@@ -279,6 +284,34 @@ fn render_post_helper(output: &mut String) {
         if self._retryable is not None:
             return self._retryable
         return self.status == 429 or self.status >= 500
+
+
+def _application_failure(detail: str) -> tuple[str | None, str | None]:
+    """The type and message of the first application failure a body holds.
+
+    A Temporal handler's failure crosses as a Nexus failure whose ``details`` is
+    the Temporal failure in proto JSON, with its message left on the Nexus
+    failure. The application failure can sit in a ``cause`` at either level, so
+    both are searched, outermost first.
+    """
+    try:
+        pending: list[tuple[object, object]] = [(json.loads(detail), None)]
+    except ValueError:
+        return None, None
+    while pending:
+        failure, outer_message = pending.pop(0)
+        if not isinstance(failure, dict):
+            continue
+        fields = typing.cast("dict[str, object]", failure)
+        message = fields.get("message", outer_message)
+        info = fields.get("applicationFailureInfo")
+        if isinstance(info, dict):
+            failure_type = typing.cast("dict[str, object]", info).get("type")
+            if isinstance(failure_type, str):
+                return failure_type, message if isinstance(message, str) else None
+        pending.append((fields.get("details"), message))
+        pending.append((fields.get("cause"), None))
+    return None, None
 
 
 def _retryable_header(headers: typing.Any) -> bool | None:

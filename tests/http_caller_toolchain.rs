@@ -476,6 +476,114 @@ fn the_generated_python_caller_runs_the_payload_codec() {
     assert!(output.contains("ok"), "{output}");
 }
 
+/// Refusal bodies in the shapes the Nexus HTTP ingress writes for a Temporal handler error: the
+/// Temporal failure in `details`, with the application failure as its cause, and the same with
+/// the handler error kept around it as a Nexus `cause`.
+const PYTHON_FAILURE_DRIVER: &str = r#"
+import asyncio
+import http.server
+import importlib
+import json
+import pathlib
+import sys
+import threading
+
+package = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+models = importlib.import_module(f"{package.name}.models")
+
+lost = {
+    "message": "range lost",
+    "applicationFailureInfo": {
+        "type": "StreamReplayRangeLostError",
+        "nonRetryable": True,
+    },
+}
+handler_failure = {
+    "nexusHandlerFailureInfo": {
+        "type": "BAD_REQUEST",
+        "retryBehavior": "NEXUS_HANDLER_ERROR_RETRY_BEHAVIOR_NON_RETRYABLE",
+    },
+    "cause": lost,
+}
+bodies = [
+    {
+        "message": "StreamReplayRangeLostError: range lost",
+        "metadata": {"type": "temporal.api.failure.v1.Failure"},
+        "details": handler_failure,
+    },
+    {
+        "message": "StreamReplayRangeLostError: range lost",
+        "metadata": {"type": "nexus.HandlerError"},
+        "details": {"type": "BAD_REQUEST", "retryableOverride": False},
+        "cause": {
+            "message": "range lost",
+            "metadata": {"type": "temporal.api.failure.v1.Failure"},
+            "details": {
+                "applicationFailureInfo": lost["applicationFailureInfo"]
+            },
+        },
+    },
+]
+answers = [json.dumps(body).encode() for body in bodies] + [b"not json", b"{}"]
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        self.send_response(400)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(answers.pop(0))
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+client = client_module.StreamServiceHttpClient(f"http://127.0.0.1:{server.server_port}")
+
+expected = [
+    ("StreamReplayRangeLostError", "range lost"),
+    ("StreamReplayRangeLostError", "range lost"),
+    (None, None),
+    (None, None),
+]
+
+
+async def main():
+    for failure_type, failure_message in expected:
+        try:
+            await client.read(models.ReadInput(stream="scores"))
+        except client_module.HTTPStatusError as error:
+            assert error.status == 400, error
+            assert error.failure_type == failure_type, error.failure_type
+            assert error.failure_message == failure_message, error.failure_message
+        else:
+            raise AssertionError("a 400 was read as a result")
+
+
+asyncio.run(main())
+server.shutdown()
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_caller_reads_the_failure_type_from_a_400_body() {
+    let workspace = Workspace::new("http-caller-python-failure");
+    let package = generate_client(&workspace, Target::Python, "refused");
+    let driver = workspace.root().join("drive_failure.py");
+    fs::write(&driver, PYTHON_FAILURE_DRIVER).expect("write the driver");
+    let interpreter = python_interpreter();
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package))
+    .expect_ok("drive the generated caller against refusals");
+    assert!(output.contains("ok"), "{output}");
+}
+
 /// An `https` endpoint with a certificate only the caller's own context trusts.
 const PYTHON_TLS_DRIVER: &str = r#"
 import asyncio

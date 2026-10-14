@@ -73,13 +73,20 @@ Not done, and why:
 | Void output | `error` only | `-> None` |
 | Encode | `json.Marshal(request)` (the model's `MarshalJSON`) | `_<In>TransferTypeConverter().to_transfer_type(request)` |
 | Decode | `json.Unmarshal(raw, &answer)` | `_<Out>TransferTypeConverter().from_transfer_type(answer, Out)` |
-| Status error | `*HTTPStatusError{URL, StatusCode, Body, RetryableHeader}` with `Retryable()` | `HTTPStatusError(url, status, detail, retryable=None)` with `.retryable` |
+| Status error | `*HTTPStatusError{URL, StatusCode, Body, RetryableHeader}` with `Retryable()` | `HTTPStatusError(url, status, detail, retryable=None)` with `.retryable`, `.failure_type`, `.failure_message` |
 
 `<Service>` and `<Op>` are the binding's own identifiers, so an `x-<lang>-name`
 moves the caller with the binding. Go spells the fixed vocabulary
 idiomatically (`HTTPClient`, `HTTPStatusError`) because it is not derived from
 an authored name; the [[properties]] acronym folding applies to derived names
 only.
+
+The Python error also reads the body as a Nexus failure. For a Temporal
+handler, the ingress puts the Temporal failure in proto JSON in `details`, and
+the application failure is a `cause` at the Nexus or the Temporal level.
+`failure_type` is the outermost application failure's `type`, such as a stream
+error class, and `failure_message` is its message. Both are `None` for a body
+that names no application failure. The Go error leaves the body unparsed.
 
 When the handler sends `Nexus-Request-Retryable`, that header decides
 `Retryable`. A Temporal handler error that isn't retryable comes back as a
@@ -166,7 +173,8 @@ a header, a void operation, and `201`, `400`, `429`, `503` reported as status
 errors with the right retryability. A Python fixture runs a test codec both
 ways, reads a plain JSON answer with the codec set, and refuses an encoded
 answer without it. Another drives an `https` endpoint with a self-signed
-certificate that only the given `ssl_context` trusts.
+certificate that only the given `ssl_context` trusts. A third reads the failure
+type and message from `400` bodies in both failure shapes.
 
 ## Interactions
 

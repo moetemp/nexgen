@@ -285,6 +285,10 @@ fn python_caller_takes_a_payload_codec_for_each_call() {
         client.contains("timeout=timeout, context=ssl_context"),
         "{client}"
     );
+    assert!(
+        client.contains("        self.failure_type: str | None = failure_type\n"),
+        "{client}"
+    );
     // Every operation, a void one too, goes through the one exchange that runs the codec.
     assert_eq!(client.matches("await _exchange(").count(), 3, "{client}");
     assert_eq!(

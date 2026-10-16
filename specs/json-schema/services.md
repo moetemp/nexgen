@@ -657,3 +657,5 @@ emission code rather than duplicate it:
 - [[PRINCIPLES.md]] — **P1** (polyglot wire), **P2** (idiomatic),
   **P3/P4** (SDK-only deps), **P7/P7.1** (strict/reject), **P14/P15**
   (layout + namespace).
+- [[http-caller]] — the optional `--client` HTTP caller per service, for a
+  process outside a worker.

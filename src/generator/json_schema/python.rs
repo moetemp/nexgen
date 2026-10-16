@@ -427,6 +427,44 @@ impl ModelBackend {
             .iter()
             .any(|model| model.full_name == json_type.full_name)
     }
+
+    /// The HTTP caller's plan for this module. The models are the backend's own
+    /// resolved set, so the caller names the same types the models module
+    /// declares, hoisted ones included.
+    pub(in crate::generator) fn client_plan(
+        &self,
+        api_plan: &PlannedSpec,
+    ) -> Result<crate::generator::json_schema::client::ClientPlan> {
+        let resolved_names = self
+            .json_models
+            .iter()
+            .chain(self.hoisted_json_models.iter())
+            .map(|model| (model.full_name.clone(), model.model_name.clone()))
+            .collect();
+        crate::generator::json_schema::client::build_client_plan(
+            api_plan,
+            &resolved_names,
+            Language::Python,
+            &crate::generator::json_schema::client::ClientNaming {
+                service: &|service| {
+                    service
+                        .code_name
+                        .for_language(Language::Python)
+                        .unwrap_or(&service.name)
+                        .to_string()
+                },
+                operation: &|operation| {
+                    operation
+                        .code_name
+                        .for_language(Language::Python)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| {
+                            crate::generator::python::python_field_name(&operation.name)
+                        })
+                },
+            },
+        )
+    }
 }
 
 #[derive(Debug, Default)]

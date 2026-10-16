@@ -330,7 +330,7 @@ fn render_service_client(output: &mut String, service: &ClientService) {
             .doc
             .clone()
             .unwrap_or_else(|| format!("An HTTP caller for the {} service.", service.wire_name)),
-        "Every method posts to `{base_url}/{operation}`, so `base_url` is the service's \
+        "Every method posts to ``{base_url}/{operation}``, so ``base_url`` is the service's \
          address on the Nexus HTTP ingress, up to but not including the operation name."
             .to_string(),
     ];
@@ -431,7 +431,7 @@ fn render_handle_constructor(
     let bound = target
         .keys
         .iter()
-        .map(|key| format!("`{}`", key_attribute(key)))
+        .map(|key| format!("``{}``", key_attribute(key)))
         .collect::<Vec<_>>()
         .join(", ");
     render_docstring(
@@ -439,10 +439,10 @@ fn render_handle_constructor(
         "        ",
         &[match parent {
             Some(_) => format!(
-                "A `{}` bound to {bound}: this handle's own members and the ones given here.",
+                "A ``{}`` bound to {bound}: this handle's own members and the ones given here.",
                 target.name
             ),
-            None => format!("A `{}` bound to {bound}.", target.name),
+            None => format!("A ``{}`` bound to {bound}.", target.name),
         }],
     );
     output.push_str("        return ");
@@ -474,7 +474,7 @@ fn render_handle_class(output: &mut String, service: &ClientService, handle: &Cl
     let bound = handle
         .keys
         .iter()
-        .map(|key| format!("`{}`", key_attribute(key)))
+        .map(|key| format!("``{}``", key_attribute(key)))
         .collect::<Vec<_>>()
         .join(", ");
     render_docstring(
@@ -483,7 +483,7 @@ fn render_handle_class(output: &mut String, service: &ClientService, handle: &Cl
         &[
             format!("Binds {bound} for the {} service.", service.wire_name),
             format!(
-                "Every method posts through the `{client_class}` it was built from with the \
+                "Every method posts through the ``{client_class}`` it was built from with the \
                  bound members filled in, so a caller states a stream's identity once. The \
                  flat caller stays available for a call that spells every member out."
             ),
@@ -623,12 +623,12 @@ fn render_handle_method(
     let bound = handle
         .keys
         .iter()
-        .map(|key| format!("`{}`", key_attribute(key)))
+        .map(|key| format!("``{}``", key_attribute(key)))
         .collect::<Vec<_>>()
         .join(", ");
     let pronoun = if handle.keys.len() == 1 { "it" } else { "them" };
     lines.push(format!(
-        "This handle supplies {bound}; the flat caller's `{method}` takes {pronoun} spelled out."
+        "This handle supplies {bound}; the flat caller's ``{method}`` takes {pronoun} spelled out."
     ));
     if operation.deprecated {
         lines.push("This operation is deprecated.".to_string());
@@ -776,21 +776,21 @@ fn long_poll_paragraphs(
         .map(|(done, _)| member_attribute(model_output.member(done), done));
     vec![
         format!(
-            "Calls `{}` until it answers with something, or until `deadline`.",
+            "Calls ``{}`` until it answers with something, or until ``deadline``.",
             operation.name
         ),
         format!(
-            "Each attempt sets `{wait_attribute}` from the budget left, so the endpoint \
+            "Each attempt sets ``{wait_attribute}`` from the budget left, so the endpoint \
                  parks for the caller instead of the caller spinning. The first answer whose \
-                 `{result_attribute}` is non-empty{done} is returned. When the deadline passes \
+                 ``{result_attribute}`` is non-empty{done} is returned. When the deadline passes \
                  first, the last answer is returned, which still carries the caller's resume \
                  position.",
             done = done_attribute
                 .as_ref()
-                .map(|done| format!(", or whose `{done}` is true,"))
+                .map(|done| format!(", or whose ``{done}`` is true,"))
                 .unwrap_or_default(),
         ),
-        "`deadline` is the whole budget in seconds. The single-shot method stays \
+        "``deadline`` is the whole budget in seconds. The single-shot method stays \
              available for a caller that wants one attempt."
             .to_string(),
     ]

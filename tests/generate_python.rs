@@ -1016,6 +1016,32 @@ fn python_json_generated_helper_docstrings_mark_code_as_literals() {
 }
 
 #[test]
+fn python_caller_and_reader_docstrings_mark_code_as_literals() {
+    let root = project_root();
+    let output_path = unique_output_path("python-json-caller-docstrings");
+    let status = Command::new(env!("CARGO_BIN_EXE_nexgen"))
+        .args([
+            "python",
+            json_input_path(&root, "streams").to_str().unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+            "--client",
+        ])
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert_python_script_succeeds(
+        SINGLE_BACKTICK_DOCSTRING_CHECK,
+        &[
+            output_path.to_str().unwrap(),
+            "client.py",
+            "_definitions.py",
+        ],
+    );
+    fs::remove_dir_all(output_path).unwrap();
+}
+
+#[test]
 fn python_json_examples_expose_expected_runtime_features() {
     let root = project_root();
     for example_id in ["chat", "kb", "showcase", "temporal"] {

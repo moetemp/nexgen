@@ -14,8 +14,9 @@ use crate::generator::json_schema::{java, python, typescript};
 use crate::language::Language;
 use crate::spec::{
     ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelBindingSpec, JsonModelSpec,
-    LanguageStringSpec, ModulePath, OperationLongPollSpec, OperationSpec, ServiceHandleSpec,
-    ServiceSpec, Symbol, TypeDeclEntry, TypeDeclSpec, TypeSpec,
+    LanguageStringSpec, ModulePath, OperationLongPollSpec, OperationSpec,
+    OperationStreamResultSpec, ServiceHandleSpec, ServiceSpec, Symbol, TypeDeclEntry, TypeDeclSpec,
+    TypeSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
@@ -401,6 +402,10 @@ use crate::json_schema::streaming::{
     LONG_POLL_RESULT_MEMBER as NEXUS_LONG_POLL_RESULT_MEMBER,
     LONG_POLL_WAIT_MEMBER as NEXUS_LONG_POLL_WAIT_MEMBER,
     STREAM_REF_KEYWORD as NEXUS_STREAM_REF_KEYWORD,
+    STREAM_RESULT_ITEM_MEMBER as NEXUS_STREAM_RESULT_ITEM_MEMBER,
+    STREAM_RESULT_KEYWORD as NEXUS_STREAM_RESULT_KEYWORD,
+    STREAM_RESULT_MAPPED_TARGETS as NEXUS_STREAM_RESULT_MAPPED_TARGETS,
+    STREAM_RESULT_READER_MEMBER as NEXUS_STREAM_RESULT_READER_MEMBER,
 };
 
 /// The identifiers the `--client` caller declares for a service's handles,
@@ -1399,6 +1404,9 @@ fn api_spec_from_parsed_json_documents(
     // The file each service came from, by position, so a check that runs on the
     // assembled spec can still name it.
     let mut service_paths = Vec::new();
+    // The authored operation keys of each service, in the order its operations
+    // are built, so a diagnostic can name an operation as the contract does.
+    let mut operation_keys = Vec::new();
     for canonical_path in canonical_paths {
         let Some((path, doc)) = parsed.docs.get(canonical_path) else {
             continue;
@@ -1409,6 +1417,7 @@ fn api_spec_from_parsed_json_documents(
         validate_service_key_scope(path, language, service_specs)?;
         for (service_key, service) in service_specs {
             service_paths.push(path.clone());
+            operation_keys.push(service.operations.keys().cloned().collect::<Vec<_>>());
             services.push(build_service(
                 path,
                 canonical_path,
@@ -1461,7 +1470,7 @@ fn api_spec_from_parsed_json_documents(
         model_scope: None,
         types,
     };
-    validate_identifier_namespace(language, &spec)?;
+    validate_identifier_namespace(language, &spec, &service_paths, &operation_keys)?;
     validate_http_caller_handle_names(language, &spec, &service_paths)?;
     Ok(spec)
 }
@@ -1707,6 +1716,10 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
                         validate_long_poll_grammar(path, operation_name, value)?;
                         continue;
                     }
+                    if keyword == NEXUS_STREAM_RESULT_KEYWORD {
+                        validate_stream_result_grammar(path, operation_name, value)?;
+                        continue;
+                    }
                     return reject(format!(
                         "operation `{operation_name}` has unknown keyword `{keyword}`"
                     ));
@@ -1746,6 +1759,96 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Validates the shape of an `x-nexus-stream-result` value. The item's model is
+/// resolved later, in [`build_stream_result`], with the operation's I/O.
+fn validate_stream_result_grammar(path: &Path, operation_name: &str, value: &Value) -> Result<()> {
+    let reject = |reason: String| {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!("operation `{operation_name}`: {reason}"),
+        })
+    };
+    let Value::Object(members) = value else {
+        return reject(format!(
+            "`{NEXUS_STREAM_RESULT_KEYWORD}` must be an object with `{NEXUS_STREAM_RESULT_ITEM_MEMBER}` and optionally `{NEXUS_STREAM_RESULT_READER_MEMBER}`, got {value}"
+        ));
+    };
+    for member in members.keys() {
+        if member != NEXUS_STREAM_RESULT_ITEM_MEMBER && member != NEXUS_STREAM_RESULT_READER_MEMBER
+        {
+            return reject(format!(
+                "`{NEXUS_STREAM_RESULT_KEYWORD}` has unknown member `{member}`; it takes `{NEXUS_STREAM_RESULT_ITEM_MEMBER}` and optionally `{NEXUS_STREAM_RESULT_READER_MEMBER}`"
+            ));
+        }
+    }
+    let Some(item) = members.get(NEXUS_STREAM_RESULT_ITEM_MEMBER) else {
+        return reject(format!(
+            "`{NEXUS_STREAM_RESULT_KEYWORD}` requires `{NEXUS_STREAM_RESULT_ITEM_MEMBER}`, the schema of one record's body"
+        ));
+    };
+    let is_reference = item
+        .as_object()
+        .is_some_and(|item| item.len() == 1 && item.get("$ref").is_some_and(Value::is_string));
+    if !is_reference {
+        return reject(format!(
+            "`{NEXUS_STREAM_RESULT_KEYWORD}.{NEXUS_STREAM_RESULT_ITEM_MEMBER}` must be a `$ref` to an object model, got {item}"
+        ));
+    }
+    let Some(reader) = members.get(NEXUS_STREAM_RESULT_READER_MEMBER) else {
+        return Ok(());
+    };
+    let Value::Object(mapping) = reader else {
+        return reject(format!(
+            "`{NEXUS_STREAM_RESULT_KEYWORD}.{NEXUS_STREAM_RESULT_READER_MEMBER}` must map a language to a `module.Type` path, got {reader}"
+        ));
+    };
+    for (target, type_path) in mapping {
+        if !NEXUS_STREAM_RESULT_MAPPED_TARGETS.contains(&target.as_str()) {
+            return reject(format!(
+                "`{NEXUS_STREAM_RESULT_KEYWORD}.{NEXUS_STREAM_RESULT_READER_MEMBER}` maps `{target}`, which has no stream reader; only `py` does, and every other target emits nothing for the stream"
+            ));
+        }
+        if let Some(problem) = dotted_type_path_problem(type_path) {
+            return reject(format!(
+                "`{NEXUS_STREAM_RESULT_KEYWORD}.{NEXUS_STREAM_RESULT_READER_MEMBER}.{target}` {problem}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Why `path` cannot name a type a target imports, or `None` when it can. The
+/// path is emitted verbatim as `import a.b` and `a.b.T`, so every segment must
+/// be an identifier and none a keyword.
+fn dotted_type_path_problem(path: &Value) -> Option<String> {
+    let valid = path.as_str().is_some_and(|path| {
+        let segments = path.split('.').collect::<Vec<_>>();
+        segments.len() >= 2
+            && segments.iter().all(|segment| {
+                let mut chars = segment.chars();
+                chars
+                    .next()
+                    .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
+                    && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+    });
+    if !valid {
+        return Some(format!(
+            "must be a dotted `module.Type` path naming the type to emit, got {path}"
+        ));
+    }
+    path.as_str()
+        .and_then(|path| {
+            path.split('.')
+                .find(|segment| crate::generator::python::is_python_keyword(segment))
+        })
+        .map(|keyword| {
+            format!(
+                "path {path} contains the Python keyword `{keyword}`, which cannot name a module or a type"
+            )
+        })
 }
 
 /// Validates the shape of an `x-nexus-long-poll` value. Whether the two named
@@ -1948,31 +2051,8 @@ fn validate_stream_ref(path: &Path, schema: &Schema, context: &str) -> Result<()
                         "`{NEXUS_STREAM_REF_KEYWORD}` maps `{target}`, which has no stream reference mapping; only `py` does, and every other target emits the model"
                     ));
                 }
-                let valid = path.as_str().is_some_and(|path| {
-                    let segments = path.split('.').collect::<Vec<_>>();
-                    segments.len() >= 2
-                        && segments.iter().all(|segment| {
-                            let mut chars = segment.chars();
-                            chars
-                                .next()
-                                .is_some_and(|first| first.is_ascii_alphabetic() || first == '_')
-                                && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-                        })
-                });
-                if !valid {
-                    return reject(format!(
-                        "`{NEXUS_STREAM_REF_KEYWORD}.{target}` must be a dotted `module.Type` path naming the type to emit, got {path}"
-                    ));
-                }
-                // The path is emitted verbatim as `import a.b` and `a.b.T`, so a
-                // keyword segment would be a syntax error in the models module.
-                if let Some(keyword) = path.as_str().and_then(|path| {
-                    path.split('.')
-                        .find(|segment| crate::generator::python::is_python_keyword(segment))
-                }) {
-                    return reject(format!(
-                        "`{NEXUS_STREAM_REF_KEYWORD}.{target}` path {path} contains the Python keyword `{keyword}`, which cannot name a module or a type"
-                    ));
+                if let Some(problem) = dotted_type_path_problem(path) {
+                    return reject(format!("`{NEXUS_STREAM_REF_KEYWORD}.{target}` {problem}"));
                 }
             }
         }
@@ -6516,6 +6596,18 @@ fn build_operation(
     };
 
     let long_poll = build_long_poll(path, canonical_path, operation_key, operation, docs, models)?;
+    let stream_result = build_stream_result(
+        path,
+        canonical_path,
+        service_name,
+        operation_key,
+        operation,
+        docs,
+        models,
+        module_paths,
+        external_types,
+        language,
+    )?;
 
     Ok(OperationSpec {
         name: operation_name.clone(),
@@ -6528,6 +6620,7 @@ fn build_operation(
             .and_then(Value::as_bool)
             .unwrap_or(false),
         long_poll,
+        stream_result,
         doc: language_string(operation.description.clone()),
         return_doc: LanguageStringSpec::default(),
         input,
@@ -6704,6 +6797,70 @@ fn build_handles(
 /// `array`, and the optional done flag a `boolean`. Pinning them keeps every
 /// target's emitted loop a fixed shape: one numeric assignment, one length
 /// test and one flag test.
+/// Lowers an operation's `x-nexus-stream-result`: the item resolves like an
+/// operation's input or output model, and the reader type keeps only the
+/// active target's mapping.
+#[allow(clippy::too_many_arguments)]
+fn build_stream_result(
+    path: &Path,
+    canonical_path: &Path,
+    service_name: &str,
+    operation_key: &str,
+    operation: &Operation,
+    docs: &IndexMap<PathBuf, (PathBuf, Document)>,
+    models: &BTreeMap<TypeKey, JsonModel>,
+    module_paths: Option<&BTreeMap<PathBuf, ModulePath>>,
+    external_types: &mut BTreeMap<String, ExternalTypeBindingSpec>,
+    language: Language,
+) -> Result<Option<OperationStreamResultSpec>> {
+    let Some(value) = operation.extra.get(NEXUS_STREAM_RESULT_KEYWORD) else {
+        return Ok(None);
+    };
+    let item_value = value
+        .get(NEXUS_STREAM_RESULT_ITEM_MEMBER)
+        .cloned()
+        .unwrap_or(Value::Null);
+    let item_schema: Schema =
+        serde_json::from_value(item_value).map_err(|error| Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!(
+                "operation `{operation_key}`: `{NEXUS_STREAM_RESULT_KEYWORD}.{NEXUS_STREAM_RESULT_ITEM_MEMBER}` is not a schema: {error}"
+            ),
+        })?;
+    let item = operation_model_type(
+        path,
+        canonical_path,
+        service_name,
+        operation_key,
+        "StreamItem",
+        &item_schema,
+        docs,
+        models,
+        module_paths,
+        external_types,
+    )?;
+    let reader = stream_result_target(language).and_then(|target| {
+        value
+            .get(NEXUS_STREAM_RESULT_READER_MEMBER)?
+            .get(target)?
+            .as_str()
+            .map(str::to_string)
+    });
+    Ok(Some(OperationStreamResultSpec {
+        item,
+        reader: language_string_override(language, reader),
+    }))
+}
+
+/// The `x-<lang>-name` token a target's stream reader is mapped under, for a
+/// target that can emit one.
+fn stream_result_target(language: Language) -> Option<&'static str> {
+    match language {
+        Language::Python => Some("py"),
+        _ => None,
+    }
+}
+
 fn build_long_poll(
     path: &Path,
     canonical_path: &Path,
@@ -9386,6 +9543,8 @@ pub(crate) struct ManifestModel {
 /// One service handed to [`build_name_manifest`]. Services live in the root
 /// module scope of the file that declares them (the single-input scope).
 pub(crate) struct ManifestService {
+    /// The contract file the service came from, when the check knows it.
+    pub(crate) source_path: Option<PathBuf>,
     pub(crate) name: String,
     /// The verbatim per-language service code-identifier override
     /// (`x-<lang>-name`), if the active target carries one. `None` derives from
@@ -9401,9 +9560,38 @@ pub(crate) struct ManifestService {
     /// The identifiers the `--client` caller declares for this service's
     /// handles (`x-nexus-handle`), with the role each plays.
     pub(crate) handle_idents: Vec<(String, &'static str)>,
+    /// The Workflow client's stream readers (`x-nexus-stream-result`) in a
+    /// target that emits them: the reader method, the operation it reads, and
+    /// the package its SDK type is imported from.
+    pub(crate) stream_readers: Vec<ManifestStreamReader>,
+    /// The Workflow client's operation methods in a target with stream
+    /// readers, so a reader method cannot shadow one.
+    pub(crate) client_operation_idents: Vec<(String, String)>,
+}
+
+pub(crate) struct ManifestStreamReader {
+    pub(crate) method: String,
+    pub(crate) operation: String,
+    pub(crate) package: String,
+    pub(crate) item_ref: String,
 }
 
 impl ManifestService {
+    /// Names the service's contract file in a refusal that had none.
+    fn locate(&self, error: Error) -> Error {
+        match (error, &self.source_path) {
+            (Error::InvalidJsonSchema { path, reason }, Some(source))
+                if path == Path::new("<json-schema>") =>
+            {
+                Error::InvalidJsonSchema {
+                    path: source.clone(),
+                    reason,
+                }
+            }
+            (error, _) => error,
+        }
+    }
+
     /// The emitted service code identifier for `language`: the verbatim override
     /// when present, else the derived name.
     ///
@@ -9800,6 +9988,59 @@ fn validate_service_file_scopes(
                 service.code_ident(language),
                 service.origin_label(),
             )?;
+            // A stream reader's item model joins the service file's imports, and
+            // its SDK type is imported as `import pkg.mod`, which binds `pkg`.
+            for reader in &service.stream_readers {
+                if let Some(type_ident) = manifest.type_name(&reader.item_ref) {
+                    scope
+                        .insert(
+                            language,
+                            type_ident.to_string(),
+                            format!("operation I/O type `{}`", reader.item_ref),
+                        )
+                        .map_err(|error| service.locate(error))?;
+                }
+                scope
+                    .insert(
+                        language,
+                        reader.package.clone(),
+                        format!(
+                            "package `{}` imported for the stream reader of operation `{}` (`{NEXUS_STREAM_RESULT_KEYWORD}`)",
+                            reader.package, reader.operation
+                        ),
+                    )
+                    .map_err(|error| service.locate(error))?;
+            }
+            if !service.client_operation_idents.is_empty() {
+                let mut members = Namespace::default();
+                let mut reserved = vec!["_nexus_client"];
+                if !service.stream_readers.is_empty() {
+                    reserved.push("_endpoint");
+                }
+                for member in reserved {
+                    members
+                        .insert(
+                            language,
+                            member.to_string(),
+                            format!("the Workflow client's `self.{member}`"),
+                        )
+                        .map_err(|error| service.locate(error))?;
+                }
+                for (ident, operation) in &service.client_operation_idents {
+                    members
+                        .insert(language, ident.clone(), format!("operation `{operation}`"))
+                        .map_err(|error| service.locate(error))?;
+                }
+                for reader in &service.stream_readers {
+                    members
+                        .insert(
+                            language,
+                            reader.method.clone(),
+                            format!("the stream reader of operation `{}`", reader.operation),
+                        )
+                        .map_err(|error| service.locate(error))?;
+                }
+            }
             for reference in &service.io_type_refs {
                 let Some(type_ident) = manifest.type_name(reference) else {
                     continue;
@@ -9942,6 +10183,8 @@ const fn scope_is_run_wide(language: Language) -> bool {
 fn manifest_inputs_from_spec(
     language: Language,
     spec: &ApiSpec,
+    service_paths: &[PathBuf],
+    operation_keys: &[Vec<String>],
 ) -> (Vec<ManifestModel>, Vec<ManifestService>) {
     let mut models = Vec::new();
     for (_full_name, binding) in spec.external_types() {
@@ -9964,7 +10207,9 @@ fn manifest_inputs_from_spec(
     let services = spec
         .services
         .iter()
-        .map(|service| ManifestService {
+        .enumerate()
+        .map(|(index, service)| ManifestService {
+            source_path: service_paths.get(index).cloned(),
             name: service.name.clone(),
             code_name: service.code_name.for_language(language).map(str::to_string),
             module_key: spec.module_path.as_module_key(),
@@ -9976,6 +10221,8 @@ fn manifest_inputs_from_spec(
                 .filter_map(TypeSpec::reference)
                 .map(|reference| reference.trim_start_matches('.').to_string())
                 .collect(),
+            stream_readers: Vec::new(),
+            client_operation_idents: Vec::new(),
             handle_idents: http_caller_handle_idents(
                 language,
                 &service.handles,
@@ -9998,14 +10245,105 @@ fn manifest_inputs_from_spec(
                     .collect::<Vec<_>>(),
             ),
         })
-        .collect();
+        .collect::<Vec<_>>();
+    let mut services = services;
+    for (index, (manifest, service)) in services.iter_mut().zip(&spec.services).enumerate() {
+        let keys = operation_keys.get(index);
+        let operations = service
+            .operations
+            .iter()
+            .enumerate()
+            .map(|(position, operation)| StreamReaderOperation {
+                name: &operation.name,
+                label: keys.and_then(|keys| keys.get(position)).map(String::as_str),
+                python_code_name: operation.code_name.for_language(Language::Python),
+                python_reader: operation
+                    .stream_result
+                    .as_ref()
+                    .and_then(|stream_result| stream_result.reader.for_language(Language::Python)),
+                item_ref: operation.stream_result.as_ref().and_then(|stream_result| {
+                    stream_result
+                        .item
+                        .reference()
+                        .map(|reference| reference.trim_start_matches('.').to_string())
+                }),
+            })
+            .collect::<Vec<_>>();
+        (manifest.stream_readers, manifest.client_operation_idents) =
+            stream_reader_manifest(language, &operations);
+    }
     (models, services)
+}
+
+/// One operation as the stream-reader checks see it: its name, the name a
+/// diagnostic shows (the authored key when known), its `x-py-name` override,
+/// its Python reader type and its item model's full name.
+pub(crate) struct StreamReaderOperation<'a> {
+    pub(crate) name: &'a str,
+    pub(crate) label: Option<&'a str>,
+    pub(crate) python_code_name: Option<&'a str>,
+    pub(crate) python_reader: Option<&'a str>,
+    pub(crate) item_ref: Option<String>,
+}
+
+/// The Workflow client's stream readers and operation methods in a target that
+/// emits readers, for the P15 checks. Empty for every other target.
+pub(crate) fn stream_reader_manifest(
+    language: Language,
+    operations: &[StreamReaderOperation<'_>],
+) -> (Vec<ManifestStreamReader>, Vec<(String, String)>) {
+    if language != Language::Python {
+        return (Vec::new(), Vec::new());
+    }
+    let method = |operation: &StreamReaderOperation<'_>| {
+        operation
+            .python_code_name
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                let name = operation.name.to_snake_case();
+                if crate::generator::python::is_python_keyword(&name) {
+                    format!("{name}_")
+                } else {
+                    name
+                }
+            })
+    };
+    let readers = operations
+        .iter()
+        .filter_map(|operation| {
+            let reader = operation.python_reader?;
+            Some(ManifestStreamReader {
+                method: format!("read_{}_stream", method(operation)),
+                operation: operation.label.unwrap_or(operation.name).to_string(),
+                package: reader.split('.').next().unwrap_or(reader).to_string(),
+                item_ref: operation.item_ref.clone().unwrap_or_default(),
+            })
+        })
+        .collect::<Vec<_>>();
+    // Every Python Workflow client holds members its methods could shadow, so
+    // the methods are checked for every service, not only one with readers.
+    let methods = operations
+        .iter()
+        .map(|operation| {
+            (
+                method(operation),
+                operation.label.unwrap_or(operation.name).to_string(),
+            )
+        })
+        .collect();
+    (readers, methods)
 }
 
 /// The load-time P15 collision check: builds the manifest and discards it,
 /// surfacing any collision as a load reject. Runs once per emitted target.
-fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<()> {
-    let (models, services) = manifest_inputs_from_spec(language, spec);
+fn validate_identifier_namespace(
+    language: Language,
+    spec: &ApiSpec,
+    service_paths: &[PathBuf],
+    operation_keys: &[Vec<String>],
+) -> Result<()> {
+    let (models, services) =
+        manifest_inputs_from_spec(language, spec, service_paths, operation_keys);
     build_name_manifest(language, &models, &services)?;
     Ok(())
 }
@@ -12227,6 +12565,60 @@ $defs:
     properties:
       topic: {{ type: string }}
     required: [topic]
+    additionalProperties: false
+"##
+            ));
+            assert!(error.contains(expected), "{value}: {error}");
+        }
+    }
+
+    #[test]
+    fn rejects_a_malformed_stream_result() {
+        for (value, expected) in [
+            ("true", "must be an object with `item`"),
+            (
+                "{ item: { $ref: \"#/$defs/Token\" }, wait: 1 }",
+                "unknown member `wait`",
+            ),
+            ("{ reader: { py: example.Reader } }", "requires `item`"),
+            (
+                "{ item: { type: string } }",
+                "must be a `$ref` to an object model",
+            ),
+            (
+                "{ item: { $ref: \"#/$defs/Token\" }, reader: example.Reader }",
+                "must map a language to a `module.Type` path",
+            ),
+            (
+                "{ item: { $ref: \"#/$defs/Token\" }, reader: { go: example.Reader } }",
+                "maps `go`",
+            ),
+            (
+                "{ item: { $ref: \"#/$defs/Token\" }, reader: { py: Reader } }",
+                "must be a dotted `module.Type` path",
+            ),
+            (
+                "{ item: { $ref: \"#/$defs/Token\" }, reader: { py: example.import.Reader } }",
+                "the Python keyword `import`",
+            ),
+            ("{ item: { $ref: \"#/$defs/Missing\" } }", "Missing"),
+        ] {
+            let error = doc_reject(&format!(
+                r##"
+nexusrpc: "1.0.0"
+services:
+  ChatService:
+    operations:
+      chat:
+        x-nexus-stream-result: {value}
+        input: {{ $ref: "#/$defs/Token" }}
+        output: {{ $ref: "#/$defs/Token" }}
+$defs:
+  Token:
+    type: object
+    properties:
+      text: {{ type: string }}
+    required: [text]
     additionalProperties: false
 "##
             ));

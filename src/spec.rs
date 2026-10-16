@@ -657,6 +657,31 @@ pub struct OperationLongPollSpec {
     pub wait_maximum: Option<i64>,
 }
 
+/// An operation whose start hands its caller a stream. Like
+/// [`OperationLongPollSpec`], it changes no wire behavior; it tells a generated
+/// Workflow caller which reader to wrap the operation handle in.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OperationStreamResultSpec<F: TypeFamily = AuthoredFamily> {
+    /// The type of one record's body.
+    pub item: TypeSpec<F>,
+    /// The SDK reader type, as a dotted `module.Type`, per target. A target with
+    /// no reader type emits nothing for the stream.
+    pub reader: F::Text,
+}
+
+impl<F: TypeFamily> OperationStreamResultSpec<F> {
+    fn map_names_with<G, M>(self, map: &mut M) -> OperationStreamResultSpec<G>
+    where
+        G: TypeFamily,
+        M: ApiSpecTransform<F, G>,
+    {
+        OperationStreamResultSpec {
+            item: self.item.map_names_with(map),
+            reader: map.map_text(self.reader),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
@@ -673,6 +698,9 @@ pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     /// The authored long-poll contract, when the operation declares one. It
     /// changes no wire behavior; it tells a generated caller how to loop.
     pub long_poll: Option<OperationLongPollSpec>,
+    /// The authored stream result, when the operation's start hands back a
+    /// stream.
+    pub stream_result: Option<OperationStreamResultSpec<F>>,
     pub doc: F::Text,
     pub return_doc: F::Text,
     pub input: Option<TypeSpec<F>>,
@@ -708,6 +736,9 @@ impl<F: TypeFamily> OperationSpec<F> {
             experimental: self.experimental,
             deprecated: self.deprecated,
             long_poll: self.long_poll,
+            stream_result: self
+                .stream_result
+                .map(|stream_result| stream_result.map_names_with(map)),
             doc: map.map_text(self.doc),
             return_doc: map.map_text(self.return_doc),
             input: self.input.map(|input| input.map_names_with(map)),

@@ -509,7 +509,44 @@ impl<'a> TypePlanningContext<'a> {
             planner: self,
         });
         self.resolve_planned_record_field_types(&source_spec, &mut planned_spec);
+        self.resolve_planned_variant_case_types(&source_spec, &mut planned_spec);
         planned_spec
+    }
+
+    /// A case payload that names a proto message with an authored record plans as
+    /// that record, as a record field does.
+    fn resolve_planned_variant_case_types(
+        &mut self,
+        source_spec: &ApiSpec<OperationLoweredFamily>,
+        planned_spec: &mut PlannedSpec,
+    ) {
+        for (variant_name, planned_entry) in &mut planned_spec.types {
+            let TypeDeclSpec::Variant(planned_variant) = &mut planned_entry.declaration else {
+                continue;
+            };
+            let Some(source_variant) = source_spec.variant(variant_name) else {
+                continue;
+            };
+            for planned_case in &mut planned_variant.cases {
+                // Matched by name, so a planning pass that drops or reorders a
+                // case can never move a payload onto another case.
+                let Some(source_case) = source_variant
+                    .cases
+                    .iter()
+                    .find(|source_case| source_case.name == planned_case.name)
+                else {
+                    continue;
+                };
+                if let Some(TypeSpec::External(ExternalTypeSpec::Proto(proto_name))) =
+                    &source_case.payload
+                {
+                    planned_case.payload = Some(proto::planned_value_type_from_authored_proto(
+                        proto_name.as_str(),
+                        self,
+                    ));
+                }
+            }
+        }
     }
 
     fn resolve_planned_record_field_types(

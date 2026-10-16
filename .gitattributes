@@ -1,3 +1,39 @@
 # Changelog entries are independent, append-only additions under Unreleased.
 # Keep both sides when concurrent branches add entries at the same location.
 CHANGELOG.md merge=union
+
+# GitHub folds the samples that `cargo xtask build-examples` writes, and test vectors.
+*_vectors.json linguist-generated=true
+advanced/samples/dotnet/json_schema/** linguist-generated=true
+advanced/samples/dotnet/wit/** linguist-generated=true
+advanced/samples/go/functionexecution/** linguist-generated=true
+advanced/samples/go/genericmodels/** linguist-generated=true
+advanced/samples/go/json_schema/** linguist-generated=true
+advanced/samples/go/multioperationservice/** linguist-generated=true
+advanced/samples/go/startworkflow/** linguist-generated=true
+advanced/samples/go/typeroundtrip/** linguist-generated=true
+advanced/samples/go/typeshowcase/** linguist-generated=true
+advanced/samples/go/userservice/** linguist-generated=true
+advanced/samples/go/workflowservice/** linguist-generated=true
+advanced/samples/java/src/** linguist-generated=true
+advanced/samples/python/json_schema/** linguist-generated=true
+advanced/samples/python/wit/** linguist-generated=true
+advanced/samples/typescript/json_schema/** linguist-generated=true
+advanced/samples/typescript/wit/** linguist-generated=true
+samples/java/src/main/** linguist-generated=true
+samples/*/chat/** linguist-generated=true
+samples/dotnet/kb/** linguist-generated=true
+samples/go/kb/** linguist-generated=true
+samples/python/kb/** linguist-generated=true
+samples/typescript/kb/** linguist-generated=true
+samples/go/showcase/** linguist-generated=true
+samples/python/showcase/** linguist-generated=true
+samples/typescript/showcase/** linguist-generated=true
+samples/go/streams/** linguist-generated=true
+samples/python/streams/** linguist-generated=true
+samples/typescript/streams/** linguist-generated=true
+samples/go/temporal/** linguist-generated=true
+samples/python/temporal/** linguist-generated=true
+samples/typescript/temporal/** linguist-generated=true
+samples/typescript/temporal-date/** linguist-generated=true
+samples/typescript/temporal-temporal/** linguist-generated=true

@@ -1,0 +1,1 @@
+Added the `x-nexus-stream-ref` model keyword, which marks a closed model as the stream reference; a contract can map it per language (`py: module.Type`) so Python emits that type in the model's place, and without a mapping every target emits the model.

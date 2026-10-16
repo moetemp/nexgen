@@ -547,6 +547,144 @@ fn the_generated_python_long_poll_loop_runs_against_a_local_endpoint() {
     assert!(output.contains("ok"), "{output}");
 }
 
+/// An operation that hands back a stream reference and a read that takes one,
+/// so the emitted converter is run against the SDK type it builds.
+const STREAM_REF_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  ScoresService:
+    fqn: example.scores.v1.ScoresService
+    operations:
+      startGame:
+        fqn: startGame
+        input: { $ref: "#/$defs/GameRequest" }
+        output: { $ref: "#/$defs/StreamRef" }
+      read:
+        fqn: read
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  GameRequest:
+    type: object
+    properties:
+      gameId: { type: string }
+    required: [gameId]
+    additionalProperties: false
+  StreamRef:
+    type: object
+    x-nexus-stream-ref: { py: example_sdk.streams.StreamRef }
+    properties:
+      owner: { type: string, enum: [workflow, activity, standalone] }
+      workflow_id: { oneOf: [{ type: string }, { type: "null" }] }
+      run_id: { oneOf: [{ type: string }, { type: "null" }] }
+      topic: { type: string }
+    required: [owner, topic]
+    additionalProperties: false
+  ReadInput:
+    type: object
+    properties:
+      stream: { $ref: "#/$defs/StreamRef" }
+      afterToken: { type: string }
+    required: [stream]
+    additionalProperties: false
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+    additionalProperties: false
+"##;
+
+/// Runs the emitted stream-reference converter against the type it builds.
+///
+/// The contract maps the reference to `example_sdk.streams.StreamRef`, which
+/// the driver defines with the members the contract declares. What is checked
+/// is the emitted code's contract with that type: built by keyword from the
+/// wire members, read back by attribute, an SDK's own nulls accepted, and the
+/// value a caller gets back from an operation being that type.
+const PYTHON_STREAM_REF_DRIVER: &str = r#"
+import asyncio
+import dataclasses
+import importlib
+import pathlib
+import sys
+import types
+
+package = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(package.parent))
+
+
+@dataclasses.dataclass(frozen=True)
+class StreamRef:
+    owner: str
+    topic: str
+    workflow_id: str | None = None
+    run_id: str | None = None
+
+
+sdk = types.ModuleType("example_sdk")
+streams = types.ModuleType("example_sdk.streams")
+streams.StreamRef = StreamRef
+sdk.streams = streams
+sys.modules["example_sdk"] = sdk
+sys.modules["example_sdk.streams"] = streams
+
+models = importlib.import_module(f"{package.name}.models")
+client_module = importlib.import_module(f"{package.name}.client")
+assert models.StreamRef is StreamRef, models.StreamRef
+
+ref = StreamRef(owner="workflow", topic="scores", workflow_id="game-1")
+request = models.ReadInput(stream=ref, after_token="t1")
+converter = models._ReadInputTransferTypeConverter()
+wire = converter.to_transfer_type(request)
+assert wire == {
+    "stream": {"owner": "workflow", "workflow_id": "game-1", "topic": "scores"},
+    "afterToken": "t1",
+}, wire
+back = converter.from_transfer_type(wire, models.ReadInput)
+assert type(back.stream) is StreamRef, type(back.stream)
+assert back.stream == ref, back.stream
+
+# A reference the SDK serialized itself writes null for what it leaves unset.
+alone = models._StreamRefTransferTypeConverter()
+sdk_wire = {"owner": "workflow", "topic": "scores", "workflow_id": "game-1", "run_id": None}
+assert alone.from_transfer_type(sdk_wire, StreamRef) == ref
+
+
+def fake_post(url, body, headers, timeout):
+    return b'{"owner": "workflow", "topic": "scores", "workflow_id": "game-1", "run_id": null}'
+
+
+client_module._post = fake_post
+started = asyncio.run(
+    client_module.ScoresServiceHttpClient("http://endpoint").start_game(
+        models.GameRequest(game_id="g1")
+    )
+)
+assert type(started) is StreamRef and started == ref, started
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_stream_reference_round_trips_through_the_sdk_type() {
+    let workspace = Workspace::new("http-caller-python-stream-ref-toolchain");
+    let package = generate_client_from(&workspace, Target::Python, "scores", STREAM_REF_CONTRACT);
+    let driver = workspace.root().join("drive_stream_ref.py");
+    fs::write(&driver, PYTHON_STREAM_REF_DRIVER).expect("write the driver");
+
+    let interpreter = python_interpreter();
+    run(command(&interpreter.to_string_lossy())
+        .arg("-m")
+        .arg("compileall")
+        .arg("-q")
+        .arg(&package))
+    .expect_ok("compile the generated stream reference module");
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package))
+    .expect_ok("round-trip the stream reference");
+    assert!(output.contains("ok"), "{output}");
+}
+
 /// A long poll whose answer can say the stream ended. `done` is optional, so
 /// Go holds it behind a pointer.
 const DONE_CONTRACT: &str = r##"

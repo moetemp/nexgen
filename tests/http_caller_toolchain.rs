@@ -354,6 +354,328 @@ fn the_generated_python_caller_posts_to_a_local_endpoint() {
     assert!(output.contains("ok"), "{output}");
 }
 
+/// An endpoint that reads and answers as the Nexus HTTP ingress does for a handler whose codec
+/// encodes: a body with the payload content type is a serialized Temporal payload.
+const PYTHON_CODEC_DRIVER: &str = r#"
+import asyncio
+import http.server
+import importlib
+import json
+import pathlib
+import sys
+import threading
+
+from temporalio.api.common.v1 import Payload
+from temporalio.converter import PayloadCodec
+
+package = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+models = importlib.import_module(f"{package.name}.models")
+
+PAYLOAD = "application/x-temporal-payload"
+
+
+def reversed_payload(encoding, data):
+    return Payload(
+        metadata={"encoding": b"binary/reversed", "inner": encoding}, data=data[::-1]
+    )
+
+
+class ReversingCodec(PayloadCodec):
+    async def encode(self, payloads):
+        return [reversed_payload(p.metadata["encoding"], p.data) for p in payloads]
+
+    async def decode(self, payloads):
+        return [
+            Payload(metadata={"encoding": p.metadata["inner"]}, data=p.data[::-1])
+            for p in payloads
+        ]
+
+
+seen = []
+answer_plain = []
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        content_type = self.headers.get("Content-Type")
+        if content_type == PAYLOAD:
+            payload = Payload.FromString(raw)
+            assert payload.metadata["encoding"] == b"binary/reversed", payload
+            assert payload.metadata["inner"] == b"json/plain", payload
+            raw = payload.data[::-1]
+        seen.append((content_type, json.loads(raw)))
+        if self.path.endswith("/ping"):
+            answer = reversed_payload(b"binary/null", b"").SerializeToString()
+        elif answer_plain:
+            answer = b'{"records": ["plain"]}'
+        else:
+            answer = reversed_payload(
+                b"json/plain", b'{"records": ["a"], "nextToken": "t2"}'
+            ).SerializeToString()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json" if answer_plain else PAYLOAD)
+        self.end_headers()
+        self.wfile.write(answer)
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+base = f"http://127.0.0.1:{server.server_port}/svc"
+
+
+async def main():
+    client = client_module.StreamServiceHttpClient(base, payload_codec=ReversingCodec())
+    answer = await client.read(models.ReadInput(stream="scores", after_token="t1"))
+    assert answer.records == ["a"] and answer.next_token == "t2", answer
+    assert await client.ping() is None
+    assert seen == [
+        (PAYLOAD, {"stream": "scores", "afterToken": "t1"}),
+        (PAYLOAD, {}),
+    ], seen
+
+    # A handler with no codec answers JSON, which the caller reads as it is.
+    answer_plain.append(True)
+    answer = await client.read(models.ReadInput(stream="scores"))
+    assert answer.records == ["plain"], answer
+    answer_plain.clear()
+
+    # Without the codec, an encoded answer is refused with the reason.
+    plain_client = client_module.StreamServiceHttpClient(base)
+    try:
+        await plain_client.read(models.ReadInput(stream="scores"))
+    except ValueError as error:
+        assert "binary/reversed" in str(error) and "payload_codec" in str(error), error
+    else:
+        raise AssertionError("an encoded answer was read without a codec")
+    assert seen[-1] == ("application/json", {"stream": "scores"}), seen[-1]
+
+
+asyncio.run(main())
+server.shutdown()
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_caller_runs_the_payload_codec() {
+    let workspace = Workspace::new("http-caller-python-codec");
+    let package = generate_client(&workspace, Target::Python, "encoded");
+    let driver = workspace.root().join("drive_codec.py");
+    fs::write(&driver, PYTHON_CODEC_DRIVER).expect("write the driver");
+    let interpreter = python_interpreter();
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package))
+    .expect_ok("drive the generated caller with a codec");
+    assert!(output.contains("ok"), "{output}");
+}
+
+/// Refusal bodies in the shapes the Nexus HTTP ingress writes for a Temporal handler error: the
+/// Temporal failure in `details`, with the application failure as its cause, and the same with
+/// the handler error kept around it as a Nexus `cause`.
+const PYTHON_FAILURE_DRIVER: &str = r#"
+import asyncio
+import http.server
+import importlib
+import json
+import pathlib
+import sys
+import threading
+
+package = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+models = importlib.import_module(f"{package.name}.models")
+
+lost = {
+    "message": "range lost",
+    "applicationFailureInfo": {
+        "type": "StreamReplayRangeLostError",
+        "nonRetryable": True,
+    },
+}
+handler_failure = {
+    "nexusHandlerFailureInfo": {
+        "type": "BAD_REQUEST",
+        "retryBehavior": "NEXUS_HANDLER_ERROR_RETRY_BEHAVIOR_NON_RETRYABLE",
+    },
+    "cause": lost,
+}
+bodies = [
+    {
+        "message": "StreamReplayRangeLostError: range lost",
+        "metadata": {"type": "temporal.api.failure.v1.Failure"},
+        "details": handler_failure,
+    },
+    {
+        "message": "StreamReplayRangeLostError: range lost",
+        "metadata": {"type": "nexus.HandlerError"},
+        "details": {"type": "BAD_REQUEST", "retryableOverride": False},
+        "cause": {
+            "message": "range lost",
+            "metadata": {"type": "temporal.api.failure.v1.Failure"},
+            "details": {
+                "applicationFailureInfo": lost["applicationFailureInfo"]
+            },
+        },
+    },
+]
+answers = [json.dumps(body).encode() for body in bodies] + [b"not json", b"{}"]
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        self.send_response(400)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(answers.pop(0))
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+client = client_module.StreamServiceHttpClient(f"http://127.0.0.1:{server.server_port}")
+
+expected = [
+    ("StreamReplayRangeLostError", "range lost"),
+    ("StreamReplayRangeLostError", "range lost"),
+    (None, None),
+    (None, None),
+]
+
+
+async def main():
+    for failure_type, failure_message in expected:
+        try:
+            await client.read(models.ReadInput(stream="scores"))
+        except client_module.HTTPStatusError as error:
+            assert error.status == 400, error
+            assert error.failure_type == failure_type, error.failure_type
+            assert error.failure_message == failure_message, error.failure_message
+        else:
+            raise AssertionError("a 400 was read as a result")
+
+
+asyncio.run(main())
+server.shutdown()
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_caller_reads_the_failure_type_from_a_400_body() {
+    let workspace = Workspace::new("http-caller-python-failure");
+    let package = generate_client(&workspace, Target::Python, "refused");
+    let driver = workspace.root().join("drive_failure.py");
+    fs::write(&driver, PYTHON_FAILURE_DRIVER).expect("write the driver");
+    let interpreter = python_interpreter();
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package))
+    .expect_ok("drive the generated caller against refusals");
+    assert!(output.contains("ok"), "{output}");
+}
+
+/// An `https` endpoint with a certificate only the caller's own context trusts.
+const PYTHON_TLS_DRIVER: &str = r#"
+import asyncio
+import http.server
+import importlib
+import pathlib
+import ssl
+import sys
+import threading
+import urllib.error
+
+package = pathlib.Path(sys.argv[1])
+certificate, key = sys.argv[2], sys.argv[3]
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+models = importlib.import_module(f"{package.name}.models")
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'{"records": ["a"]}')
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+serving = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+serving.load_cert_chain(certificate, key)
+server.socket = serving.wrap_socket(server.socket, server_side=True)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+base = f"https://127.0.0.1:{server.server_port}/svc"
+
+
+async def main():
+    trusting = ssl.create_default_context(cafile=certificate)
+    client = client_module.StreamServiceHttpClient(base, ssl_context=trusting)
+    answer = await client.read(models.ReadInput(stream="scores"))
+    assert answer.records == ["a"], answer
+
+    # The default context does not trust the endpoint, so the option is what made it work.
+    try:
+        await client_module.StreamServiceHttpClient(base).read(
+            models.ReadInput(stream="scores")
+        )
+    except urllib.error.URLError as error:
+        assert isinstance(error.reason, ssl.SSLCertVerificationError), error
+    else:
+        raise AssertionError("the default context trusted a private certificate")
+
+
+asyncio.run(main())
+server.shutdown()
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_caller_uses_its_ssl_context() {
+    let workspace = Workspace::new("http-caller-python-tls");
+    let package = generate_client(&workspace, Target::Python, "secured");
+    let certificate = workspace.root().join("endpoint.pem");
+    let key = workspace.root().join("endpoint.key");
+    run(command("openssl")
+        .args([
+            "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+        ])
+        .args([
+            "-subj",
+            "/CN=127.0.0.1",
+            "-addext",
+            "subjectAltName=IP:127.0.0.1",
+        ])
+        .arg("-keyout")
+        .arg(&key)
+        .arg("-out")
+        .arg(&certificate))
+    .expect_ok("make a self-signed certificate");
+    let driver = workspace.root().join("drive_tls.py");
+    fs::write(&driver, PYTHON_TLS_DRIVER).expect("write the driver");
+    let interpreter = python_interpreter();
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package)
+        .arg(&certificate)
+        .arg(&key))
+    .expect_ok("drive the generated caller over TLS");
+    assert!(output.contains("ok"), "{output}");
+}
+
 /// Drives the loop against an endpoint that answers empty twice, fails once
 /// with a retryable status, then answers with records.
 const GO_LONG_POLL_DRIVER: &str = r#"package polls
@@ -547,6 +869,107 @@ fn the_generated_python_long_poll_loop_runs_against_a_local_endpoint() {
     assert!(output.contains("ok"), "{output}");
 }
 
+/// A long-pollable read whose endpoint keeps no state: each answer carries the
+/// state the next attempt sends back.
+const LONG_POLL_STATE_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    operations:
+      read:
+        fqn: read
+        x-nexus-long-poll:
+          wait-field: waitMs
+          result-field: records
+          state-field: state
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      waitMs: { type: integer }
+      state: { type: string }
+    additionalProperties: false
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+      state: { type: string }
+    additionalProperties: false
+"##;
+
+const PYTHON_LONG_POLL_STATE_DRIVER: &str = r#"
+import asyncio
+import http.server
+import importlib
+import json
+import pathlib
+import sys
+import threading
+
+package = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+models = importlib.import_module(f"{package.name}.models")
+
+# The second answer carries no state, so the caller keeps the one it had.
+script = [
+    b'{"records": [], "state": "s1"}',
+    b'{"records": []}',
+    b'{"records": ["a"], "state": "s3"}',
+]
+sent = []
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        sent.append(json.loads(self.rfile.read(length)).get("state"))
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(script.pop(0))
+
+    def log_message(self, *args):
+        pass
+
+
+server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+client = client_module.StreamServiceHttpClient(f"http://127.0.0.1:{server.server_port}")
+
+
+async def main():
+    answer = await client.read_until_records(models.ReadInput(state="s0"), deadline=5.0)
+    assert answer.records == ["a"] and answer.state == "s3", answer
+    assert sent == ["s0", "s1", "s1"], sent
+
+
+asyncio.run(main())
+server.shutdown()
+print("ok")
+"#;
+
+#[test]
+fn the_generated_python_long_poll_loop_sends_back_each_answers_state() {
+    let workspace = Workspace::new("http-caller-python-long-poll-state");
+    let package = generate_client_from(
+        &workspace,
+        Target::Python,
+        "stateful",
+        LONG_POLL_STATE_CONTRACT,
+    );
+    let driver = workspace.root().join("drive_state.py");
+    fs::write(&driver, PYTHON_LONG_POLL_STATE_DRIVER).expect("write the driver");
+    let interpreter = python_interpreter();
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package))
+    .expect_ok("drive the generated loop");
+    assert!(output.contains("ok"), "{output}");
+}
+
 /// An operation that hands back a stream reference and a read that takes one,
 /// so the emitted converter is run against the SDK type it builds.
 const STREAM_REF_CONTRACT: &str = r##"
@@ -650,8 +1073,11 @@ sdk_wire = {"owner": "workflow", "topic": "scores", "workflow_id": "game-1", "ru
 assert alone.from_transfer_type(sdk_wire, StreamRef) == ref
 
 
-def fake_post(url, body, headers, timeout):
-    return b'{"owner": "workflow", "topic": "scores", "workflow_id": "game-1", "run_id": null}'
+def fake_post(url, body, headers, timeout, **options):
+    return (
+        b'{"owner": "workflow", "topic": "scores", "workflow_id": "game-1", "run_id": null}',
+        "application/json",
+    )
 
 
 client_module._post = fake_post
@@ -969,12 +1395,12 @@ client_module = importlib.import_module(f"{package.name}.client")
 posted = []
 
 
-def fake_post(url, body, headers, timeout):
+def fake_post(url, body, headers, timeout, **options):
     operation = url.rsplit("/", 1)[1]
     posted.append((operation, json.loads(body)))
     if operation == "append":
-        return b'{"cursor": "c1"}'
-    return b'{"records": ["x"], "nextToken": "t2"}'
+        return b'{"cursor": "c1"}', "application/json"
+    return b'{"records": ["x"], "nextToken": "t2"}', "application/json"
 
 
 client_module._post = fake_post
@@ -1259,9 +1685,9 @@ models = importlib.import_module(f"{package.name}.models")
 calls = []
 
 
-def fake_post(url, body, headers, timeout):
+def fake_post(url, body, headers, timeout, **options):
     calls.append(url)
-    return b'{"records": [], "done": true}'
+    return b'{"records": [], "done": true}', "application/json"
 
 
 client_module._post = fake_post

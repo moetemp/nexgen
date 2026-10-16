@@ -18,12 +18,20 @@ services:
           wait-field: waitMs      # optional input member, type: integer, milliseconds
           result-field: records   # output member, type: array
           done-field: done        # optional output member, type: boolean
+          state-field: state      # optional member of both models, type: string
         input: { $ref: "#/$defs/ReadInput" }
         output: { $ref: "#/$defs/ReadOutput" }
 ```
 
 - The value is an object with `wait-field` and `result-field`, and optionally
-  `done-field`, each a non-empty string.
+  `done-field` and `state-field`, each a non-empty string.
+- `state-field` names an opaque `type: string` member that the input and the
+  output both declare, with the same `contentEncoding`. It is optional on the
+  input, since a first call has none. After an answer with nothing, the Python
+  loop sends the state that answer carried on its next attempt, so the endpoint
+  keeps nothing between calls. An answer without a state leaves the caller's
+  own. The Go loop doesn't carry it yet, so each Go
+  attempt sends the caller's own state.
 - `done-field` names a boolean the endpoint sets when nothing more will arrive,
   such as a stream whose writer has closed. Without it, an answer that ends the
   stream with no records is asked again until the deadline.
@@ -73,6 +81,7 @@ the call site: `read_until_records`.
 | Signature | `ReadUntilRecords(ctx, request ReadInput, deadline time.Duration) (ReadOutput, error)` | `async def read_until_records(self, request: ReadInput, *, deadline: float) -> ReadOutput` |
 | Wait assignment | `attempt.WaitMs = &milliseconds` | `dataclasses.replace(request, wait_ms=wait_ms)` |
 | Done test | `len(answer.Records) > 0`, plus `\|\| answer.Done` (a pointer test when optional) with `done-field` | `if answer.records:`, plus `or answer.done` with `done-field` |
+| State | not carried | `dataclasses.replace(request, state=answer.state)` after an answer with nothing, with `state-field` |
 
 Each attempt:
 1. **Budget.** The wait sent is the time left before the deadline, clamped to
@@ -121,6 +130,7 @@ Each attempt:
 | Wait member with a default | `waitMs: { type: integer, default: 5000 }` |
 | Operation without the side | marked operation with no `output` |
 | Model without `properties` | output is `additionalProperties: { type: string }` |
+| State member missing, not text, required on the input, or encoded differently | `state: { type: integer }`; `required: [state]` |
 
 ### Runtime fixtures
 
@@ -129,6 +139,8 @@ two empty answers, a `503`, then records (four attempts, each wait inside the
 budget); a deadline that passes on empty answers (the last answer, with its
 resume token, comes back); a `400` (returned at once); an answer with `done`
 set and no records (returned after one request, well inside the deadline).
+A Python endpoint that answers with a new state each time sees each one come
+back on the next attempt.
 
 ## Interactions
 

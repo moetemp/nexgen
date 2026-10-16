@@ -269,6 +269,45 @@ fn the_other_targets_emit_no_caller() {
 }
 
 #[test]
+fn python_caller_takes_a_payload_codec_for_each_call() {
+    let (temp_dir, files) = generate(Language::Python, true, "http-caller-python-codec");
+    let client = file(&files, "client.py");
+    assert!(
+        client
+            .contains("        payload_codec: temporalio.converter.PayloadCodec | None = None,\n"),
+        "{client}"
+    );
+    assert!(
+        client.contains("        ssl_context: ssl.SSLContext | None = None,\n"),
+        "{client}"
+    );
+    assert!(
+        client.contains("timeout=timeout, context=ssl_context"),
+        "{client}"
+    );
+    assert!(
+        client.contains("        self.failure_type: str | None = failure_type\n"),
+        "{client}"
+    );
+    // Every operation, a void one too, goes through the one exchange that runs the codec.
+    assert_eq!(client.matches("await _exchange(").count(), 3, "{client}");
+    assert_eq!(
+        client.matches("            self._payload_codec,\n").count(),
+        3,
+        "{client}"
+    );
+    assert!(
+        client.contains("_PAYLOAD_CONTENT_TYPE = \"application/x-temporal-payload\""),
+        "{client}"
+    );
+    assert!(
+        client.contains("metadata={\"encoding\": b\"json/plain\"}, data=body"),
+        "{client}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn python_caller_loops_the_long_poll_operation_and_keeps_the_single_shot() {
     let (temp_dir, files) = generate_contract(
         Language::Python,
@@ -411,4 +450,120 @@ fn a_done_flag_ends_the_loop_in_both_callers() {
         file(&files, "client.py")
     );
     fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// The long-poll contract with an opaque state member on both models.
+fn state_contract() -> String {
+    let contract = LONG_POLL_CONTRACT
+        .replace(
+            "          result-field: records\n",
+            "          result-field: records\n          state-field: state\n",
+        )
+        .replace(
+            "      waitMs: { type: integer }\n",
+            "      waitMs: { type: integer }\n      state: { type: string }\n",
+        )
+        .replace(
+            "      records: { type: array, items: { type: string } }\n    additionalProperties: false\n",
+            "      records: { type: array, items: { type: string } }\n      state: { type: string }\n    additionalProperties: false\n",
+        );
+    assert_eq!(
+        contract.matches("state: { type: string }").count(),
+        2,
+        "{contract}"
+    );
+    contract
+}
+
+#[test]
+fn a_state_member_rides_each_python_attempt() {
+    let (temp_dir, files) = generate_contract(
+        Language::Python,
+        &state_contract(),
+        true,
+        "http-caller-python-state",
+    );
+    let client = file(&files, "client.py");
+    assert!(
+        client.contains(
+            "            if answer.records:\n                return answer\n            \
+             if answer.state is not None:\n                \
+             request = dataclasses.replace(request, state=answer.state)\n"
+        ),
+        "{client}"
+    );
+    assert!(
+        client.contains("the next attempt sends the ``state`` that"),
+        "{client}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+    // Go reads the member but its loop doesn't carry it yet.
+    let (temp_dir, files) = generate_contract(
+        Language::Go,
+        &state_contract(),
+        true,
+        "http-caller-go-state",
+    );
+    assert!(!file(&files, "client.go").contains("request.State ="));
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn a_state_member_must_be_optional_text_on_both_models() {
+    let cases = [
+        (
+            "      waitMs: { type: integer }\n      state: { type: string }\n",
+            "      waitMs: { type: integer }\n",
+            "which the input model does not declare",
+        ),
+        (
+            "      state: { type: string }\n    additionalProperties: false\n",
+            "    additionalProperties: false\n",
+            "which the output model does not declare",
+        ),
+        (
+            "      waitMs: { type: integer }\n      state: { type: string }\n",
+            "      waitMs: { type: integer }\n      state: { type: integer }\n",
+            "input member `state` must be `type: string`",
+        ),
+        (
+            "    required: [stream]\n",
+            "    required: [stream, state]\n",
+            "input member `state` must be optional",
+        ),
+        (
+            "      waitMs: { type: integer }\n      state: { type: string }\n",
+            "      waitMs: { type: integer }\n      state: { type: string, contentEncoding: base64 }\n",
+            "the same `contentEncoding` on the input and the output",
+        ),
+    ];
+    for (from, to, expected) in cases {
+        let contract = state_contract();
+        assert!(contract.contains(from), "{from}");
+        let contract = contract.replacen(from, to, 1);
+        let temp_dir = unique_output_path("http-caller-state-refused");
+        let input_dir = temp_dir.join("input");
+        fs::create_dir_all(&input_dir).unwrap();
+        let input_path = input_dir.join("streams.nexusrpc.yaml");
+        fs::write(&input_path, &contract).unwrap();
+        let error = generate_to_file(&GenerateRequest {
+            config: NexgenConfig {
+                mode: GenerationMode::DefinitionsOnly,
+                client: true,
+                ..Default::default()
+            },
+            language: Language::Python,
+            input_paths: vec![input_path],
+            support_package: None,
+            descriptor_paths: Vec::new(),
+            output_path: temp_dir.join("streams"),
+            format: false,
+            java_package_name: None,
+            ts_date_time_types: Default::default(),
+        })
+        .expect_err("the state member should be refused")
+        .to_string();
+        assert!(error.contains(expected), "{to}: {error}");
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
 }

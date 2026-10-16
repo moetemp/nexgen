@@ -40,7 +40,9 @@ The defining choices (citing [[PRINCIPLES.md]]):
   handler (P10, P12).
 - **Standard library only (P4).** Python uses `urllib` inside
   `asyncio.to_thread`; Go uses `net/http`. A caller is often not in a worker
-  process, so it depends on nothing beyond the models module next to it.
+  process, so it depends on nothing beyond the models module next to it. The
+  Python codec hook uses the SDK's `Payload` and `PayloadCodec`, which the
+  models module already imports.
 - **Behind `advanced`.** `advanced` holds the CLI surface the root README does
   not document. The workflow-side `{Service}Client` is already reachable only
   through the `advanced`-gated `--native-api`, and a second caller kind should
@@ -50,6 +52,8 @@ The defining choices (citing [[PRINCIPLES.md]]):
   one accept set for every invocation, as for the native client.
 
 Not done, and why:
+- **A Go codec hook.** The Go caller posts JSON only, because no Go consumer
+  asks for a codec yet.
 - **TypeScript, Java and .NET** emit no caller. Each needs its own HTTP stack
   and an async story, and no consumer asks for one yet. A library request that
   sets `client` for them emits nothing.
@@ -62,20 +66,27 @@ Not done, and why:
 |---|---|---|
 | File | `client.go`, in the models' flat package | `client.py`, beside `models.py` |
 | Caller type | `<Service>HTTPClient` | `<Service>HttpClient` |
-| Construction | `New<Service>HTTPClient(baseURL string, options *<Service>HTTPClientOptions)` | `<Service>HttpClient(base_url, *, headers=None, timeout=30.0)` |
-| Options | `HTTPClient *http.Client` (nil is `http.DefaultClient`), `Header http.Header` | `headers` added to every request, `timeout` in seconds |
+| Construction | `New<Service>HTTPClient(baseURL string, options *<Service>HTTPClientOptions)` | `<Service>HttpClient(base_url, *, headers=None, timeout=30.0, ssl_context=None, payload_codec=None)` |
+| Options | `HTTPClient *http.Client` (nil is `http.DefaultClient`), `Header http.Header` | `headers` added to every request, `timeout` in seconds, `ssl_context` an `ssl.SSLContext`, `payload_codec` a `temporalio.converter.PayloadCodec` |
 | Method | `<Op>(ctx context.Context, request In) (Out, error)` | `async def <op>(self, request: In) -> Out` |
 | Void input | no `request` parameter, body `{}` | no `request` parameter, body `{}` |
 | Void output | `error` only | `-> None` |
 | Encode | `json.Marshal(request)` (the model's `MarshalJSON`) | `_<In>TransferTypeConverter().to_transfer_type(request)` |
 | Decode | `json.Unmarshal(raw, &answer)` | `_<Out>TransferTypeConverter().from_transfer_type(answer, Out)` |
-| Status error | `*HTTPStatusError{URL, StatusCode, Body, RetryableHeader}` with `Retryable()` | `HTTPStatusError(url, status, detail, retryable=None)` with `.retryable` |
+| Status error | `*HTTPStatusError{URL, StatusCode, Body, RetryableHeader}` with `Retryable()` | `HTTPStatusError(url, status, detail, retryable=None)` with `.retryable`, `.failure_type`, `.failure_message` |
 
 `<Service>` and `<Op>` are the binding's own identifiers, so an `x-<lang>-name`
 moves the caller with the binding. Go spells the fixed vocabulary
 idiomatically (`HTTPClient`, `HTTPStatusError`) because it is not derived from
 an authored name; the [[properties]] acronym folding applies to derived names
 only.
+
+The Python error also reads the body as a Nexus failure. For a Temporal
+handler, the ingress puts the Temporal failure in proto JSON in `details`, and
+the application failure is a `cause` at the Nexus or the Temporal level.
+`failure_type` is the outermost application failure's `type`, such as a stream
+error class, and `failure_message` is its message. Both are `None` for a body
+that names no application failure. The Go error leaves the body unparsed.
 
 When the handler sends `Nexus-Request-Retryable`, that header decides
 `Retryable`. A Temporal handler error that isn't retryable comes back as a
@@ -92,6 +103,19 @@ other status is about the request, and repeating it changes nothing.
   characters pass through, so the segment is also safe inside each target's
   string literal and format string.
 - **Body.** `Content-Type: application/json`. A void input posts `{}`.
+- **TLS.** Python passes `ssl_context` to `urlopen`, so a caller sets a private
+  certificate authority or a client certificate for mTLS. Without it, `urllib`
+  uses its default context. Go takes TLS from the `http.Client` it is given.
+- **Payload codec (Python).** With `payload_codec`, the JSON body becomes a
+  `json/plain` payload, the codec encodes it, and the caller posts the
+  serialized payload as `application/x-temporal-payload`. That is the form the
+  ingress gives the handler unchanged, so the handler's own codec decodes it.
+- **Encoded answer (Python).** The ingress answers
+  `application/x-temporal-payload` when no plain content type holds the result
+  payload's metadata, as for an encoded payload. The caller parses the payload, decodes it
+  with `payload_codec`, and reads its data as the JSON answer. A `binary/null`
+  payload is no answer. Without a codec, a payload that is not JSON is refused
+  with a `ValueError` that names `payload_codec`.
 - **Answer.** `200` is decoded as the output. An empty `200` for an operation
   that declares an output is an error: reading it as the all-defaults value
   would hand the caller a value the endpoint never produced. `204` is accepted
@@ -146,7 +170,11 @@ pass whether or not `--client` is set:
 `tests/http_caller_toolchain.rs` builds both callers with their real
 toolchains and drives them against a local endpoint: the posted path and body,
 a header, a void operation, and `201`, `400`, `429`, `503` reported as status
-errors with the right retryability.
+errors with the right retryability. A Python fixture runs a test codec both
+ways, reads a plain JSON answer with the codec set, and refuses an encoded
+answer without it. Another drives an `https` endpoint with a self-signed
+certificate that only the given `ssl_context` trusts. A third reads the failure
+type and message from `400` bodies in both failure shapes.
 
 ## Interactions
 

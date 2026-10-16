@@ -116,6 +116,11 @@ pub const LONG_POLL_RESULT_MEMBER: &str = "result-field";
 /// says the endpoint will answer nothing more, so the loop stops on it.
 pub const LONG_POLL_DONE_MEMBER: &str = "done-field";
 
+/// The optional `x-nexus-long-poll` member naming an opaque state member that
+/// the input and the output both declare. A loop passes each answer's state
+/// back on its next attempt, so the endpoint keeps nothing between calls.
+pub const LONG_POLL_STATE_MEMBER: &str = "state-field";
+
 /// The two rules a caller must not break. They are generator-owned rather than
 /// copied from the authored `description`: a contract that words them
 /// differently would still have to mean this.

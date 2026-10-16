@@ -400,6 +400,7 @@ use crate::json_schema::streaming::{
     LONG_POLL_DONE_MEMBER as NEXUS_LONG_POLL_DONE_MEMBER,
     LONG_POLL_KEYWORD as NEXUS_LONG_POLL_KEYWORD,
     LONG_POLL_RESULT_MEMBER as NEXUS_LONG_POLL_RESULT_MEMBER,
+    LONG_POLL_STATE_MEMBER as NEXUS_LONG_POLL_STATE_MEMBER,
     LONG_POLL_WAIT_MEMBER as NEXUS_LONG_POLL_WAIT_MEMBER,
     OPERATION_TOKEN_KEYWORD as NEXUS_OPERATION_TOKEN_KEYWORD,
     OPERATION_TOKEN_VERSION_MEMBER as NEXUS_OPERATION_TOKEN_VERSION_MEMBER,
@@ -1877,11 +1878,12 @@ fn validate_long_poll_grammar(path: &Path, operation_name: &str, value: &Value) 
         if member != NEXUS_LONG_POLL_WAIT_MEMBER
             && member != NEXUS_LONG_POLL_RESULT_MEMBER
             && member != NEXUS_LONG_POLL_DONE_MEMBER
+            && member != NEXUS_LONG_POLL_STATE_MEMBER
         {
             return reject(format!(
                 "`{NEXUS_LONG_POLL_KEYWORD}` has unknown member `{member}`; it takes \
                  `{NEXUS_LONG_POLL_WAIT_MEMBER}`, `{NEXUS_LONG_POLL_RESULT_MEMBER}` and \
-                 optionally `{NEXUS_LONG_POLL_DONE_MEMBER}`"
+                 optionally `{NEXUS_LONG_POLL_DONE_MEMBER}` and `{NEXUS_LONG_POLL_STATE_MEMBER}`"
             ));
         }
     }
@@ -1889,9 +1891,10 @@ fn validate_long_poll_grammar(path: &Path, operation_name: &str, value: &Value) 
         NEXUS_LONG_POLL_WAIT_MEMBER,
         NEXUS_LONG_POLL_RESULT_MEMBER,
         NEXUS_LONG_POLL_DONE_MEMBER,
+        NEXUS_LONG_POLL_STATE_MEMBER,
     ] {
         let Some(named) = members.get(member) else {
-            if member == NEXUS_LONG_POLL_DONE_MEMBER {
+            if member == NEXUS_LONG_POLL_DONE_MEMBER || member == NEXUS_LONG_POLL_STATE_MEMBER {
                 continue;
             }
             return reject(format!("`{NEXUS_LONG_POLL_KEYWORD}` requires `{member}`"));
@@ -6967,6 +6970,10 @@ fn build_long_poll(
             .get(NEXUS_LONG_POLL_DONE_MEMBER)
             .and_then(Value::as_str)
             .map(str::to_string),
+        state_field: members
+            .get(NEXUS_LONG_POLL_STATE_MEMBER)
+            .and_then(Value::as_str)
+            .map(str::to_string),
         wait_minimum: None,
         wait_maximum: None,
     };
@@ -7084,7 +7091,90 @@ fn build_long_poll(
         }
     }
     (spec.wait_minimum, spec.wait_maximum) = wait_range;
+    if let Some(state) = &spec.state_field {
+        check_long_poll_state(
+            path,
+            canonical_path,
+            operation_key,
+            operation,
+            state,
+            docs,
+            models,
+        )?;
+    }
     Ok(Some(spec))
+}
+
+/// Checks the state member a long poll names. The loop copies the output's
+/// value into the next input as it is, so both members must hold the same
+/// kind of value. The first call has no state, so the input member is
+/// optional.
+fn check_long_poll_state(
+    path: &Path,
+    canonical_path: &Path,
+    operation_key: &str,
+    operation: &Operation,
+    state: &str,
+    docs: &IndexMap<PathBuf, (PathBuf, Document)>,
+    models: &BTreeMap<TypeKey, JsonModel>,
+) -> Result<()> {
+    let reject = |reason: String| -> Result<()> {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!("operation `{operation_key}`: `{NEXUS_LONG_POLL_KEYWORD}` {reason}"),
+        })
+    };
+    let mut found = Vec::new();
+    for (label, schema) in [
+        ("input", operation.input.as_ref()),
+        ("output", operation.output.as_ref()),
+    ] {
+        let Some(schema) = schema else {
+            return reject(format!(
+                "names the state member `{state}`, but the operation declares no {label}"
+            ));
+        };
+        let model = if let Some(reference) = &schema.reference {
+            resolve_ref(path, canonical_path, reference, docs, models)?
+                .schema
+                .clone()
+        } else {
+            schema.clone()
+        };
+        let Some(property) = model
+            .properties
+            .as_ref()
+            .and_then(|properties| properties.get(state))
+            .cloned()
+        else {
+            return reject(format!(
+                "names the state member `{state}`, which the {label} model does not declare"
+            ));
+        };
+        if property.ty.as_ref().and_then(Value::as_str) != Some("string") {
+            return reject(format!(
+                "{label} member `{state}` must be `type: string`; the state is opaque text"
+            ));
+        }
+        let required = model
+            .required
+            .as_ref()
+            .and_then(Value::as_array)
+            .is_some_and(|names| names.iter().any(|name| name.as_str() == Some(state)));
+        if label == "input" && required {
+            return reject(format!(
+                "input member `{state}` must be optional; a first call has no state"
+            ));
+        }
+        found.push(property.extra.get("contentEncoding").cloned());
+    }
+    if found[0] != found[1] {
+        return reject(format!(
+            "state member `{state}` must have the same `contentEncoding` on the input and the \
+             output; the loop copies the value from one to the other as it is"
+        ));
+    }
+    Ok(())
 }
 
 fn operation_model_type(

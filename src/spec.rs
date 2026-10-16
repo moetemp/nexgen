@@ -649,6 +649,9 @@ pub struct OperationLongPollSpec {
     /// contract declares one. An answer with it set ends the loop even when the
     /// result is empty.
     pub done_field: Option<String>,
+    /// The opaque state member the input and output both declare, when the
+    /// contract names one. A loop sends each answer's state on its next attempt.
+    pub state_field: Option<String>,
     /// The smallest wait the input member accepts, from its `minimum` or
     /// `exclusiveMinimum`, when it declares one.
     pub wait_minimum: Option<i64>,

@@ -155,7 +155,9 @@ errors with the right retryability.
 - `--native-api`: orthogonal. The native client calls Nexus from inside a
   workflow; this caller posts from outside one.
 - [[long-poll]]: adds the loop method per marked operation.
+- [[handles]]: projections that bind some input members once and post through
+  this caller.
 
 ## See also
 
-[[services]], [[long-poll]], [[generated-file-layout]], [[PRINCIPLES.md]].
+[[services]], [[long-poll]], [[handles]], [[generated-file-layout]], [[PRINCIPLES.md]].

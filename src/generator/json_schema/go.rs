@@ -1856,7 +1856,7 @@ pub(in crate::generator) fn client_plan(
     let manifest = build_json_name_manifest(crate::language::Language::Go, api_plan)?;
     let mut cross_module_names = BTreeMap::new();
     register_cross_module_ref_names(api_plan, &mut cross_module_names);
-    let resolved_names = tree_models
+    let resolved_names: BTreeMap<String, String> = tree_models
         .iter()
         .map(|model| {
             let name = manifest
@@ -1867,6 +1867,16 @@ pub(in crate::generator) fn client_plan(
             (model.full_name.clone(), name)
         })
         .collect();
+    // The same two forms the struct emitter resolves a `$ref` through, so a
+    // handle key typed by a model names the struct the models file declares.
+    let mut model_names = cross_module_names.clone();
+    for (full_name, name) in &resolved_names {
+        model_names.insert(full_name.clone(), name.clone());
+        model_names.insert(format!("#/$defs/{full_name}"), name.clone());
+    }
+    let member = |model_name: &str, json_name: &str, property: &Value, required: bool| {
+        member_go_type(model_name, json_name, property, required, &model_names)
+    };
     build_client_plan(
         api_plan,
         &resolved_names,
@@ -1886,6 +1896,7 @@ pub(in crate::generator) fn client_plan(
                     .map(str::to_string)
                     .unwrap_or_else(|| go_field_name(&operation.name))
             },
+            member: &member,
         },
     )
 }
@@ -5745,6 +5756,23 @@ fn go_map_shape(
         element_type: "json.RawMessage".to_string(),
         element: GoMapElement::Raw,
     }))
+}
+
+/// The field type a member takes on a generated struct, for a handle that
+/// binds the member or takes it as a parameter: the models file's own rule.
+pub(in crate::generator) fn member_go_type(
+    model_name: &str,
+    json_name: &str,
+    property: &Value,
+    required: bool,
+    model_names: &BTreeMap<String, String>,
+) -> Result<String> {
+    let schema: Schema =
+        serde_json::from_value(property.clone()).map_err(|error| Error::InvalidJsonSchema {
+            path: PathBuf::from("<go-client>"),
+            reason: format!("failed to read a handle member's schema: {error}"),
+        })?;
+    go_property_type(model_name, json_name, &schema, required, model_names)
 }
 
 fn go_property_type(

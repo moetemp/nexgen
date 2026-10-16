@@ -224,3 +224,203 @@ class StreamServiceHttpClient:
                 backoff = _long_poll_next_backoff(backoff)
             else:
                 backoff = _LONG_POLL_MIN_BACKOFF
+
+    def workflow_streams(
+        self,
+        *,
+        workflow_id: str,
+    ) -> "WorkflowStreams":
+        """A `WorkflowStreams` bound to `workflow_id`."""
+        return WorkflowStreams(
+            self,
+            workflow_id=workflow_id,
+        )
+
+    def stream_producer(
+        self,
+        *,
+        workflow_id: str,
+        stream: str,
+        producer_id: str,
+        attempt: int,
+    ) -> "StreamProducer":
+        """A `StreamProducer` bound to `workflow_id`, `stream`, `producer_id`,
+        `attempt`.
+        """
+        return StreamProducer(
+            self,
+            workflow_id=workflow_id,
+            stream=stream,
+            producer_id=producer_id,
+            attempt=attempt,
+        )
+
+
+class WorkflowStreams:
+    """Binds `workflow_id` for the example.streams.v1.StreamService service.
+
+    Every method posts through the `StreamServiceHttpClient` it was built from
+    with the bound members filled in, so a caller states a stream's identity once.
+    The flat caller stays available for a call that spells every member out.
+    """
+
+    def __init__(
+        self,
+        client: StreamServiceHttpClient,
+        *,
+        workflow_id: str,
+    ) -> None:
+        self._client: StreamServiceHttpClient = client
+        self._workflow_id: str = workflow_id
+
+    async def append(
+        self,
+        *,
+        stream: str,
+        producer_id: str,
+        attempt: int,
+        batch_index: int,
+        payloads: list[bytes] | None = None,
+        finish: bool | None = None,
+    ) -> AppendOutput:
+        """Append one batch of records. A repeated batchIndex for the same producer
+        attempt is dropped, so a retried call writes once.
+
+        This handle supplies `workflow_id`; the flat caller's `append` takes it
+        spelled out.
+        """
+        return await self._client.append(
+            AppendInput(
+                workflow_id=self._workflow_id,
+                stream=stream,
+                producer_id=producer_id,
+                attempt=attempt,
+                batch_index=batch_index,
+                payloads=payloads,
+                finish=finish,
+            ),
+        )
+
+    async def read(
+        self,
+        *,
+        stream: str | None = None,
+        after_token: str | None = None,
+        max_records: int | None = None,
+        wait_ms: int | None = None,
+    ) -> ReadOutput:
+        """Answer with the records after the caller's token, or time out. The call
+        parks until it has maxRecords records or waitMs elapses, whichever comes
+        first, and answers with whatever it collected.
+
+        This handle supplies `workflow_id`; the flat caller's `read` takes it
+        spelled out.
+        """
+        return await self._client.read(
+            ReadInput(
+                workflow_id=self._workflow_id,
+                stream=stream,
+                after_token=after_token,
+                max_records=max_records,
+                wait_ms=wait_ms,
+            ),
+        )
+
+    async def read_until_records(
+        self,
+        *,
+        stream: str | None = None,
+        after_token: str | None = None,
+        max_records: int | None = None,
+        deadline: float,
+    ) -> ReadOutput:
+        """Calls `read` until it answers with something, or until `deadline`.
+
+        Each attempt sets `wait_ms` from the budget left, so the endpoint parks
+        for the caller instead of the caller spinning. The first answer whose
+        `records` is non-empty is returned. When the deadline passes first, the
+        last answer is returned, which still carries the caller's resume position.
+
+        `deadline` is the whole budget in seconds. The single-shot method stays
+        available for a caller that wants one attempt.
+
+        This handle supplies `workflow_id`; the flat caller's `read_until_records`
+        takes it spelled out.
+        """
+        return await self._client.read_until_records(
+            ReadInput(
+                workflow_id=self._workflow_id,
+                stream=stream,
+                after_token=after_token,
+                max_records=max_records,
+            ),
+            deadline=deadline,
+        )
+
+    def stream_producer(
+        self,
+        *,
+        stream: str,
+        producer_id: str,
+        attempt: int,
+    ) -> "StreamProducer":
+        """A `StreamProducer` bound to `workflow_id`, `stream`, `producer_id`,
+        `attempt`: this handle's own members and the ones given here.
+        """
+        return StreamProducer(
+            self._client,
+            workflow_id=self._workflow_id,
+            stream=stream,
+            producer_id=producer_id,
+            attempt=attempt,
+        )
+
+
+class StreamProducer:
+    """Binds `workflow_id`, `stream`, `producer_id`, `attempt` for the
+    example.streams.v1.StreamService service.
+
+    Every method posts through the `StreamServiceHttpClient` it was built from
+    with the bound members filled in, so a caller states a stream's identity once.
+    The flat caller stays available for a call that spells every member out.
+    """
+
+    def __init__(
+        self,
+        client: StreamServiceHttpClient,
+        *,
+        workflow_id: str,
+        stream: str,
+        producer_id: str,
+        attempt: int,
+    ) -> None:
+        self._client: StreamServiceHttpClient = client
+        self._workflow_id: str = workflow_id
+        self._stream: str = stream
+        self._producer_id: str = producer_id
+        self._attempt: int = attempt
+
+    async def append(
+        self,
+        *,
+        batch_index: int,
+        payloads: list[bytes] | None = None,
+        finish: bool | None = None,
+    ) -> AppendOutput:
+        """Append one batch of records. A repeated batchIndex for the same producer
+        attempt is dropped, so a retried call writes once.
+
+        This handle supplies `workflow_id`, `stream`, `producer_id`, `attempt`;
+        the flat caller's `append` takes them spelled out.
+        """
+        return await self._client.append(
+            AppendInput(
+                workflow_id=self._workflow_id,
+                stream=self._stream,
+                producer_id=self._producer_id,
+                attempt=self._attempt,
+                batch_index=batch_index,
+                payloads=payloads,
+                finish=finish,
+            ),
+        )

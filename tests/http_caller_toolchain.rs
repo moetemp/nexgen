@@ -685,6 +685,488 @@ fn the_generated_python_stream_reference_round_trips_through_the_sdk_type() {
     assert!(output.contains("ok"), "{output}");
 }
 
+/// Two handles over the stream contract, so the emitted projection is built
+/// and driven through the real toolchains against a fake endpoint.
+const HANDLE_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    x-nexus-handle:
+      StreamHandle: [workflowId, stream]
+      StreamProducer: [workflowId, stream, producerId, attempt]
+    operations:
+      append:
+        fqn: append
+        input: { $ref: "#/$defs/AppendInput" }
+        output: { $ref: "#/$defs/AppendOutput" }
+      read:
+        fqn: read
+        x-nexus-long-poll:
+          wait-field: waitMs
+          result-field: records
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  AppendInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      stream: { type: string }
+      producerId: { type: string }
+      attempt: { type: integer, minimum: 1 }
+      batchIndex: { type: integer, minimum: 1 }
+      payloads:
+        type: array
+        items: { type: string, contentEncoding: base64 }
+    required: [workflowId, stream, producerId, attempt, batchIndex]
+    additionalProperties: false
+  AppendOutput:
+    type: object
+    properties:
+      cursor: { type: string, x-nexus-cursor: StreamCursor }
+    additionalProperties: false
+  ReadInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      stream: { type: string }
+      afterToken: { type: string, x-nexus-cursor: StreamCursor }
+      waitMs: { type: integer, minimum: 0 }
+    required: [workflowId, stream]
+    additionalProperties: false
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+      nextToken: { type: string, x-nexus-cursor: StreamCursor }
+    additionalProperties: false
+"##;
+
+/// Drives the handles against an httptest server and checks what reached it:
+/// the bound members beside the free ones the per-handle request carried.
+const GO_HANDLE_DRIVER: &str = r#"package handles
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestHandlesBindTheirKeys(t *testing.T) {
+	var seen []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var decoded map[string]any
+		_ = json.Unmarshal(body, &decoded)
+		decoded["path"] = r.URL.Path
+		seen = append(seen, decoded)
+		if r.URL.Path == "/append" {
+			_, _ = w.Write([]byte(`{"cursor": "c1"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"records": ["x"], "nextToken": "t2"}`))
+	}))
+	defer server.Close()
+	client := NewStreamServiceHTTPClient(server.URL, nil)
+	stream := client.Stream("wf-1", "scores")
+	producer := stream.Producer("model", 2)
+	if _, err := producer.Append(context.Background(), StreamProducerAppendRequest{BatchIndex: 1}); err != nil {
+		t.Fatal(err)
+	}
+	after := "t1"
+	if _, err := stream.Read(context.Background(), StreamHandleReadRequest{AfterToken: &after}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 {
+		t.Fatalf("want two posts, got %d", len(seen))
+	}
+	appended, read := seen[0], seen[1]
+	if appended["path"] != "/append" || appended["workflowId"] != "wf-1" || appended["stream"] != "scores" ||
+		appended["producerId"] != "model" || appended["attempt"] != float64(2) || appended["batchIndex"] != float64(1) {
+		t.Fatalf("append carried %v", appended)
+	}
+	if read["path"] != "/read" || read["workflowId"] != "wf-1" || read["stream"] != "scores" || read["afterToken"] != "t1" {
+		t.Fatalf("read carried %v", read)
+	}
+}
+"#;
+
+#[test]
+fn the_generated_go_handles_compile_and_bind_their_keys() {
+    let workspace = Workspace::new("http-caller-go-handles-toolchain");
+    let root = prepare_go_module(&workspace).expect("prepare the go module");
+    let package = generate_client_from(&workspace, Target::Go, "handles", HANDLE_CONTRACT);
+    fs::write(package.join("handles_test.go"), GO_HANDLE_DRIVER).expect("write the driver");
+
+    run(command("go")
+        .current_dir(&root)
+        .env("GOFLAGS", "-mod=mod")
+        .args(["vet", "./..."]))
+    .expect_ok("go vet over the generated handles");
+    run(command("go")
+        .current_dir(&root)
+        .env("GOFLAGS", "-mod=mod")
+        .args(["test", "./..."]))
+    .expect_ok("go test over the generated handles");
+}
+
+/// Generates a Go caller for `contract` and runs `go vet` over it, which
+/// type-checks the package.
+fn go_vet_generated(tag: &str, contract: &str) {
+    let workspace = Workspace::new(tag);
+    let root = prepare_go_module(&workspace).expect("prepare the go module");
+    generate_client_from(&workspace, Target::Go, "handles", contract);
+    run(command("go")
+        .current_dir(&root)
+        .env("GOFLAGS", "-mod=mod")
+        .args(["vet", "./..."]))
+    .expect_ok("go vet over the generated handles");
+}
+
+/// An enum key both inputs declare inline, once plain and once nullable. Go
+/// names an enum per model, so the handle holds one model's type and the other
+/// operation and the child handle take another.
+const ENUM_KEY_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    x-nexus-handle:
+      ModeHandle: [workflowId, mode, level]
+      ModeReader: [workflowId, mode, level, afterToken]
+    operations:
+      append:
+        fqn: append
+        input: { $ref: "#/$defs/AppendInput" }
+        output: { $ref: "#/$defs/Ack" }
+      read:
+        fqn: read
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/Ack" }
+$defs:
+  Ack:
+    type: object
+    properties:
+      ok: { type: boolean }
+    additionalProperties: false
+  AppendInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      mode: { type: string, enum: [fast, safe] }
+      level: { oneOf: [{ type: integer, enum: [1, 2] }, { type: "null" }] }
+    required: [workflowId]
+    additionalProperties: false
+  ReadInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      mode: { type: string, enum: [fast, safe] }
+      level: { oneOf: [{ type: integer, enum: [1, 2] }, { type: "null" }] }
+      afterToken: { type: string }
+    required: [workflowId]
+    additionalProperties: false
+"##;
+
+#[test]
+fn the_generated_go_handles_compile_with_an_enum_key_each_model_names() {
+    go_vet_generated("http-caller-go-enum-key-toolchain", ENUM_KEY_CONTRACT);
+}
+
+/// Keys whose Go parameter names would be the constructors' receivers: `c` on
+/// the flat caller and `h` on a parent handle.
+const RECEIVER_KEY_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    x-nexus-handle:
+      Parent: [workflowId, c]
+      Child: [workflowId, c, h]
+    operations:
+      append:
+        fqn: append
+        input: { $ref: "#/$defs/AppendInput" }
+        output: { $ref: "#/$defs/AppendOutput" }
+$defs:
+  AppendInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      c: { type: string }
+      h: { type: string }
+    required: [workflowId, c, h]
+    additionalProperties: false
+  AppendOutput:
+    type: object
+    properties:
+      cursor: { type: string }
+    additionalProperties: false
+"##;
+
+#[test]
+fn the_generated_go_handles_compile_with_keys_named_like_the_receivers() {
+    go_vet_generated(
+        "http-caller-go-receiver-keys-toolchain",
+        RECEIVER_KEY_CONTRACT,
+    );
+}
+
+/// A `date-time` key and a `date-time` free member on a handle, with no long
+/// poll, so only the handle needs `time`.
+const TIME_MEMBER_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    x-nexus-handle:
+      WindowHandle: [workflowId, since]
+    operations:
+      append:
+        fqn: append
+        input: { $ref: "#/$defs/AppendInput" }
+        output: { $ref: "#/$defs/AppendOutput" }
+$defs:
+  AppendInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      since: { type: string, format: date-time }
+      at: { type: string, format: date-time }
+    required: [workflowId, since]
+    additionalProperties: false
+  AppendOutput:
+    type: object
+    properties:
+      cursor: { type: string }
+    additionalProperties: false
+"##;
+
+#[test]
+fn the_generated_go_handles_compile_with_time_members_and_no_long_poll() {
+    go_vet_generated(
+        "http-caller-go-time-members-toolchain",
+        TIME_MEMBER_CONTRACT,
+    );
+}
+
+/// Drives the Python handles with the transport swapped for a recorder.
+const PYTHON_HANDLE_DRIVER: &str = r#"
+import asyncio
+import importlib
+import json
+import pathlib
+import sys
+
+package = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(package.parent))
+client_module = importlib.import_module(f"{package.name}.client")
+
+posted = []
+
+
+def fake_post(url, body, headers, timeout):
+    operation = url.rsplit("/", 1)[1]
+    posted.append((operation, json.loads(body)))
+    if operation == "append":
+        return b'{"cursor": "c1"}'
+    return b'{"records": ["x"], "nextToken": "t2"}'
+
+
+client_module._post = fake_post
+
+
+async def main():
+    client = client_module.StreamServiceHttpClient("http://endpoint")
+    stream = client.stream(workflow_id="wf-1", stream="scores")
+    producer = stream.producer(producer_id="model", attempt=2)
+    await producer.append(batch_index=1)
+    await stream.read(after_token="t1")
+    answer = await stream.read_until_records(after_token="t2", deadline=1.0)
+    assert answer.records == ["x"], answer
+    direct = client.stream_producer(
+        workflow_id="wf-2", stream="scores", producer_id="other", attempt=1
+    )
+    await direct.append(batch_index=1)
+
+
+asyncio.run(main())
+operations = [operation for operation, _ in posted]
+assert operations == ["append", "read", "read", "append"], operations
+appended, read, polled, direct = (body for _, body in posted)
+assert appended == {
+    "workflowId": "wf-1",
+    "stream": "scores",
+    "producerId": "model",
+    "attempt": 2,
+    "batchIndex": 1,
+}, appended
+assert read == {"workflowId": "wf-1", "stream": "scores", "afterToken": "t1"}, read
+assert polled["workflowId"] == "wf-1" and polled["afterToken"] == "t2", polled
+assert "waitMs" in polled, polled
+assert direct["workflowId"] == "wf-2" and direct["producerId"] == "other", direct
+print("ok")
+"#;
+
+/// Handle parameters typed by a model key, `$ref` and hoisted models, a list
+/// of models, `datetime` types and a literal whose value reads like a name, so
+/// every name a handle annotation uses has to be imported.
+const PYTHON_ANNOTATION_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    x-nexus-handle:
+      ScopeHandle: [workflowId, scope]
+    operations:
+      append:
+        fqn: append
+        input: { $ref: "#/$defs/AppendInput" }
+        output: { $ref: "#/$defs/AppendOutput" }
+$defs:
+  Scope:
+    type: object
+    properties:
+      name: { type: string }
+    additionalProperties: false
+  Options:
+    type: object
+    properties:
+      level: { type: integer }
+    additionalProperties: false
+  AppendInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      scope: { $ref: "#/$defs/Scope" }
+      at: { type: string, format: date-time }
+      day: { type: string, format: date }
+      options: { $ref: "#/$defs/Options" }
+      tags: { type: array, items: { $ref: "#/$defs/Options" } }
+      meta:
+        type: object
+        properties:
+          note: { type: string }
+        additionalProperties: false
+      mode: { type: string, enum: [Unknown, fast] }
+    required: [workflowId, scope]
+    additionalProperties: false
+  AppendOutput:
+    type: object
+    properties:
+      cursor: { type: string }
+    additionalProperties: false
+"##;
+
+/// Generates a Python caller for `contract`, imports it, and type-checks it.
+/// The module postpones its annotations, so an unimported name surfaces only
+/// to a type checker.
+fn python_check_generated(tag: &str, contract: &str) {
+    let workspace = Workspace::new(tag);
+    let package = generate_client_from(&workspace, Target::Python, "handles", contract);
+    let interpreter = python_interpreter();
+    let interpreter = interpreter.to_string_lossy();
+    let import = format!(
+        "import sys; sys.path.insert(0, {:?}); import {}.client",
+        package
+            .parent()
+            .expect("a package parent")
+            .to_string_lossy(),
+        package
+            .file_name()
+            .expect("a package name")
+            .to_string_lossy()
+    );
+    run(command(&interpreter).args(["-c", &import])).expect_ok("import the generated caller");
+    run(command(&interpreter)
+        .args([
+            "-m",
+            "basedpyright",
+            "--pythonpath",
+            &interpreter,
+            "--level",
+            "error",
+        ])
+        .arg(package.join("client.py")))
+    .expect_ok("type-check the generated caller");
+}
+
+#[test]
+fn the_generated_python_handle_annotations_resolve() {
+    python_check_generated(
+        "http-caller-python-annotations-toolchain",
+        PYTHON_ANNOTATION_CONTRACT,
+    );
+}
+
+/// A key named `client` and a free member named `deadline` beside a loop
+/// method, both renamed for Python with `x-py-name`, which the loader names as
+/// the remedy when it refuses them unrenamed.
+const PYTHON_RENAMED_PARAMETER_CONTRACT: &str = r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    fqn: example.streams.v1.StreamService
+    x-nexus-handle:
+      StreamHandle: [workflowId, client]
+    operations:
+      read:
+        fqn: read
+        x-nexus-long-poll:
+          wait-field: waitMs
+          result-field: records
+        input: { $ref: "#/$defs/ReadInput" }
+        output: { $ref: "#/$defs/ReadOutput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      workflowId: { type: string }
+      client: { type: string, x-py-name: client_name }
+      deadline: { type: number, x-py-name: read_deadline }
+      waitMs: { type: integer, minimum: 0 }
+    required: [workflowId, client]
+    additionalProperties: false
+  ReadOutput:
+    type: object
+    properties:
+      records: { type: array, items: { type: string } }
+    additionalProperties: false
+"##;
+
+#[test]
+fn the_generated_python_handles_import_with_renamed_parameters() {
+    python_check_generated(
+        "http-caller-python-renamed-toolchain",
+        PYTHON_RENAMED_PARAMETER_CONTRACT,
+    );
+}
+
+#[test]
+fn the_generated_python_handles_bind_their_keys() {
+    let workspace = Workspace::new("http-caller-python-handles-toolchain");
+    let package = generate_client_from(&workspace, Target::Python, "handles", HANDLE_CONTRACT);
+    let driver = workspace.root().join("drive_handles.py");
+    fs::write(&driver, PYTHON_HANDLE_DRIVER).expect("write the driver");
+
+    let interpreter = python_interpreter();
+    run(command(&interpreter.to_string_lossy())
+        .arg("-m")
+        .arg("compileall")
+        .arg("-q")
+        .arg(&package))
+    .expect_ok("compile the generated handles");
+    let output = run(command(&interpreter.to_string_lossy())
+        .arg(&driver)
+        .arg(&package))
+    .expect_ok("drive the generated handles");
+    assert!(output.contains("ok"), "{output}");
+}
+
 /// A long poll whose answer can say the stream ended. `done` is optional, so
 /// Go holds it behind a pointer.
 const DONE_CONTRACT: &str = r##"

@@ -14,8 +14,8 @@ use crate::generator::json_schema::{java, python, typescript};
 use crate::language::Language;
 use crate::spec::{
     ApiSpec, ExternalTypeBindingSpec, ExternalTypeSpec, JsonModelBindingSpec, JsonModelSpec,
-    LanguageStringSpec, ModulePath, OperationLongPollSpec, OperationSpec, ServiceSpec, Symbol,
-    TypeDeclEntry, TypeDeclSpec, TypeSpec,
+    LanguageStringSpec, ModulePath, OperationLongPollSpec, OperationSpec, ServiceHandleSpec,
+    ServiceSpec, Symbol, TypeDeclEntry, TypeDeclSpec, TypeSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
@@ -395,12 +395,61 @@ impl Schema {
 const LANG_NAME_KEYWORDS: [&str; 4] = ["x-go-name", "x-ts-name", "x-py-name", "x-java-name"];
 
 use crate::json_schema::streaming::{
-    CURSOR_KEYWORD as NEXUS_CURSOR_KEYWORD, LONG_POLL_DONE_MEMBER as NEXUS_LONG_POLL_DONE_MEMBER,
+    CURSOR_KEYWORD as NEXUS_CURSOR_KEYWORD, HANDLE_KEYWORD as NEXUS_HANDLE_KEYWORD,
+    LONG_POLL_DONE_MEMBER as NEXUS_LONG_POLL_DONE_MEMBER,
     LONG_POLL_KEYWORD as NEXUS_LONG_POLL_KEYWORD,
     LONG_POLL_RESULT_MEMBER as NEXUS_LONG_POLL_RESULT_MEMBER,
     LONG_POLL_WAIT_MEMBER as NEXUS_LONG_POLL_WAIT_MEMBER,
     STREAM_REF_KEYWORD as NEXUS_STREAM_REF_KEYWORD,
 };
+
+/// The identifiers the `--client` caller declares for a service's handles,
+/// with the role each plays. `operations` holds each operation's Go identifier
+/// and its input's wire members; Go emits a request type per handle and joined
+/// operation, so those join the handle's own name there.
+pub(crate) fn http_caller_handle_idents(
+    language: Language,
+    handles: &[ServiceHandleSpec],
+    operations: &[(String, BTreeSet<String>)],
+) -> Vec<(String, &'static str)> {
+    let mut idents = Vec::new();
+    for handle in handles {
+        match language {
+            Language::Go => {
+                idents.push((handle.name.clone(), "handle type"));
+                for (operation, members) in operations {
+                    if handle.keys.iter().all(|key| members.contains(key)) {
+                        idents.push((
+                            format!("{}{operation}Request", handle.name),
+                            "handle request type",
+                        ));
+                    }
+                }
+            }
+            Language::Python => idents.push((handle.name.clone(), "handle class")),
+            _ => {}
+        }
+    }
+    idents
+}
+
+/// One operation's Go identifier and its input's wire members, for
+/// [`http_caller_handle_idents`].
+pub(crate) fn http_caller_handle_operation(
+    name: &str,
+    go_code_name: Option<&str>,
+    input_schema: Option<&Value>,
+) -> (String, BTreeSet<String>) {
+    let ident = go_code_name
+        .map(str::to_string)
+        .unwrap_or_else(|| crate::generator::go::go_field_name(name));
+    let members = input_schema
+        .and_then(|schema| schema.get("properties"))
+        .and_then(Value::as_object)
+        .map(|properties| properties.keys().cloned().collect())
+        .unwrap_or_default();
+    (ident, members)
+}
 
 /// The identifiers the `--client` HTTP caller declares per service, with the
 /// role each plays, for the targets that emit one.
@@ -1347,6 +1396,9 @@ fn api_spec_from_parsed_json_documents(
     }
 
     let mut services = Vec::new();
+    // The file each service came from, by position, so a check that runs on the
+    // assembled spec can still name it.
+    let mut service_paths = Vec::new();
     for canonical_path in canonical_paths {
         let Some((path, doc)) = parsed.docs.get(canonical_path) else {
             continue;
@@ -1356,6 +1408,7 @@ fn api_spec_from_parsed_json_documents(
         };
         validate_service_key_scope(path, language, service_specs)?;
         for (service_key, service) in service_specs {
+            service_paths.push(path.clone());
             services.push(build_service(
                 path,
                 canonical_path,
@@ -1409,6 +1462,7 @@ fn api_spec_from_parsed_json_documents(
         types,
     };
     validate_identifier_namespace(language, &spec)?;
+    validate_http_caller_handle_names(language, &spec, &service_paths)?;
     Ok(spec)
 }
 
@@ -1608,6 +1662,10 @@ fn validate_raw_document_grammar(path: &Path, doc: &Document) -> Result<()> {
                     }
                     continue;
                 }
+                if keyword == NEXUS_HANDLE_KEYWORD {
+                    validate_handle_grammar(path, service_name, value)?;
+                    continue;
+                }
                 return reject(format!(
                     "service `{service_name}` has unknown keyword `{keyword}`"
                 ));
@@ -1776,6 +1834,64 @@ fn validate_document_markers(path: &Path, doc: &Document) -> Result<()> {
             path: path.to_path_buf(),
             reason: "plain JSON schema files must define a root schema or `$defs`".to_string(),
         });
+    }
+    Ok(())
+}
+
+/// Validates the shape of an `x-nexus-handle` value: emitted type names to
+/// non-empty lists of distinct wire members. Whether the members exist, and
+/// which operations join, is checked later in [`build_handles`], where the
+/// operations' input models are resolved.
+fn validate_handle_grammar(path: &Path, service_name: &str, value: &Value) -> Result<()> {
+    let reject = |reason: String| -> Result<()> {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!("service `{service_name}`: {reason}"),
+        })
+    };
+    let Some(handles) = value.as_object() else {
+        return reject(format!(
+            "`{NEXUS_HANDLE_KEYWORD}` must be an object mapping handle type names to lists of wire members, got {value}"
+        ));
+    };
+    if handles.is_empty() {
+        return reject(format!(
+            "`{NEXUS_HANDLE_KEYWORD}` must declare at least one handle"
+        ));
+    }
+    for (name, keys) in handles {
+        if !name_matches(name, true) {
+            return reject(format!(
+                "`{NEXUS_HANDLE_KEYWORD}` name `{name}` must match `^[A-Z][a-zA-Z\\d]+$`; it names an emitted type"
+            ));
+        }
+        let Some(keys) = keys.as_array() else {
+            return reject(format!(
+                "`{NEXUS_HANDLE_KEYWORD}.{name}` must be a list of wire member names, got {keys}"
+            ));
+        };
+        if keys.is_empty() {
+            return reject(format!(
+                "`{NEXUS_HANDLE_KEYWORD}.{name}` must bind at least one member; a handle with no key is the flat caller"
+            ));
+        }
+        let mut seen = BTreeSet::new();
+        for key in keys {
+            match key.as_str() {
+                Some(member) if !member.trim().is_empty() => {
+                    if !seen.insert(member) {
+                        return reject(format!(
+                            "`{NEXUS_HANDLE_KEYWORD}.{name}` lists `{member}` twice"
+                        ));
+                    }
+                }
+                _ => {
+                    return reject(format!(
+                        "`{NEXUS_HANDLE_KEYWORD}.{name}` must list non-empty strings naming wire members, got {key}"
+                    ));
+                }
+            }
+        }
     }
     Ok(())
 }
@@ -6280,6 +6396,7 @@ fn build_service(
             )
         })
         .collect::<Result<Vec<_>>>()?;
+    let handles = build_handles(path, canonical_path, service_key, service, docs, models)?;
 
     // A per-language `x-<lang>-name` on the service becomes the emitted code
     // identifier, verbatim (no recasing). It never affects `wire_name`.
@@ -6312,6 +6429,7 @@ fn build_service(
             .and_then(Value::as_bool)
             .unwrap_or(false),
         delay_load_temporalio_workflow: false,
+        handles,
         operations,
         resources: Vec::new(),
         data: (),
@@ -6418,6 +6536,162 @@ fn build_operation(
         serialization_context: LanguageStringSpec::default(),
         data: (),
     })
+}
+
+/// An input's top-level members by wire name, and the names it requires.
+type InputMembers<'a> = (&'a IndexMap<String, Schema>, BTreeSet<String>);
+
+/// The top-level members an operation's input declares, with the required set,
+/// looking through a `$ref` to the model. `None` when the operation has no
+/// input or its input is not `properties`-shaped, which no handle can join.
+fn operation_input_members<'a>(
+    path: &Path,
+    canonical_path: &Path,
+    operation: &'a Operation,
+    docs: &'a IndexMap<PathBuf, (PathBuf, Document)>,
+    models: &'a BTreeMap<TypeKey, JsonModel>,
+) -> Result<Option<InputMembers<'a>>> {
+    let Some(input) = operation.input.as_ref() else {
+        return Ok(None);
+    };
+    let schema = if let Some(reference) = &input.reference {
+        &resolve_ref(path, canonical_path, reference, docs, models)?.schema
+    } else {
+        input
+    };
+    let Some(properties) = schema.properties.as_ref() else {
+        return Ok(None);
+    };
+    let required = schema
+        .required
+        .as_ref()
+        .and_then(Value::as_array)
+        .map(|names| {
+            names
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<BTreeSet<_>>()
+        })
+        .unwrap_or_default();
+    Ok(Some((properties, required)))
+}
+
+/// Whether two declarations of one member agree on everything but their
+/// documentation. Two operations describe the same member in their own words,
+/// and a handle binds a value, not a sentence.
+fn same_member_shape(left: &Schema, right: &Schema) -> bool {
+    fn undocumented(schema: &Schema) -> Schema {
+        let mut bare = schema.clone();
+        bare.title = None;
+        bare.description = None;
+        for keyword in ["examples", "$comment", "deprecated"] {
+            bare.extra.shift_remove(keyword);
+        }
+        bare
+    }
+    undocumented(left) == undocumented(right)
+}
+
+/// Lowers `x-nexus-handle` and checks every handle against the operations.
+///
+/// The grammar is already validated. What is settled here is what an emitter
+/// cannot decide on its own: that at least one operation joins each handle,
+/// that every operation joining a handle declares its key members the same
+/// way (a handle holds one value per key and injects it into every request,
+/// so two shapes for one key would make one of those requests invalid), and
+/// that no two handles bind the same key set. A handle's type name enters the
+/// P15 collision pass with the rest of the caller's names, and the names it
+/// derives are checked per target by [`validate_http_caller_handle_names`].
+fn build_handles(
+    path: &Path,
+    canonical_path: &Path,
+    service_key: &str,
+    service: &Service,
+    docs: &IndexMap<PathBuf, (PathBuf, Document)>,
+    models: &BTreeMap<TypeKey, JsonModel>,
+) -> Result<Vec<ServiceHandleSpec>> {
+    let Some(declared) = service
+        .extra
+        .get(NEXUS_HANDLE_KEYWORD)
+        .and_then(Value::as_object)
+    else {
+        return Ok(Vec::new());
+    };
+    let reject = |reason: String| -> Result<Vec<ServiceHandleSpec>> {
+        Err(Error::InvalidJsonSchema {
+            path: path.to_path_buf(),
+            reason: format!("service `{service_key}`: `{NEXUS_HANDLE_KEYWORD}` {reason}"),
+        })
+    };
+
+    let mut inputs = Vec::new();
+    for (operation_key, operation) in &service.operations {
+        if let Some(members) =
+            operation_input_members(path, canonical_path, operation, docs, models)?
+        {
+            inputs.push((operation_key.as_str(), members.0, members.1));
+        }
+    }
+
+    let handles = declared
+        .iter()
+        .map(|(name, keys)| ServiceHandleSpec {
+            name: name.clone(),
+            keys: keys
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect(),
+        })
+        .collect::<Vec<_>>();
+
+    for (index, handle) in handles.iter().enumerate() {
+        let joined = inputs
+            .iter()
+            .filter(|(_, properties, _)| handle.keys.iter().all(|key| properties.contains_key(key)))
+            .collect::<Vec<_>>();
+        if joined.is_empty() {
+            return reject(format!(
+                "handle `{}` binds [{}], which no operation's input carries in full, so nothing would join it",
+                handle.name,
+                handle.keys.join(", ")
+            ));
+        }
+        for key in &handle.keys {
+            let (first_operation, first_properties, first_required) = joined[0];
+            let first = &first_properties[key];
+            if first.extra.contains_key("const") {
+                return reject(format!(
+                    "handle `{}` binds `{key}`, which operation `{first_operation}` declares with one admissible value; a key has to be a value the caller chooses",
+                    handle.name
+                ));
+            }
+            for (operation_key, properties, required) in &joined[1..] {
+                let same_shape = same_member_shape(&properties[key], first);
+                let same_presence = required.contains(key) == first_required.contains(key);
+                if !same_shape || !same_presence {
+                    return reject(format!(
+                        "handle `{}` binds `{key}`, which operations `{first_operation}` and `{operation_key}` declare differently; a handle holds one value per key and sends it on every call",
+                        handle.name
+                    ));
+                }
+            }
+        }
+        let key_set = handle.keys.iter().collect::<BTreeSet<_>>();
+        for other in &handles[..index] {
+            if other.keys.iter().collect::<BTreeSet<_>>() == key_set {
+                return reject(format!(
+                    "handles `{}` and `{}` bind the same members; they would emit one projection twice",
+                    other.name, handle.name
+                ));
+            }
+        }
+    }
+
+    Ok(handles)
 }
 
 /// Lowers `x-nexus-long-poll` and checks the two members it names against the
@@ -9124,6 +9398,9 @@ pub(crate) struct ManifestService {
     /// these model names enter the generated service file and can shadow an SDK
     /// import there; unrelated `$defs` remain in their model files.
     pub(crate) io_type_refs: BTreeSet<String>,
+    /// The identifiers the `--client` caller declares for this service's
+    /// handles (`x-nexus-handle`), with the role each plays.
+    pub(crate) handle_idents: Vec<(String, &'static str)>,
 }
 
 impl ManifestService {
@@ -9352,7 +9629,10 @@ pub(crate) fn build_name_manifest(
             // are fixed by the service identifier, reserved for the same reason.
             // Go emits it into the models' package; Python's caller module
             // imports the operation models by name beside its own declarations.
-            for (ident, role) in http_caller_idents(language, &service_ident) {
+            for (ident, role) in http_caller_idents(language, &service_ident)
+                .into_iter()
+                .chain(service.handle_idents.iter().cloned())
+            {
                 top.insert(
                     language,
                     ident,
@@ -9696,6 +9976,27 @@ fn manifest_inputs_from_spec(
                 .filter_map(TypeSpec::reference)
                 .map(|reference| reference.trim_start_matches('.').to_string())
                 .collect(),
+            handle_idents: http_caller_handle_idents(
+                language,
+                &service.handles,
+                &service
+                    .operations
+                    .iter()
+                    .map(|operation| {
+                        let input = match operation.input.as_ref() {
+                            Some(TypeSpec::External(ExternalTypeSpec::Json(json))) => {
+                                Some(&json.schema)
+                            }
+                            _ => None,
+                        };
+                        http_caller_handle_operation(
+                            &operation.name,
+                            operation.code_name.for_language(Language::Go),
+                            input,
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ),
         })
         .collect();
     (models, services)
@@ -9706,6 +10007,204 @@ fn manifest_inputs_from_spec(
 fn validate_identifier_namespace(language: Language, spec: &ApiSpec) -> Result<()> {
     let (models, services) = manifest_inputs_from_spec(language, spec);
     build_name_manifest(language, &models, &services)?;
+    Ok(())
+}
+
+/// Checks the names a `--client` caller derives for a service's handles, on the
+/// target's own spelling, since `x-<lang>-name` and each target's casing decide
+/// them: a constructor against the methods of the object it lands on and
+/// against the other constructors there, and in Python each keyword parameter
+/// against the names its method already binds (`self`, a handle's `client`,
+/// the loop method's `deadline`). Python parameter names are part of a call, so
+/// a clash is refused with the override as the remedy; Go renames a clashing
+/// local instead.
+fn validate_http_caller_handle_names(
+    language: Language,
+    spec: &ApiSpec,
+    service_paths: &[PathBuf],
+) -> Result<()> {
+    let (name_keyword, case): (&str, fn(&str) -> String) = match language {
+        Language::Go => ("x-go-name", crate::generator::go::go_field_name),
+        Language::Python => ("x-py-name", crate::generator::python::python_field_name),
+        _ => return Ok(()),
+    };
+    let member_name = |member: Option<&Value>, wire_name: &str| -> String {
+        member
+            .and_then(|member| member.get(name_keyword))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| case(wire_name))
+    };
+    fn json_schema(type_spec: Option<&TypeSpec>) -> Option<&Value> {
+        match type_spec {
+            Some(TypeSpec::External(ExternalTypeSpec::Json(json))) => Some(&json.schema),
+            _ => None,
+        }
+    }
+    /// One operation as the caller emits it: its method names, its input
+    /// members and, when it loops, the wait member the loop sets.
+    struct CallerOperation<'a> {
+        method: String,
+        loop_method: Option<String>,
+        input: serde_json::Map<String, Value>,
+        wait: Option<&'a str>,
+    }
+    impl CallerOperation<'_> {
+        fn methods(&self) -> impl Iterator<Item = String> + '_ {
+            std::iter::once(self.method.clone()).chain(self.loop_method.clone())
+        }
+    }
+
+    for (index, service) in spec.services.iter().enumerate() {
+        if service.handles.is_empty() {
+            continue;
+        }
+        let path = service_paths
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from("<json-schema>"));
+        let reject = |reason: String| -> Result<()> {
+            Err(Error::InvalidJsonSchema {
+                path: path.clone(),
+                reason: format!(
+                    "service `{}`: `{NEXUS_HANDLE_KEYWORD}` {reason}",
+                    service.name
+                ),
+            })
+        };
+        let mut operations = Vec::new();
+        for operation in &service.operations {
+            let method = operation
+                .code_name
+                .for_language(language)
+                .map(str::to_string)
+                .unwrap_or_else(|| case(&operation.name));
+            let loop_method = operation
+                .long_poll
+                .as_ref()
+                .zip(json_schema(operation.output.as_ref()))
+                .map(|(long_poll, output)| {
+                    let result = member_name(
+                        output
+                            .get("properties")
+                            .and_then(|members| members.get(&long_poll.result_field)),
+                        &long_poll.result_field,
+                    );
+                    match language {
+                        Language::Go => format!("{method}Until{result}"),
+                        _ => format!("{method}_until_{result}"),
+                    }
+                });
+            let input = json_schema(operation.input.as_ref())
+                .and_then(|schema| schema.get("properties"))
+                .and_then(Value::as_object)
+                .cloned()
+                .unwrap_or_default();
+            operations.push(CallerOperation {
+                method,
+                loop_method,
+                input,
+                wait: operation
+                    .long_poll
+                    .as_ref()
+                    .map(|long_poll| long_poll.wait_field.as_str()),
+            });
+        }
+        let joining = |keys: &[String]| {
+            operations
+                .iter()
+                .filter(|operation| keys.iter().all(|key| operation.input.contains_key(key)))
+                .collect::<Vec<_>>()
+        };
+
+        let flat_methods = operations
+            .iter()
+            .flat_map(CallerOperation::methods)
+            .collect::<BTreeSet<_>>();
+        let mut on_flat = BTreeMap::new();
+        for handle in &service.handles {
+            let joined = joining(&handle.keys);
+            if language == Language::Python {
+                if let Some(first) = joined.first() {
+                    for key in &handle.keys {
+                        let name = member_name(first.input.get(key), key);
+                        if matches!(name.as_str(), "client" | "self") {
+                            return reject(format!(
+                                "handle `{}` would take `{name}` for key `{key}`, a name its constructor already binds; rename the member for Python with `x-py-name`",
+                                handle.name
+                            ));
+                        }
+                    }
+                }
+                for operation in &joined {
+                    for (wire_name, member) in &operation.input {
+                        if handle.keys.contains(wire_name) || member.get("const").is_some() {
+                            continue;
+                        }
+                        let name = member_name(Some(member), wire_name);
+                        let clash = if name == "self" {
+                            Some(operation.method.clone())
+                        } else if name == "deadline" && operation.wait != Some(wire_name.as_str()) {
+                            operation.loop_method.clone()
+                        } else {
+                            None
+                        };
+                        if let Some(method) = clash {
+                            return reject(format!(
+                                "handle `{}` would take `{name}` on `{method}` for member `{wire_name}` of `{}`, a name the method already binds; rename the member for Python with `x-py-name`",
+                                handle.name, operation.method
+                            ));
+                        }
+                    }
+                }
+            }
+
+            let constructor = case(&crate::json_schema::streaming::handle_constructor_base(
+                &handle.name,
+                None,
+            ));
+            if flat_methods.contains(&constructor) {
+                return reject(format!(
+                    "handle `{}` would be built by `{constructor}`, which is also an operation of the service",
+                    handle.name
+                ));
+            }
+            if let Some(previous) = on_flat.insert(constructor.clone(), handle.name.clone()) {
+                return reject(format!(
+                    "handles `{previous}` and `{}` would both be built by `{constructor}` on the flat caller",
+                    handle.name
+                ));
+            }
+            let parent_keys = handle.keys.iter().collect::<BTreeSet<_>>();
+            let parent_methods = joined
+                .iter()
+                .flat_map(|operation| operation.methods())
+                .collect::<BTreeSet<_>>();
+            let mut on_parent = BTreeMap::new();
+            for child in &service.handles {
+                let child_keys = child.keys.iter().collect::<BTreeSet<_>>();
+                if child_keys.len() <= parent_keys.len() || !parent_keys.is_subset(&child_keys) {
+                    continue;
+                }
+                let constructor = case(&crate::json_schema::streaming::handle_constructor_base(
+                    &child.name,
+                    Some(&handle.name),
+                ));
+                if parent_methods.contains(&constructor) {
+                    return reject(format!(
+                        "handle `{}` would be built from `{}` by `{constructor}`, which is also an operation the handle carries",
+                        child.name, handle.name
+                    ));
+                }
+                if let Some(previous) = on_parent.insert(constructor.clone(), child.name.clone()) {
+                    return reject(format!(
+                        "handles `{previous}` and `{}` would both be built from `{}` by `{constructor}`",
+                        child.name, handle.name
+                    ));
+                }
+            }
+        }
+    }
     Ok(())
 }
 
@@ -11757,6 +12256,90 @@ $defs:
         );
         assert!(
             error.contains("`x-nexus-stream-ref` must be `true` or a map"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn keeps_the_handles_on_the_loaded_service() {
+        let spec = parse(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    x-nexus-handle:
+      StreamHandle: [workflow_id, topic]
+      StreamProducer: [workflow_id, topic, producer_id]
+    operations:
+      read:
+        input: { $ref: "#/$defs/ReadInput" }
+      append:
+        input: { $ref: "#/$defs/AppendInput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      workflow_id: { type: string }
+      topic: { type: string }
+    required: [workflow_id, topic]
+  AppendInput:
+    type: object
+    properties:
+      workflow_id: { type: string }
+      topic: { type: string }
+      producer_id: { type: string }
+    required: [workflow_id, topic, producer_id]
+"##,
+        );
+        let handles = &spec.services[0].handles;
+        assert_eq!(handles.len(), 2);
+        assert_eq!(handles[0].name, "StreamHandle");
+        assert_eq!(handles[0].keys, vec!["workflow_id", "topic"]);
+        assert_eq!(handles[1].name, "StreamProducer");
+        assert_eq!(handles[1].keys, vec!["workflow_id", "topic", "producer_id"]);
+    }
+
+    #[test]
+    fn rejects_a_handle_keyword_that_is_not_a_map_of_lists() {
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    x-nexus-handle: [StreamHandle]
+    operations:
+      read:
+        input: { $ref: "#/$defs/ReadInput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      workflow_id: { type: string }
+"##,
+        );
+        assert!(
+            error.contains("`x-nexus-handle` must be an object mapping handle type names"),
+            "{error}"
+        );
+        let error = doc_reject(
+            r##"
+nexusrpc: "1.0.0"
+services:
+  StreamService:
+    x-nexus-handle:
+      stream_handle: [workflow_id]
+    operations:
+      read:
+        input: { $ref: "#/$defs/ReadInput" }
+$defs:
+  ReadInput:
+    type: object
+    properties:
+      workflow_id: { type: string }
+"##,
+        );
+        assert!(
+            error.contains("`x-nexus-handle` name `stream_handle` must match"),
             "{error}"
         );
     }

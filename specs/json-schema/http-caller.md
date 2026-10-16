@@ -18,6 +18,8 @@ following it verbatim.
 - The caller is for **synchronous** operations. A handler that starts an
   operation asynchronously answers `201` with a token, which the caller reports
   as an error rather than reading it as the result.
+- An operation marked [[long-poll]] also gets a loop method that re-issues the
+  call until it answers with something or a deadline passes.
 - The flag is gated behind the `advanced` Cargo feature. It adds files; it never
   changes a model, a binding, or the wire.
 
@@ -94,8 +96,9 @@ other status is about the request, and repeating it changes nothing.
   that declares an output is an error: reading it as the all-defaults value
   would hand the caller a value the endpoint never produced. `204` is accepted
   for a void output.
-- **Not retried.** The caller makes one attempt. A transport error is whatever
-  the caller's own client settings make it.
+- **Not retried.** A single-shot method makes one attempt. A transport error is
+  whatever the caller's own client settings make it. Only the [[long-poll]]
+  loop repeats a call, and it retries only a retryable status.
 - **Cancel.** The Python caller runs the request in a worker thread. A cancelled
   task doesn't stop that thread, so the request holds its connection until the
   endpoint answers or `timeout` passes. Keep `timeout` short for a caller that
@@ -151,7 +154,8 @@ errors with the right retryability.
   identifiers.
 - `--native-api`: orthogonal. The native client calls Nexus from inside a
   workflow; this caller posts from outside one.
+- [[long-poll]]: adds the loop method per marked operation.
 
 ## See also
 
-[[services]], [[generated-file-layout]], [[PRINCIPLES.md]].
+[[services]], [[long-poll]], [[generated-file-layout]], [[PRINCIPLES.md]].

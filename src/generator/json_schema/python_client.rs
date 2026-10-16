@@ -6,9 +6,13 @@
 //! It carries no dependency beyond the standard library and the models module
 //! next to it, because a stream producer is often not a Temporal worker at all.
 
-use crate::generator::json_schema::client::{ClientOperation, ClientPlan, ClientService};
+use serde_json::Value;
+
+use crate::generator::json_schema::client::{
+    ClientLongPoll, ClientModel, ClientOperation, ClientPlan, ClientService,
+};
 use crate::generator::json_schema::python::converter_class_name;
-use crate::generator::python::render_generated_file_header;
+use crate::generator::python::{python_field_name, render_generated_file_header};
 
 /// The file the caller is emitted to, next to the models it uses.
 pub(in crate::generator) const CLIENT_MODULE: &str = "client.py";
@@ -17,8 +21,37 @@ fn literal(value: &str) -> String {
     serde_json::to_string(value).expect("a Rust string is always JSON-serializable")
 }
 
+/// The emitted attribute for a wire member: the `x-py-name` override if the
+/// member carries one, otherwise the snake-cased wire name. This mirrors the
+/// models module's own rule, so the caller reads the field the models declare.
+fn member_attribute(member: Option<&Value>, wire_name: &str) -> String {
+    member
+        .and_then(|member| member.get("x-py-name"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| python_field_name(wire_name))
+}
+
 fn client_class_name(service: &ClientService) -> String {
     format!("{}HttpClient", service.name)
+}
+
+/// The looping method's name. Deriving it from the result member keeps the
+/// contract visible at the call site: an operation whose emptiness test is
+/// `records` reads as `read_until_records`.
+fn long_poll_method_name(
+    operation: &ClientOperation,
+    long_poll: &ClientLongPoll,
+    output: &ClientModel,
+) -> String {
+    format!(
+        "{}_until_{}",
+        operation.name,
+        member_attribute(
+            output.member(&long_poll.result_member),
+            &long_poll.result_member
+        )
+    )
 }
 
 /// Renders the whole module, or `None` when the module declares no service.
@@ -29,18 +62,27 @@ pub(in crate::generator) fn render_client_module(plan: &ClientPlan) -> Option<St
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
-    render_imports(&mut output);
+    render_imports(&mut output, plan);
     render_model_imports(&mut output, plan);
     render_post_helper(&mut output);
+    if plan.has_long_poll() {
+        render_long_poll_runtime(&mut output);
+    }
     for service in &plan.services {
         render_service_client(&mut output, service);
     }
     Some(output)
 }
 
-fn render_imports(output: &mut String) {
+fn render_imports(output: &mut String, plan: &ClientPlan) {
     output.push_str("import asyncio\n");
+    if plan.has_long_poll() {
+        output.push_str("import dataclasses\n");
+    }
     output.push_str("import json\n");
+    if plan.has_long_poll() {
+        output.push_str("import time\n");
+    }
     output.push_str("import typing\n");
     output.push_str("import urllib.error\n");
     output.push_str("import urllib.request\n\n");
@@ -72,6 +114,43 @@ fn render_model_imports(output: &mut String, plan: &ClientPlan) {
         output.push_str(",\n");
     }
     output.push_str(")\n\n\n");
+}
+
+fn render_long_poll_runtime(output: &mut String) {
+    output.push_str(
+        r#"_LONG_POLL_MIN_BACKOFF = 0.05
+_LONG_POLL_MAX_BACKOFF = 2.0
+
+
+async def _long_poll_pause(backoff: float, end: float) -> None:
+    """Waits out a backoff without running past the read's own deadline."""
+    remaining = end - time.monotonic()
+    delay = min(backoff, remaining)
+    if delay > 0:
+        await asyncio.sleep(delay)
+
+
+def _long_poll_next_backoff(backoff: float) -> float:
+    return min(backoff * 2, _LONG_POLL_MAX_BACKOFF)
+
+
+"#,
+    );
+}
+
+fn render_poll_budget_method(output: &mut String) {
+    output.push_str(
+        r#"
+    def _poll_budget(self, remaining: float) -> float:
+        """How long one attempt may ask the endpoint to park, in seconds.
+
+        Asking for longer than the transport will wait is a socket timeout
+        dressed as a long poll, so the ask leaves the answer room to come back
+        inside this client's own timeout.
+        """
+        return max(0.001, min(remaining, self._timeout * 0.9))
+"#,
+    );
 }
 
 fn render_post_helper(output: &mut String) {
@@ -121,7 +200,13 @@ def _post(
     request = urllib.request.Request(
         url,
         data=body,
-        headers={"Content-Type": "application/json", **headers},
+        headers={
+            "Content-Type": "application/json",
+            # Tells the handler how long this caller waits, so it can cut a
+            # long poll short instead of being cut off.
+            "Request-Timeout": f"{int(timeout * 1000)}ms",
+            **headers,
+        },
         method="POST",
     )
     try:
@@ -176,9 +261,24 @@ fn render_service_client(output: &mut String, service: &ClientService) {
     output.push_str("        self._headers: dict[str, str] = dict(headers or {})\n");
     output.push_str("        self._timeout: float = timeout\n");
 
+    if service
+        .operations
+        .iter()
+        .any(|operation| operation.long_poll.is_some())
+    {
+        render_poll_budget_method(output);
+    }
+
     for operation in &service.operations {
         output.push('\n');
         render_operation_method(output, operation);
+        if let Some(long_poll) = &operation.long_poll
+            && let Some(input) = &operation.input
+            && let Some(model_output) = &operation.output
+        {
+            output.push('\n');
+            render_long_poll_method(output, operation, long_poll, input, model_output);
+        }
     }
     output.push('\n');
 }
@@ -253,6 +353,108 @@ fn render_operation_method(output: &mut String, operation: &ClientOperation) {
     output.push_str("().from_transfer_type(answer, ");
     output.push_str(&model_output.type_name);
     output.push_str(")\n");
+}
+
+fn render_long_poll_method(
+    output: &mut String,
+    operation: &ClientOperation,
+    long_poll: &ClientLongPoll,
+    input: &ClientModel,
+    model_output: &ClientModel,
+) {
+    let wait_attribute =
+        member_attribute(input.member(&long_poll.wait_member), &long_poll.wait_member);
+    let result_attribute = member_attribute(
+        model_output.member(&long_poll.result_member),
+        &long_poll.result_member,
+    );
+    let done_attribute = long_poll
+        .done_member
+        .as_ref()
+        .map(|(done, _)| member_attribute(model_output.member(done), done));
+    output.push_str("    async def ");
+    output.push_str(&long_poll_method_name(operation, long_poll, model_output));
+    output.push_str("(\n        self,\n        request: ");
+    output.push_str(&input.type_name);
+    output.push_str(",\n        *,\n        deadline: float,\n    ) -> ");
+    output.push_str(&model_output.type_name);
+    output.push_str(":\n");
+    render_docstring(
+        output,
+        "        ",
+        &[
+            format!(
+                "Calls `{}` until it answers with something, or until `deadline`.",
+                operation.name
+            ),
+            format!(
+                "Each attempt sets `{wait_attribute}` from the budget left, so the endpoint \
+                 parks for the caller instead of the caller spinning. The first answer whose \
+                 `{result_attribute}` is non-empty{done} is returned. When the deadline passes \
+                 first, the last answer is returned, which still carries the caller's resume \
+                 position.",
+                done = done_attribute
+                    .as_ref()
+                    .map(|done| format!(", or whose `{done}` is true,"))
+                    .unwrap_or_default(),
+            ),
+            "`deadline` is the whole budget in seconds. The single-shot method stays \
+             available for a caller that wants one attempt."
+                .to_string(),
+        ],
+    );
+    output.push_str("        end = time.monotonic() + deadline\n");
+    output.push_str("        answer: ");
+    output.push_str(&model_output.type_name);
+    output.push_str(" | None = None\n");
+    output.push_str("        backoff = _LONG_POLL_MIN_BACKOFF\n");
+    output.push_str("        while True:\n");
+    output.push_str("            wait = self._poll_budget(end - time.monotonic())\n");
+    output.push_str("            wait_ms = int(wait * 1000)\n");
+    // The model refuses a wait outside the member's declared range.
+    if let Some(maximum) = long_poll.wait_maximum {
+        output.push_str(&format!("            wait_ms = min(wait_ms, {maximum})\n"));
+    }
+    if let Some(minimum) = long_poll.wait_minimum {
+        output.push_str(&format!("            wait_ms = max(wait_ms, {minimum})\n"));
+    }
+    if long_poll.wait_maximum.is_some() || long_poll.wait_minimum.is_some() {
+        output.push_str("            wait = wait_ms / 1000\n");
+    }
+    output.push_str("            attempt = dataclasses.replace(\n");
+    output.push_str("                request, ");
+    output.push_str(&wait_attribute);
+    output.push_str("=wait_ms\n");
+    output.push_str("            )\n");
+    output.push_str("            started = time.monotonic()\n");
+    output.push_str("            try:\n");
+    output.push_str("                answer = await self.");
+    output.push_str(&operation.name);
+    output.push_str("(attempt)\n");
+    output.push_str("            except HTTPStatusError as error:\n");
+    output.push_str(
+        "                if not error.retryable or time.monotonic() >= end:\n                    raise\n",
+    );
+    output.push_str("                await _long_poll_pause(backoff, end)\n");
+    output.push_str("                backoff = _long_poll_next_backoff(backoff)\n");
+    output.push_str("                continue\n");
+    output.push_str("            if answer.");
+    output.push_str(&result_attribute);
+    if let Some(done) = &done_attribute {
+        output.push_str(" or answer.");
+        output.push_str(done);
+    }
+    output.push_str(":\n");
+    output.push_str("                return answer\n");
+    output.push_str("            if time.monotonic() >= end:\n");
+    output.push_str("                return answer\n");
+    // An endpoint that answers empty without parking for the wait it was given
+    // would otherwise be asked again as fast as the network allows.
+    output.push_str("            if time.monotonic() - started < wait / 2:\n");
+    output.push_str("                await _long_poll_pause(backoff, end)\n");
+    output.push_str("                backoff = _long_poll_next_backoff(backoff)\n");
+    output.push_str("            else:\n");
+    output.push_str("                backoff = _LONG_POLL_MIN_BACKOFF\n");
 }
 
 /// A docstring with one paragraph per entry. The shared Python docstring writer

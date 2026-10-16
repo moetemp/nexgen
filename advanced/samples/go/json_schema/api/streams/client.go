@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // HTTPStatusError is an answer from the ingress that is not a synchronous
@@ -39,6 +40,38 @@ func (e *HTTPStatusError) Retryable() bool {
 		return *e.RetryableHeader
 	}
 	return e.StatusCode == http.StatusTooManyRequests || e.StatusCode >= 500
+}
+
+const (
+	longPollMinBackoff = 50 * time.Millisecond
+	longPollMaxBackoff = 2 * time.Second
+)
+
+// longPollPause waits out a backoff without running past the read's own
+// deadline, and gives up as soon as the context is done.
+func longPollPause(ctx context.Context, backoff time.Duration, end time.Time) error {
+	if remaining := time.Until(end); remaining < backoff {
+		backoff = remaining
+	}
+	if backoff <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(backoff)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+func longPollNextBackoff(backoff time.Duration) time.Duration {
+	doubled := backoff * 2
+	if doubled > longPollMaxBackoff {
+		return longPollMaxBackoff
+	}
+	return doubled
 }
 
 // StreamServiceHTTPClient is an HTTP caller for the example.streams.v1.StreamService
@@ -91,6 +124,15 @@ func (c *StreamServiceHTTPClient) post(ctx context.Context, segment string, body
 		}
 	}
 	request.Header.Set("Content-Type", "application/json")
+	// Tells the handler how long this caller waits, so it can cut a long poll
+	// short instead of being cut off.
+	timeout := c.httpClient.Timeout
+	if deadline, ok := ctx.Deadline(); ok && (timeout <= 0 || time.Until(deadline) < timeout) {
+		timeout = time.Until(deadline)
+	}
+	if timeout > 0 && request.Header.Get("Request-Timeout") == "" {
+		request.Header.Set("Request-Timeout", fmt.Sprintf("%dms", timeout.Milliseconds()))
+	}
 	response, err := c.httpClient.Do(request)
 	if err != nil {
 		return nil, err
@@ -111,6 +153,25 @@ func (c *StreamServiceHTTPClient) post(ctx context.Context, segment string, body
 		return nil, statusErr
 	}
 	return raw, nil
+}
+
+func (c *StreamServiceHTTPClient) pollBudget(remaining time.Duration) time.Duration {
+	if remaining < time.Millisecond {
+		remaining = time.Millisecond
+	}
+	// Asking the endpoint to park for longer than the transport will wait is a
+	// socket timeout dressed as a long poll, so the ask leaves the answer room
+	// to come back inside the client's own deadline.
+	if c.httpClient.Timeout > 0 {
+		budget := c.httpClient.Timeout * 9 / 10
+		if budget < time.Millisecond {
+			budget = time.Millisecond
+		}
+		if remaining > budget {
+			return budget
+		}
+	}
+	return remaining
 }
 
 // Append posts one append call. Append one batch of records. A repeated batchIndex for
@@ -154,4 +215,54 @@ func (c *StreamServiceHTTPClient) Read(ctx context.Context, request ReadInput) (
 		return answer, err
 	}
 	return answer, nil
+}
+
+// ReadUntilRecords calls Read until it answers with something, or until the deadline.
+// Each attempt sets WaitMs from the budget left, so the endpoint parks for the caller
+// instead of the caller spinning. The first answer whose Records is non-empty is
+// returned. When the deadline passes first, the last answer is returned, which still
+// carries the caller's resume position. The single-shot method stays available for a
+// caller that wants one attempt.
+func (c *StreamServiceHTTPClient) ReadUntilRecords(ctx context.Context, request ReadInput, deadline time.Duration) (ReadOutput, error) {
+	end := time.Now().Add(deadline)
+	var answer ReadOutput
+	backoff := longPollMinBackoff
+	for {
+		wait := c.pollBudget(time.Until(end))
+		attempt := request
+		milliseconds := wait.Milliseconds()
+		if milliseconds < 0 {
+			milliseconds = 0
+		}
+		wait = time.Duration(milliseconds) * time.Millisecond
+		attempt.WaitMs = &milliseconds
+		started := time.Now()
+		next, err := c.Read(ctx, attempt)
+		if err != nil {
+			var status *HTTPStatusError
+			if !errors.As(err, &status) || !status.Retryable() || !time.Now().Before(end) {
+				return answer, err
+			}
+			if paused := longPollPause(ctx, backoff, end); paused != nil {
+				return answer, paused
+			}
+			backoff = longPollNextBackoff(backoff)
+			continue
+		}
+		answer = next
+		if len(answer.Records) > 0 {
+			return answer, nil
+		}
+		if !time.Now().Before(end) {
+			return answer, nil
+		}
+		if time.Since(started) < wait/2 {
+			if paused := longPollPause(ctx, backoff, end); paused != nil {
+				return answer, paused
+			}
+			backoff = longPollNextBackoff(backoff)
+		} else {
+			backoff = longPollMinBackoff
+		}
+	}
 }

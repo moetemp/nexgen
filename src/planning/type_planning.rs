@@ -636,6 +636,7 @@ impl<'a> TypePlanningContext<'a> {
             wire_name: operation.wire_name.clone(),
             experimental: operation.experimental,
             deprecated: operation.deprecated,
+            long_poll: operation.long_poll.clone(),
             doc: materialize_selected_text(&operation.doc),
             return_doc: materialize_selected_text(&operation.return_doc),
             input,
@@ -1599,6 +1600,7 @@ mod tests {
                     wire_name: "ExampleOperation".to_string(),
                     experimental: false,
                     deprecated: false,
+                    long_poll: None,
                     doc: LanguageStringSpec::default(),
                     return_doc: LanguageStringSpec::default(),
                     input: Some(TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(

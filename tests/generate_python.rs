@@ -978,6 +978,43 @@ fn generated_wit_examples_remain_python_310_compatible() {
     }
 }
 
+/// Fails when a docstring in the given modules marks code with single
+/// backticks. reStructuredText (and so pydoctor, Sphinx) reads `x` as a link to
+/// resolve, not as code; the literal is ``x``.
+const SINGLE_BACKTICK_DOCSTRING_CHECK: &str = r#"
+import ast
+import pathlib
+import re
+import sys
+
+root = pathlib.Path(sys.argv[1])
+single = re.compile(r"(?<!`)`[^`]+`(?!`)")
+found = []
+for name in sys.argv[2:]:
+    for path in sorted(root.rglob(name)):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                doc = ast.get_docstring(node, clean=False)
+                if doc and single.search(doc):
+                    found.append(f"{path.name}:{getattr(node, 'name', '<module>')}: {single.findall(doc)}")
+assert not found, "\n".join(found)
+"#;
+
+#[test]
+fn python_json_generated_helper_docstrings_mark_code_as_literals() {
+    let root = project_root();
+    for example_id in ["chat", "kb", "showcase", "temporal"] {
+        let output_path = unique_output_path(&format!("python-json-docstrings-{example_id}"));
+        generate_formatted_json_python_output(&root, example_id, &output_path, false);
+        assert_python_script_succeeds(
+            SINGLE_BACKTICK_DOCSTRING_CHECK,
+            &[output_path.to_str().unwrap(), "_definitions.py"],
+        );
+        fs::remove_dir_all(output_path).unwrap();
+    }
+}
+
 #[test]
 fn python_json_examples_expose_expected_runtime_features() {
     let root = project_root();
@@ -1451,6 +1488,468 @@ fn python_notification_models_do_not_emit_an_empty_service() {
     assert!(package_init.contains("OnCompleteRequest,"));
     assert!(package_init.contains("OnCompleteResponse,"));
     assert!(!package_init.contains("NotificationServiceClient"));
+}
+
+/// Proto-backed repeated and map fields. Protobuf gives neither presence, so
+/// `HasField` on them raises.
+const PROTO_COLLECTIONS_WIT: &str = r#"package temporal:nexus@1.0.0;
+
+world system {
+  export collections;
+}
+
+interface collections {
+  /// @nexus.proto "temporal.api.taskqueue.v1.TaskQueuePartitionMetadata"
+  record task-queue-partition-metadata {
+    key: string,
+    owner-host-name: string,
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.ListTaskQueuePartitionsResponse"
+  record list-task-queue-partitions-response {
+    activity-task-queue-partitions: option<list<task-queue-partition-metadata>>,
+    workflow-task-queue-partitions: option<list<task-queue-partition-metadata>>,
+  }
+
+  /// @nexus.proto "temporal.api.common.v1.Callback.Nexus"
+  record callback-nexus {
+    url: string,
+    header: option<map<string, string>>,
+  }
+}
+"#;
+
+const PROTO_COLLECTIONS_READ_CHECK: &str = r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.common.v1 import Callback
+from temporalio.api.taskqueue.v1 import TaskQueuePartitionMetadata
+from temporalio.api.workflowservice.v1 import ListTaskQueuePartitionsResponse
+
+response = ListTaskQueuePartitionsResponse(
+    activity_task_queue_partitions=[
+        TaskQueuePartitionMetadata(key="a", owner_host_name="h")
+    ]
+)
+converter = models._ListTaskQueuePartitionsResponseTransferTypeConverter()
+model = converter.from_transfer_type(response, models.ListTaskQueuePartitionsResponse)
+assert [p.key for p in model.activity_task_queue_partitions] == ["a"], model
+assert model.workflow_task_queue_partitions == [], model
+
+nexus = Callback.Nexus(url="http://x", header={"k": "v"})
+converter = models._CallbackNexusTransferTypeConverter()
+model = converter.from_transfer_type(nexus, models.CallbackNexus)
+assert model.header == {"k": "v"}, model
+"#;
+
+fn generate_python_package_from_wit(label: &str, wit: &str) -> PathBuf {
+    let root = project_root();
+    let temp_dir = unique_output_path(label);
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("input.wit");
+    fs::write(&input_path, wit).unwrap();
+    generate_to_file(&GenerateRequest {
+        config: Default::default(),
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_path, linked_inputs_path(&root)],
+        support_package: Some("temporal_support".into()),
+        descriptor_paths: vec![descriptor_path(&root)],
+        output_path: temp_dir.join("generated"),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    temp_dir
+}
+
+#[test]
+fn python_proto_repeated_and_map_fields_are_read_without_presence() {
+    let root = project_root();
+    let temp_dir =
+        generate_python_package_from_wit("python-proto-collections", PROTO_COLLECTIONS_WIT);
+    let models = fs::read_to_string(temp_dir.join("generated/models.py")).unwrap();
+
+    assert!(!models.contains("HasField(\"activity_task_queue_partitions\")"));
+    assert!(!models.contains("HasField(\"header\")"));
+    assert_python_script_succeeds(
+        PROTO_COLLECTIONS_READ_CHECK,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// `add-rpc` scaffolds a repeated field as a bare `list<T>` and a map as a bare
+/// `map<K, V>`; both are optional collections, as in WIT-direct records.
+#[test]
+fn python_accepts_bare_lists_and_maps_on_proto_collection_fields() {
+    let root = project_root();
+    let wit = PROTO_COLLECTIONS_WIT
+        .replace(
+            "option<list<task-queue-partition-metadata>>",
+            "list<task-queue-partition-metadata>",
+        )
+        .replace("option<map<string, string>>", "map<string, string>");
+    let temp_dir = generate_python_package_from_wit("python-proto-bare-collections", &wit);
+    let models = fs::read_to_string(temp_dir.join("generated/models.py")).unwrap();
+
+    assert!(models.contains(
+        "activity_task_queue_partitions: list[TaskQueuePartitionMetadata] | None = dataclasses.field(default_factory=list)"
+    ));
+    assert!(
+        models.contains("header: dict[str, str] | None = dataclasses.field(default_factory=dict)")
+    );
+    assert_python_script_succeeds(
+        PROTO_COLLECTIONS_READ_CHECK,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// WIT spells a byte string `list<u8>`, the form `add-rpc` scaffolds for proto `bytes`.
+#[test]
+fn python_reads_wit_byte_lists_as_proto_bytes() {
+    let root = project_root();
+    let temp_dir = generate_python_package_from_wit(
+        "python-proto-bytes",
+        r#"package temporal:nexus@1.0.0;
+
+world system {
+  export callbacks;
+}
+
+interface callbacks {
+  /// @nexus.proto "temporal.api.common.v1.Callback.Internal"
+  record callback-internal {
+    data: list<u8>,
+  }
+}
+"#,
+    );
+    let models = fs::read_to_string(temp_dir.join("generated/models.py")).unwrap();
+
+    assert!(models.contains("    data: bytes\n"));
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.common.v1 import Callback
+
+internal = Callback.Internal(data=b"\x00\xff")
+converter = models._CallbackInternalTransferTypeConverter()
+model = converter.from_transfer_type(internal, models.CallbackInternal)
+assert model.data == b"\x00\xff", model
+assert converter.to_transfer_type(model) == internal
+"#,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A proto-backed enum with no replacement type reads and writes as the proto
+/// enum's own value type.
+#[test]
+fn python_proto_enums_without_a_replacement_use_the_proto_enum_type() {
+    let root = project_root();
+    let temp_dir = generate_python_package_from_wit(
+        "python-proto-enum",
+        r#"package temporal:nexus@1.0.0;
+
+world system {
+  export alerts;
+}
+
+interface alerts {
+  /// @nexus.proto "temporal.api.enums.v1.Severity"
+  enum severity {
+    severity-unspecified,
+    severity-high,
+    severity-medium,
+    severity-low,
+  }
+
+  /// @nexus.proto "temporal.api.version.v1.Alert"
+  record alert {
+    message: string,
+    severity: option<severity>,
+  }
+}
+"#,
+    );
+    let models = fs::read_to_string(temp_dir.join("generated/models.py")).unwrap();
+
+    assert!(
+        models.contains(
+            "severity: temporalio.api.enums.v1.common_pb2.Severity.ValueType | None = None"
+        )
+    );
+    assert!(models.contains(
+        "message.severity = temporalio.api.enums.v1.common_pb2.Severity.ValueType(value.severity)"
+    ));
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.enums.v1 import Severity
+from temporalio.api.version.v1 import Alert
+
+alert = Alert(message="m", severity=Severity.SEVERITY_MEDIUM)
+converter = models._AlertTransferTypeConverter()
+model = converter.from_transfer_type(alert, models.Alert)
+assert model.severity == Severity.SEVERITY_MEDIUM, model
+assert converter.to_transfer_type(model) == alert
+model = converter.from_transfer_type(Alert(message="m"), models.Alert)
+assert model.severity is None, model
+"#,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn python_proto_enum_defaults_name_the_proto_enum_value() {
+    let root = project_root();
+    let temp_dir = generate_python_package_from_wit(
+        "python-proto-enum-default",
+        r#"package temporal:nexus@1.0.0;
+
+world system {
+  export alerts;
+}
+
+interface alerts {
+  /// @nexus.proto "temporal.api.enums.v1.Severity"
+  enum severity {
+    severity-unspecified,
+    severity-high,
+    severity-medium,
+    severity-low,
+  }
+
+  /// @nexus.proto "temporal.api.version.v1.Alert"
+  record alert {
+    message: string,
+    /// @nexus.default "severity-low"
+    severity: severity,
+  }
+}
+"#,
+    );
+
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.enums.v1 import Severity
+
+assert models.Alert(message="m").severity == Severity.SEVERITY_LOW
+"#,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// Each registry entry is parameterized by its own operation's types, and mypy
+/// joins differing ones to `object` unless the registry is annotated.
+#[test]
+fn python_operation_registry_is_annotated_for_several_operations() {
+    let root = project_root();
+    let rendered = generate_python_to_string(
+        &example_input_paths(&root, "multi-operation-service"),
+        &[descriptor_path(&root)],
+    );
+
+    assert!(rendered.contains(
+        "__nexus_operation_registry__: dict[tuple[str, str], _NexusOperationInfo[typing.Any, typing.Any]] = {\n"
+    ));
+}
+
+/// A proto oneof whose members are messages with authored records, as `add-rpc`
+/// scaffolds it.
+#[test]
+fn python_proto_oneof_cases_carry_their_authored_records() {
+    let root = project_root();
+    let temp_dir = generate_python_package_from_wit(
+        "python-proto-oneof-records",
+        r#"package temporal:nexus@1.0.0;
+
+world system {
+  export endpoints;
+}
+
+interface endpoints {
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget.Worker"
+  record endpoint-target-worker {
+    namespace: string,
+    task-queue: string,
+  }
+
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget.External"
+  record endpoint-target-external {
+    url: string,
+  }
+
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget.variant"
+  variant endpoint-target-variant {
+    worker(endpoint-target-worker),
+    external(endpoint-target-external),
+  }
+
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget"
+  record endpoint-target {
+    %variant: option<endpoint-target-variant>,
+  }
+}
+"#,
+    );
+
+    assert_python_script_succeeds(
+        r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.nexus.v1 import EndpointTarget
+
+converter = models._EndpointTargetTransferTypeConverter()
+for target in [
+    EndpointTarget(worker=EndpointTarget.Worker(namespace="ns", task_queue="tq")),
+    EndpointTarget(external=EndpointTarget.External(url="http://x")),
+    EndpointTarget(),
+]:
+    model = converter.from_transfer_type(target, models.EndpointTarget)
+    assert converter.to_transfer_type(model) == target, model
+model = converter.from_transfer_type(
+    EndpointTarget(worker=EndpointTarget.Worker(namespace="ns", task_queue="tq")),
+    models.EndpointTarget,
+)
+assert isinstance(model.variant, models.EndpointTargetVariantWorker), model
+assert model.variant.value == models.EndpointTargetWorker(namespace="ns", task_queue="tq")
+"#,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+/// A map of messages and a list of messages, each followed by another field.
+const PROTO_MESSAGE_COLLECTIONS_WIT: &str = r#"package temporal:nexus@1.0.0;
+
+world system {
+  export stack-traces;
+}
+
+interface stack-traces {
+  /// @nexus.proto "temporal.api.sdk.v1.StackTraceSDKInfo"
+  record stack-trace-sdk-info {
+    name: string,
+    version: string,
+  }
+
+  /// @nexus.proto "temporal.api.sdk.v1.StackTraceFileSlice"
+  record stack-trace-file-slice {
+    line-offset: option<u32>,
+    content: string,
+  }
+
+  /// @nexus.proto "temporal.api.sdk.v1.StackTraceFileLocation"
+  record stack-trace-file-location {
+    file-path: string,
+    line: option<s32>,
+    column: option<s32>,
+    function-name: string,
+    internal-code: option<bool>,
+  }
+
+  /// @nexus.proto "temporal.api.sdk.v1.StackTrace"
+  record stack-trace {
+    locations: option<list<stack-trace-file-location>>,
+  }
+
+  /// @nexus.proto "temporal.api.sdk.v1.EnhancedStackTrace"
+  record enhanced-stack-trace {
+    sdk: option<stack-trace-sdk-info>,
+    sources: option<map<string, stack-trace-file-slice>>,
+    stacks: option<list<stack-trace>>,
+  }
+}
+"#;
+
+const PROTO_MESSAGE_COLLECTIONS_WRITE_CHECK: &str = r#"
+import importlib, sys
+sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, sys.argv[2])
+models = importlib.import_module(sys.argv[3] + ".models")
+from temporalio.api.sdk.v1 import (
+    EnhancedStackTrace,
+    StackTrace,
+    StackTraceFileLocation,
+    StackTraceFileSlice,
+    StackTraceSDKInfo,
+)
+
+trace = EnhancedStackTrace(
+    sdk=StackTraceSDKInfo(name="sdk", version="1"),
+    sources={"a.py": StackTraceFileSlice(line_offset=3, content="pass")},
+    stacks=[
+        StackTrace(
+            locations=[StackTraceFileLocation(file_path="a.py", function_name="f")]
+        )
+    ],
+)
+converter = models._EnhancedStackTraceTransferTypeConverter()
+model = converter.from_transfer_type(trace, models.EnhancedStackTrace)
+assert converter.to_transfer_type(model) == trace
+"#;
+
+#[test]
+fn python_proto_repeated_and_map_message_fields_are_written_in_full() {
+    let root = project_root();
+    let temp_dir = generate_python_package_from_wit(
+        "python-proto-message-collections",
+        PROTO_MESSAGE_COLLECTIONS_WIT,
+    );
+
+    assert_python_script_succeeds(
+        PROTO_MESSAGE_COLLECTIONS_WRITE_CHECK,
+        &[
+            temp_dir.to_str().unwrap(),
+            python_root(&root).to_str().unwrap(),
+            "generated",
+        ],
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
 }
 
 #[test]

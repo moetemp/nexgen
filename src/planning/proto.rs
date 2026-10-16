@@ -125,6 +125,10 @@ pub(crate) fn relative_descriptor_name(full_name: &str, package: &str) -> String
 }
 
 fn field_has_presence(field: &FieldDescriptorProto, field_type: Option<Type>) -> bool {
+    // Repeated and map fields have no presence, even when their elements are messages.
+    if field_label(field) == Some(Label::Repeated) {
+        return false;
+    }
     matches!(field_type, Some(Type::Message))
         || field.proto3_optional.unwrap_or(false)
         || field.oneof_index.is_some()

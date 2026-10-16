@@ -19,7 +19,8 @@ The generator picks its input format from the file extension, so the same
 
 > [!IMPORTANT]
 > The `dotnet` target, the `--descriptors`, `--format`, and `--native-api`
-> flags, the `--client` flag on `go` and `python`, and the `add-rpc` and
+> flags, the `--client` flag on `go` and `python`, the `--forwarder` flag on
+> `python`, and the `add-rpc` and
 > `debug-wit-dir` subcommands — is
 > gated behind the `advanced` Cargo feature, which is off by default. Build or
 > run with `--features advanced` (as every command below does), or produce a
@@ -415,6 +416,16 @@ key sets become handle types that bind those members once. See
 [`specs/json-schema/handles.md`](../specs/json-schema/handles.md) for the
 generated shapes, the status handling, the loop and the handles. The `streams` sample's advanced
 output carries a generated caller in both languages.
+
+## Forwarding Handlers
+
+`--forwarder` on `python` also emits `forwarder.py`, an abstract handler base
+class per service. Each operation turns its input into the JSON transfer form,
+awaits `forward(operation, ctx, transfer)`, and turns the answer back into the
+output model, for a runtime that serves the contract itself. A subclass
+implements `forward` and declares itself the handler with
+`@nexusrpc.handler.service_handler`. See
+[`specs/json-schema/forwarder.md`](../specs/json-schema/forwarder.md).
 
 ## Validation
 

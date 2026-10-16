@@ -659,3 +659,5 @@ emission code rather than duplicate it:
   (layout + namespace).
 - [[http-caller]] — the optional `--client` HTTP caller per service, for a
   process outside a worker.
+- [[forwarder]], the optional `--forwarder` handler base per service, for a
+  runtime that serves the contract itself.

@@ -1,0 +1,1 @@
+`--forwarder` on `python` emits `forwarder.py`, an abstract `{Service}Forwarder` per service that hands each operation's JSON transfer form to one `forward` method, for a runtime that serves the contract itself.

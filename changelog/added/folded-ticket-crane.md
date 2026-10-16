@@ -1,0 +1,1 @@
+`x-nexus-operation-token` marks a model as an operation token's content. Python gives it `to_token()` and `from_token()`, base64url JSON with sorted keys and no padding, and a version member the decoder checks.

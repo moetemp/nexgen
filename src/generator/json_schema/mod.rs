@@ -5,6 +5,7 @@ pub(in crate::generator) mod go_client;
 pub(crate) mod java;
 pub(crate) mod python;
 pub(in crate::generator) mod python_client;
+pub(in crate::generator) mod python_forwarder;
 pub(crate) mod typescript;
 
 pub(in crate::generator) use crate::planning::build_json_name_manifest;

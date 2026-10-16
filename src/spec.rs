@@ -612,6 +612,32 @@ impl<F: TypeFamily> ServiceSpec<F> {
     }
 }
 
+/// The long-poll contract authored on an operation (`x-nexus-long-poll`).
+///
+/// Both members are **wire** member names on the operation's input and output
+/// models, not emitted identifiers: the authored contract is the only thing both
+/// ends of the call agree on, so an emitter resolves them through its own
+/// `x-<lang>-name` mapping rather than the other way round.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationLongPollSpec {
+    /// The input member carrying the per-call server-side wait budget, in
+    /// milliseconds.
+    pub wait_field: String,
+    /// The output member whose emptiness means the call collected nothing, so a
+    /// caller that is still inside its deadline should poll again.
+    pub result_field: String,
+    /// The boolean output member that says nothing more will arrive, when the
+    /// contract declares one. An answer with it set ends the loop even when the
+    /// result is empty.
+    pub done_field: Option<String>,
+    /// The smallest wait the input member accepts, from its `minimum` or
+    /// `exclusiveMinimum`, when it declares one.
+    pub wait_minimum: Option<i64>,
+    /// The largest wait the input member accepts, from its `maximum` or
+    /// `exclusiveMaximum`, when it declares one. A loop never sends more.
+    pub wait_maximum: Option<i64>,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
@@ -625,6 +651,9 @@ pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     /// Whether the authored operation is deprecated. This is annotation
     /// metadata only and has no effect on binding or wire behavior.
     pub deprecated: bool,
+    /// The authored long-poll contract, when the operation declares one. It
+    /// changes no wire behavior; it tells a generated caller how to loop.
+    pub long_poll: Option<OperationLongPollSpec>,
     pub doc: F::Text,
     pub return_doc: F::Text,
     pub input: Option<TypeSpec<F>>,
@@ -659,6 +688,7 @@ impl<F: TypeFamily> OperationSpec<F> {
             wire_name: self.wire_name,
             experimental: self.experimental,
             deprecated: self.deprecated,
+            long_poll: self.long_poll,
             doc: map.map_text(self.doc),
             return_doc: map.map_text(self.return_doc),
             input: self.input.map(|input| input.map_names_with(map)),

@@ -1413,6 +1413,14 @@ impl<'a> AddRpcBuilder<'a> {
         let field_type = Type::try_from(field.r#type.unwrap_or_default())
             .map_err(|_| self.unsupported(&context, "unknown field type"))?;
 
+        if label == Label::Repeated
+            && let Some((key, value)) = self.map_entry_fields(field)
+        {
+            let key_type = self.render_field_base_type(&key, parent_type, field_name)?;
+            let value_type = self.render_field_base_type(&value, parent_type, field_name)?;
+            return Ok(format!("map<{key_type}, {value_type}>"));
+        }
+
         let base_type = self.render_field_base_type(field, parent_type, field_name)?;
 
         if label == Label::Repeated {
@@ -1426,6 +1434,37 @@ impl<'a> AddRpcBuilder<'a> {
         }
 
         Ok(base_type)
+    }
+
+    /// The key and value fields of a proto map field's synthetic entry message.
+    fn map_entry_fields(
+        &self,
+        field: &FieldDescriptorProto,
+    ) -> Option<(FieldDescriptorProto, FieldDescriptorProto)> {
+        if field.r#type != Some(Type::Message as i32) {
+            return None;
+        }
+        let entry = self
+            .descriptors
+            .message(field.type_name.as_deref()?.trim_start_matches('.'))?;
+        if !entry
+            .descriptor
+            .options
+            .as_ref()
+            .and_then(|options| options.map_entry)
+            .unwrap_or(false)
+        {
+            return None;
+        }
+        let entry_field = |name: &str| {
+            entry
+                .descriptor
+                .field
+                .iter()
+                .find(|field| field.name.as_deref() == Some(name))
+                .cloned()
+        };
+        Some((entry_field("key")?, entry_field("value")?))
     }
 
     fn render_field_base_type(
@@ -1927,6 +1966,11 @@ fn render_wit_type_id(resolve: &Resolve, type_id: TypeId) -> String {
     match &type_def.kind {
         TypeDefKind::Option(inner) => format!("option<{}>", render_wit_type(resolve, inner)),
         TypeDefKind::List(inner) => format!("list<{}>", render_wit_type(resolve, inner)),
+        TypeDefKind::Map(key, value) => format!(
+            "map<{}, {}>",
+            render_wit_type(resolve, key),
+            render_wit_type(resolve, value)
+        ),
         TypeDefKind::Type(inner) => render_wit_type(resolve, inner),
         TypeDefKind::Tuple(tuple) => format!(
             "tuple<{}>",

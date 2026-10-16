@@ -5,12 +5,43 @@
 //! emitters that honor them share one vocabulary. Nothing here holds
 //! target-language policy.
 //!
-//! See `specs/json-schema/long-poll.md`, `specs/json-schema/cursor.md` and
-//! `specs/json-schema/stream-ref.md` for the authoritative rules.
+//! See `specs/json-schema/long-poll.md`, `specs/json-schema/cursor.md`,
+//! `specs/json-schema/stream-ref.md` and `specs/json-schema/handles.md` for the
+//! authoritative rules.
 
 use std::collections::BTreeSet;
 
 use serde_json::Value;
+
+/// Maps emitted handle type names to the ordered wire members they bind, on a
+/// `services:` entry. An operation joins a handle when its input carries every
+/// key member; the generated caller then exposes it as a method with those
+/// members bound.
+pub const HANDLE_KEYWORD: &str = "x-nexus-handle";
+
+/// The base a handle constructor's name is derived from, before a target
+/// cases it.
+///
+/// A trailing `Handle` is dropped, so `StreamHandle` is built by `stream`.
+/// Built from a parent handle, the parent's own base is dropped as a prefix
+/// when something is left of it, so `StreamProducer` built from `StreamHandle`
+/// reads `producer`, while from the flat client it stays `stream_producer`.
+/// One rule for every target keeps the two callers reading alike.
+pub fn handle_constructor_base(name: &str, parent: Option<&str>) -> String {
+    let base = name
+        .strip_suffix("Handle")
+        .filter(|rest| !rest.is_empty())
+        .unwrap_or(name);
+    if let Some(parent) = parent {
+        let parent_base = handle_constructor_base(parent, None);
+        if let Some(rest) = base.strip_prefix(parent_base.as_str())
+            && rest.chars().next().is_some_and(char::is_uppercase)
+        {
+            return rest.to_string();
+        }
+    }
+    base.to_string()
+}
 
 /// Marks a `$defs` model as the stream reference: the value an operation takes
 /// or returns to hand a stream to its caller. The model's members are the wire
@@ -209,6 +240,31 @@ mod tests {
                 "properties.tokens.items".to_string(),
                 "additionalProperties".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn derives_a_handle_constructor_from_its_name_and_parent() {
+        assert_eq!(handle_constructor_base("StreamHandle", None), "Stream");
+        assert_eq!(
+            handle_constructor_base("StreamProducer", None),
+            "StreamProducer"
+        );
+        assert_eq!(
+            handle_constructor_base("StreamProducer", Some("StreamHandle")),
+            "Producer"
+        );
+        // A parent whose base is not a prefix leaves the name whole.
+        assert_eq!(
+            handle_constructor_base("StreamProducer", Some("Session")),
+            "StreamProducer"
+        );
+        // A name that is only the suffix stays itself rather than vanishing.
+        assert_eq!(handle_constructor_base("Handle", None), "Handle");
+        // The prefix has to end on a word boundary.
+        assert_eq!(
+            handle_constructor_base("Streamer", Some("StreamHandle")),
+            "Streamer"
         );
     }
 

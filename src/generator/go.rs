@@ -2679,7 +2679,7 @@ pub(in crate::generator) fn go_unexported_name(name: &str) -> String {
 
 /// Converts a WIT field name (kebab-case) to an exported Go field name
 /// (UpperCamelCase), escaping Go keywords with a trailing underscore.
-pub(in crate::generator) fn go_field_name(name: &str) -> String {
+pub(crate) fn go_field_name(name: &str) -> String {
     let camel = name
         .to_snake_case()
         .split('_')
@@ -2952,7 +2952,7 @@ fn collect_imports_from_planned_value(value: &PlannedValueType, imports: &mut BT
 }
 
 /// Returns `true` if `name` is a Go language keyword.
-fn is_go_keyword(name: &str) -> bool {
+pub(in crate::generator) fn is_go_keyword(name: &str) -> bool {
     matches!(
         name,
         "break"

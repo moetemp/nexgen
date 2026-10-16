@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from ._definitions import Violation
+from ._definitions import (
+    StreamCursor,
+    Violation,
+)
 from .models import (
     AppendInput,
     AppendOutput,
@@ -13,6 +16,7 @@ from .models import (
 from .services import StreamService
 
 __all__ = [
+    "StreamCursor",
     "Violation",
     "AppendInput",
     "AppendOutput",

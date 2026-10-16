@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from ._definitions import Violation
+from ._definitions import (
+    StreamCursor,
+    Violation,
+)
 import collections.abc
 import typing
 
@@ -12,6 +15,7 @@ from .services import StreamServiceClient
 from . import services as _services
 
 __all__ = [
+    "StreamCursor",
     "Violation",
     "StreamServiceClient",
 ]

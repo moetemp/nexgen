@@ -1,0 +1,1 @@
+Added the `x-nexus-cursor` member keyword, which marks a string member as an opaque resume token and names its type; Go and Python declare that type once per package for the caller's own variables, while the wire members and the generated callers keep plain strings.

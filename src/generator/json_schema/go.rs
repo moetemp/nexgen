@@ -1700,6 +1700,13 @@ pub(in crate::generator) fn render_definitions_file(
     }
     output.push_str("\t\"go.temporal.io/sdk/temporal\"\n");
     output.push_str(")\n\n");
+    // Declared here rather than beside the models: Go flattens the closure into
+    // one package, so two input files naming one token type would otherwise
+    // declare it twice. This is the file whose census spans the package.
+    render_cursor_types(
+        &mut output,
+        &crate::json_schema::streaming::cursor_type_names(models.iter().map(|model| &model.schema)),
+    );
     render_validator_core(&mut output);
     if uses_temporal {
         output.push('\n');
@@ -1881,6 +1888,25 @@ pub(in crate::generator) fn client_plan(
             },
         },
     )
+}
+
+/// The opaque token types the contract declares (`x-nexus-cursor`).
+///
+/// A named string type rather than a `string` alias: a caller holding a token in
+/// one of these cannot pass a bare `string` into its place without saying so.
+/// The wire models keep `string`, so the JSON on the wire is unchanged.
+fn render_cursor_types(output: &mut String, cursor_names: &[String]) {
+    for name in cursor_names {
+        output.push('\n');
+        render_wrapped_go_doc_comment(
+            output,
+            "",
+            &crate::json_schema::streaming::cursor_doc(name, " "),
+        );
+        output.push_str("type ");
+        output.push_str(name);
+        output.push_str(" string\n");
+    }
 }
 
 /// Renders the closed-value (`const`/`enum`) defined types and their typed value

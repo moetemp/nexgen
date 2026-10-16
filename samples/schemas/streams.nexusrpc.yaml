@@ -3,7 +3,8 @@ $schema: https://json-schema.org/draft/2020-12/schema
 description: >
   A stream endpoint: append records to a workflow's stream and read them back
   from a resume token. The generated HTTP callers post to it from outside a
-  worker, and loop the long-pollable read until records arrive.
+  worker, loop the long-pollable read until records arrive, and hold resume
+  positions in an opaque token type.
 services:
   StreamService:
     fqn: example.streams.v1.StreamService
@@ -86,6 +87,7 @@ $defs:
     properties:
       cursor:
         type: string
+        x-nexus-cursor: StreamCursor
         description: >
           Names the last record written by this call. Empty when the call
           carried no payloads.
@@ -105,6 +107,7 @@ $defs:
           publishes.
       afterToken:
         type: string
+        x-nexus-cursor: StreamCursor
         description: >
           A token from an earlier record or append. Empty starts at the
           beginning.
@@ -129,6 +132,7 @@ $defs:
     properties:
       token:
         type: string
+        x-nexus-cursor: StreamCursor
         description: Names this record. Pass it as afterToken to resume just past it.
       frame:
         type: string
@@ -152,6 +156,7 @@ $defs:
         description: The records after the caller's token, in stream order.
       nextToken:
         type: string
+        x-nexus-cursor: StreamCursor
         description: >
           Pass as afterToken on the following call. Echoes the caller's own
           token when the call collected nothing.

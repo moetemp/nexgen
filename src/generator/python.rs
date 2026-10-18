@@ -1304,31 +1304,6 @@ impl<'a> ApiPlanner<'a> {
             .for_language(Language::Python)
             .map(str::to_string)
             .unwrap_or_else(|| python_ident(&operation.name.to_snake_case()));
-        let stream_reader = match operation.stream_result.as_ref() {
-            Some(stream_result) => match stream_result.reader.for_language(Language::Python) {
-                Some(reader_type) => {
-                    let (item_ref, item_module_path) = self.external_models.service_model_ref(
-                        &stream_result.item,
-                        "models",
-                        self.api_plan,
-                    );
-                    let item_annotation = self.resolve_output_annotation(&stream_result.item)?;
-                    let (reader_module, _) = reader_type
-                        .rsplit_once('.')
-                        .expect("a stream reader type is a dotted `module.Type` path");
-                    Some(RenderedStreamReader {
-                        method_name: format!("read_{attr_name}_stream"),
-                        reader_module: reader_module.to_string(),
-                        reader_type: reader_type.to_string(),
-                        item_ref,
-                        item_module_path,
-                        item_annotation,
-                    })
-                }
-                None => None,
-            },
-            None => None,
-        };
         Ok(RenderedOperation {
             name: operation.name.as_str(),
             wire_name: operation.wire_name.as_str(),
@@ -1370,7 +1345,6 @@ impl<'a> ApiPlanner<'a> {
                 .map(|usage| usage.parameter.name)
                 .collect(),
             generic_model_types,
-            stream_reader,
         })
     }
 
@@ -2587,20 +2561,6 @@ struct RenderedOperation<'a> {
     unpacked_input: Option<RenderedUnpackedInput>,
     model_input_type_parameters: Vec<String>,
     generic_model_types: bool,
-    stream_reader: Option<RenderedStreamReader>,
-}
-
-/// The typed reader a Workflow client hands back for an operation whose start
-/// returns a stream (`x-nexus-stream-result`). The reader type is the SDK's,
-/// named by the contract, so the method only binds the item type and endpoint.
-#[derive(Debug)]
-struct RenderedStreamReader {
-    method_name: String,
-    reader_module: String,
-    reader_type: String,
-    item_ref: String,
-    item_module_path: Option<String>,
-    item_annotation: String,
 }
 
 #[derive(Debug)]
@@ -4108,19 +4068,6 @@ fn render_service_module(
                     module_imports.insert(input_module_path.clone());
                 }
             }
-            if include_endpoint_clients
-                && service.endpoint.is_none()
-                && let Some(reader) = &operation.stream_reader
-            {
-                module_imports.insert(reader.reader_module.clone());
-                if reader.item_module_path.as_deref() == Some(".models") {
-                    if let Some(type_name) = reader.item_ref.strip_prefix("models.") {
-                        model_type_imports.insert(type_name.to_string());
-                    }
-                } else if let Some(item_module_path) = &reader.item_module_path {
-                    module_imports.insert(item_module_path.clone());
-                }
-            }
             if let Some(output_module_path) = &operation.output_module_path {
                 if output_module_path == "._resources" {
                     if let Some(module_name) = resource_modules.get(&operation.output_ref) {
@@ -4948,13 +4895,6 @@ fn render_endpoint_service_object(output: &mut String, service: &RenderedService
     output.push_str(",\n");
     output.push_str("            endpoint=endpoint,\n");
     output.push_str("        )\n");
-    if service
-        .operations
-        .iter()
-        .any(|operation| operation.stream_reader.is_some())
-    {
-        output.push_str("        self._endpoint = endpoint\n");
-    }
     if service.operations.is_empty() {
         output.push('\n');
         output.push_str("    pass\n");
@@ -4964,44 +4904,6 @@ fn render_endpoint_service_object(output: &mut String, service: &RenderedService
         output.push('\n');
         render_endpoint_service_object_operation_method(output, service, operation);
     }
-    for operation in &service.operations {
-        if let Some(reader) = &operation.stream_reader {
-            output.push('\n');
-            render_endpoint_service_object_stream_reader(output, service, operation, reader);
-        }
-    }
-}
-
-/// The reader method for a stream-returning operation. It only wraps the
-/// operation handle in the SDK's reader: waiting for progress, reading through
-/// the stream service and ending with the operation all belong to the reader.
-fn render_endpoint_service_object_stream_reader(
-    output: &mut String,
-    service: &RenderedService<'_>,
-    operation: &RenderedOperation<'_>,
-    reader: &RenderedStreamReader,
-) {
-    output.push_str("    def ");
-    output.push_str(&reader.method_name);
-    output.push_str("(\n        self,\n        handle: ");
-    output.push_str(&operation_public_return_annotation(service, operation));
-    output.push_str(",\n        *,\n        endpoint: str | None = None,\n    ) -> ");
-    output.push_str(&reader.reader_type);
-    output.push('[');
-    output.push_str(&reader.item_annotation);
-    output.push_str("]:\n");
-    output.push_str("        \"\"\"Read the stream the ``");
-    output.push_str(&operation.attr_name);
-    output.push_str(
-        "`` operation returns.\n\n        The stream is read through the stream service on ``endpoint``, the client's own\n        endpoint by default.\n        \"\"\"\n",
-    );
-    output.push_str("        return ");
-    output.push_str(&reader.reader_type);
-    output.push_str("(\n            handle,\n            item_type=");
-    output.push_str(&local_python_model_type_expr(&reader.item_ref));
-    output.push_str(
-        ",\n            endpoint=self._endpoint if endpoint is None else endpoint,\n        )\n",
-    );
 }
 
 fn render_endpoint_service_object_operation_method(

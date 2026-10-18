@@ -6,8 +6,8 @@
 //! target-language policy.
 //!
 //! See `specs/json-schema/long-poll.md`, `specs/json-schema/cursor.md`,
-//! `specs/json-schema/stream-ref.md`, `specs/json-schema/handles.md` and
-//! `specs/json-schema/stream-result.md` for the authoritative rules.
+//! `specs/json-schema/stream-ref.md` and `specs/json-schema/handles.md` for the
+//! authoritative rules.
 
 use std::collections::BTreeSet;
 
@@ -71,21 +71,6 @@ pub fn stream_ref_mapping<'a>(schema: &'a Value, target: &str) -> Option<&'a str
 /// Marks a `type: string` member as an opaque resume token. The value names the
 /// emitted token type, so every member naming the same type shares it.
 pub const CURSOR_KEYWORD: &str = "x-nexus-cursor";
-
-/// Marks an `operations:` entry whose start hands its caller a stream. The value
-/// names the record type the stream carries and, per target, the SDK reader
-/// type a generated caller wraps the operation handle in.
-pub const STREAM_RESULT_KEYWORD: &str = "x-nexus-stream-result";
-
-/// The `x-nexus-stream-result` member naming the schema of one record's body.
-pub const STREAM_RESULT_ITEM_MEMBER: &str = "item";
-
-/// The optional `x-nexus-stream-result` member mapping a target's
-/// `x-<lang>-name` token to the SDK reader type, as a dotted `module.Type`.
-pub const STREAM_RESULT_READER_MEMBER: &str = "reader";
-
-/// The targets a stream result's reader can be mapped for.
-pub const STREAM_RESULT_MAPPED_TARGETS: [&str; 1] = ["py"];
 
 /// Marks an `operations:` entry as long-pollable.
 pub const LONG_POLL_KEYWORD: &str = "x-nexus-long-poll";

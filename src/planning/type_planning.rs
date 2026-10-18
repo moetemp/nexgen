@@ -324,10 +324,7 @@ fn collect_symbol_module_import(
 }
 
 use super::*;
-use crate::spec::{
-    FunctionTypeDescriptorSpec, OperationOutputTransformSpec, OperationStreamResultSpec,
-    ResourceResultSpec,
-};
+use crate::spec::{FunctionTypeDescriptorSpec, OperationOutputTransformSpec, ResourceResultSpec};
 
 pub(super) struct TypePlanningContext<'a> {
     pub(super) spec: ApiSpec<OperationLoweredFamily>,
@@ -632,11 +629,6 @@ impl<'a> TypePlanningContext<'a> {
     ) -> Result<OperationSpec<PlannedFamily>> {
         let input = self.plan_operation_input(service, operation)?;
         let output = self.plan_operation_output(service, operation)?;
-        let stream_result = operation
-            .stream_result
-            .as_ref()
-            .map(|stream_result| self.plan_operation_stream_result(operation, stream_result))
-            .transpose()?;
 
         Ok(OperationSpec {
             name: operation.name.clone(),
@@ -645,7 +637,6 @@ impl<'a> TypePlanningContext<'a> {
             experimental: operation.experimental,
             deprecated: operation.deprecated,
             long_poll: operation.long_poll.clone(),
-            stream_result,
             doc: materialize_selected_text(&operation.doc),
             return_doc: materialize_selected_text(&operation.return_doc),
             input,
@@ -663,26 +654,6 @@ impl<'a> TypePlanningContext<'a> {
                     operation.data.output_resource_return.as_ref(),
                 ),
             },
-        })
-    }
-
-    fn plan_operation_stream_result(
-        &mut self,
-        operation: &OperationSpec<OperationLoweredFamily>,
-        stream_result: &OperationStreamResultSpec<OperationLoweredFamily>,
-    ) -> Result<OperationStreamResultSpec<PlannedFamily>> {
-        let TypeSpec::External(ExternalTypeSpec::Json(json_type)) = &stream_result.item else {
-            return Err(Error::InvalidWit {
-                path: std::path::PathBuf::from("<api-plan>"),
-                reason: format!(
-                    "operation `{}` stream result item must be a named model",
-                    operation.name
-                ),
-            });
-        };
-        Ok(OperationStreamResultSpec {
-            item: TypeSpec::External(ExternalTypeSpec::Json(self.map_json_type(json_type))),
-            reader: materialize_selected_text(&stream_result.reader),
         })
     }
 
@@ -1631,7 +1602,6 @@ mod tests {
                     experimental: false,
                     deprecated: false,
                     long_poll: None,
-                    stream_result: None,
                     doc: LanguageStringSpec::default(),
                     return_doc: LanguageStringSpec::default(),
                     input: Some(TypeSpec::External(ExternalTypeSpec::Proto(Symbol::new(

@@ -2965,10 +2965,9 @@ fn build_operation(
         wire_name: wire_operation_name,
         experimental,
         deprecated: false,
-        // The long-poll and stream-result contracts are authored in JSON Schema
-        // only; WIT has no keyword for them.
+        // The long-poll contract is authored in JSON Schema only; WIT has no
+        // keyword for it.
         long_poll: None,
-        stream_result: None,
         doc: directive(&directives, "doc", path, &context)?
             .map(directive_language_string)
             .unwrap_or_default(),

@@ -1,1 +1,0 @@
-`x-nexus-stream-result` marks an operation whose start hands back a stream. The Python Workflow client gains a typed `read_<op>_stream` method that wraps the operation handle in the SDK reader the contract names.

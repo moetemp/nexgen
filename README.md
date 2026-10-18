@@ -361,7 +361,6 @@ not yet lowered).
 | `x-nexus-stream-ref` | Partial | Marks the stream reference model; a `py` mapping in the contract makes Python emit that type in its place, and every other case emits the model. See [`specs/json-schema/stream-ref.md`](specs/json-schema/stream-ref.md). |
 | `x-nexus-operation-token` | Partial | Accepted by every target; Python gives the marked model `to_token` and `from_token`, base64url JSON with a checked version member. See [`specs/json-schema/operation-token.md`](specs/json-schema/operation-token.md). |
 | `x-nexus-handle` | Partial | Accepted by every target; the advanced `--client` HTTP callers (Go, Python) emit identity-binding handles over the flat methods. See [`specs/json-schema/handles.md`](specs/json-schema/handles.md). |
-| `x-nexus-stream-result` | Partial | Accepted by every target; the Python Workflow client (`--native-api`) emits a typed `read_<op>_stream` method that wraps the operation handle in the SDK reader the contract maps. See [`specs/json-schema/stream-result.md`](specs/json-schema/stream-result.md). |
 | `x-nexus-long-poll` | Partial | Accepted by every target; the advanced `--client` HTTP callers (Go, Python) emit a loop method for it, and the Python loop sends back an answer's `state-field`. See [`specs/json-schema/long-poll.md`](specs/json-schema/long-poll.md). |
 | `examples` | Planned | Accepted and ignored; pending the doc-comment feature. |
 | `readOnly` | Planned | Deferred; needs request/response split-types. |

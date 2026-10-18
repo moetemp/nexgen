@@ -3587,3 +3587,50 @@ $defs:
     );
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+#[test]
+fn python_refuses_an_operation_named_like_the_nexus_client_member() {
+    let contract = r##"
+nexusrpc: "1.0.0"
+services:
+  ChatService:
+    fqn: example.chat.v1.ChatService
+    operations:
+      ping:
+        fqn: ping
+        x-py-name: _nexus_client
+        input: { $ref: "#/$defs/ChatInput" }
+$defs:
+  ChatInput:
+    type: object
+    properties:
+      prompt: { type: string }
+    required: [prompt]
+    additionalProperties: false
+"##;
+    let temp_dir = unique_output_path("python-client-member-reject");
+    let input_dir = temp_dir.join("input");
+    fs::create_dir_all(&input_dir).unwrap();
+    let input_path = input_dir.join("chat.nexusrpc.yaml");
+    fs::write(&input_path, contract).unwrap();
+    let error = generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            ..Default::default()
+        },
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_path],
+        support_package: None,
+        descriptor_paths: Vec::new(),
+        output_path: temp_dir.join("chat"),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .expect_err("the contract should be refused")
+    .to_string();
+    fs::remove_dir_all(temp_dir).unwrap();
+    assert!(error.contains("`_nexus_client`"), "{error}");
+    assert!(error.contains("x-py-name"), "{error}");
+    assert!(error.contains("chat.nexusrpc.yaml"), "{error}");
+}

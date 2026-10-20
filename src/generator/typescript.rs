@@ -3944,35 +3944,39 @@ fn render_system_nexus_interceptors_module(
     );
     body.push_str("): Promise<nexus.NexusOperationHandle<unknown>> {\n");
     body.push_str("  switch (service) {\n");
-    for (service, operation) in operations {
-        let input = operation
-            .input
-            .as_ref()
-            .and_then(|input| input.model_name.as_deref())
-            .or_else(|| {
-                operation
-                    .input
-                    .as_ref()
-                    .map(|input| input.annotation.as_str())
-            })
-            .unwrap_or("undefined");
+    // A `switch` runs only the first matching `case`, so each service gets one
+    // case that contains all of its operations.
+    for service in services.iter().filter(|service| service.endpoint.is_some()) {
         body.push_str("    case ");
         body.push_str(&typescript_string_literal(service.wire_name));
         body.push_str(":\n      switch (operation) {\n");
-        body.push_str("        case ");
-        body.push_str(&typescript_string_literal(operation.wire_name));
-        body.push_str(":\n");
-        body.push_str("          return composeInterceptors(interceptors, ");
-        body.push_str(&typescript_string_literal(&operation.attr_name));
-        body.push_str(", (request) =>\n");
-        body.push_str("            next<");
-        body.push_str(input);
-        body.push_str(", ");
-        body.push_str(&operation.output_operation_annotation);
-        body.push_str(">(request)\n");
-        body.push_str("          )(input as ");
-        body.push_str(input);
-        body.push_str(") as Promise<nexus.NexusOperationHandle<unknown>>;\n");
+        for operation in &service.operations {
+            let input = operation
+                .input
+                .as_ref()
+                .and_then(|input| input.model_name.as_deref())
+                .or_else(|| {
+                    operation
+                        .input
+                        .as_ref()
+                        .map(|input| input.annotation.as_str())
+                })
+                .unwrap_or("undefined");
+            body.push_str("        case ");
+            body.push_str(&typescript_string_literal(operation.wire_name));
+            body.push_str(":\n");
+            body.push_str("          return composeInterceptors(interceptors, ");
+            body.push_str(&typescript_string_literal(&operation.attr_name));
+            body.push_str(", (request) =>\n");
+            body.push_str("            next<");
+            body.push_str(input);
+            body.push_str(", ");
+            body.push_str(&operation.output_operation_annotation);
+            body.push_str(">(request)\n");
+            body.push_str("          )(input as ");
+            body.push_str(input);
+            body.push_str(") as Promise<nexus.NexusOperationHandle<unknown>>;\n");
+        }
         body.push_str("        default:\n          return next(input);\n      }\n");
     }
     body.push_str("    default:\n      return next(input);\n  }\n}\n");
@@ -7143,6 +7147,61 @@ interface workflow-service {
         assert!(output.contains("return await client.startOperation("));
         assert!(output.contains("__temporal_system"));
         assert!(output.contains("export type { Request, Response } from './models';"));
+    }
+
+    #[test]
+    fn system_nexus_interceptors_dispatch_every_operation_of_a_service() {
+        let wit = r#"
+package temporal:nexus@1.0.0;
+
+world system {
+  export workflow-service;
+}
+
+/// @nexus.endpoint "__temporal_system"
+interface workflow-service {
+  record request {
+    id: string,
+  }
+
+  record response {
+    value: string,
+  }
+
+  first-operation: func(request: request) -> response;
+  second-operation: func(request: request) -> response;
+}
+"#;
+        let spec = crate::parser::parse_api_spec_from_wit_for_language(
+            Language::TypeScript,
+            wit,
+            PathBuf::from("inline.wit"),
+        )
+        .unwrap();
+        let descriptors = DescriptorIndex::load(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("advanced/samples/descriptors/temporal_api.bin"),
+        )
+        .unwrap();
+        let _scope = scope(NexgenConfig {
+            system_nexus: true,
+            ..current()
+        });
+        let output =
+            generate_source(Language::TypeScript, spec, &descriptors, "./support").unwrap();
+
+        assert_eq!(
+            output.matches("    case \"WorkflowService\":\n").count(),
+            1,
+            "{output}"
+        );
+        assert!(
+            output.contains("      switch (operation) {\n        case \"FirstOperation\":\n"),
+            "{output}"
+        );
+        assert!(output.contains(
+            "          )(input as Request) as Promise<nexus.NexusOperationHandle<unknown>>;\n        case \"SecondOperation\":\n"
+        ), "{output}");
     }
 
     #[test]

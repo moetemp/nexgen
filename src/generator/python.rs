@@ -4567,10 +4567,13 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         output.push_str(&operation.attr_name);
         output.push_str("(typed_input.input),\n        )\n");
     }
-    output.push_str("    raise ValueError(f\"unsupported System Nexus operation: {input.service}/{input.operation_name}\")\n");
+    // An operation outside the generated set goes to the generic hook, so a
+    // plugin outside the SDK can serve its own System Nexus service.
+    output.push_str("    return await interceptor.start_system_nexus_operation(input)\n");
 
     output.push_str("\n\nclass _SystemNexusWorkflowOutboundInterceptorBase(abc.ABC):\n");
     output.push_str("    @abc.abstractmethod\n    def _next_system_nexus_interceptor(\n        self,\n    ) -> _SystemNexusWorkflowOutboundInterceptorBase:\n        ...\n");
+    output.push_str("\n    @abc.abstractmethod\n    async def start_system_nexus_operation(\n        self,\n        input: StartNexusOperationInput[_InputT, _OutputT],\n    ) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n        \"\"\"Intercept a System Nexus operation through the generic hook.\"\"\"\n        ...\n");
     for (_service, operation) in &operations {
         let output_type = system_nexus_type_expr(&operation.output_type_expr);
         output.push_str("\n    async def start_");

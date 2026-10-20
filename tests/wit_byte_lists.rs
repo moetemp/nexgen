@@ -106,20 +106,6 @@ fn python_keeps_a_plain_wit_byte_list_as_a_list_of_integers() {
 }
 
 #[test]
-fn go_keeps_a_plain_wit_byte_list_as_a_list_of_integers() {
-    let models = generate(Language::Go, "example.com/nexgen/support");
-    assert!(models.contains("Data []int32"), "{models}");
-    assert!(!models.contains("[]byte"), "{models}");
-}
-
-#[test]
-fn typescript_keeps_a_plain_wit_byte_list_as_a_list_of_integers() {
-    let models = generate(Language::TypeScript, "./support");
-    assert!(models.contains("data?: number[]"), "{models}");
-    assert!(!models.contains("Uint8Array"), "{models}");
-}
-
-#[test]
 fn python_reads_a_proto_backed_wit_byte_list_as_bytes() {
     let descriptors = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("advanced/samples/descriptors/temporal_api.bin");

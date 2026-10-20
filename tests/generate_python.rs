@@ -1416,3 +1416,40 @@ $defs:
         fs::remove_dir_all(temp_dir).unwrap();
     }
 }
+
+/// A System Nexus operation outside the generated set goes to the generic hook
+/// of the outbound chain, so a plugin outside the SDK can serve it.
+#[test]
+fn python_system_nexus_unknown_operations_use_the_generic_hook() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-system-nexus-fallthrough");
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            system_nexus: true,
+        },
+        language: nexgen::language::Language::Python,
+        input_paths: example_input_paths(&root, "multi-operation-service"),
+        support_package: Some("temporal_support".into()),
+        descriptor_paths: vec![descriptor_path(&root)],
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let interceptor = fs::read_to_string(output_path.join("_system_nexus_interceptor.py")).unwrap();
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    assert!(!interceptor.contains("raise ValueError"), "{interceptor}");
+    assert!(
+        interceptor.contains("    return await interceptor.start_system_nexus_operation(input)\n"),
+        "{interceptor}"
+    );
+    assert!(
+        interceptor
+            .contains("    @abc.abstractmethod\n    async def start_system_nexus_operation("),
+        "{interceptor}"
+    );
+}

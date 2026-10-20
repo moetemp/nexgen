@@ -1,0 +1,1 @@
+Python and .NET `--system-nexus` dispatch sends an operation outside the generated set to the generic hook of the workflow outbound chain (`start_system_nexus_operation` or `ScheduleSystemNexusOperationAsync`), as TypeScript does, instead of raising.

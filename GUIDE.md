@@ -218,6 +218,10 @@ code calls `support.workflowNamespace()`. Include both the support module and
 generated output in your project. Run the project's TypeScript type checker (the
 sample uses `npm run typecheck`).
 
+Validation helpers such as `requiredField` are generated privately in each
+module that needs them. They are not exported and do not belong in your support
+module.
+
 ### .NET
 
 Pass the C# **namespace**, not a source path or assembly name:
@@ -867,32 +871,39 @@ export interface ActivityOptions {
     retryPolicy: common.RetryPolicy;
 }
 
-export const ActivityOptions = {
-    fromProto(proto: temporal.api.activity.v1.IActivityOptions | null | undefined) {
-        if (proto == null) return undefined;
-        return {
-            taskQueue: proto.taskQueue == null ? undefined
-                : taskQueueFromProto(proto.taskQueue),
-            retryPolicy: requiredField(
-                retryPolicyFromProto(requiredField(proto.retryPolicy, ...)), ...
-            ),
-        };
-    },
-    toProto(model: ActivityOptions | null | undefined) {
-        if (model == null) return undefined;
-        return {
-            taskQueue: model.taskQueue == null ? undefined
-                : taskQueueToProto(model.taskQueue),
-            retryPolicy: retryPolicyToProto(model.retryPolicy),
-        };
-    },
-};
+function activityOptionsFromProto(
+    proto: temporal.api.activity.v1.IActivityOptions,
+): ActivityOptions {
+    return {
+        taskQueue: proto.taskQueue == null ? undefined
+            : taskQueueFromProto(proto.taskQueue),
+        retryPolicy: requiredField(
+            retryPolicyFromProto(requiredField(proto.retryPolicy, ...)), ...
+        ),
+    };
+}
+
+function activityOptionsToProto(
+    model: ActivityOptions,
+): temporal.api.activity.v1.IActivityOptions {
+    return {
+        taskQueue: model.taskQueue == null ? undefined
+            : taskQueueToProto(model.taskQueue),
+        retryPolicy: retryPolicyToProto(model.retryPolicy),
+    };
+}
 ```
 
 Required fields are validated in `from_proto` -- missing required proto fields
 raise a `ValueError` (Python) or throw an `Error` (TypeScript). .NET output
 requires `Temporalio` 1.18.0 or newer, or 1.19.0 or newer for generic
 proto-backed models.
+
+Generated TypeScript message-conversion helpers take non-null inputs and return
+non-null outputs. Callers guard optional fields before conversion and validate
+required wire fields before passing them to a helper. Required results from
+authored support converters are still validated; those converters retain their
+own nullable contracts.
 
 ### Sourced Fields
 
@@ -1473,6 +1484,22 @@ Encoding a required variant property that holds `null` (for example after
 `null!`) also throws `InvalidOperationException`. An unset `option<variant>`
 decodes to `null`, and encoding `null` leaves the oneof unset.
 
+TypeScript uses tagged object unions, such as
+`{ tag: "success", value: output }`. The containing record's transfer converter
+switches on the SDK's oneof discriminator and writes the discriminator together
+with the selected member. A missing required discriminator throws an `Error`; an
+absent optional discriminator decodes as `undefined`. Plain wire objects must
+supply the discriminator when a case is selected; member presence is not used to
+infer it. Unknown discriminator values and missing selected member values throw
+an `Error`, as does encoding an invalid variant tag. Model-only modules export
+their model types and transfer converters from `index.ts` without emitting an
+empty service.
+
+Generated TypeScript oneof switches use `satisfies never` in their default
+branches. Adding an unhandled case to the SDK discriminator or the generated
+variant is therefore a compile-time error. Runtime errors still protect against
+invalid values passed from JavaScript.
+
 Other targets reject a reachable model containing a oneof they cannot convert.
 Unreachable declarations and omitted oneofs remain valid.
 
@@ -1508,12 +1535,12 @@ A language-specific field-level `@nexus.type` override replaces that field
 occurrence and therefore removes it from generic inference for that target.
 
 Type parameters are not currently supported in proto-backed records except in
-Python and .NET when a field or oneof member maps to Temporal's protobuf
-`Payload` or `Payloads` carrier. When decoding a parameterized Python model,
-concrete type arguments propagate through nested proto-backed records and become
-type hints for single-value `Payload` fields. An unparameterized model decodes
-those fields as `typing.Any`. `Payloads` fields continue to decode as untyped
-sequences.
+Python, .NET, and TypeScript when a field or oneof member maps to Temporal's
+protobuf `Payload` or `Payloads` carrier. When decoding a parameterized Python
+model, concrete type arguments propagate through nested proto-backed records and
+become type hints for single-value `Payload` fields. An unparameterized model
+decodes those fields as `typing.Any`. `Payloads` fields continue to decode as
+untyped sequences.
 
 .NET generic proto-backed records declare an open generic transfer-type
 converter, such as `typeof(Request<,>.TransferTypeConverter)`, which the SDK
@@ -1525,6 +1552,16 @@ with no payload decodes as the default value of the type argument, for example
 for a `NoValue` result. If a `Payloads` carrier holds more than one payload,
 decoding throws `InvalidOperationException` with the field name and the payload
 count. This requires `Temporalio` 1.19.0 or newer.
+
+TypeScript retains model type parameters on transfer-converter methods. Generic
+`Payload` fields use the support module's `payloadToValue<T>` and
+`valueToPayload` helpers; generic `Payloads` fields use
+`singleValueFromPayloads<T>` and `payloadsToProto([value])`. The single-value
+decoder returns `undefined` for an empty payload list and rejects more than one
+payload. These helpers must use the configured application payload converter.
+Generic type arguments describe the decoded values statically; they do not
+supply runtime type hints. Required carrier fields require a wire envelope but
+can contain application values that are themselves `null` or `undefined`.
 
 Type parameters are also unsupported in resources, map keys, function-signature
 metadata, or resource-bound generic operations.

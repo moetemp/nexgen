@@ -1362,6 +1362,7 @@ impl<'a> ApiPlanner<'a> {
         let planned_model = planned_record(self.api_plan, input_full_name);
 
         let mut parameters = Vec::new();
+        let mut parameter_imports = PythonImports::default();
         let mut request_fields = Vec::new();
         let mut flattened_messages = Vec::new();
         let mut parameter_sources = BTreeMap::<String, String>::new();
@@ -1405,6 +1406,7 @@ impl<'a> ApiPlanner<'a> {
                 &rendered_field.attr_name,
                 &model.name,
             )?;
+            parameter_imports.extend(&rendered_field.imports);
             parameters.push(RenderedUnpackedInputField {
                 attr_name: rendered_field.attr_name.clone(),
                 annotation: rendered_field.annotation.clone(),
@@ -1425,6 +1427,7 @@ impl<'a> ApiPlanner<'a> {
         Ok(RenderedUnpackedInput {
             model_name: model.name.clone(),
             parameters,
+            parameter_imports,
             request_fields,
             flattened_messages,
             functions: planned_model
@@ -2667,6 +2670,9 @@ pub(in crate::generator) enum PythonFieldDefaultKind {
 struct RenderedUnpackedInput {
     model_name: String,
     parameters: Vec<RenderedUnpackedInputField>,
+    /// The modules that the parameter annotations name, such as the proto
+    /// module of an enum field without a replacement type.
+    parameter_imports: PythonImports,
     request_fields: Vec<RenderedUnpackedRequestField>,
     flattened_messages: Vec<RenderedFlattenedMessage>,
     functions: Vec<RenderedFunctionField>,
@@ -4342,6 +4348,17 @@ fn render_operation_module(
         body.push_str("\n\n");
     }
     render_operation_functions(&mut body, service, operation);
+    if service.endpoint.is_some()
+        && let Some(unpacked_input) = &operation.unpacked_input
+    {
+        module_imports.extend(
+            unpacked_input
+                .parameter_imports
+                .module_imports
+                .iter()
+                .cloned(),
+        );
+    }
     if !service.delay_load_temporalio_workflow {
         module_imports.insert("temporalio.workflow".to_string());
     }

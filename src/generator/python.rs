@@ -4799,7 +4799,7 @@ fn render_operation_registry_body(services: &[RenderedService<'_>]) -> String {
     );
     output.push_str("        self.operation: nexusrpc.Operation[_InputT, _OutputT] = operation\n");
     output.push_str("        self.serialization_context: _SerializationContextFactory[_InputT] | None = serialization_context\n");
-    output.push_str("\n\n__nexus_operation_registry__ = {\n");
+    output.push_str("\n\n__nexus_operation_registry__: dict[tuple[str, str], _NexusOperationInfo[typing.Any, typing.Any]] = {\n");
     for service in services {
         for operation in &service.operations {
             output.push_str("    (\n");

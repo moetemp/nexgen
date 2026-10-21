@@ -4184,6 +4184,8 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
     let mut model_names = BTreeSet::new();
     let mut body = String::new();
     body.push_str(CLIENT_RUNTIME);
+    body.push_str("\n\n");
+    body.push_str(HTTP_TRANSPORT_RUNTIME);
     for service in services {
         body.push_str("\n\n");
         body.push_str("class ");
@@ -4340,14 +4342,24 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
-    for module in ["asyncio", "dataclasses", "datetime"] {
+    for module in [
+        "asyncio",
+        "dataclasses",
+        "datetime",
+        "email.message",
+        "ssl",
+        "typing",
+        "urllib.error",
+        "urllib.parse",
+        "urllib.request",
+    ] {
         if body.contains(&format!("{module}.")) {
             output.push_str("import ");
             output.push_str(module);
             output.push('\n');
         }
     }
-    output.push_str("import typing\n\n");
+    output.push('\n');
     output.push_str("import google.protobuf.json_format\n");
     output.push_str("import google.protobuf.message\n");
     output.push_str("import temporalio.api.common.v1\n");
@@ -4591,6 +4603,139 @@ fn render_client_long_poll(
     output.push_str("            else:\n");
     output.push_str("                pause = _LONG_POLL_FIRST_PAUSE\n");
 }
+
+/// The HTTP transport maps a payload to HTTP content the way the Temporal
+/// server's Nexus payload serializer does, so the handler sees the payload that
+/// the caller sent.
+const HTTP_TRANSPORT_RUNTIME: &str = r#"class HttpTransport:
+    """A transport that posts each call to a Nexus HTTP endpoint.
+
+    Each call goes to ``{base_url}/{service}/{operation}``. The payload maps to
+    HTTP content as the Temporal server maps it: ``json/plain`` is
+    ``application/json``, a proto payload names its message type, and any
+    other payload travels whole as ``application/x-temporal-payload``.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        timeout: float = 90.0,
+        ssl_context: ssl.SSLContext | None = None,
+    ) -> None:
+        """Create an HTTP transport.
+
+        Args:
+            base_url: The endpoint's base URL, before the service name.
+            headers: Added to every request.
+            timeout: Seconds to wait for each answer. Keep it longer than the
+                longest wait that a long poll asks for.
+            ssl_context: TLS settings, such as a private certificate authority.
+        """
+        self._base_url = base_url.rstrip("/")
+        self._headers = dict(headers or {})
+        self._timeout = timeout
+        self._ssl_context = ssl_context
+
+    async def call(
+        self,
+        *,
+        service: str,
+        operation: str,
+        input: temporalio.api.common.v1.Payload,
+    ) -> temporalio.api.common.v1.Payload:
+        """Post one call and return its answer."""
+        url = "/".join(
+            [
+                self._base_url,
+                urllib.parse.quote(service, safe=""),
+                urllib.parse.quote(operation, safe=""),
+            ]
+        )
+        content_type, body = _payload_to_http(input)
+        headers = dict(self._headers)
+        if content_type is not None:
+            headers["Content-Type"] = content_type
+        request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        return await asyncio.to_thread(self._send, request)
+
+    def _send(self, request: urllib.request.Request) -> temporalio.api.common.v1.Payload:
+        try:
+            with urllib.request.urlopen(
+                request, timeout=self._timeout, context=self._ssl_context
+            ) as response:
+                status = int(response.status)
+                content_type = response.headers.get("Content-Type")
+                body = bytes(response.read())
+        except urllib.error.HTTPError as error:
+            detail = bytes(error.read()).decode(errors="replace")
+            retryable_header = error.headers.get("Nexus-Request-Retryable")
+            if retryable_header is not None:
+                retryable = retryable_header.strip().lower() == "true"
+            else:
+                retryable = error.code == 429 or error.code >= 500
+            raise TransportError(
+                f"{request.full_url} answered {error.code}: {detail}", retryable=retryable
+            ) from error
+        except urllib.error.URLError as error:
+            raise TransportError(
+                f"{request.full_url} failed: {error.reason}", retryable=True
+            ) from error
+        if status not in (200, 204):
+            raise TransportError(
+                f"{request.full_url} answered {status}, which is not a synchronous result"
+            )
+        return _http_to_payload(content_type, body)
+
+
+def _payload_to_http(payload: temporalio.api.common.v1.Payload) -> tuple[str | None, bytes]:
+    metadata = dict(payload.metadata)
+    encoding = metadata.get("encoding", b"").decode()
+    message_type = metadata.get("messageType", b"").decode()
+    if encoding == "json/plain" and len(metadata) == 1:
+        return "application/json", payload.data
+    if encoding == "json/protobuf" and len(metadata) == 2 and message_type:
+        return f'application/json; format=protobuf; message-type="{message_type}"', payload.data
+    if encoding == "binary/protobuf" and len(metadata) == 2 and message_type:
+        return f'application/x-protobuf; message-type="{message_type}"', payload.data
+    if encoding == "binary/plain" and len(metadata) == 1:
+        return "application/octet-stream", payload.data
+    if encoding == "binary/null" and len(metadata) == 1:
+        return None, b""
+    return "application/x-temporal-payload", payload.SerializeToString()
+
+
+def _http_to_payload(content_type: str | None, body: bytes) -> temporalio.api.common.v1.Payload:
+    if not content_type:
+        if body:
+            raise TransportError("the answer has a body but no content type")
+        return temporalio.api.common.v1.Payload(metadata={"encoding": b"binary/null"})
+    header = email.message.Message()
+    header["Content-Type"] = content_type
+    media_type = header.get_content_type()
+    message_type = header.get_param("message-type")
+    message_type = message_type if isinstance(message_type, str) else ""
+    if media_type == "application/x-temporal-payload":
+        payload = temporalio.api.common.v1.Payload()
+        _ = payload.ParseFromString(body)
+        return payload
+    if media_type == "application/json" and header.get_param("format") == "protobuf":
+        return temporalio.api.common.v1.Payload(
+            metadata={"encoding": b"json/protobuf", "messageType": message_type.encode()},
+            data=body,
+        )
+    if media_type == "application/json":
+        return temporalio.api.common.v1.Payload(metadata={"encoding": b"json/plain"}, data=body)
+    if media_type == "application/x-protobuf":
+        return temporalio.api.common.v1.Payload(
+            metadata={"encoding": b"binary/protobuf", "messageType": message_type.encode()},
+            data=body,
+        )
+    if media_type == "application/octet-stream":
+        return temporalio.api.common.v1.Payload(metadata={"encoding": b"binary/plain"}, data=body)
+    raise TransportError(f"the answer has an unknown content type {content_type!r}")
+"#;
 
 const CLIENT_RUNTIME: &str = r#"class Transport(typing.Protocol):
     """Carries one operation call to a service and its answer back.

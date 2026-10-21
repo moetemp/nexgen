@@ -1078,6 +1078,19 @@ client = StreamServiceClient(my_transport)
 response = await client.describe_stream(DescribeStreamRequest(stream=ref))
 ```
 
+`client.py` also has `HttpTransport`, which posts each call to
+`{base_url}/{service}/{operation}` on a Nexus HTTP endpoint. It maps a payload
+to HTTP content the way the Temporal server does: `json/plain` is
+`application/json`, a proto payload names its message type in the content type,
+and any other payload travels whole as `application/x-temporal-payload`. A
+`429`, a `5xx` or a connection error is a retryable `TransportError`, unless the
+endpoint's `Nexus-Request-Retryable` header says otherwise.
+
+```python
+transport = HttpTransport("https://nexus.example.com/endpoints/streams/services")
+client = StreamServiceClient(transport)
+```
+
 An operation with `@nexus.long-poll` also gets `<operation>_until_<result>`,
 which takes the request and a `deadline` (a `datetime.timedelta`). It calls the
 operation until an answer has something in the result list, or has the done

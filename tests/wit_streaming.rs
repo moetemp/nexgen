@@ -660,3 +660,27 @@ fn python_client_rejects_a_long_poll_method_that_another_method_names() {
         "{error}"
     );
 }
+
+#[test]
+fn python_client_module_carries_an_http_transport() {
+    let client = generate_client(LOG_WIT);
+
+    for expected in [
+        "class HttpTransport:\n",
+        "        timeout: float = 90.0,\n        ssl_context: ssl.SSLContext | None = None,\n",
+        "                urllib.parse.quote(service, safe=\"\"),\n                \
+         urllib.parse.quote(operation, safe=\"\"),\n",
+        "        return await asyncio.to_thread(self._send, request)\n",
+        "            retryable_header = error.headers.get(\"Nexus-Request-Retryable\")\n",
+        "                retryable = error.code == 429 or error.code >= 500\n",
+        // The payload maps to HTTP content as the Temporal server maps it.
+        "        return f'application/x-protobuf; message-type=\"{message_type}\"', payload.data\n",
+        "    return \"application/x-temporal-payload\", payload.SerializeToString()\n",
+        "    if media_type == \"application/json\" and header.get_param(\"format\") == \"protobuf\":\n",
+    ] {
+        assert!(
+            client.contains(expected),
+            "missing {expected:?} in\n{client}"
+        );
+    }
+}

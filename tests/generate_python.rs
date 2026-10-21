@@ -1454,16 +1454,22 @@ interface alerts {
 }
 "#;
 
-/// A proto-backed enum with no replacement type uses the proto enum's `ValueType`.
-/// No generated code declares the bare WIT enum identifier.
+/// A proto enum with no replacement type gets the `IntEnum` of its WIT enum. Only the
+/// converter uses the proto enum.
 #[test]
-fn python_proto_enums_without_a_replacement_use_the_proto_enum_type() {
+fn python_proto_enums_without_a_replacement_use_the_wit_enum_model() {
     let models = generate_python_models_from_wit("python-proto-enum", PROTO_ENUM_WIT);
 
     assert!(
-        models.contains(
-            "severity: temporalio.api.enums.v1.common_pb2.Severity.ValueType | None = None"
-        ),
+        models.contains("class Severity(enum.IntEnum):\n"),
+        "{models}"
+    );
+    assert!(
+        models.contains("    severity: Severity | None = None"),
+        "{models}"
+    );
+    assert!(
+        models.contains("severity=Severity(value.severity)"),
         "{models}"
     );
     assert!(
@@ -1472,7 +1478,6 @@ fn python_proto_enums_without_a_replacement_use_the_proto_enum_type() {
         ),
         "{models}"
     );
-    assert!(!models.contains("Severity("), "{models}");
 }
 
 #[test]
@@ -1486,15 +1491,15 @@ fn python_proto_enum_defaults_name_the_proto_enum_value() {
     );
 
     assert!(
-        models.contains(" = (\n        temporalio.api.enums.v1.common_pb2.Severity.SEVERITY_LOW\n"),
+        models.contains("    severity: Severity = Severity.SeverityLow\n"),
         "{models}"
     );
 }
 
-/// A keyword parameter of an operation stub uses the proto module of an enum field
-/// without a replacement type. So the stub imports that module.
+/// An operation stub's keyword parameter of such an enum uses the `IntEnum`, even when
+/// only an operation reaches the record.
 #[test]
-fn python_operation_stubs_import_the_proto_enum_module_of_a_parameter() {
+fn python_operation_stubs_use_the_wit_enum_model_of_a_parameter() {
     let root = project_root();
     let temp_dir = unique_output_path("python-proto-enum-operation");
     fs::create_dir_all(&temp_dir).unwrap();
@@ -1522,13 +1527,8 @@ fn python_operation_stubs_import_the_proto_enum_module_of_a_parameter() {
         .unwrap_or_else(|| panic!("missing the raise operation module:\n{rendered}"));
 
     assert!(
-        operation.contains(
-            "    severity: temporalio.api.enums.v1.common_pb2.Severity.ValueType | None = None,"
-        ),
+        operation.contains("    severity: Severity | None = None,"),
         "{operation}"
     );
-    assert!(
-        operation.contains("\nimport temporalio.api.enums.v1.common_pb2\n"),
-        "{operation}"
-    );
+    assert!(operation.contains("    Severity,\n"), "{operation}");
 }

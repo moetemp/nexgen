@@ -149,7 +149,17 @@ fn enqueue_external_type(
             add_name(spec, &message.proto.full_name, reachable)
         }
         ExternalTypeSpec::Proto(PlannedProtoType::Enum(enumeration)) => {
-            add_name(spec, &enumeration.proto.full_name, reachable)
+            add_name(spec, &enumeration.proto.full_name, reachable);
+            // A WIT enum with `@nexus.proto` gives the proto enum its generated model, so a
+            // field of the proto enum also keeps that WIT enum.
+            for (name, authored) in spec.enums() {
+                if let Some(ExternalTypeSourceSpec::Proto(source)) = &authored.source
+                    && let PlannedProtoType::Enum(proto) = &source.proto
+                    && proto.proto.full_name == enumeration.proto.full_name
+                {
+                    reachable.insert(name.to_string());
+                }
+            }
         }
         ExternalTypeSpec::Json(json) => add_name(spec, &json.full_name, reachable),
         ExternalTypeSpec::Alias(alias) => pending.push((*alias.target).clone()),

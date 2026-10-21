@@ -1349,7 +1349,6 @@ impl<'a> ApiPlanner<'a> {
         let planned_model = planned_record(self.api_plan, input_full_name);
 
         let mut parameters = Vec::new();
-        let mut parameter_imports = PythonImports::default();
         let mut request_fields = Vec::new();
         let mut flattened_messages = Vec::new();
         let mut parameter_sources = BTreeMap::<String, String>::new();
@@ -1393,7 +1392,6 @@ impl<'a> ApiPlanner<'a> {
                 &rendered_field.attr_name,
                 &model.name,
             )?;
-            parameter_imports.extend(&rendered_field.imports);
             parameters.push(RenderedUnpackedInputField {
                 attr_name: rendered_field.attr_name.clone(),
                 annotation: rendered_field.annotation.clone(),
@@ -1414,7 +1412,6 @@ impl<'a> ApiPlanner<'a> {
         Ok(RenderedUnpackedInput {
             model_name: model.name.clone(),
             parameters,
-            parameter_imports,
             request_fields,
             flattened_messages,
             functions: planned_model
@@ -1710,7 +1707,17 @@ impl<'a> ApiPlanner<'a> {
                 .default_enum_value
                 .as_ref()
                 .expect("planned field default enum value should be resolved");
-            let default_expr = enum_default_expr(&resolved_type, default_value);
+            // The generated `IntEnum` of a WIT enum keeps the WIT member names, also when a
+            // proto converts it.
+            let default_expr = if self
+                .enums
+                .values()
+                .any(|enumeration| enumeration.name == resolved_type.annotation)
+            {
+                format!("{}.{}", resolved_type.annotation, default_value.name)
+            } else {
+                enum_default_expr(&resolved_type, default_value)
+            };
             return Ok(RenderedField {
                 attr_name: attr_name.clone(),
                 annotation: python_field_annotation(
@@ -1786,6 +1793,27 @@ impl<'a> ApiPlanner<'a> {
         match value_type {
             PlannedType::Enum(enum_type) => {
                 if let Some(enum_spec) = self.api_plan.enum_decl(&enum_type.full_name) {
+                    self.ensure_rendered_enum(enum_spec);
+                }
+            }
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(enum_type)))
+                if enum_type
+                    .replacement
+                    .as_ref()
+                    .and_then(python_proto::python_replacement_type_name)
+                    .is_none() =>
+            {
+                // A proto enum with no replacement type gets the `IntEnum` of its WIT enum, as
+                // a plain WIT enum does, so the field type is never the proto enum.
+                if let Some((_, enum_spec)) = self.api_plan.enums().find(|(_, enum_spec)| {
+                    matches!(
+                        &enum_spec.source,
+                        Some(ExternalTypeSourceSpec::Proto(crate::spec::ProtoTypeSpec {
+                            proto: PlannedProtoType::Enum(proto),
+                            ..
+                        })) if proto.proto.full_name == enum_type.proto.full_name
+                    )
+                }) {
                     self.ensure_rendered_enum(enum_spec);
                 }
             }
@@ -2657,9 +2685,6 @@ pub(in crate::generator) enum PythonFieldDefaultKind {
 struct RenderedUnpackedInput {
     model_name: String,
     parameters: Vec<RenderedUnpackedInputField>,
-    /// The modules that the parameter annotations use, such as the proto module
-    /// of an enum field without a replacement type.
-    parameter_imports: PythonImports,
     request_fields: Vec<RenderedUnpackedRequestField>,
     flattened_messages: Vec<RenderedFlattenedMessage>,
     functions: Vec<RenderedFunctionField>,
@@ -3298,10 +3323,6 @@ pub(in crate::generator) fn enum_default_expr(
     resolved_type: &ResolvedFieldType,
     enum_value: &EnumValueSpec,
 ) -> String {
-    // The members of a proto enum are attributes of the enum class, not of its `ValueType`.
-    if let Some(proto_enum) = resolved_type.annotation.strip_suffix(".ValueType") {
-        return format!("{proto_enum}.{}", enum_value.name.to_shouty_snake_case());
-    }
     let value_name = if resolved_type.wire_conversion.is_some() {
         enum_value.name.to_shouty_snake_case()
     } else {
@@ -4292,17 +4313,6 @@ fn render_operation_module(
         body.push_str("\n\n");
     }
     render_operation_functions(&mut body, service, operation);
-    if service.endpoint.is_some()
-        && let Some(unpacked_input) = &operation.unpacked_input
-    {
-        module_imports.extend(
-            unpacked_input
-                .parameter_imports
-                .module_imports
-                .iter()
-                .cloned(),
-        );
-    }
     if !service.delay_load_temporalio_workflow {
         module_imports.insert("temporalio.workflow".to_string());
     }

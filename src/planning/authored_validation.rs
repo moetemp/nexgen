@@ -1055,13 +1055,7 @@ fn authored_field_matches_singular_proto(
         ) => matches!(authored_type, TypeSpec::Int(_)),
         Some(Type::Bool) => matches!(authored_type, TypeSpec::Bool),
         Some(Type::String) => matches!(authored_type, TypeSpec::String),
-        // A proto `bytes` field accepts a WIT `list<u8>`, which is what `add-rpc` writes.
-        // The parser drops the WIT integer width, so any integer list is accepted.
-        Some(Type::Bytes) => match authored_type {
-            TypeSpec::Bytes => true,
-            TypeSpec::List(inner) => matches!(inner.as_ref(), TypeSpec::Int(_)),
-            _ => false,
-        },
+        Some(Type::Bytes) => matches!(authored_type, TypeSpec::Bytes),
         Some(Type::Enum | Type::Message | Type::Group) => match authored_type {
             TypeSpec::External(ExternalTypeSpec::Proto(proto_name)) => field
                 .type_name

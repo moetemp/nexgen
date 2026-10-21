@@ -55,6 +55,15 @@ fn generate_from(
     language: Language,
     support_package: &str,
 ) -> String {
+    try_generate_from(wit, descriptor_paths, language, support_package).unwrap()
+}
+
+fn try_generate_from(
+    wit: &str,
+    descriptor_paths: Vec<PathBuf>,
+    language: Language,
+    support_package: &str,
+) -> Result<String, String> {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -65,7 +74,7 @@ fn generate_from(
     let input_path = temp_dir.join("store.wit");
     fs::write(&input_path, wit).unwrap();
     let output_path = temp_dir.join("generated");
-    generate_to_file(&GenerateRequest {
+    let result = generate_to_file(&GenerateRequest {
         config: Default::default(),
         language,
         input_paths: vec![input_path],
@@ -75,12 +84,13 @@ fn generate_from(
         format: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
-    })
-    .unwrap();
+    });
     let mut rendered = String::new();
-    read_all(&output_path, &mut rendered);
+    if result.is_ok() {
+        read_all(&output_path, &mut rendered);
+    }
     fs::remove_dir_all(temp_dir).unwrap();
-    rendered
+    result.map(|_| rendered).map_err(|err| err.to_string())
 }
 
 fn read_all(dir: &std::path::Path, out: &mut String) {
@@ -116,4 +126,19 @@ fn python_reads_a_proto_backed_wit_byte_list_as_bytes() {
         "temporal_support",
     );
     assert!(models.contains("    data: bytes\n"), "{models}");
+}
+
+#[test]
+fn python_refuses_a_wider_wit_integer_list_for_a_proto_bytes_field() {
+    let descriptors = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("advanced/samples/descriptors/temporal_api.bin");
+    let wit = PROTO_BYTES_WIT.replace("data: list<u8>", "data: list<u32>");
+    let err = try_generate_from(
+        &wit,
+        vec![descriptors],
+        Language::Python,
+        "temporal_support",
+    )
+    .unwrap_err();
+    assert!(err.contains("bytes"), "{err}");
 }

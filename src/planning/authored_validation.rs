@@ -1188,8 +1188,8 @@ fn validate_model_required_field(
     let field = validate_model_override_field(message_name, field_name, message)?;
     let field_type = field_type(field);
 
-    // A bare WIT `list<T>` or `map<K, V>` is how a collection is authored, and an
-    // empty collection is its unset value, so there is no presence to require.
+    // An empty repeated or map field is the unset value. The field has no presence,
+    // so a bare `list<T>` or `map<K, V>` is not a required field.
     if field_label(field) == Some(Label::Repeated) {
         return Ok(());
     }

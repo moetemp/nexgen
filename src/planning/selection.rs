@@ -188,6 +188,7 @@ mod tests {
                 delay_load_temporalio_workflow: false,
                 operations: Vec::new(),
                 resources: Vec::new(),
+                handles: Vec::new(),
                 data: (),
             }],
             model_scope: None,

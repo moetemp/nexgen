@@ -1,6 +1,7 @@
 //! WIT annotations for streaming services (`@nexus.offset` on record fields,
-//! and `@nexus.long-poll` and `@nexus.one-way` on operations) and the caller
-//! that `--client` generates for code outside a Workflow.
+//! `@nexus.long-poll` and `@nexus.one-way` on operations, `@nexus.handle` on
+//! services) and the caller that `--client` generates for code outside a
+//! Workflow.
 #![cfg(feature = "advanced")]
 
 use std::collections::BTreeMap;
@@ -25,6 +26,8 @@ world logs {
 }
 
 /// @nexus.endpoint "logs"
+/// @nexus.handle "log-handle" keys="log-id"
+/// @nexus.handle "log-reader" keys="log-id from-offset"
 interface log-service {
   use nexus:temporal-types/model@1.0.0.{duration};
 
@@ -683,4 +686,133 @@ fn python_client_module_carries_an_http_transport() {
             "missing {expected:?} in\n{client}"
         );
     }
+}
+
+#[test]
+fn python_client_handles_bind_their_keys_once() {
+    let client = generate_client(LOG_WIT);
+
+    for expected in [
+        // The caller builds each handle, and a handle builds the handles that
+        // extend its keys.
+        "    def log(self, *, log_id: str) -> LogHandle:\n        \
+         \"\"\"Bind ``log_id`` and return a ``LogHandle``.\"\"\"\n        \
+         return LogHandle(self, log_id=log_id)\n",
+        "    def log_reader(self, *, log_id: str, from_offset: int | None) -> LogReader:\n",
+        "class LogHandle:\n",
+        "    def __init__(self, client: LogServiceClient, *, log_id: str) -> None:\n",
+        "    def reader(self, *, from_offset: int | None) -> LogReader:\n",
+        "        return LogReader(self._client, log_id=self._log_id, from_offset=from_offset)\n",
+        "    async def append(\n        self,\n        *,\n        texts: list[str] | None = None,\n    \
+         ) -> AppendResponse:\n        request = AppendRequest(\n            log_id=self._log_id,\n            \
+         texts=texts or [],\n        )\n        return await self._client.append(request)\n",
+        // The loop sets the wait, so a handle's loop method does not take it.
+        "    async def read_until_entries(\n        self,\n        *,\n        \
+         from_offset: int | None = None,\n        \
+         idle_timeout: datetime.timedelta | None = None,\n        \
+         deadline: datetime.timedelta,\n    ) -> ReadResponse:\n",
+        "        return await self._client.read_until_entries(request, deadline=deadline)\n",
+        "class LogReader:\n",
+    ] {
+        assert!(
+            client.contains(expected),
+            "missing {expected:?} in\n{client}"
+        );
+    }
+    let reader = &client[client.find("class LogReader:").unwrap()..];
+    assert!(!reader.contains("async def append("), "{reader}");
+}
+
+#[test]
+fn handles_generate_in_typescript_and_dotnet() {
+    for language in [Language::TypeScript, Language::Dotnet] {
+        let files = generate(language, GenerationMode::NativeApi, LOG_WIT);
+        assert!(!files.is_empty(), "{language:?}");
+    }
+}
+
+#[test]
+fn handle_directive_rejects_keys_that_do_not_bind() {
+    let handles = "/// @nexus.handle \"log-handle\" keys=\"log-id\"\n\
+                   /// @nexus.handle \"log-reader\" keys=\"log-id from-offset\"\n";
+    for (directive, reason) in [
+        (
+            "@nexus.handle keys=\"log-id\"",
+            "missing the handle type name",
+        ),
+        (
+            "@nexus.handle \"LogHandle\" keys=\"log-id\"",
+            "not a kebab-case WIT identifier",
+        ),
+        (
+            "@nexus.handle \"log-handle\"",
+            "needs at least one key in `keys`",
+        ),
+        (
+            "@nexus.handle \"log-handle\" keys=\"log-id log-id\"",
+            "lists the key `log-id` twice",
+        ),
+        (
+            "@nexus.handle \"orphan\" keys=\"log-id texts from-offset\"",
+            "no operation input declares every key of `orphan`",
+        ),
+        (
+            "@nexus.handle \"log-handle\" keys=\"log-id\" kind=\"stream\"",
+            "unknown member `kind`",
+        ),
+    ] {
+        let error = generate_error(
+            Language::Python,
+            &LOG_WIT.replace(handles, &format!("/// {directive}\n")),
+        );
+        assert!(
+            error.contains("@nexus.handle") && error.contains(reason),
+            "{directive}: {error}"
+        );
+    }
+
+    let twice = generate_error(
+        Language::Python,
+        &LOG_WIT.replace(
+            handles,
+            "/// @nexus.handle \"log-handle\" keys=\"log-id\"\n/// @nexus.handle \"log\" keys=\"log-id\"\n",
+        ),
+    );
+    assert!(
+        twice.contains("binds the same keys as another handle"),
+        "{twice}"
+    );
+
+    let two_ways = generate_error(
+        Language::Python,
+        &LOG_WIT.replace(
+            "  record append-request {\n    log-id: string,",
+            "  record append-request {\n    log-id: option<string>,",
+        ),
+    );
+    assert!(
+        two_ways.contains("the key `log-id` of `log-handle` is declared one way by `append`")
+            && two_ways.contains("another way by `read`"),
+        "{two_ways}"
+    );
+}
+
+#[test]
+fn python_client_rejects_handle_names_that_its_owner_already_uses() {
+    let wit = LOG_WIT.replace("\"log-reader\"", "\"read\"");
+    let error = try_generate_with(client_config(), Language::Python, &wit, Vec::new()).unwrap_err();
+    assert!(
+        error.contains("the constructor `read` of `LogServiceClient` is already declared"),
+        "{error}"
+    );
+
+    let wit = LOG_WIT.replace("log-id", "client").replace(
+        "\"log-reader\" keys=\"client from-offset\"",
+        "\"log-reader\" keys=\"from-offset\"",
+    );
+    let error = try_generate_with(client_config(), Language::Python, &wit, Vec::new()).unwrap_err();
+    assert!(
+        error.contains("cannot bind a member named `client`"),
+        "{error}"
+    );
 }

@@ -1726,6 +1726,7 @@ mod tests {
                     data: (),
                 }],
                 resources: Vec::new(),
+                handles: Vec::new(),
                 data: (),
             }],
             model_scope: None,

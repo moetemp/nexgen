@@ -1733,6 +1733,40 @@ Cannot be combined with `@nexus.source`.
 
 ---
 
+### @nexus.handle
+
+**Placement:** Interface (service) **Syntax:**
+`@nexus.handle "<handle-name>" keys="<input-field> ..."`
+
+Declares a handle over the service's caller: an object that binds some input
+fields once and calls the operations whose inputs declare all of them, with
+those fields filled in. Repeat the directive for more handles. The name and the
+keys are WIT names. Each key must have one declaration across the operations
+that join. A handle that no operation joins, two handles with the same keys, and
+a key listed twice are load errors.
+
+```wit
+/// @nexus.handle "stream-handle" keys="stream"
+/// @nexus.handle "stream-producer" keys="stream producer"
+interface stream-service { ... }
+```
+
+**Python** (with `--client`): each handle is a class in `client.py`. The caller
+builds each handle, and a handle builds the handles whose keys extend its own. A
+constructor drops a trailing `Handle` from the name, and on a parent it also
+drops the parent's name as a prefix. A handle method takes the free fields as
+keyword parameters. A long-poll method on a handle does not take the wait field,
+since the loop sets it.
+
+```python
+producer = client.stream(stream=ref).producer(producer=me)
+await producer.append_records(sequence=1, records=batch)
+```
+
+TypeScript and .NET accept the directive and generate no handle.
+
+---
+
 ### @nexus.long-poll
 
 **Placement:** Operation (function) whose input and output are records

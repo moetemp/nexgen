@@ -591,7 +591,19 @@ pub struct ServiceSpec<F: TypeFamily = AuthoredFamily> {
     pub delay_load_temporalio_workflow: bool,
     pub operations: Vec<OperationSpec<F>>,
     pub resources: Vec<ResourceSpec<F>>,
+    /// Handle projections over the service's caller (`@nexus.handle` on WIT).
+    pub handles: Vec<ServiceHandleSpec>,
     pub data: F::ServiceData,
+}
+
+/// A handle binds some input members once and calls the operations whose
+/// inputs carry all of them, with those members filled in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceHandleSpec {
+    /// The handle type name, in UpperCamelCase.
+    pub name: String,
+    /// The bound members, by their record field keys, in authored order.
+    pub keys: Vec<String>,
 }
 
 impl<F: TypeFamily> ServiceSpec<F> {
@@ -632,6 +644,7 @@ impl<F: TypeFamily> ServiceSpec<F> {
                 .into_iter()
                 .map(|resource| resource.map_names_with(map))
                 .collect(),
+            handles: self.handles,
             data,
         }
     }

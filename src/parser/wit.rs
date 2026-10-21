@@ -2639,6 +2639,7 @@ fn build_service(
         .map(|(_, function)| build_operation(resolve, function, path, &context, &service_name))
         .collect::<Result<Vec<_>>>()?;
     ensure_unique_wire_operation_names(path, &context, &operations)?;
+    let handles = build_service_handles(resolve, interface, &directives, path, &context)?;
 
     let mut resources = Vec::new();
     for type_id in interface.types.values() {
@@ -2664,8 +2665,141 @@ fn build_service(
         delay_load_temporalio_workflow,
         operations,
         resources,
+        handles,
         data: (),
     })
+}
+
+/// Reads each `@nexus.handle "<name>" keys="<field> ..."` on a service. An
+/// operation joins a handle when its input record declares every key, and each
+/// key must have one declaration across the operations that join.
+fn build_service_handles(
+    resolve: &Resolve,
+    interface: &Interface,
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Vec<ServiceHandleSpec>> {
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.handle".to_string(),
+        reason,
+    };
+    let inputs = interface
+        .functions
+        .values()
+        .filter(|function| {
+            matches!(
+                function.kind,
+                FunctionKind::Freestanding | FunctionKind::AsyncFreestanding
+            )
+        })
+        .filter_map(|function| {
+            let [parameter] = function.params.as_slice() else {
+                return None;
+            };
+            wit_record_of(resolve, &parameter.ty).map(|record| (function.name.as_str(), record))
+        })
+        .collect::<Vec<_>>();
+    let mut handles = Vec::<ServiceHandleSpec>::new();
+    let mut key_sets = Vec::<BTreeSet<String>>::new();
+    for directive in directives
+        .iter()
+        .filter(|directive| directive.name() == "handle")
+    {
+        if let Some(key) = directive
+            .args
+            .keys()
+            .find(|key| !matches!(key.as_str(), "value" | "keys"))
+        {
+            return Err(invalid(format!("unknown member `{key}`")));
+        }
+        let Some(name) = directive.value("value") else {
+            return Err(invalid("missing the handle type name".to_string()));
+        };
+        if !is_wit_identifier(name) {
+            return Err(invalid(format!(
+                "`{name}` is not a kebab-case WIT identifier"
+            )));
+        }
+        let type_name = name.to_upper_camel_case();
+        if handles.iter().any(|handle| handle.name == type_name) {
+            return Err(invalid(format!("`{name}` is declared twice")));
+        }
+        let keys = directive
+            .value("keys")
+            .unwrap_or_default()
+            .split_whitespace()
+            .collect::<Vec<_>>();
+        if keys.is_empty() {
+            return Err(invalid(format!(
+                "`{name}` needs at least one key in `keys`"
+            )));
+        }
+        let mut seen = BTreeSet::new();
+        if let Some(key) = keys.iter().find(|key| !seen.insert(**key)) {
+            return Err(invalid(format!("`{name}` lists the key `{key}` twice")));
+        }
+        let joining = inputs
+            .iter()
+            .filter(|(_, record)| {
+                keys.iter()
+                    .all(|key| record.fields.iter().any(|field| field.name == *key))
+            })
+            .collect::<Vec<_>>();
+        if joining.is_empty() {
+            return Err(invalid(format!(
+                "no operation input declares every key of `{name}`"
+            )));
+        }
+        let mut field_keys = Vec::new();
+        for key in &keys {
+            let mut declaration = None::<(Type, String, &str)>;
+            for (operation, record) in &joining {
+                let field = record
+                    .fields
+                    .iter()
+                    .find(|field| field.name == *key)
+                    .expect("joining operations declare every key");
+                let field_context = format!("{context} field `{key}`");
+                let field_directives =
+                    parse_directives(field.docs.contents.as_deref(), path, &field_context)?;
+                let field_key = directive_value(
+                    &field_directives,
+                    "proto-field",
+                    path,
+                    &field_context,
+                    "value",
+                )?
+                .unwrap_or_else(|| field.name.to_snake_case());
+                match &declaration {
+                    None => declaration = Some((field.ty, field_key, operation)),
+                    Some((ty, first_key, first_operation)) => {
+                        if *ty != field.ty || *first_key != field_key {
+                            return Err(invalid(format!(
+                                "the key `{key}` of `{name}` is declared one way by `{first_operation}` \
+                                 and another way by `{operation}`"
+                            )));
+                        }
+                    }
+                }
+            }
+            field_keys.push(declaration.expect("a handle has a joining operation").1);
+        }
+        let key_set = field_keys.iter().cloned().collect::<BTreeSet<_>>();
+        if key_sets.contains(&key_set) {
+            return Err(invalid(format!(
+                "`{name}` binds the same keys as another handle"
+            )));
+        }
+        key_sets.push(key_set);
+        handles.push(ServiceHandleSpec {
+            name: type_name,
+            keys: field_keys,
+        });
+    }
+    Ok(handles)
 }
 
 fn build_wire_service_name(

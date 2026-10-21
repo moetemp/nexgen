@@ -455,7 +455,7 @@ fn validate_message_model_config(
         if oneof_by_name(&oneofs, field_name).is_some() {
             continue;
         }
-        validate_model_required_field(message_name, field_name, message, descriptors)?;
+        validate_model_required_field(message_name, field_name, message)?;
     }
     for field_name in model_config
         .record
@@ -1184,22 +1184,14 @@ fn validate_model_required_field(
     message_name: &str,
     field_name: &str,
     message: &MessageMetadata,
-    descriptors: &DescriptorIndex,
 ) -> Result<()> {
     let field = validate_model_override_field(message_name, field_name, message)?;
     let field_type = field_type(field);
 
+    // An empty repeated or map field is the unset value. The field has no presence,
+    // so a bare `list<T>` or `map<K, V>` is not a required field.
     if field_label(field) == Some(Label::Repeated) {
-        let reason = if field_is_map(field, descriptors) {
-            "map fields cannot be marked required"
-        } else {
-            "repeated fields cannot be marked required"
-        };
-        return Err(Error::UnsupportedRequiredTypeField {
-            message: message_name.to_string(),
-            field: field_name.to_string(),
-            reason: reason.to_string(),
-        });
+        return Ok(());
     }
 
     if field_has_presence(field, field_type) || field_supports_required_without_presence(field_type)

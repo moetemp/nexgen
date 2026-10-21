@@ -1,5 +1,5 @@
-//! A WIT `list<u8>` matches a proto `bytes` field, and outside a proto-backed
-//! record it keeps the list wire form.
+//! A WIT `list<u8>` field of a `@nexus.proto` record generates as proto `bytes`.
+//! A `list<u8>` field of a record without a proto generates as a list of integers.
 
 use std::fs;
 use std::path::PathBuf;
@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use nexgen::language::Language;
 use nexgen::{GenerateRequest, generate_to_file};
 
-/// The reviewer's repro: a plain WIT record with no `@nexus.proto`.
+/// A WIT record with no `@nexus.proto`.
 const PLAIN_RECORD_WIT: &str = r#"package acme:store@1.0.0;
 
 world store {

@@ -1469,3 +1469,77 @@ interface collections {
         "{models}"
     );
 }
+
+fn generate_python_models_from_wit(label: &str, wit: &str) -> String {
+    let root = project_root();
+    let temp_dir = unique_output_path(label);
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("input.wit");
+    fs::write(&input_path, wit).unwrap();
+    let package = generate_python_package_files(&[input_path], &[descriptor_path(&root)]);
+    fs::remove_dir_all(temp_dir).unwrap();
+    package
+        .get(&PathBuf::from("models.py"))
+        .expect("the package should include models.py")
+        .clone()
+}
+
+const PROTO_ENUM_WIT: &str = r#"package temporal:nexus@1.0.0;
+
+world system {
+  export alerts;
+}
+
+interface alerts {
+  /// @nexus.proto "temporal.api.enums.v1.Severity"
+  enum severity {
+    severity-unspecified,
+    severity-high,
+    severity-medium,
+    severity-low,
+  }
+
+  /// @nexus.proto "temporal.api.version.v1.Alert"
+  record alert {
+    message: string,
+    severity: option<severity>,
+  }
+}
+"#;
+
+/// A proto-backed enum with no replacement type reads and writes as the proto
+/// enum's own value type, since nothing declares the bare WIT enum name.
+#[test]
+fn python_proto_enums_without_a_replacement_use_the_proto_enum_type() {
+    let models = generate_python_models_from_wit("python-proto-enum", PROTO_ENUM_WIT);
+
+    assert!(
+        models.contains(
+            "severity: temporalio.api.enums.v1.common_pb2.Severity.ValueType | None = None"
+        ),
+        "{models}"
+    );
+    assert!(
+        models.contains(
+            "message.severity = temporalio.api.enums.v1.common_pb2.Severity.ValueType(value.severity)"
+        ),
+        "{models}"
+    );
+    assert!(!models.contains("Severity("), "{models}");
+}
+
+#[test]
+fn python_proto_enum_defaults_name_the_proto_enum_value() {
+    let models = generate_python_models_from_wit(
+        "python-proto-enum-default",
+        &PROTO_ENUM_WIT.replace(
+            "    severity: option<severity>,",
+            "    /// @nexus.default \"severity-low\"\n    severity: severity,",
+        ),
+    );
+
+    assert!(
+        models.contains(" = (\n        temporalio.api.enums.v1.common_pb2.Severity.SEVERITY_LOW\n"),
+        "{models}"
+    );
+}

@@ -1666,6 +1666,48 @@ Cannot be combined with `@nexus.source`.
 
 ---
 
+### @nexus.long-poll
+
+**Placement:** Operation (function) whose input and output are records
+**Syntax:**
+
+```
+@nexus.long-poll
+  wait-field="<input-field>" result-field="<output-field>"
+  [max-wait-ms="<milliseconds>"] [done-field="<output-field>"]
+  [offset-field="<input-field>" next-offset-field="<output-field>"]
+  [idle-timeout-field="<input-field>"]
+```
+
+Declares that the endpoint parks a call for up to the wait the caller sends, and
+answers early when it has something. Each member is a WIT field name. The
+directive changes no model and no wire byte. A generated client uses it to
+repeat the call until it answers with something or a deadline passes.
+
+- `wait-field` is an optional input field, a `duration` or an integer count of
+  milliseconds. The caller sets it on each call, so it is not a parameter.
+- `max-wait-ms` is the largest wait the endpoint accepts. A call never asks for
+  more.
+- `result-field` is an output list. An empty list means nothing came yet.
+- `done-field` is an output boolean that says nothing more will come.
+- `offset-field` and `next-offset-field` go together. Both are fields marked
+  with the same `@nexus.offset` type. After an answer with nothing, the next
+  call starts from the offset that the answer gave, so a read that starts at the
+  end does not skip what arrives between calls.
+- `idle-timeout-field` is an optional input field, a `duration` or an integer
+  count of milliseconds. The endpoint ends a call when nothing comes for this
+  long. Each call sends what is left of it, so the idle time counts across
+  calls.
+
+```wit
+/// @nexus.long-poll wait-field="wait" max-wait-ms="60000" result-field="records"
+///   done-field="done" offset-field="from-offset" next-offset-field="next-offset"
+///   idle-timeout-field="idle-timeout"
+read-records: func(request: read-records-request) -> read-records-response;
+```
+
+---
+
 ### @nexus.offset
 
 **Placement:** Record field of an integer type, or an `option` of one

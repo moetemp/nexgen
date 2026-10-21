@@ -594,3 +594,69 @@ fn client_flag_generates_nothing_more_in_typescript_and_dotnet() {
         );
     }
 }
+
+#[test]
+fn python_client_long_polls_an_operation_that_declares_it() {
+    let client = generate_client(LOG_WIT);
+
+    for expected in [
+        "    async def read_until_entries(\n        self,\n        request: ReadRequest,\n        \
+         *,\n        deadline: datetime.timedelta,\n    ) -> ReadResponse:\n",
+        "            wait = max(end - clock.time(), 0.001)\n            wait = min(wait, 60.0)\n",
+        "            attempt = dataclasses.replace(attempt, wait=datetime.timedelta(seconds=wait))\n",
+        "                idle_left = max(idle_timeout - (clock.time() - started), 0.001)\n",
+        "                    attempt, idle_timeout=datetime.timedelta(seconds=idle_left)\n",
+        "                answer = await self.read(attempt)\n",
+        "            except TransportError as error:\n                \
+         if not error.retryable or clock.time() + pause >= end:\n",
+        "            if answer.entries or answer.done:\n                return answer\n",
+        "            if answer.next_offset is not None:\n                \
+         attempt = dataclasses.replace(attempt, from_offset=answer.next_offset)\n",
+        "            if left <= 0:\n                return answer\n",
+        "_LONG_POLL_FIRST_PAUSE = 0.05\n_LONG_POLL_LAST_PAUSE = 2.0\n",
+        "\nimport asyncio\nimport dataclasses\nimport datetime\nimport typing\n",
+    ] {
+        assert!(
+            client.contains(expected),
+            "missing {expected:?} in\n{client}"
+        );
+    }
+    assert!(!client.contains("append_until"), "{client}");
+}
+
+#[test]
+fn python_client_long_poll_sends_milliseconds_for_an_integer_wait() {
+    let wit = LOG_WIT
+        .replace("    wait: option<duration>,", "    wait: option<u32>,")
+        .replace(
+            "    idle-timeout: option<duration>,",
+            "    idle-timeout: option<u64>,",
+        )
+        .replace("  ///   max-wait-ms=\"60000\"\n", "");
+    let client = generate_client(&wit);
+
+    assert!(
+        client.contains(
+            "            attempt = dataclasses.replace(attempt, wait=max(int(wait * 1000), 1))\n"
+        ),
+        "{client}"
+    );
+    assert!(
+        client.contains("            request.idle_timeout / 1000 if request.idle_timeout is not None else None\n"),
+        "{client}"
+    );
+    assert!(!client.contains("wait = min(wait,"), "{client}");
+}
+
+#[test]
+fn python_client_rejects_a_long_poll_method_that_another_method_names() {
+    let wit = LOG_WIT.replace(
+        "  /// @nexus.one-way\n  append: func(request: append-request) -> append-response;",
+        "  read-until-entries: func(request: append-request) -> append-response;",
+    );
+    let error = try_generate_with(client_config(), Language::Python, &wit, Vec::new()).unwrap_err();
+    assert!(
+        error.contains("its caller method `read_until_entries` is already declared"),
+        "{error}"
+    );
+}

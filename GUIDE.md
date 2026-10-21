@@ -1078,6 +1078,21 @@ client = StreamServiceClient(my_transport)
 response = await client.describe_stream(DescribeStreamRequest(stream=ref))
 ```
 
+An operation with `@nexus.long-poll` also gets `<operation>_until_<result>`,
+which takes the request and a `deadline` (a `datetime.timedelta`). It calls the
+operation until an answer has something in the result list, or has the done
+field set, or the deadline passes. At the deadline it returns the last answer,
+so the caller keeps its place. Each call asks the service to wait for what is
+left of the deadline, at most `max-wait-ms`. After an answer with nothing, the
+next call starts from the answer's next offset, and the idle timeout counts down
+across calls. An answer with nothing that comes back in less than half of its
+wait is followed by a pause, from 50 ms and doubling up to 2 s. A
+`TransportError` with `retryable` set is tried again while the deadline allows.
+
+```python
+answer = await client.read_records_until_records(request, deadline=timedelta(seconds=30))
+```
+
 The caller supports operations whose input and output are models of the same
 module. An operation whose models take type parameters, or that returns a
 resource without a wire type, is a generation error. TypeScript and .NET do not

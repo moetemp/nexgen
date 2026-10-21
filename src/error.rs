@@ -215,6 +215,14 @@ pub enum Error {
     )]
     IncompleteOperationOutputTransform { service: String, operation: String },
 
+    #[error("{language} cannot generate a caller for operation `{service}.{operation}`: {reason}")]
+    UnsupportedClientOperation {
+        language: Language,
+        service: String,
+        operation: String,
+        reason: String,
+    },
+
     #[error("{language} cannot generate one-way operation `{service}.{operation}`: {reason}")]
     UnsupportedOneWayOperation {
         language: Language,

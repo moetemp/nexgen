@@ -1,5 +1,6 @@
-//! WIT annotations for streaming services: `@nexus.offset` on record fields,
-//! and `@nexus.long-poll` and `@nexus.one-way` on operations.
+//! WIT annotations for streaming services (`@nexus.offset` on record fields,
+//! and `@nexus.long-poll` and `@nexus.one-way` on operations) and the caller
+//! that `--client` generates for code outside a Workflow.
 #![cfg(feature = "advanced")]
 
 use std::collections::BTreeMap;
@@ -124,21 +125,31 @@ fn try_generate(
     mode: GenerationMode,
     wit: &str,
 ) -> Result<BTreeMap<String, String>, String> {
+    let config = NexgenConfig {
+        mode,
+        ..Default::default()
+    };
+    try_generate_with(config, language, wit, Vec::new())
+}
+
+fn try_generate_with(
+    config: NexgenConfig,
+    language: Language,
+    wit: &str,
+    extra_inputs: Vec<PathBuf>,
+) -> Result<BTreeMap<String, String>, String> {
     let temp_dir = unique_output_path(&format!("{language:?}"));
     fs::create_dir_all(&temp_dir).unwrap();
     let input_path = temp_dir.join("logs.wit");
     fs::write(&input_path, wit).unwrap();
     let output_path = temp_dir.join("generated");
+    let mut input_paths = vec![input_path];
+    input_paths.extend(extra_inputs);
+    input_paths.push(project_root().join("advanced/samples/inputs/deps"));
     let result = generate_to_file(&GenerateRequest {
-        config: NexgenConfig {
-            mode,
-            ..Default::default()
-        },
+        config,
         language,
-        input_paths: vec![
-            input_path,
-            project_root().join("advanced/samples/inputs/deps"),
-        ],
+        input_paths,
         support_package: Some(
             match language {
                 Language::Dotnet => "Acme.Support",
@@ -448,6 +459,138 @@ fn one_way_rejects_arguments_and_conflicting_directives() {
         assert!(
             error.contains("@nexus.one-way") && error.contains(reason),
             "{to}: {error}"
+        );
+    }
+}
+
+fn client_config() -> NexgenConfig {
+    NexgenConfig {
+        mode: GenerationMode::NativeApi,
+        client: true,
+        ..Default::default()
+    }
+}
+
+fn generate_client(wit: &str) -> String {
+    let files = try_generate_with(client_config(), Language::Python, wit, Vec::new()).unwrap();
+    file(&files, "client.py").to_string()
+}
+
+#[test]
+fn python_client_calls_each_operation_over_a_transport() {
+    let client = generate_client(LOG_WIT);
+
+    assert!(
+        client.contains("class Transport(typing.Protocol):"),
+        "{client}"
+    );
+    assert!(
+        client.contains(
+            "    async def call(\n        self,\n        *,\n        service: str,\n        \
+             operation: str,\n        input: temporalio.api.common.v1.Payload,\n    ) -> \
+             temporalio.api.common.v1.Payload:"
+        ),
+        "{client}"
+    );
+    assert!(
+        client.contains("class TransportError(Exception):"),
+        "{client}"
+    );
+    assert!(client.contains("class LogServiceClient:"), "{client}");
+    assert!(
+        client.contains("            service=\"LogService\",\n            operation=operation,"),
+        "{client}"
+    );
+    // A model that is not proto-backed goes through the payload converter.
+    assert!(
+        client.contains(
+            "    async def append(self, request: AppendRequest) -> AppendResponse:\n        \
+             payload = self._payload_converter.to_payload(request)\n        \
+             answer = await self._call(\"Append\", payload)\n"
+        ),
+        "{client}"
+    );
+    // A one-way operation is synchronous in a Workflow only. Outside one, the
+    // caller still answers with the result.
+    assert!(
+        client.contains("    async def read(self, request: ReadRequest) -> ReadResponse:"),
+        "{client}"
+    );
+    assert!(
+        client.contains("[payload] = await self._payload_codec.encode([payload])"),
+        "{client}"
+    );
+    assert!(
+        client.contains("[answer] = await self._payload_codec.decode([answer])"),
+        "{client}"
+    );
+}
+
+#[test]
+fn python_client_converts_proto_backed_models_through_their_converters() {
+    let root = project_root();
+    let files = try_generate_with(
+        client_config(),
+        Language::Python,
+        &fs::read_to_string(root.join("advanced/samples/inputs/start-workflow.wit")).unwrap(),
+        Vec::new(),
+    )
+    .unwrap();
+    let client = file(&files, "client.py");
+
+    assert!(
+        client.contains(
+            "        payload = _proto_payload(_CancelWorkflowRequestTransferTypeConverter().to_transfer_type(request))\n"
+        ),
+        "{client}"
+    );
+    assert!(
+        client.contains(
+            "        converter = _CancelWorkflowResponseTransferTypeConverter()\n        \
+             return converter.from_transfer_type(\n            \
+             _proto_message(answer, converter.transfer_type),\n            CancelWorkflowResponse,\n        )\n"
+        ),
+        "{client}"
+    );
+    assert!(
+        client.contains("    _CancelWorkflowRequestTransferTypeConverter,\n"),
+        "{client}"
+    );
+}
+
+#[test]
+fn python_client_is_generated_only_with_the_client_flag() {
+    let files = generate(Language::Python, GenerationMode::NativeApi, LOG_WIT);
+    assert!(!files.contains_key("client.py"), "{:?}", files.keys());
+}
+
+#[test]
+fn python_client_rejects_an_operation_that_returns_a_resource_without_a_wire_type() {
+    let root = project_root();
+    let error = try_generate_with(
+        client_config(),
+        Language::Python,
+        &fs::read_to_string(root.join("advanced/samples/inputs/user-service.wit")).unwrap(),
+        Vec::new(),
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("cannot generate a caller for operation `UserService.GetUser`")
+            && error.contains("it returns a resource"),
+        "{error}"
+    );
+}
+
+#[test]
+fn client_flag_generates_nothing_more_in_typescript_and_dotnet() {
+    for language in [Language::TypeScript, Language::Dotnet] {
+        let with_client =
+            try_generate_with(client_config(), language, LOG_WIT, Vec::new()).unwrap();
+        let without_client = generate(language, GenerationMode::NativeApi, LOG_WIT);
+        assert_eq!(
+            with_client.keys().collect::<Vec<_>>(),
+            without_client.keys().collect::<Vec<_>>(),
+            "{language:?}"
         );
     }
 }

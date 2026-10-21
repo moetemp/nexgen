@@ -450,6 +450,7 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
         config: NexgenConfig {
             mode: GenerationMode::NativeApi,
             system_nexus,
+            client: false,
         },
         language,
         input_paths,

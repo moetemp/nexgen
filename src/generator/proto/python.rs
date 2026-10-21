@@ -588,8 +588,8 @@ pub(in crate::generator) fn enum_value(value_type: &PlannedType) -> Option<Pytho
             conversion: None,
         });
     };
-    // `ValueType` is `int` at runtime; calling it in both directions keeps the
-    // proto field's declared type for type checkers.
+    // `ValueType` is `int` at runtime. The call in each direction gives type checkers
+    // the declared type of the proto field.
     Some(PythonProtoEnumValue {
         annotation: reference.type_ref.clone(),
         module_import: Some(reference.module_path),

@@ -2657,8 +2657,8 @@ pub(in crate::generator) enum PythonFieldDefaultKind {
 struct RenderedUnpackedInput {
     model_name: String,
     parameters: Vec<RenderedUnpackedInputField>,
-    /// The modules that the parameter annotations name, such as the proto
-    /// module of an enum field without a replacement type.
+    /// The modules that the parameter annotations use, such as the proto module
+    /// of an enum field without a replacement type.
     parameter_imports: PythonImports,
     request_fields: Vec<RenderedUnpackedRequestField>,
     flattened_messages: Vec<RenderedFlattenedMessage>,
@@ -3298,7 +3298,7 @@ pub(in crate::generator) fn enum_default_expr(
     resolved_type: &ResolvedFieldType,
     enum_value: &EnumValueSpec,
 ) -> String {
-    // A proto enum's values live on its wrapper, not on its `ValueType`.
+    // The members of a proto enum are attributes of the enum class, not of its `ValueType`.
     if let Some(proto_enum) = resolved_type.annotation.strip_suffix(".ValueType") {
         return format!("{proto_enum}.{}", enum_value.name.to_shouty_snake_case());
     }

@@ -1454,8 +1454,8 @@ interface alerts {
 }
 "#;
 
-/// A proto-backed enum with no replacement type reads and writes as the proto
-/// enum's own value type, since nothing declares the bare WIT enum name.
+/// A proto-backed enum with no replacement type uses the proto enum's `ValueType`.
+/// No generated code declares the bare WIT enum identifier.
 #[test]
 fn python_proto_enums_without_a_replacement_use_the_proto_enum_type() {
     let models = generate_python_models_from_wit("python-proto-enum", PROTO_ENUM_WIT);
@@ -1491,8 +1491,8 @@ fn python_proto_enum_defaults_name_the_proto_enum_value() {
     );
 }
 
-/// An operation stub's keyword parameters name the proto enum module of an
-/// enum field without a replacement type, so the stub imports that module.
+/// A keyword parameter of an operation stub uses the proto module of an enum field
+/// without a replacement type. So the stub imports that module.
 #[test]
 fn python_operation_stubs_import_the_proto_enum_module_of_a_parameter() {
     let root = project_root();

@@ -705,6 +705,10 @@ pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub serialization_context: F::Text,
     /// The long-poll contract, when the operation declares one.
     pub long_poll: Option<OperationLongPollSpec>,
+    /// Whether the caller in a Workflow does not use the result
+    /// (`@nexus.one-way` on WIT). The Workflow stub is then synchronous and
+    /// returns nothing. The call still goes through the outbound interceptors.
+    pub one_way: bool,
     pub data: F::OperationData,
 }
 
@@ -742,6 +746,7 @@ impl<F: TypeFamily> OperationSpec<F> {
                 .map(|transform| transform.map_names_with(map)),
             serialization_context: map.map_text(self.serialization_context),
             long_poll: self.long_poll,
+            one_way: self.one_way,
             data,
         }
     }

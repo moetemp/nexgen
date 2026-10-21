@@ -490,7 +490,7 @@ impl<'a> ApiPlanner<'a> {
                 let operations = service
                     .operations
                     .iter()
-                    .map(|operation| self.resolve_operation(operation))
+                    .map(|operation| self.resolve_operation(&service.name, operation))
                     .collect::<Result<Vec<_>>>()?;
 
                 Ok(RenderedService {
@@ -1139,6 +1139,7 @@ impl<'a> ApiPlanner<'a> {
 
     fn resolve_operation<'operation>(
         &mut self,
+        service_name: &str,
         operation: &'operation OperationSpec<PlannedFamily>,
     ) -> Result<RenderedOperation<'operation>> {
         let output_resource_return = operation.data.output_resource_return.clone();
@@ -1271,6 +1272,26 @@ impl<'a> ApiPlanner<'a> {
             &local_python_model_type_expr(&output_ref),
             &output_type_parameters,
         );
+        if operation.one_way {
+            let reason = if generic_model_types {
+                Some("its models take type parameters")
+            } else if unpacked_input
+                .as_ref()
+                .is_some_and(|unpacked_input| !unpacked_input.functions.is_empty())
+            {
+                Some("its input has function fields")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                return Err(Error::UnsupportedOneWayOperation {
+                    language: Language::Python,
+                    service: service_name.to_string(),
+                    operation: operation.name.clone(),
+                    reason: reason.to_string(),
+                });
+            }
+        }
         let descriptor_output_ref = match operation.output_type() {
             Some(PlannedType::Record(record)) => python_erased_generic_record_annotation(
                 &output_ref,
@@ -1313,6 +1334,7 @@ impl<'a> ApiPlanner<'a> {
                 .map(|usage| usage.parameter.name)
                 .collect(),
             generic_model_types,
+            one_way: operation.one_way,
         })
     }
 
@@ -2543,6 +2565,7 @@ struct RenderedOperation<'a> {
     unpacked_input: Option<RenderedUnpackedInput>,
     model_input_type_parameters: Vec<String>,
     generic_model_types: bool,
+    one_way: bool,
 }
 
 #[derive(Debug)]
@@ -6587,6 +6610,10 @@ fn render_operation_functions(
     service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
 ) {
+    if operation.one_way {
+        render_one_way_operation_functions(output, service, operation);
+        return;
+    }
     render_request_only_operation_function(output, service, operation);
     if service.endpoint.is_none() {
         return;
@@ -6598,6 +6625,122 @@ fn render_operation_functions(
             output.push('\n');
         }
         render_unpacked_operation_function(output, service, operation, unpacked_input);
+    }
+}
+
+/// A one-way stub is synchronous, because Workflow code does not wait for a
+/// result it does not use. It still starts the operation through the Nexus
+/// client, so every outbound interceptor sees the call. The interceptor that
+/// takes it, such as a plugin that buffers it, must complete it without
+/// suspending.
+fn render_one_way_operation_functions(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) {
+    let function_name = request_operation_function_name(service, operation);
+    render_deprecated_decorator(output, operation);
+    output.push_str("def ");
+    output.push_str(&function_name);
+    output.push_str("(\n");
+    render_endpoint_parameter(output, service);
+    if let Some(input) = &operation.input {
+        output.push_str("    request: ");
+        output.push_str(&input.annotation);
+        output.push_str(",\n");
+    }
+    output.push_str(") -> None:\n");
+    if operation.unpacked_input.is_none() || service.endpoint.is_none() {
+        render_operation_docstring(output, operation, &[], None);
+    }
+    render_temporalio_workflow_runtime_imports(
+        output,
+        service,
+        &temporalio_workflow_operation_runtime_names(service, operation),
+        "    ",
+    );
+    render_inline_nexus_client(output, service, "    ");
+    output.push_str("    start = nexus_client.start_operation(\n");
+    output.push_str("        operation=");
+    output.push_str(&python_string_literal(operation.wire_name));
+    output.push_str(",\n");
+    output.push_str("        input=");
+    output.push_str(operation_input_wire_expr(operation));
+    output.push_str(",\n");
+    if !operation.output_none {
+        output.push_str("        output_type=");
+        output.push_str(&operation.output_type_expr);
+        output.push_str(",\n");
+    }
+    output.push_str("    )\n");
+    output.push_str("    try:\n");
+    output.push_str("        _ = start.send(None)\n");
+    output.push_str("    except StopIteration:\n");
+    output.push_str("        return\n");
+    output.push_str("    start.close()\n");
+    output.push_str("    raise RuntimeError(\n");
+    output.push_str("        ");
+    output.push_str(&python_string_literal(&format!(
+        "one-way operation {} did not complete at once. ",
+        operation.wire_name
+    )));
+    output.push_str(
+        "\n        \"It needs an outbound interceptor that takes the call, such as one that \"\n",
+    );
+    output.push_str("        \"buffers it.\"\n");
+    output.push_str("    )\n");
+
+    if service.endpoint.is_none() {
+        return;
+    }
+    let Some(unpacked_input) = &operation.unpacked_input else {
+        return;
+    };
+    output.push('\n');
+    render_deprecated_decorator(output, operation);
+    output.push_str("def ");
+    output.push_str(&operation.attr_name);
+    output.push_str("(\n");
+    output.push_str("    *,\n");
+    for field in &unpacked_input.parameters {
+        output.push_str("    ");
+        output.push_str(&field.attr_name);
+        output.push_str(": ");
+        output.push_str(&python_parameter_annotation(
+            &field.annotation,
+            &field.default_kind,
+        ));
+        if let Some(default_expr) = python_parameter_default_expr(&field.default_kind) {
+            render_python_default_expr(output, &default_expr, "    ");
+        }
+        output.push_str(",\n");
+    }
+    output.push_str(") -> None:\n");
+    render_unpacked_operation_docstring(output, operation, unpacked_input, None);
+    for flattened_message in &unpacked_input.flattened_messages {
+        render_flattened_message_setup(output, flattened_message);
+    }
+    output.push_str("    request = ");
+    output.push_str(&unpacked_input.model_name);
+    output.push_str("(\n");
+    for field in &unpacked_input.request_fields {
+        output.push_str("        ");
+        output.push_str(&field.attr_name);
+        output.push('=');
+        output.push_str(&unpacked_request_field_value_expr(field));
+        output.push_str(",\n");
+    }
+    output.push_str("    )\n");
+    output.push_str("    ");
+    output.push_str(&function_name);
+    output.push_str("(request)\n");
+}
+
+fn render_deprecated_decorator(output: &mut String, operation: &RenderedOperation<'_>) {
+    if operation.deprecated {
+        output.push_str(
+            "@typing_extensions.deprecated(\"This operation is deprecated.\", category=None)\n",
+        );
     }
 }
 

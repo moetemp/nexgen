@@ -656,6 +656,7 @@ impl<'a> TypePlanningContext<'a> {
             }),
             serialization_context: operation.serialization_context.clone(),
             long_poll: operation.long_poll.clone(),
+            one_way: operation.one_way,
             data: PlannedOperationData {
                 output_resource_return: plan_operation_resource_return(
                     operation.data.output_resource_return.as_ref(),
@@ -1721,6 +1722,7 @@ mod tests {
                     output_transform: None,
                     serialization_context: LanguageStringSpec::default(),
                     long_poll: None,
+                    one_way: false,
                     data: (),
                 }],
                 resources: Vec::new(),

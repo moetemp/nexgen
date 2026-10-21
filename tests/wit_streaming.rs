@@ -614,7 +614,7 @@ fn python_client_long_polls_an_operation_that_declares_it() {
          attempt = dataclasses.replace(attempt, from_offset=answer.next_offset)\n",
         "            if left <= 0:\n                return answer\n",
         "_LONG_POLL_FIRST_PAUSE = 0.05\n_LONG_POLL_LAST_PAUSE = 2.0\n",
-        "\nimport asyncio\nimport dataclasses\nimport datetime\nimport typing\n",
+        "\nimport asyncio\nimport dataclasses\nimport datetime\n",
     ] {
         assert!(
             client.contains(expected),

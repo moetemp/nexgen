@@ -1152,6 +1152,7 @@ fn build_fields_from_record(
                 .unwrap_or_else(|| field.name.to_snake_case());
         let function_directive = directive(&directives, "function", path, &field_context)?;
         let default_directive = directive(&directives, "default", path, &field_context)?;
+        let offset = build_field_offset(resolve, &field.ty, &directives, path, &field_context)?;
         let flattened_function_type = if omit_directive.is_none() && function_directive.is_none() {
             find_flattened_function_type_spec(resolve, &field.ty, path, language)?
         } else {
@@ -1186,8 +1187,14 @@ fn build_fields_from_record(
                 });
             }
 
-            for conflicting_directive in ["source", "type", "flattened-type", "function", "default"]
-            {
+            for conflicting_directive in [
+                "source",
+                "type",
+                "flattened-type",
+                "function",
+                "default",
+                "offset",
+            ] {
                 if directive(&directives, conflicting_directive, path, &field_context)?.is_some() {
                     return Err(Error::InvalidWitDirective {
                         path: path.to_path_buf(),
@@ -1223,6 +1230,7 @@ fn build_fields_from_record(
                     required: false,
                     visibility: RecordFieldVisibility::Omitted,
                     function: None,
+                    offset: None,
                     data: (),
                 },
             );
@@ -1294,6 +1302,7 @@ fn build_fields_from_record(
                         }
                     }),
                 function,
+                offset,
                 data: (),
             },
         );
@@ -1326,6 +1335,7 @@ fn build_fields_from_record(
                         required: arg_field.required,
                         visibility: RecordFieldVisibility::Public,
                         function: None,
+                        offset: None,
                         data: (),
                     },
                 );
@@ -3337,6 +3347,83 @@ fn experimental_directive(directives: &[Directive], path: &Path, context: &str) 
         });
     }
     Ok(true)
+}
+
+/// Reads `@nexus.offset "<type-name>"` on a record field. The field must be an
+/// integer or an optional integer, because an offset is a position in an
+/// ordered log that the service gives and the caller passes back.
+fn build_field_offset(
+    resolve: &Resolve,
+    ty: &Type,
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<String>> {
+    let Some(directive) = directive(directives, "offset", path, context)? else {
+        return Ok(None);
+    };
+    let invalid = |reason: &str| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.offset".to_string(),
+        reason: reason.to_string(),
+    };
+    if directive.args.keys().any(|key| key != "value") {
+        return Err(invalid("takes only the offset type name"));
+    }
+    let Some(name) = directive.value("value") else {
+        return Err(invalid("missing the offset type name"));
+    };
+    if !is_wit_identifier(name) {
+        return Err(invalid(&format!(
+            "`{name}` is not a kebab-case WIT identifier"
+        )));
+    }
+    if !is_integer_or_optional_integer(resolve, ty) {
+        return Err(invalid("is only supported on integer fields"));
+    }
+    Ok(Some(name.to_upper_camel_case()))
+}
+
+fn is_wit_identifier(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('-').all(|part| {
+            part.chars()
+                .next()
+                .is_some_and(|first| first.is_ascii_lowercase())
+                && part
+                    .chars()
+                    .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+        })
+}
+
+fn is_integer_or_optional_integer(resolve: &Resolve, ty: &Type) -> bool {
+    match ty {
+        Type::U8
+        | Type::U16
+        | Type::U32
+        | Type::U64
+        | Type::S8
+        | Type::S16
+        | Type::S32
+        | Type::S64 => true,
+        Type::Id(id) => match &resolve.types[*id].kind {
+            TypeDefKind::Option(inner) => is_integer_type(resolve, inner),
+            TypeDefKind::Type(inner) => is_integer_or_optional_integer(resolve, inner),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn is_integer_type(resolve: &Resolve, ty: &Type) -> bool {
+    match ty {
+        Type::Id(id) => match &resolve.types[*id].kind {
+            TypeDefKind::Type(inner) => is_integer_type(resolve, inner),
+            _ => false,
+        },
+        _ => is_integer_or_optional_integer(resolve, ty),
+    }
 }
 
 fn delay_load_temporalio_workflow_directive(

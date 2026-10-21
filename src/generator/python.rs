@@ -527,10 +527,21 @@ impl<'a> ApiPlanner<'a> {
         let variant_refs = self.variants.values().collect::<Vec<_>>();
         let model_fragments =
             self.render_model_fragments(model_refs.as_slice(), variant_refs.as_slice())?;
-        validate_python_generated_names(self.api_plan, &model_fragments.generated_names)?;
+        let offset_types = python_offset_types(api_plan);
+        validate_python_generated_names(
+            self.api_plan,
+            model_fragments
+                .generated_names
+                .iter()
+                .chain(offset_types.values()),
+        )?;
 
-        let (files, exported_names) =
-            self.render_package(&model_fragments, &services, module_origin)?;
+        let (files, exported_names) = self.render_package(
+            &model_fragments,
+            &services,
+            &offset_types.keys().cloned().collect::<Vec<_>>(),
+            module_origin,
+        )?;
         Ok(PythonGenerationResult {
             files,
             warnings: Vec::new(),
@@ -552,6 +563,7 @@ impl<'a> ApiPlanner<'a> {
         &self,
         model_fragments: &RenderedModelFragments,
         services: &[RenderedService<'_>],
+        offset_types: &[String],
         module_origin: GeneratedFileOrigin,
     ) -> Result<(GeneratedFileMap, BTreeSet<String>)> {
         let mode = crate::nexgen_config::current().mode;
@@ -662,6 +674,7 @@ impl<'a> ApiPlanner<'a> {
         // A module that declares nothing emits no models file. Emitting the file
         // anyway leaves a header and unused imports behind.
         if let Some(models_source) = render_models_module(
+            offset_types,
             self.enums.values().collect::<Vec<_>>().as_slice(),
             self.flags.values().collect::<Vec<_>>().as_slice(),
             variants.as_slice(),
@@ -3784,7 +3797,44 @@ fn render_temporalio_workflow_type_checking_imports(
     true
 }
 
+/// The offset types that `@nexus.offset` names in this module, each with the
+/// first field that names it. Fields that name one type share its declaration.
+fn python_offset_types(api_plan: &PlannedSpec) -> BTreeMap<String, PythonGeneratedName> {
+    let mut offset_types = BTreeMap::new();
+    for (_, record) in api_plan.records() {
+        for field in record.fields.values() {
+            if let Some(offset) = &field.offset {
+                offset_types
+                    .entry(offset.clone())
+                    .or_insert_with(|| PythonGeneratedName {
+                        name: offset.clone(),
+                        generated_by: format!(
+                            "offset type of `{}.{}`",
+                            record.full_name, field.name
+                        ),
+                    });
+            }
+        }
+    }
+    offset_types
+}
+
+fn render_offset_type(output: &mut String, name: &str) {
+    output.push_str(name);
+    output.push_str(" = typing.NewType(");
+    output.push_str(&python_string_literal(name));
+    output.push_str(", int)\n");
+    output.push_str(concat!(
+        "\"\"\"A position in an ordered log, as the service gives it.\n",
+        "\n",
+        "Offsets are ordered and unique, and they can have gaps, so they do not count\n",
+        "entries. Do not compute an offset. Pass back one that the service gave.\n",
+        "\"\"\"\n",
+    ));
+}
+
 fn render_models_module(
+    offset_types: &[String],
     enums: &[&RenderedEnum],
     flags: &[&RenderedFlags],
     variants: &[&RenderedVariant],
@@ -3799,6 +3849,12 @@ fn render_models_module(
     let mut module_imports = BTreeSet::new();
     module_imports.extend(model_fragments.module_imports.iter().cloned());
     let mut body = String::new();
+    for (index, offset_type) in offset_types.iter().enumerate() {
+        if index != 0 {
+            body.push_str("\n\n");
+        }
+        render_offset_type(&mut body, offset_type);
+    }
     if !enums.is_empty() {
         if !body.is_empty() {
             body.push_str("\n\n");

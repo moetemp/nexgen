@@ -1543,3 +1543,45 @@ fn python_proto_enum_defaults_name_the_proto_enum_value() {
         "{models}"
     );
 }
+
+/// An operation stub's keyword parameters name the proto enum module of an
+/// enum field without a replacement type, so the stub imports that module.
+#[test]
+fn python_operation_stubs_import_the_proto_enum_module_of_a_parameter() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-proto-enum-operation");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("input.wit");
+    fs::write(
+        &input_path,
+        PROTO_ENUM_WIT
+            .replace(
+                "interface alerts {",
+                "/// @nexus.endpoint \"alerts\"\ninterface alerts {",
+            )
+            .replace(
+                "    severity: option<severity>,\n  }\n",
+                "    severity: option<severity>,\n  }\n\n  raise: func(request: alert) -> alert;\n",
+            ),
+    )
+    .unwrap();
+    let rendered = generate_python_to_string(&[input_path], &[descriptor_path(&root)]);
+    fs::remove_dir_all(temp_dir).unwrap();
+    let operation = rendered
+        .split("### ")
+        .find(|file| {
+            file.starts_with("operations/raise_.py") || file.starts_with("operations/raise.py")
+        })
+        .unwrap_or_else(|| panic!("missing the raise operation module:\n{rendered}"));
+
+    assert!(
+        operation.contains(
+            "    severity: temporalio.api.enums.v1.common_pb2.Severity.ValueType | None = None,"
+        ),
+        "{operation}"
+    );
+    assert!(
+        operation.contains("\nimport temporalio.api.enums.v1.common_pb2\n"),
+        "{operation}"
+    );
+}

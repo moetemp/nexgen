@@ -4018,7 +4018,7 @@ fn render_models_module(
     Ok(Some(output))
 }
 
-/// The model a caller outside a Workflow names for an operation's input or
+/// The model that a caller outside a Workflow uses for an operation's input or
 /// output. The caller supports the models of this module only.
 fn client_model_name(
     service: &RenderedService<'_>,

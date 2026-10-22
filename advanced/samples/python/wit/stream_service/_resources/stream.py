@@ -23,6 +23,8 @@ from ..models import (
 
 @dataclasses.dataclass
 class Stream:
+    """A handle on one stream, built from its ref."""
+
     stream: StreamRef
 
     async def append_records(
@@ -30,6 +32,7 @@ class Stream:
         records: list[AppendRecord] | None = None,
         sequence: int | None = None,
     ) -> AppendRecordsResponse:
+        """Append records. The answer has the first and the last offset."""
         request = AppendRecordsRequest(
             stream=self.stream,
             records=records or [],
@@ -56,6 +59,7 @@ class Stream:
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse:
+        """Read one page of records from an offset."""
         request = ReadRecordsRequest(
             stream=self.stream,
             from_offset=from_offset,

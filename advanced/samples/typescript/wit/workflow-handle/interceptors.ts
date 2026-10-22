@@ -2,12 +2,7 @@
 
 import { composeInterceptors } from "../../../interceptor-composition";
 import type * as nexus from "../../../nexus";
-import type {
-  StartWorkflowResult,
-  StartWorkflowRequest,
-  CancelWorkflowResponse,
-  CancelWorkflowRequest,
-} from "./models";
+import type { StartWorkflowResult, StartWorkflowRequest } from "./models";
 
 export interface SystemNexusWorkflowOutboundCallsInterceptor {
   startWorkflow?: (
@@ -16,18 +11,6 @@ export interface SystemNexusWorkflowOutboundCallsInterceptor {
       input: StartWorkflowRequest,
     ) => Promise<nexus.NexusOperationHandle<StartWorkflowResult>>,
   ) => Promise<nexus.NexusOperationHandle<StartWorkflowResult>>;
-  restartWorkflow?: (
-    input: StartWorkflowRequest,
-    next: (
-      input: StartWorkflowRequest,
-    ) => Promise<nexus.NexusOperationHandle<StartWorkflowResult>>,
-  ) => Promise<nexus.NexusOperationHandle<StartWorkflowResult>>;
-  cancelWorkflow?: (
-    input: CancelWorkflowRequest,
-    next: (
-      input: CancelWorkflowRequest,
-    ) => Promise<nexus.NexusOperationHandle<CancelWorkflowResponse>>,
-  ) => Promise<nexus.NexusOperationHandle<CancelWorkflowResponse>>;
 }
 
 /** Dispatches the operation-specific interceptor chain selected by service and operation. */
@@ -39,24 +22,12 @@ export function dispatchSystemNexusSpecificInterceptors(
   next: <Input, Output>(input: Input) => Promise<nexus.NexusOperationHandle<Output>>,
 ): Promise<nexus.NexusOperationHandle<unknown>> {
   switch (service) {
-    case "StartWorkflowService":
+    case "WorkflowHandleService":
       switch (operation) {
         case "StartWorkflow":
           return composeInterceptors(interceptors, "startWorkflow", (request) =>
             next<StartWorkflowRequest, StartWorkflowResult>(request),
           )(input as StartWorkflowRequest) as Promise<
-            nexus.NexusOperationHandle<unknown>
-          >;
-        case "RestartWorkflow":
-          return composeInterceptors(interceptors, "restartWorkflow", (request) =>
-            next<StartWorkflowRequest, StartWorkflowResult>(request),
-          )(input as StartWorkflowRequest) as Promise<
-            nexus.NexusOperationHandle<unknown>
-          >;
-        case "CancelWorkflow":
-          return composeInterceptors(interceptors, "cancelWorkflow", (request) =>
-            next<CancelWorkflowRequest, CancelWorkflowResponse>(request),
-          )(input as CancelWorkflowRequest) as Promise<
             nexus.NexusOperationHandle<unknown>
           >;
         default:

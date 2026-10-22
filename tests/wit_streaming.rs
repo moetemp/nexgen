@@ -980,3 +980,28 @@ fn python_long_poll_without_offsets_has_no_sequence_reader() {
     assert!(log.contains("    async def read(\n"), "{log}");
     assert!(!log.contains("iter_read"), "{log}");
 }
+
+#[test]
+fn wit_64_bit_integers_map_to_64_bit_types() {
+    let files = generate(Language::Dotnet, GenerationMode::NativeApi, LOG_WIT);
+    let models = file(&files, "Models.cs");
+    assert!(
+        models.contains("public long? FirstOffset { get; init; }"),
+        "{models}"
+    );
+    let files = generate(Language::Go, GenerationMode::NativeApi, LOG_WIT);
+    let service = file(&files, "logservice.go");
+    assert!(service.contains("\tFirstOffset *int64\n"), "{service}");
+
+    // A resource method parameter has only its WIT type, with no proto field behind it.
+    let wit = RUN_WIT.replace(
+        "      workflow-task-finish-event-id: s64,\n    );",
+        "      workflow-task-finish-event-id: s64,\n      attempt: s32,\n    );",
+    );
+    let files = generate(Language::Dotnet, GenerationMode::NativeApi, &wit);
+    let resources = file(&files, "Resources.cs");
+    assert!(
+        resources.contains("long workflowTaskFinishEventId, int attempt)"),
+        "{resources}"
+    );
+}

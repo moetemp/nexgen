@@ -1,0 +1,1 @@
+WIT `s64` and `u64` now plan as 64-bit integers, so .NET generates `long` and Go `int64` for WIT-only fields and resource method parameters, where both had a 32-bit type. TypeScript generates `Long` for them, as for proto `int64` fields.

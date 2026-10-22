@@ -63,6 +63,23 @@ class UserServiceHandler:
         assert input.email == "new@example.com"
         return user_resource(email=input.email)
 
+    @sync_operation
+    async def notify(
+        self,
+        _ctx: StartOperationContext,
+        input: user_service_models.NotifyRequest,
+    ) -> None:
+        self.calls.append(("Notify", input))
+
+    @sync_operation
+    async def get_profile(
+        self,
+        _ctx: StartOperationContext,
+        input: user_service_models.GetProfileRequest,
+    ) -> user_service_models.UserProfile:
+        self.calls.append(("GetProfile", input))
+        return user_service_models.UserProfile(display_name="Alice")
+
 
 @workflow.defn
 class UserServiceCallerWorkflow:
@@ -70,6 +87,8 @@ class UserServiceCallerWorkflow:
     async def run(self) -> User:
         service = user_service.UserServiceClient("user-service")
         user = await service.get_user(user_id="user-123")
+        await user.notify(sender="ops")
+        assert (await user.get_profile()).display_name == "Alice"
         return await user.update_email("new@example.com")
 
 
@@ -117,13 +136,24 @@ async def test_get_user_returns_user_resource(env: WorkflowEnvironment) -> None:
     assert user.user_id == "user-123"
     assert user.email == "new@example.com"
 
-    assert len(service_handler.calls) == 2
+    assert len(service_handler.calls) == 4
     get_user_operation, get_user_request = service_handler.calls[0]
     assert get_user_operation == "GetUser"
     assert isinstance(get_user_request, user_service_models.GetUserRequest)
     assert get_user_request.user_id == "user-123"
 
-    update_operation, update_request = service_handler.calls[1]
+    notify_operation, notify_request = service_handler.calls[1]
+    assert notify_operation == "Notify"
+    assert notify_request == user_service_models.NotifyRequest(
+        user_id="user-123", reason=None, channels=[], sender="ops"
+    )
+
+    assert service_handler.calls[2] == (
+        "GetProfile",
+        user_service_models.GetProfileRequest(user_id="user-123"),
+    )
+
+    update_operation, update_request = service_handler.calls[3]
     assert update_operation == "UpdateEmail"
     assert isinstance(update_request, user_service_models.UpdateEmailRequest)
     assert update_request.user_id == "user-123"

@@ -434,6 +434,9 @@ fn resource_method_result_matches_operation(
             operation_output_ref(operation) == Some(proto_name.as_str())
                 || operation_output_resource_message_name(operation) == Some(proto_name.as_str())
         }
+        TypeSpec::Record(record_name) => {
+            operation_output_ref(operation) == Some(record_name.as_str())
+        }
         _ => false,
     }
 }

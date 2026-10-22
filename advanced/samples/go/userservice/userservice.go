@@ -29,6 +29,37 @@ func (m updateEmailRequest) GetEmail() string {
 	return m.Email
 }
 
+type notifyRequest struct {
+	UserID   string
+	Reason   *string
+	Channels []string
+	Sender   string
+}
+
+func (m notifyRequest) GetUserID() string {
+	return m.UserID
+}
+
+func (m notifyRequest) GetReason() *string {
+	return m.Reason
+}
+
+func (m notifyRequest) GetChannels() []string {
+	return m.Channels
+}
+
+func (m notifyRequest) GetSender() string {
+	return m.Sender
+}
+
+type getProfileRequest struct {
+	UserID string
+}
+
+func (m getProfileRequest) GetUserID() string {
+	return m.UserID
+}
+
 // --- Resources ---
 
 type User struct {
@@ -49,6 +80,18 @@ func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.Future {
 	return updateEmail(ctx, updateEmailRequest{UserID: u.UserID, Email: email})
 }
 
+func (u *User) Notify(ctx workflow.Context, reason string, channels []string, sender string) workflow.Future {
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+	return notify(ctx, notifyRequest{UserID: u.UserID, Reason: reasonPtr, Channels: channels, Sender: sender})
+}
+
+func (u *User) GetProfile(ctx workflow.Context) workflow.Future {
+	return getProfile(ctx, getProfileRequest{UserID: u.UserID})
+}
+
 // --- Operations (internal) ---
 
 func getUser(ctx workflow.Context, request getUserRequest) workflow.Future {
@@ -63,7 +106,28 @@ func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.Futu
 	return fut
 }
 
+func notify(ctx workflow.Context, request notifyRequest) workflow.Future {
+	c := workflow.NewNexusClient("user-service", "UserService")
+	fut := c.ExecuteOperation(ctx, "Notify", request, workflow.NexusOperationOptions{})
+	return fut
+}
+
+func getProfile(ctx workflow.Context, request getProfileRequest) workflow.Future {
+	c := workflow.NewNexusClient("user-service", "UserService")
+	fut := c.ExecuteOperation(ctx, "GetProfile", request, workflow.NexusOperationOptions{})
+	return fut
+}
+
 // --- Operations (public API) ---
+
+type UserProfile struct {
+	// DisplayName - Required.
+	DisplayName string
+}
+
+func (m UserProfile) GetDisplayName() string {
+	return m.DisplayName
+}
 
 type GetUserOptions struct {
 	// UserID - Required.
@@ -87,5 +151,40 @@ func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.Future 
 	return updateEmail(ctx, updateEmailRequest{
 		UserID: opts.UserID,
 		Email:  opts.Email,
+	})
+}
+
+type NotifyOptions struct {
+	// UserID - Required.
+	UserID string
+	// Reason - Optional.
+	Reason string
+	// Channels - Required.
+	Channels []string
+	// Sender - Required.
+	Sender string
+}
+
+func Notify(ctx workflow.Context, opts NotifyOptions) workflow.Future {
+	var reason *string
+	if opts.Reason != "" {
+		reason = &opts.Reason
+	}
+	return notify(ctx, notifyRequest{
+		UserID:   opts.UserID,
+		Reason:   reason,
+		Channels: opts.Channels,
+		Sender:   opts.Sender,
+	})
+}
+
+type GetProfileOptions struct {
+	// UserID - Required.
+	UserID string
+}
+
+func GetProfile(ctx workflow.Context, opts GetProfileOptions) workflow.Future {
+	return getProfile(ctx, getProfileRequest{
+		UserID: opts.UserID,
 	})
 }

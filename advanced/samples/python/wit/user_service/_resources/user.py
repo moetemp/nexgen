@@ -5,7 +5,12 @@ from __future__ import annotations
 import dataclasses
 import typing
 
-from ..models import UpdateEmailRequest
+from ..models import (
+    GetProfileRequest,
+    NotifyRequest,
+    UpdateEmailRequest,
+    UserProfile,
+)
 
 
 @dataclasses.dataclass
@@ -32,6 +37,40 @@ class User:
             resource,
             nexus_client,
         )
+
+    async def notify(
+        self,
+        *,
+        reason: str | None = None,
+        channels: list[str] | None = None,
+        sender: str,
+    ) -> None:
+        request = NotifyRequest(
+            user_id=self.user_id,
+            reason=reason,
+            channels=channels or [],
+            sender=sender,
+        )
+        nexus_client = getattr(self, "_nexus_client")
+        handle = await nexus_client.start_operation(
+            operation="Notify",
+            input=request,
+        )
+        await handle
+
+    async def get_profile(
+        self,
+    ) -> UserProfile:
+        request = GetProfileRequest(
+            user_id=self.user_id,
+        )
+        nexus_client = getattr(self, "_nexus_client")
+        handle = await nexus_client.start_operation(
+            operation="GetProfile",
+            input=request,
+            output_type=UserProfile,
+        )
+        return await handle
 
 
 def bind_user_client(

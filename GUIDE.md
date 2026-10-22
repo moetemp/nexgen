@@ -1107,7 +1107,7 @@ wait is followed by a pause, from 50 ms and doubling up to 2 s. A
 answer = await client.read_until_entries(request, deadline=timedelta(seconds=30))
 ```
 
-When the long poll also names `offset-field` and `next-offset-field`, the caller
+When the long poll also sets `offset-field` and `next-offset-field`, the caller
 gets `iter_<operation>`, an async iterator over the items of the result list.
 Each page is one `_until_` call, so it waits and backs off by the same rules.
 The next page starts at the answer's next offset. The iterator ends after an

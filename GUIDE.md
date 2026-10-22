@@ -1079,15 +1079,17 @@ Each caller method converts its request to a payload, gives it to the transport,
 and converts the answer. A proto-backed model travels as a `binary/protobuf`
 payload of its proto message, so a transport that moves proto bytes needs
 nothing else. An answer for it can be `binary/protobuf`, `json/protobuf` or
-`json/plain`. Other models go through the payload converter that the caller
-takes (the SDK default when none is given). A `payload_codec`, when given,
-encodes each request payload and decodes each answer. A transport raises
+`json/plain`. The caller takes a `data_converter`, the SDK default when none is
+given. Each payload and failure inside a proto-backed model goes through its
+converters and codec, as in Workflow code. The model's own payload doesn't,
+since the service reads it. A model that is not proto-backed is one user value,
+and the data converter converts and encodes it whole. A transport raises
 `TransportError` for a call that failed, with `retryable` set when the same call
 can succeed later.
 
 ```python
-client = StreamServiceClient(my_transport)
-response = await client.describe_stream(DescribeStreamRequest(stream=ref))
+client = StartWorkflowServiceClient(my_transport)
+response = await client.cancel_workflow(request)
 ```
 
 The caller supports operations whose input and output are models of the same

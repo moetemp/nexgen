@@ -1104,7 +1104,19 @@ wait is followed by a pause, from 50 ms and doubling up to 2 s. A
 `TransportError` with `retryable` set is tried again while the deadline allows.
 
 ```python
-answer = await client.read_records_until_records(request, deadline=timedelta(seconds=30))
+answer = await client.read_until_entries(request, deadline=timedelta(seconds=30))
+```
+
+When the long poll also names `offset-field` and `next-offset-field`, the caller
+gets `iter_<operation>`, an async iterator over the items of the result list.
+Each page is one `_until_` call, so it waits and backs off by the same rules.
+The next page starts at the answer's next offset. The iterator ends after an
+answer with the done field set, or when its optional `deadline` passes. With no
+deadline, it ends only on done. The idle timeout counts within one page.
+
+```python
+async for entry in client.iter_read(request):
+    print(entry.offset)
 ```
 
 The caller supports operations whose input and output are models of the same
@@ -1775,7 +1787,9 @@ Cannot be combined with `@nexus.source`.
 Declares that the endpoint parks a call for up to the wait the caller sends, and
 answers early when it has something. Each member is a WIT field name. The
 directive changes no model and no wire byte. A generated client uses it to
-repeat the call until it answers with something or a deadline passes.
+repeat the call until it answers with something or a deadline passes. With both
+offset fields, the client and a bound resource method also read the pages as one
+async iterator.
 
 - `wait-field` is an optional input field, a `duration` or an integer count of
   milliseconds. The caller sets it on each call, so it is not a parameter.
@@ -1783,49 +1797,20 @@ repeat the call until it answers with something or a deadline passes.
   more.
 - `result-field` is an output list. An empty list means nothing came yet.
 - `done-field` is an output boolean that says nothing more will come.
-- `offset-field` and `next-offset-field` go together. Both are fields marked
-  with the same `@nexus.offset` type. After an answer with nothing, the next
-  call starts from the offset that the answer gave, so a read that starts at the
-  end does not skip what arrives between calls.
+- `offset-field` and `next-offset-field` go together. Both are integer fields of
+  the same type. After an answer with nothing, the next call starts from the
+  offset that the answer gave, so a read that starts at the end does not skip
+  what arrives between calls.
 - `idle-timeout-field` is an optional input field, a `duration` or an integer
   count of milliseconds. The endpoint ends a call when nothing comes for this
   long. Each call sends what is left of it, so the idle time counts across
   calls.
 
 ```wit
-/// @nexus.long-poll wait-field="wait" max-wait-ms="60000" result-field="records"
+/// @nexus.long-poll wait-field="wait" max-wait-ms="60000" result-field="entries"
 ///   done-field="done" offset-field="from-offset" next-offset-field="next-offset"
-///   idle-timeout-field="idle-timeout"
-read-records: func(request: read-records-request) -> read-records-response;
+read: func(request: read-request) -> read-response;
 ```
-
----
-
-### @nexus.offset
-
-**Placement:** Record field of an integer type, or an `option` of one
-**Syntax:** `@nexus.offset "<offset-type-name>"`
-
-Marks the field as a position in an ordered log, such as a stream offset. The
-name is a kebab-case WIT identifier. Every field that names the same type shares
-one declaration, so an offset read from one operation can be passed to another.
-The field keeps its integer type, and the wire form does not change.
-
-```wit
-record read-request {
-  /// @nexus.offset "stream-offset"
-  from-offset: option<s64>,
-}
-```
-
-**Python:** the models module declares the type once.
-
-```python
-StreamOffset = typing.NewType("StreamOffset", int)
-```
-
-TypeScript and .NET accept the directive and declare no type. Cannot be combined
-with `@nexus.omit`.
 
 ---
 

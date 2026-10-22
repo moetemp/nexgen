@@ -1754,6 +1754,54 @@ pub(crate) fn find_proto_name_for_type_def(
     directive_value(&directives, "proto", path, context, "value")
 }
 
+/// Reads `@nexus.offset "<type-name>"` on a record field. The field must be an
+/// integer or an optional integer, because an offset is a position in an
+/// ordered log that the service gives and the caller passes back.
+fn build_field_offset(
+    resolve: &Resolve,
+    ty: &Type,
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<String>> {
+    let Some(directive) = directive(directives, "offset", path, context)? else {
+        return Ok(None);
+    };
+    let invalid = |reason: &str| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.offset".to_string(),
+        reason: reason.to_string(),
+    };
+    if directive.args.keys().any(|key| key != "value") {
+        return Err(invalid("takes only the offset type name"));
+    }
+    let Some(name) = directive.value("value") else {
+        return Err(invalid("missing the offset type name"));
+    };
+    if !is_wit_identifier(name) {
+        return Err(invalid(&format!(
+            "`{name}` is not a kebab-case WIT identifier"
+        )));
+    }
+    if !is_integer_or_optional_integer(resolve, ty) {
+        return Err(invalid("is only supported on integer fields"));
+    }
+    Ok(Some(name.to_upper_camel_case()))
+}
+
+fn is_wit_identifier(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('-').all(|part| {
+            part.chars()
+                .next()
+                .is_some_and(|first| first.is_ascii_lowercase())
+                && part
+                    .chars()
+                    .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+        })
+}
+
 fn build_field_default(
     resolve: &Resolve,
     ty: &Type,
@@ -3179,35 +3227,19 @@ fn build_operation_long_poll(
         field(output, "output", "next-offset-field")?,
     ) {
         (None, None) => None,
-        (Some((input_field, input_type)), Some((output_field, _))) => {
+        (Some((input_field, input_type)), Some((output_field, output_type))) => {
             if optional_inner_type(resolve, &input_type).is_none() {
                 return Err(invalid(
                     "`offset-field` must name an optional field, since a first call may omit it"
                         .to_string(),
                 ));
             }
-            let offset_type = |record: &Record, name: &str| -> Result<Option<String>> {
-                let field = record
-                    .fields
-                    .iter()
-                    .find(|field| field.name == name)
-                    .expect("long-poll field resolved above");
-                let field_context = format!("{context} field `{name}`");
-                let field_directives =
-                    parse_directives(field.docs.contents.as_deref(), path, &field_context)?;
-                build_field_offset(resolve, &field.ty, &field_directives, path, &field_context)
-            };
-            let input_offset = offset_type(input, directive.value("offset-field").unwrap())?;
-            let output_offset = offset_type(output, directive.value("next-offset-field").unwrap())?;
-            match (input_offset, output_offset) {
-                (Some(input_offset), Some(output_offset)) if input_offset == output_offset => {}
-                _ => {
-                    return Err(invalid(
-                        "`offset-field` and `next-offset-field` must name fields marked with \
-                         the same `@nexus.offset` type"
-                            .to_string(),
-                    ));
-                }
+            if !is_integer_or_optional_integer(resolve, &input_type)
+                || !is_integer_or_optional_integer(resolve, &output_type)
+            {
+                return Err(invalid(
+                    "`offset-field` and `next-offset-field` must name integer fields".to_string(),
+                ));
             }
             Some(LongPollOffsetFields {
                 input_field,
@@ -3629,52 +3661,14 @@ fn experimental_directive(directives: &[Directive], path: &Path, context: &str) 
     Ok(true)
 }
 
-/// Reads `@nexus.offset "<type-name>"` on a record field. The field must be an
-/// integer or an optional integer, because an offset is a position in an
-/// ordered log that the service gives and the caller passes back.
-fn build_field_offset(
-    resolve: &Resolve,
-    ty: &Type,
-    directives: &[Directive],
-    path: &Path,
-    context: &str,
-) -> Result<Option<String>> {
-    let Some(directive) = directive(directives, "offset", path, context)? else {
-        return Ok(None);
-    };
-    let invalid = |reason: &str| Error::InvalidWitDirective {
-        path: path.to_path_buf(),
-        context: context.to_string(),
-        directive: "@nexus.offset".to_string(),
-        reason: reason.to_string(),
-    };
-    if directive.args.keys().any(|key| key != "value") {
-        return Err(invalid("takes only the offset type name"));
+fn is_integer_type(resolve: &Resolve, ty: &Type) -> bool {
+    match ty {
+        Type::Id(id) => match &resolve.types[*id].kind {
+            TypeDefKind::Type(inner) => is_integer_type(resolve, inner),
+            _ => false,
+        },
+        _ => is_integer_or_optional_integer(resolve, ty),
     }
-    let Some(name) = directive.value("value") else {
-        return Err(invalid("missing the offset type name"));
-    };
-    if !is_wit_identifier(name) {
-        return Err(invalid(&format!(
-            "`{name}` is not a kebab-case WIT identifier"
-        )));
-    }
-    if !is_integer_or_optional_integer(resolve, ty) {
-        return Err(invalid("is only supported on integer fields"));
-    }
-    Ok(Some(name.to_upper_camel_case()))
-}
-
-fn is_wit_identifier(name: &str) -> bool {
-    !name.is_empty()
-        && name.split('-').all(|part| {
-            part.chars()
-                .next()
-                .is_some_and(|first| first.is_ascii_lowercase())
-                && part
-                    .chars()
-                    .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
-        })
 }
 
 fn is_integer_or_optional_integer(resolve: &Resolve, ty: &Type) -> bool {
@@ -3693,16 +3687,6 @@ fn is_integer_or_optional_integer(resolve: &Resolve, ty: &Type) -> bool {
             _ => false,
         },
         _ => false,
-    }
-}
-
-fn is_integer_type(resolve: &Resolve, ty: &Type) -> bool {
-    match ty {
-        Type::Id(id) => match &resolve.types[*id].kind {
-            TypeDefKind::Type(inner) => is_integer_type(resolve, inner),
-            _ => false,
-        },
-        _ => is_integer_or_optional_integer(resolve, ty),
     }
 }
 

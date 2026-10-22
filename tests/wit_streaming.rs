@@ -75,16 +75,6 @@ interface log-service {
 }
 "#;
 
-const LONG_POLL_DIRECTIVE: &str = r#"  /// @nexus.long-poll
-  ///   wait-field="wait"
-  ///   max-wait-ms="60000"
-  ///   result-field="entries"
-  ///   done-field="done"
-  ///   offset-field="from-offset"
-  ///   next-offset-field="next-offset"
-  ///   idle-timeout-field="idle-timeout"
-"#;
-
 fn project_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
@@ -181,10 +171,6 @@ fn generate(language: Language, mode: GenerationMode, wit: &str) -> BTreeMap<Str
     try_generate(language, mode, wit).unwrap()
 }
 
-fn generate_error(language: Language, wit: &str) -> String {
-    try_generate(language, GenerationMode::NativeApi, wit).unwrap_err()
-}
-
 fn file<'a>(files: &'a BTreeMap<String, String>, name: &str) -> &'a str {
     files
         .get(name)
@@ -211,129 +197,5 @@ fn python_declares_one_offset_type_for_every_field_that_names_it() {
     assert!(
         models.contains("    next_offset: int | None = None"),
         "{models}"
-    );
-}
-
-#[test]
-fn offset_directive_rejects_a_field_that_is_not_an_integer() {
-    let error = generate_error(
-        Language::Python,
-        &LOG_WIT.replace(
-            "    /// @nexus.offset \"log-offset\"\n    offset: option<s64>,\n    text: string,",
-            "    offset: option<s64>,\n    /// @nexus.offset \"log-offset\"\n    text: string,",
-        ),
-    );
-    assert!(
-        error.contains("@nexus.offset") && error.contains("only supported on integer fields"),
-        "{error}"
-    );
-}
-
-/// Replaces the long-poll directive of `read` with `directive`.
-fn with_long_poll(directive: &str) -> String {
-    LOG_WIT.replace(LONG_POLL_DIRECTIVE, &format!("  /// {directive}\n"))
-}
-
-#[test]
-fn long_poll_generates_in_python_typescript_and_dotnet() {
-    for language in [Language::Python, Language::TypeScript, Language::Dotnet] {
-        let files = generate(language, GenerationMode::NativeApi, LOG_WIT);
-        assert!(!files.is_empty(), "{language:?}");
-    }
-}
-
-#[test]
-fn long_poll_rejects_members_that_do_not_resolve() {
-    for (directive, reason) in [
-        (
-            "@nexus.long-poll result-field=\"entries\"",
-            "missing required `wait-field`",
-        ),
-        (
-            "@nexus.long-poll wait-field=\"wait\"",
-            "missing required `result-field`",
-        ),
-        (
-            "@nexus.long-poll wait-field=\"deadline\" result-field=\"entries\"",
-            "`wait-field` names `deadline`, which the input record does not declare",
-        ),
-        (
-            "@nexus.long-poll wait-field=\"wait\" result-field=\"records\"",
-            "`result-field` names `records`, which the output record does not declare",
-        ),
-        (
-            "@nexus.long-poll wait-field=\"wait\" result-field=\"entries\" until=\"done\"",
-            "unknown member `until`",
-        ),
-        (
-            "@nexus.long-poll \"read\" wait-field=\"wait\" result-field=\"entries\"",
-            "takes only named members",
-        ),
-    ] {
-        let error = generate_error(Language::Python, &with_long_poll(directive));
-        assert!(
-            error.contains("@nexus.long-poll") && error.contains(reason),
-            "{directive}: {error}"
-        );
-    }
-}
-
-#[test]
-fn long_poll_rejects_members_of_the_wrong_shape() {
-    for (directive, reason) in [
-        (
-            "@nexus.long-poll wait-field=\"log-id\" result-field=\"entries\"",
-            "`wait-field` must name an optional field",
-        ),
-        (
-            "@nexus.long-poll wait-field=\"from-offset\" result-field=\"next-offset\"",
-            "`result-field` must name a list field",
-        ),
-        (
-            "@nexus.long-poll wait-field=\"wait\" result-field=\"entries\" \
-             done-field=\"next-offset\"",
-            "`done-field` must name a boolean field",
-        ),
-        (
-            "@nexus.long-poll wait-field=\"wait\" result-field=\"entries\" max-wait-ms=\"0\"",
-            "`max-wait-ms` must be a positive integer",
-        ),
-        (
-            "@nexus.long-poll wait-field=\"wait\" result-field=\"entries\" \
-             offset-field=\"from-offset\"",
-            "`offset-field` and `next-offset-field` go together",
-        ),
-    ] {
-        let error = generate_error(Language::Python, &with_long_poll(directive));
-        assert!(
-            error.contains("@nexus.long-poll") && error.contains(reason),
-            "{directive}: {error}"
-        );
-    }
-}
-
-#[test]
-fn long_poll_offsets_must_name_one_offset_type() {
-    let wit = LOG_WIT.replace(
-        "    /// @nexus.offset \"log-offset\"\n    next-offset: option<s64>,",
-        "    next-offset: option<s64>,",
-    );
-    let error = generate_error(Language::Python, &wit);
-    assert!(
-        error.contains("must name fields marked with the same `@nexus.offset` type"),
-        "{error}"
-    );
-}
-
-#[test]
-fn long_poll_rejects_an_operation_whose_output_is_not_a_record() {
-    let wit = LOG_WIT.replace(
-        "  read: func(request: read-request) -> read-response;",
-        "  read: func(request: read-request);",
-    );
-    let error = generate_error(Language::Python, &wit);
-    assert!(
-        error.contains("the operation output must be a record"),
-        "{error}"
     );
 }

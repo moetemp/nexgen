@@ -1,1 +1,1 @@
-WIT operations accept `@nexus.long-poll` with its wait, result, done, offset and idle-timeout members. The members are checked when the WIT loads.
+WIT operations accept `@nexus.long-poll`, which gives the wait, result, done, offset and idle-timeout fields of a long poll. With `--client`, the Python caller gets `<operation>_until_<result>`, which repeats the call until an answer has something or a deadline passes, and `iter_<operation>`, an async iterator over the results of an offset-based long poll.

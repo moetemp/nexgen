@@ -1,0 +1,1 @@
+The Python caller from `--client` adds `<operation>_until_<result>` for an operation with `@nexus.long-poll`. It repeats the call until an answer has something or the deadline passes, and carries the offset and the idle timeout across calls.

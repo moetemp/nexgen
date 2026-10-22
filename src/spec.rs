@@ -655,7 +655,7 @@ pub struct LongPollDurationField {
 
 /// The long-poll contract of an operation (`@nexus.long-poll` on WIT).
 ///
-/// Each member names a field of the input or output record by its record
+/// Each member refers to a field of the input or output record by its record
 /// field key. The contract changes no model and no wire byte. It tells a
 /// generated caller how to repeat the call until it answers with something.
 #[derive(Debug, Clone, PartialEq, Eq)]

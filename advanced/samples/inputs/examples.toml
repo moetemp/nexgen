@@ -15,3 +15,7 @@ languages = ["python", "dotnet", "typescript"]
 
 [start-workflow]
 client = true
+
+[log-service]
+languages = ["python"]
+client = true

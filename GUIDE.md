@@ -488,6 +488,10 @@ Whether a field is required or optional is determined by the WIT `option<>`
 wrapper (for WIT-direct fields) or proto field presence semantics (for
 proto-backed fields).
 
+In a record with `@nexus.proto`, write a proto `bytes` field as `list<u8>`.
+nexgen generates the field as bytes. In other records, `list<u8>` is a list of
+integers, like any other `list<T>`.
+
 ---
 
 ## Resources

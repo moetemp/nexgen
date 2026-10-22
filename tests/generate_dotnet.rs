@@ -858,3 +858,46 @@ interface conflict-models {
         "{error}"
     );
 }
+
+#[test]
+fn dotnet_wit_64_bit_integers_map_to_long() {
+    let temp_dir = unique_output_path("dotnet-64-bit-ints");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("counters.wit");
+    fs::write(
+        &wit_path,
+        r#"package temporal:counters@1.0.0;
+
+world system {
+  export api;
+}
+
+/// @nexus.endpoint "api"
+interface api {
+  record request {
+    total: s64,
+    limit: u64,
+    small: s32,
+  }
+
+  run: func(request: request);
+}
+"#,
+    )
+    .unwrap();
+
+    let rendered = generate_dotnet_to_string(&[wit_path], &[]);
+    assert!(
+        rendered.contains("public long Total { get; init; }"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("public long Limit { get; init; }"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("public int Small { get; init; }"),
+        "{rendered}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}

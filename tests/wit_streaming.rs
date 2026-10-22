@@ -903,9 +903,11 @@ interface log-service {
     done: option<bool>,
   }
 
+  /// @nexus.doc "A handle on one log."
   resource log {
     constructor(log: log-ref);
 
+    /// @nexus.doc "Read one page of the log."
     /// @nexus.operation "read-log"
     read: func(from-offset: option<s64>) -> read-log-response;
   }
@@ -1074,4 +1076,19 @@ fn a_record_that_holds_a_resource_needs_a_proto_and_python() {
             "{language:?}: {error}"
         );
     }
+}
+
+#[test]
+fn python_resource_and_its_methods_carry_their_docs() {
+    let files = generate_log_handle(client_config(), LOG_HANDLE_WIT);
+    let log = file(&files, "_resources/log.py");
+
+    assert!(
+        log.contains("class Log:\n    \"\"\"A handle on one log.\"\"\"\n    log: LogRef\n"),
+        "{log}"
+    );
+    assert!(
+        log.contains(") -> ReadLogResponse:\n        \"\"\"Read one page of the log.\"\"\"\n"),
+        "{log}"
+    );
 }

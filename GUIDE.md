@@ -1891,8 +1891,8 @@ variant outcome {
 
 ### @nexus.doc
 
-**Placement:** Record, record field, variant, variant case, or operation
-(function) **Syntax:** `@nexus.doc "<text>" [returns="<text>"]` Per-language
+**Placement:** Record, record field, variant, variant case, operation
+(function), resource, or resource method **Syntax:** `@nexus.doc "<text>" [returns="<text>"]` Per-language
 overrides: `python="<text>"` `typescript="<text>"` `go="<text>"`
 `dotnet="<text>"` `java="<text>"` Return docs: `python-returns="<text>"`
 `typescript-returns="<text>"` `go-returns="<text>"` `dotnet-returns="<text>"`
@@ -1910,6 +1910,9 @@ Javadoc text) so authored content cannot break the generated source.
 ///   returns="A workflow handle to the started workflow."
 signal-with-start-workflow: func(...) -> ...;
 ```
+
+Python emits the docs of a resource and its methods as docstrings. The other
+targets don't emit them yet.
 
 Variant documentation is emitted by Python, TypeScript, Go, and .NET; Java does
 not currently generate WIT variants. Python emits an attribute docstring after

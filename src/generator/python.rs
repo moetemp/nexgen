@@ -935,6 +935,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("class ");
         output.push_str(&resource.type_name);
         output.push_str(":\n");
+        render_python_docstring(output, "    ", resource.doc.as_deref(), &[], None, false);
         for field in &resource.fields {
             output.push_str("    ");
             output.push_str(&python_field_name(&field.name));
@@ -973,6 +974,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
+        render_python_docstring(output, "        ", method.doc.as_deref(), &[], None, false);
 
         match &method.binding {
             PlannedResourceMethodBindingSpec::Operation { operation_name, .. } => {

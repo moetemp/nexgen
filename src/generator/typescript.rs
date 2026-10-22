@@ -4243,7 +4243,7 @@ fn render_models_module(
         api_plan,
         &body,
     );
-    // A result record that holds a resource names its class.
+    // A result record that holds a resource uses its class.
     let held_resources = api_plan
         .services
         .iter()

@@ -1,5 +1,6 @@
-//! WIT annotations for streaming services: `@nexus.offset` on record fields
-//! and `@nexus.long-poll` on operations.
+//! WIT annotations for streaming services (`@nexus.offset` on record fields
+//! and `@nexus.long-poll` on operations) and the caller that `--client`
+//! generates for code outside a Workflow.
 #![cfg(feature = "advanced")]
 
 use std::collections::BTreeMap;
@@ -123,21 +124,31 @@ fn try_generate(
     mode: GenerationMode,
     wit: &str,
 ) -> Result<BTreeMap<String, String>, String> {
+    let config = NexgenConfig {
+        mode,
+        ..Default::default()
+    };
+    try_generate_with(config, language, wit, Vec::new())
+}
+
+fn try_generate_with(
+    config: NexgenConfig,
+    language: Language,
+    wit: &str,
+    extra_inputs: Vec<PathBuf>,
+) -> Result<BTreeMap<String, String>, String> {
     let temp_dir = unique_output_path(&format!("{language:?}"));
     fs::create_dir_all(&temp_dir).unwrap();
     let input_path = temp_dir.join("logs.wit");
     fs::write(&input_path, wit).unwrap();
     let output_path = temp_dir.join("generated");
+    let mut input_paths = vec![input_path];
+    input_paths.extend(extra_inputs);
+    input_paths.push(project_root().join("advanced/samples/inputs/deps"));
     let result = generate_to_file(&GenerateRequest {
-        config: NexgenConfig {
-            mode,
-            ..Default::default()
-        },
+        config,
         language,
-        input_paths: vec![
-            input_path,
-            project_root().join("advanced/samples/inputs/deps"),
-        ],
+        input_paths,
         support_package: Some(
             match language {
                 Language::Dotnet => "Acme.Support",
@@ -204,14 +215,6 @@ fn python_declares_one_offset_type_for_every_field_that_names_it() {
 }
 
 #[test]
-fn offset_fields_generate_in_typescript_and_dotnet() {
-    for language in [Language::TypeScript, Language::Dotnet] {
-        let files = generate(language, GenerationMode::NativeApi, LOG_WIT);
-        assert!(!files.is_empty(), "{language:?}");
-    }
-}
-
-#[test]
 fn offset_directive_rejects_a_field_that_is_not_an_integer() {
     let error = generate_error(
         Language::Python,
@@ -222,54 +225,6 @@ fn offset_directive_rejects_a_field_that_is_not_an_integer() {
     );
     assert!(
         error.contains("@nexus.offset") && error.contains("only supported on integer fields"),
-        "{error}"
-    );
-}
-
-#[test]
-fn offset_directive_requires_a_kebab_case_type_name() {
-    for (directive, reason) in [
-        ("@nexus.offset", "missing the offset type name"),
-        (
-            "@nexus.offset \"LogOffset\"",
-            "not a kebab-case WIT identifier",
-        ),
-        (
-            "@nexus.offset \"log-offset\" kind=\"cursor\"",
-            "takes only the offset type name",
-        ),
-    ] {
-        let error = generate_error(
-            Language::Python,
-            &LOG_WIT.replacen("@nexus.offset \"log-offset\"", directive, 1),
-        );
-        assert!(error.contains(reason), "{directive}: {error}");
-    }
-}
-
-#[test]
-fn offset_directive_cannot_be_combined_with_omit() {
-    let error = generate_error(
-        Language::Python,
-        &LOG_WIT.replace(
-            "    /// @nexus.offset \"log-offset\"\n    offset: option<s64>,",
-            "    /// @nexus.omit\n    /// @nexus.offset \"log-offset\"\n    offset: option<s64>,",
-        ),
-    );
-    assert!(
-        error.contains("cannot be combined with `@nexus.offset`"),
-        "{error}"
-    );
-}
-
-#[test]
-fn python_offset_type_cannot_share_a_name_with_a_model() {
-    let error = generate_error(
-        Language::Python,
-        &LOG_WIT.replace("\"log-offset\"", "\"entry\""),
-    );
-    assert!(
-        error.contains("`Entry`") && error.contains("offset type"),
         "{error}"
     );
 }

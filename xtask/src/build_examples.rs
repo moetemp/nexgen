@@ -23,6 +23,9 @@ struct ExampleConfig {
     languages: Option<Vec<String>>,
     #[serde(default)]
     system_nexus: bool,
+    // Turns System Nexus on for some languages only, where the other languages' samples
+    // aren't set up for it.
+    system_nexus_languages: Option<Vec<String>>,
     #[serde(default)]
     client: bool,
 }
@@ -445,7 +448,13 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
     let language_root = advanced_language_root(repo_root, language);
     reset_example_output_directory(&language_root, &output_path)?;
     let example = config.examples.get(example_id);
-    let system_nexus = example.is_some_and(|example| example.system_nexus);
+    let system_nexus = example.is_some_and(|example| {
+        example.system_nexus
+            || example
+                .system_nexus_languages
+                .as_ref()
+                .is_some_and(|languages| languages.iter().any(|name| name == language.as_str()))
+    });
     let generate_request = GenerateRequest {
         config: NexgenConfig {
             mode: GenerationMode::NativeApi,

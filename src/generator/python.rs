@@ -2642,8 +2642,8 @@ struct RenderedOperation<'a> {
     /// transfer-type converters instead of the payload converter.
     client_input_proto_model: Option<String>,
     client_output_proto_model: Option<String>,
-    /// The long-poll loop of a caller outside a Workflow, by Python attribute
-    /// names. Set when the operation declares `@nexus.long-poll`.
+    /// The long-poll loop of a caller outside a Workflow, with the Python attribute of
+    /// each member. Set when the operation declares `@nexus.long-poll`.
     client_long_poll: Option<RenderedLongPoll>,
 }
 

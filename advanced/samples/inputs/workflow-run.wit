@@ -15,7 +15,7 @@ interface workflow-run-service {
     run-id: option<string>,
   }
 
-  /// @nexus.doc "A handle on one Workflow run. It never changes."
+  /// @nexus.doc "A handle on one Workflow run. A StartRunRequest starts it, and it never changes."
   resource workflow-run {
     constructor(workflow-id: string, run-id: option<string>);
 

@@ -14,7 +14,7 @@ from ..models import (
 
 @dataclasses.dataclass
 class WorkflowRun:
-    """A handle on one Workflow run. It never changes."""
+    """A handle on one Workflow run. A StartRunRequest starts it, and it never changes."""
 
     workflow_id: str
     run_id: str | None

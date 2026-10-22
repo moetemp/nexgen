@@ -5,7 +5,7 @@ import type { temporal } from "@temporalio/proto";
 import * as support from "../../support/temporal_model_converters";
 import type { WorkflowRun } from "./resources";
 
-export function requiredField<T>(
+function requiredField<T>(
   value: T | null | undefined,
   owner: string,
   field: string,
@@ -22,14 +22,8 @@ export interface StartWorkflowExecutionResponse {
 }
 
 function startWorkflowExecutionResponseFromProto(
-  proto:
-    | temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse
-    | null
-    | undefined,
-): StartWorkflowExecutionResponse | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse,
+): StartWorkflowExecutionResponse {
   return {
     runId: proto.runId ?? undefined,
     started: proto.started ?? undefined,
@@ -37,11 +31,8 @@ function startWorkflowExecutionResponseFromProto(
 }
 
 function startWorkflowExecutionResponseToProto(
-  model: StartWorkflowExecutionResponse | null | undefined,
-): temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: StartWorkflowExecutionResponse,
+): temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse {
   return {
     runId: model.runId,
     started: model.started,
@@ -52,13 +43,13 @@ export const startWorkflowExecutionResponseTransferTypeConverter = {
   fromTransferType(
     value: temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse,
   ): StartWorkflowExecutionResponse {
-    return startWorkflowExecutionResponseFromProto(value)!;
+    return startWorkflowExecutionResponseFromProto(value);
   },
 
   toTransferType(
     value: StartWorkflowExecutionResponse,
   ): temporal.api.workflowservice.v1.IStartWorkflowExecutionResponse {
-    return startWorkflowExecutionResponseToProto(value) ?? {};
+    return startWorkflowExecutionResponseToProto(value);
   },
 };
 export interface StartRunRequest {
@@ -70,14 +61,8 @@ export interface StartRunRequest {
 }
 
 function startRunRequestFromProto(
-  proto:
-    | temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest
-    | null
-    | undefined,
-): StartRunRequest | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest,
+): StartRunRequest {
   return {
     workflow: requiredField(
       support.workflowTypeFromProto(
@@ -111,11 +96,8 @@ function startRunRequestFromProto(
 }
 
 function startRunRequestToProto(
-  model: StartRunRequest | null | undefined,
-): temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: StartRunRequest,
+): temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest {
   return {
     workflowType: support.workflowTypeToProto(
       requiredField(model.workflow, "StartRunRequest", "workflow"),
@@ -136,35 +118,26 @@ export const startRunRequestTransferTypeConverter = {
   fromTransferType(
     value: temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest,
   ): StartRunRequest {
-    return startRunRequestFromProto(value)!;
+    return startRunRequestFromProto(value);
   },
 
   toTransferType(
     value: StartRunRequest,
   ): temporal.api.workflowservice.v1.IStartWorkflowExecutionRequest {
-    return startRunRequestToProto(value) ?? {};
+    return startRunRequestToProto(value);
   },
 };
 export type CancelRunResponse = Record<string, never>;
 
 function cancelRunResponseFromProto(
-  proto:
-    | temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse
-    | null
-    | undefined,
-): CancelRunResponse | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse,
+): CancelRunResponse {
   return {};
 }
 
 function cancelRunResponseToProto(
-  model: CancelRunResponse | null | undefined,
-): temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: CancelRunResponse,
+): temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse {
   return {};
 }
 
@@ -172,13 +145,13 @@ export const cancelRunResponseTransferTypeConverter = {
   fromTransferType(
     value: temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse,
   ): CancelRunResponse {
-    return cancelRunResponseFromProto(value)!;
+    return cancelRunResponseFromProto(value);
   },
 
   toTransferType(
     value: CancelRunResponse,
   ): temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionResponse {
-    return cancelRunResponseToProto(value) ?? {};
+    return cancelRunResponseToProto(value);
   },
 };
 export interface CancelRunRequest {
@@ -188,21 +161,11 @@ export interface CancelRunRequest {
 }
 
 function cancelRunRequestFromProto(
-  proto:
-    | temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionRequest
-    | null
-    | undefined,
-): CancelRunRequest | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionRequest,
+): CancelRunRequest {
   return {
-    workflowExecution: requiredField(
-      workflowExecutionFromProto(
-        requiredField(proto.workflowExecution, "CancelRunRequest", "workflowExecution"),
-      ),
-      "CancelRunRequest",
-      "workflowExecution",
+    workflowExecution: workflowExecutionFromProto(
+      requiredField(proto.workflowExecution, "CancelRunRequest", "workflowExecution"),
     ),
     reason: proto.reason ?? undefined,
     namespace: requiredField(
@@ -214,16 +177,12 @@ function cancelRunRequestFromProto(
 }
 
 function cancelRunRequestToProto(
-  model: CancelRunRequest | null | undefined,
-): temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionRequest | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: CancelRunRequest,
+): temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionRequest {
   return {
-    workflowExecution:
-      workflowExecutionToProto(
-        requiredField(model.workflowExecution, "CancelRunRequest", "workflowExecution"),
-      ) ?? {},
+    workflowExecution: workflowExecutionToProto(
+      requiredField(model.workflowExecution, "CancelRunRequest", "workflowExecution"),
+    ),
     reason: model.reason,
     namespace: model.namespace ?? support.workflowNamespace(),
   };
@@ -233,13 +192,13 @@ export const cancelRunRequestTransferTypeConverter = {
   fromTransferType(
     value: temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionRequest,
   ): CancelRunRequest {
-    return cancelRunRequestFromProto(value)!;
+    return cancelRunRequestFromProto(value);
   },
 
   toTransferType(
     value: CancelRunRequest,
   ): temporal.api.workflowservice.v1.IRequestCancelWorkflowExecutionRequest {
-    return cancelRunRequestToProto(value) ?? {};
+    return cancelRunRequestToProto(value);
   },
 };
 export interface WorkflowExecution {
@@ -248,11 +207,8 @@ export interface WorkflowExecution {
 }
 
 function workflowExecutionFromProto(
-  proto: temporal.api.common.v1.IWorkflowExecution | null | undefined,
-): WorkflowExecution | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.common.v1.IWorkflowExecution,
+): WorkflowExecution {
   return {
     workflowId: requiredField(
       proto.workflowId === "" ? undefined : proto.workflowId,
@@ -264,11 +220,8 @@ function workflowExecutionFromProto(
 }
 
 function workflowExecutionToProto(
-  model: WorkflowExecution | null | undefined,
-): temporal.api.common.v1.IWorkflowExecution | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: WorkflowExecution,
+): temporal.api.common.v1.IWorkflowExecution {
   return {
     workflowId: requiredField(model.workflowId, "WorkflowExecution", "workflowId"),
     runId: model.runId,
@@ -279,11 +232,11 @@ export const workflowExecutionTransferTypeConverter = {
   fromTransferType(
     value: temporal.api.common.v1.IWorkflowExecution,
   ): WorkflowExecution {
-    return workflowExecutionFromProto(value)!;
+    return workflowExecutionFromProto(value);
   },
 
   toTransferType(value: WorkflowExecution): temporal.api.common.v1.IWorkflowExecution {
-    return workflowExecutionToProto(value) ?? {};
+    return workflowExecutionToProto(value);
   },
 };
 export interface StartRunResult {

@@ -811,32 +811,6 @@ fn go_rejects_descriptors_on_fixed_argument_functions_with_go_diagnostic() {
 }
 
 #[test]
-fn go_rejects_collisions_between_generated_wrapper_type_parameters() {
-    let fixture = go_descriptor_fixture("", "signal-input");
-    for reserved in ["WorkflowArg", "SignalF"] {
-        let wit = fixture.replace(
-            "result-type-parameter=\"WorkflowResult\"",
-            &format!("result-type-parameter=\"{reserved}\""),
-        );
-        let error = render_go_descriptor_fixture(&wit).unwrap_err();
-        match error.downcast_ref::<nexgen::error::Error>().unwrap() {
-            nexgen::error::Error::UnsupportedGoType { context, reason } => {
-                assert!(context.contains("Typed"), "{error}");
-                assert!(
-                    reason.contains(&format!("generated type parameter `{reserved}`")),
-                    "{error}"
-                );
-                assert!(
-                    reason.contains(&format!("generated reserved name `{reserved}`")),
-                    "{error}"
-                );
-            }
-            other => panic!("expected early UnsupportedGoType, got {other:?}"),
-        }
-    }
-}
-
-#[test]
 fn go_temporal_function_constraints_use_workflow_context_prefix() {
     let root = project_root();
     let rendered = generate_to_string_with_system_nexus(
@@ -848,11 +822,6 @@ fn go_temporal_function_constraints_use_workflow_context_prefix() {
     .unwrap();
 
     assert!(rendered.contains("func SignalWithStartWorkflow("));
-    assert!(
-        rendered
-            .contains("func SignalWithStartWorkflowTyped[WorkflowArg any, WorkflowResult any](")
-    );
-    assert!(rendered.contains("\tworkflow func(workflow.Context, WorkflowArg) WorkflowResult,"));
     assert!(!rendered.contains("func SignalWithStartWorkflowWithArgs("));
     assert!(!rendered.contains("SignalF interface"));
     assert!(rendered.contains("\topts SignalWithStartWorkflowOptions,\n"));
@@ -875,7 +844,7 @@ fn go_temporal_function_constraints_use_workflow_context_prefix() {
         rendered
             .matches("workflowName := support.WorkflowFunctionName(ctx, workflow)")
             .count(),
-        2
+        1
     );
     assert!(rendered.contains(
         "c := internal.NewSystemNexusClient(\"temporal.api.workflowservice.v1.WorkflowService\")"
@@ -2302,7 +2271,7 @@ interface workflow-service {
 }
 
 #[test]
-fn go_flatten_in_api_embeds_options_value() {
+fn go_flatten_in_api_promotes_optional_fields_and_collapses_absence() {
     let root = project_root();
     let rendered = generate_to_string_with_inputs(
         nexgen::language::Language::Go,
@@ -2312,16 +2281,76 @@ fn go_flatten_in_api_embeds_options_value() {
     .unwrap();
 
     assert!(rendered.contains("type SignalWithStartWorkflowOptions struct {"));
-    assert!(rendered.contains("\tUserMetadata\n}\n\n// Signal a workflow"));
+    assert!(!rendered.contains("\tUserMetadata\n}\n\n// Signal a workflow"));
     assert!(!rendered.contains("\tUserMetadata *UserMetadata\n}\n\n// Signal a workflow"));
-    assert!(rendered.contains("\t\tUserMetadata: &opts.UserMetadata,\n"));
+    assert!(rendered.contains("type userMetadata struct {"));
+    assert!(!rendered.contains("type UserMetadata struct {"));
+    assert!(rendered.contains("out.UserMetadata = new(userMetadata)"));
+    assert!(!rendered.contains("new(UserMetadata)"));
+    assert!(rendered.contains("\t\tUserMetadata: userMetadataValue,\n"));
     assert!(rendered.contains("\tStaticSummary string"));
     assert!(rendered.contains("\tStaticDetails string"));
+    // Internal models retain presence; only public options default-pun.
+    assert!(rendered.contains("\tStaticSummary *string"));
+    assert!(rendered.contains("\tStaticDetails *string"));
+    assert!(rendered.contains("\tvar userMetadataValue *userMetadata\n"));
+    assert!(rendered.contains("\tif opts.StaticSummary != \"\" || opts.StaticDetails != \"\" {"));
+    assert!(rendered.contains("if opts.StaticSummary != \"\" {"));
+    assert!(rendered.contains("if opts.StaticDetails != \"\" {"));
+    assert!(rendered.contains("userMetadataValue.StaticSummary = &opts.StaticSummary"));
+    assert!(rendered.contains("userMetadataValue.StaticDetails = &opts.StaticDetails"));
+    assert!(rendered.contains("if m.StaticSummary != nil {"));
+    assert!(rendered.contains("(*m.StaticSummary)"), "{rendered}");
+    assert!(rendered.contains("typed, ok := converted.(string)"));
+    assert!(rendered.contains("out.StaticSummary = &typed"));
     assert!(rendered.contains("// Input signal: Signal name to send with the start request."));
     assert!(
         rendered
             .contains("// Input workflow: Workflow function identifying the workflow to start.")
     );
+}
+
+#[test]
+fn go_flatten_in_api_keeps_models_public_when_exposed_elsewhere() {
+    let root = project_root();
+    let source = fs::read_to_string(wit_input_path(&root, "workflow-service")).unwrap();
+    let (prefix, _) = source.rsplit_once('}').unwrap();
+    for (scenario, input) in [
+        (
+            "output",
+            format!(
+                "{prefix}\n  expose-metadata: func(request: signal-with-start-workflow-request) -> user-metadata;\n}}\n"
+            ),
+        ),
+        (
+            "required-input",
+            source.replace(
+                "user-metadata: option<user-metadata>",
+                "user-metadata: user-metadata",
+            ),
+        ),
+    ] {
+        let temp_dir = unique_output_path(&format!("go-flatten-public-{scenario}"));
+        fs::create_dir_all(&temp_dir).unwrap();
+        let wit_path = temp_dir.join("workflow-service.wit");
+        fs::write(&wit_path, input).unwrap();
+        let rendered = generate_to_string_with_inputs(
+            nexgen::language::Language::Go,
+            &[wit_path, linked_inputs_path(&root)],
+            &[descriptor_path(&root)],
+        )
+        .unwrap();
+
+        assert!(
+            rendered.contains("type UserMetadata struct {"),
+            "{scenario}"
+        );
+        assert!(
+            !rendered.contains("type userMetadata struct {"),
+            "{scenario}"
+        );
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
 }
 
 #[test]

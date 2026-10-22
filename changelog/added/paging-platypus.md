@@ -1,2 +1,1 @@
-A `@nexus.long-poll` with `offset-field` and `next-offset-field` gives the Python caller `iter_<operation>`, an async iterator over the items of the result list. It moves the offset after each page and stops on the done field or at an optional deadline.
-A Python resource method bound to such an operation gets `iter_<method>`, which fills the request from the resource and reads the pages in the same way.
+A Python resource method bound to a `@nexus.long-poll` with offsets gets `iter_<method>`, which fills the request from the resource and reads the pages as one async iterator.

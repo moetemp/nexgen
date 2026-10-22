@@ -417,6 +417,13 @@ fn render_output_files(files: BTreeMap<PathBuf, String>) -> String {
 }
 
 fn generate_typescript_to_string(input_paths: &[PathBuf], descriptor_paths: &[PathBuf]) -> String {
+    render_output_files(generate_typescript_files(input_paths, descriptor_paths))
+}
+
+fn generate_typescript_files(
+    input_paths: &[PathBuf],
+    descriptor_paths: &[PathBuf],
+) -> BTreeMap<PathBuf, String> {
     let temp_dir = unique_output_path("typescript-rendered");
     let output_path = temp_dir.join("output");
     generate_to_file(&GenerateRequest {
@@ -434,13 +441,27 @@ fn generate_typescript_to_string(input_paths: &[PathBuf], descriptor_paths: &[Pa
         ts_date_time_types: Default::default(),
     })
     .unwrap();
-    let rendered = if output_path.is_file() {
-        fs::read_to_string(&output_path).unwrap()
-    } else {
-        render_output_files(read_typescript_output_files(&output_path))
-    };
+    let files = read_typescript_output_files(&output_path);
     fs::remove_dir_all(temp_dir).unwrap();
-    rendered
+    files
+}
+
+#[test]
+fn typescript_proto_model_only_examples_emit_only_model_files() {
+    let root = project_root();
+    // Types, exports, and conversion behavior are exercised by the TypeScript
+    // sample tests. Here the contract is the output layout, not source spelling.
+    for example in ["notification-service", "proto-generic", "proto-oneof"] {
+        let files = generate_typescript_files(
+            &example_input_paths(&root, example),
+            &[descriptor_path(&root)],
+        );
+        assert_eq!(
+            files.into_keys().collect::<Vec<_>>(),
+            vec![PathBuf::from("index.ts"), PathBuf::from("models.ts")],
+            "model-only example {example} must not emit service or operation modules",
+        );
+    }
 }
 
 fn unique_output_path(label: &str) -> PathBuf {
@@ -724,9 +745,11 @@ fn typescript_renders_required_fields_and_custom_message_types() {
     ));
     assert!(rendered.contains("support.taskQueueFromProto("));
     assert!(rendered.contains("support.taskQueueToProto("));
-    assert!(rendered.contains(
-        "): temporal.api.workflowservice.v1.ISignalWithStartWorkflowExecutionRequest | undefined {"
-    ));
+    assert!(
+        rendered.contains(
+            "): temporal.api.workflowservice.v1.ISignalWithStartWorkflowExecutionRequest {"
+        )
+    );
     assert!(rendered.contains("const result = await handle.result();"));
     assert!(rendered.contains("return workflow.getExternalWorkflowHandle("));
     assert!(rendered.contains("request.id"));
@@ -1775,5 +1798,69 @@ properties:
     assert!(models.contains("Java emits Long here"), "{models}");
     assert!(models.contains("\"Long\""), "{models}");
     assert!(!models.contains("from 'long'"), "{models}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn typescript_system_nexus_operation_builds_the_returned_resource() {
+    let root = project_root();
+    let temp_dir = unique_output_path("typescript-system-nexus-resource");
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            system_nexus: true,
+            ..Default::default()
+        },
+        language: nexgen::language::Language::TypeScript,
+        input_paths: example_input_paths(&root, "start-workflow"),
+        support_package: Some("./support".to_string()),
+        descriptor_paths: vec![descriptor_path(&root)],
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let start = fs::read_to_string(output_path.join("operations/start-workflow.ts")).unwrap();
+    assert!(
+        start.contains(
+            "  return new StartedWorkflow(requiredField(request.namespace, \"resource\", \"namespace\"), request.workflowId, result.runId ?? undefined);\n"
+        ),
+        "{start}"
+    );
+    assert!(
+        !start.contains("return result as StartedWorkflow"),
+        "{start}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn typescript_resource_method_takes_undefined_before_a_required_parameter() {
+    let root = project_root();
+    let temp_dir = unique_output_path("typescript-resource-param-order");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("param-order.wit");
+    let wit = fs::read_to_string(wit_input_path(&root, "start-workflow"))
+        .unwrap()
+        .replace(
+            "cancel: func(reason: option<string>);",
+            "cancel: func(reason: option<string>, identity: string);",
+        )
+        .replace(
+            "    reason: option<string>,\n    /// @nexus.omit\n    identity: placeholder,",
+            "    reason: option<string>,\n    identity: string,",
+        );
+    fs::write(&wit_path, wit).unwrap();
+    let files = generate_typescript_files(
+        &[wit_path, linked_inputs_path(&root)],
+        &[descriptor_path(&root)],
+    );
+    let resources = &files[&PathBuf::from("resources.ts")];
+    assert!(
+        resources.contains("    reason: string | undefined,\n    identity: string,\n"),
+        "{resources}"
+    );
     fs::remove_dir_all(temp_dir).unwrap();
 }

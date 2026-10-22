@@ -1585,3 +1585,125 @@ fn python_operation_stubs_import_the_proto_enum_module_of_a_parameter() {
         "{operation}"
     );
 }
+
+#[test]
+fn python_imports_no_model_that_only_a_docstring_names() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-docstring-names");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("docstring-names.wit");
+    let wit = r#"
+package temporal:docstring-names@1.0.0;
+
+world system { export api; }
+
+/// @nexus.endpoint "api"
+interface api {
+  record ping-request {
+    text: string,
+  }
+
+  record pong-request {
+    text: string,
+  }
+
+  /// @nexus.doc "Send a ping. A PongRequest answers it."
+  ping: func(request: ping-request);
+
+  pong: func(request: pong-request);
+}
+"#;
+    fs::write(&wit_path, wit).unwrap();
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            ..Default::default()
+        },
+        language: nexgen::language::Language::Python,
+        input_paths: vec![wit_path, linked_inputs_path(&root)],
+        support_package: Some("temporal_support".into()),
+        descriptor_paths: vec![descriptor_path(&root)],
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let ping = fs::read_to_string(output_path.join("operations/ping.py")).unwrap();
+    assert!(ping.contains("A PongRequest answers it."), "{ping}");
+    assert!(!ping.contains("    PongRequest,\n"), "{ping}");
+    assert!(!ping.contains("import PongRequest\n"), "{ping}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn python_resource_method_takes_keywords_when_a_required_parameter_follows_a_default() {
+    let temp_dir = unique_output_path("python-resource-method-params");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("users.wit");
+    let wit = r#"
+package temporal:users@1.0.0;
+
+world system { export user-service; }
+
+/// @nexus.endpoint "users"
+interface user-service {
+  resource user {
+    constructor(user-id: string);
+
+    notify: func(reason: option<string>, channels: list<string>, sender: string);
+  }
+
+  record notify-request {
+    user-id: string,
+    reason: option<string>,
+    channels: list<string>,
+    sender: string,
+  }
+
+  notify: func(request: notify-request);
+}
+"#;
+    fs::write(&wit_path, wit).unwrap();
+    let rendered = generate_python_to_string(&[wit_path], &[]);
+    assert!(
+        rendered.contains(
+            "    async def notify(\n        self,\n        *,\n        reason: str | None = None,\n        \
+             channels: list[str] | None = None,\n        sender: str,\n    ) -> None:\n"
+        ),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("            channels=channels or [],\n"),
+        "{rendered}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
+fn python_checks_a_required_resource_field_that_the_response_fills_in() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-required-resource-field");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("start-workflow.wit");
+    let sample = fs::read_to_string(wit_input_path(&root, "start-workflow")).unwrap();
+    let wit = sample.replace(
+        "constructor(namespace: string, workflow-id: string, run-id: option<string>);",
+        "constructor(namespace: string, workflow-id: string, run-id: string);",
+    );
+    assert_ne!(wit, sample);
+    fs::write(&wit_path, wit).unwrap();
+    let rendered = generate_python_to_string(
+        &[wit_path, linked_inputs_path(&root)],
+        &[descriptor_path(&root)],
+    );
+    assert!(
+        rendered.contains(
+            "    result = await handle\n    if result.run_id is None:\n        \
+             raise RuntimeError(\"StartWorkflow answered without `run_id`\")\n"
+        ),
+        "{rendered}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}

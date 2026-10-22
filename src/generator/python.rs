@@ -1051,11 +1051,19 @@ impl<'a> ApiPlanner<'a> {
                 }
                 output.push_str("    ) -> None:\n");
                 output.push_str("        \"\"\"Bind the handle to a caller.\"\"\"\n");
-                output.push_str("        self._client = client\n");
+                output.push_str("        self._client: ");
+                output.push_str(&client_class_name(service));
+                output.push_str(" = client\n");
                 for field in &resource.fields {
                     let name = python_field_name(&field.name);
                     output.push_str("        self.");
                     output.push_str(&name);
+                    output.push_str(": ");
+                    output.push_str(&self.python_resource_field_annotation(
+                        &field.kind,
+                        field.optional,
+                        field.function.as_ref(),
+                    ));
                     output.push_str(" = ");
                     output.push_str(&name);
                     output.push('\n');
@@ -1118,8 +1126,9 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(":\n");
         render_python_docstring(output, "        ", method.doc.as_deref(), &[], None, false);
         render_resource_method_request(output, method, operation, request_plan);
+        // A method with no result drops the answer.
         output.push_str(if result_annotation == "None" {
-            "        await self._client."
+            "        _ = await self._client."
         } else {
             "        return await self._client."
         });
@@ -4572,8 +4581,8 @@ fn render_client_module(
         );
         body.push_str("                default data converter.\n");
         body.push_str("        \"\"\"\n");
-        body.push_str("        self._transport = transport\n");
-        body.push_str("        self._data_converter = (\n");
+        body.push_str("        self._transport: Transport = transport\n");
+        body.push_str("        self._data_converter: temporalio.converter.DataConverter = (\n");
         body.push_str("            data_converter or temporalio.converter.DataConverter.default\n");
         body.push_str("        )\n");
         body.push_str("\n");
@@ -4712,13 +4721,24 @@ fn render_client_module(
             }
         }
     }
-    if body.contains("_LONG_POLL_FIRST_PAUSE") {
-        body = body.replacen(
-            "\n\n_MessageT = ",
-            &format!("\n\n{LONG_POLL_PAUSES}_MessageT = "),
-            1,
-        );
+
+    // A helper that no method uses would be dead code in the module.
+    let uses_proto = services
+        .iter()
+        .flat_map(|service| service.operations.iter())
+        .any(|operation| {
+            operation.client_input_proto_model.is_some()
+                || operation.client_output_proto_model.is_some()
+        });
+    let tail = body.split_off(CLIENT_RUNTIME.len());
+    if tail.contains("_LONG_POLL_FIRST_PAUSE") {
+        body.push_str("\n\n");
+        body.push_str(LONG_POLL_PAUSES.trim_end());
     }
+    if uses_proto {
+        body.push_str(CLIENT_PROTO_RUNTIME);
+    }
+    body.push_str(&tail);
 
     let mut output = String::new();
     render_generated_file_header(&mut output);
@@ -4737,8 +4757,10 @@ fn render_client_module(
         }
     }
     output.push_str("import typing\n\n");
-    output.push_str("import google.protobuf.json_format\n");
-    output.push_str("import google.protobuf.message\n");
+    if uses_proto {
+        output.push_str("import google.protobuf.json_format\n");
+        output.push_str("import google.protobuf.message\n");
+    }
     output.push_str("import temporalio.api.common.v1\n");
     output.push_str("import temporalio.converter\n");
     output.push_str("import temporalio.nexus.system\n");
@@ -5191,7 +5213,10 @@ class TransportError(Exception):
         """Create a transport error."""
         super().__init__(message)
         self.retryable: bool = retryable
+"#;
 
+/// The helpers of a caller that moves proto-backed models.
+const CLIENT_PROTO_RUNTIME: &str = r#"
 
 _MessageT = typing.TypeVar("_MessageT", bound=google.protobuf.message.Message)
 
@@ -5227,8 +5252,8 @@ def _proto_message(
     return message
 
 
-# The codec runs on the user payloads inside a proto-backed model, Record bodies and
-# failure details included, and never on the model's own payload, which the service reads.
+# The codec runs on the user payloads inside a proto-backed model, failure details
+# included, and never on the model's own payload, which the service reads.
 def _payloads_in(
     message: google.protobuf.message.Message,
 ) -> list[temporalio.api.common.v1.Payload]:
@@ -5963,8 +5988,8 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         output.push_str(&operation.attr_name);
         output.push_str("(typed_input.input),\n        )\n");
     }
-    // An operation outside the generated set goes to the generic hook, so a
-    // plugin outside the SDK can serve its own System Nexus service.
+    // The generic hook gets each operation outside the generated set. Then a plugin
+    // outside the SDK can serve its own System Nexus service.
     output.push_str("    return await interceptor.start_system_nexus_operation(input)\n");
 
     output.push_str("\n\nclass _SystemNexusWorkflowOutboundInterceptorBase(abc.ABC):\n");

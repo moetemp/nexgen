@@ -1107,6 +1107,17 @@ wait is followed by a pause, from 50 ms and doubling up to 2 s. A
 answer = await client.read_until_entries(request, deadline=timedelta(seconds=30))
 ```
 
+Each resource with methods also gets a class in `client.py`, of the same name as
+the Workflow class. It takes the caller and the constructor fields, and each
+method fills in the request from them and calls the caller. A caller method
+whose operation returns such a resource gives back an instance bound to the
+caller.
+
+```python
+started = await client.start_workflow(request)  # StartedWorkflow
+await started.cancel(reason="done")
+```
+
 When the long poll also names `offset-field` and `next-offset-field`, the caller
 gets `iter_<operation>`, an async iterator over the items of the result list.
 Each page is one `_until_` call, so it waits and backs off by the same rules.

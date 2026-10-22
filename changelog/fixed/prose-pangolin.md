@@ -1,1 +1,1 @@
-Python modules no longer import a model that only a docstring names, so type checkers find no unused import.
+Python modules no longer import a model that only a docstring mentions, so type checkers report no unused import.

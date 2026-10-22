@@ -869,9 +869,9 @@ pub struct RecordFieldSpec<F: TypeFamily = AuthoredFamily> {
     pub required: bool,
     pub visibility: RecordFieldVisibility,
     pub function: Option<FunctionFieldSpec<F>>,
-    /// The offset type named by `@nexus.offset`, in UpperCamelCase. The field
+    /// The offset type that `@nexus.offset` gives, in UpperCamelCase. The field
     /// keeps its integer type. The name gives callers a type for the
-    /// positions they hold, shared by every field that names it.
+    /// positions they hold, shared by every field that uses it.
     pub offset: Option<String>,
     pub data: F::FieldData,
 }

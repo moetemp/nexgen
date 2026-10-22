@@ -10,7 +10,6 @@ descriptors = "temporal"
 
 [start-workflow]
 descriptors = "temporal"
-system_nexus_languages = ["typescript"]
 
 [type-roundtrip]
 descriptors = "temporal"
@@ -31,3 +30,9 @@ descriptors = "temporal"
 languages = ["python", "typescript", "dotnet"]
 # The sample proto imports the Temporal API messages, so it needs both sets.
 descriptors = ["temporal_api.bin", "stream_service.bin"]
+
+# A System Nexus operation that returns a resource. TypeScript only for now.
+[workflow-handle]
+languages = ["typescript"]
+system_nexus = true
+descriptors = "temporal"

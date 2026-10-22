@@ -3463,9 +3463,15 @@ fn body_uses_python_symbol(body: &str, symbol: &str) -> bool {
 }
 
 fn used_python_symbol_imports(body: &str, candidates: &[String]) -> Vec<String> {
+    // A name in a docstring is prose, so it needs no import.
+    let code = body
+        .split("\"\"\"")
+        .step_by(2)
+        .collect::<Vec<_>>()
+        .join("\n");
     candidates
         .iter()
-        .filter(|candidate| body_uses_python_symbol(body, candidate))
+        .filter(|candidate| body_uses_python_symbol(&code, candidate))
         .cloned()
         .collect()
 }

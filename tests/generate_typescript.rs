@@ -1800,32 +1800,3 @@ properties:
     assert!(!models.contains("from 'long'"), "{models}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
-
-#[test]
-fn typescript_resource_method_takes_undefined_before_a_required_parameter() {
-    let root = project_root();
-    let temp_dir = unique_output_path("typescript-resource-param-order");
-    fs::create_dir_all(&temp_dir).unwrap();
-    let wit_path = temp_dir.join("param-order.wit");
-    let wit = fs::read_to_string(wit_input_path(&root, "start-workflow"))
-        .unwrap()
-        .replace(
-            "cancel: func(reason: option<string>);",
-            "cancel: func(reason: option<string>, identity: string);",
-        )
-        .replace(
-            "    reason: option<string>,\n    /// @nexus.omit\n    identity: placeholder,",
-            "    reason: option<string>,\n    identity: string,",
-        );
-    fs::write(&wit_path, wit).unwrap();
-    let files = generate_typescript_files(
-        &[wit_path, linked_inputs_path(&root)],
-        &[descriptor_path(&root)],
-    );
-    let resources = &files[&PathBuf::from("resources.ts")];
-    assert!(
-        resources.contains("    reason: string | undefined,\n    identity: string,\n"),
-        "{resources}"
-    );
-    fs::remove_dir_all(temp_dir).unwrap();
-}

@@ -1399,13 +1399,15 @@ fn resolve_typescript_value_type(
             requirements: TypeScriptRequirements::default(),
             wire_conversion: None,
         },
-        PlannedType::Int(IntSpec::I32 | IntSpec::U32) => ResolvedFieldType {
-            annotation: "number".to_string(),
-            kind: ResolvedFieldKind::Scalar,
-            requirements: TypeScriptRequirements::default(),
-            wire_conversion: None,
-        },
-        PlannedType::Int(IntSpec::I64 | IntSpec::U64) => ResolvedFieldType {
+        PlannedType::Int(IntSpec::I32 | IntSpec::S64 | IntSpec::U32 | IntSpec::U64) => {
+            ResolvedFieldType {
+                annotation: "number".to_string(),
+                kind: ResolvedFieldKind::Scalar,
+                requirements: TypeScriptRequirements::default(),
+                wire_conversion: None,
+            }
+        }
+        PlannedType::Int(IntSpec::I64) => ResolvedFieldType {
             annotation: "Long".to_string(),
             kind: ResolvedFieldKind::Scalar,
             requirements: TypeScriptRequirements {
@@ -2576,8 +2578,9 @@ pub(in crate::generator) fn typescript_authored_type_annotation(
 ) -> String {
     match authored_type {
         TypeSpec::Bool => "boolean".to_string(),
-        TypeSpec::Int(IntSpec::I32 | IntSpec::U32) | TypeSpec::Float => "number".to_string(),
-        TypeSpec::Int(IntSpec::I64 | IntSpec::U64) => "Long".to_string(),
+        TypeSpec::Int(IntSpec::I32 | IntSpec::S64 | IntSpec::U32 | IntSpec::U64)
+        | TypeSpec::Float => "number".to_string(),
+        TypeSpec::Int(IntSpec::I64) => "Long".to_string(),
         TypeSpec::String => "string".to_string(),
         TypeSpec::Bytes => "Uint8Array".to_string(),
         TypeSpec::TypeParameter(parameter) => parameter.name.clone(),
@@ -5789,8 +5792,10 @@ fn typescript_resource_field_annotation(
 
 fn typescript_resource_value_annotation(value: &PlannedType) -> String {
     match value {
-        PlannedType::Int(IntSpec::I32 | IntSpec::U32) => "number".to_string(),
-        PlannedType::Int(IntSpec::I64 | IntSpec::U64) => "Long".to_string(),
+        PlannedType::Int(IntSpec::I32 | IntSpec::S64 | IntSpec::U32 | IntSpec::U64) => {
+            "number".to_string()
+        }
+        PlannedType::Int(IntSpec::I64) => "Long".to_string(),
         PlannedType::Float => "number".to_string(),
         PlannedType::Bool => "boolean".to_string(),
         PlannedType::String => "string".to_string(),
@@ -5870,7 +5875,7 @@ fn collect_typescript_value_requirements(
     requirements: &mut TypeScriptRequirements,
 ) {
     match value {
-        PlannedType::Int(IntSpec::I64 | IntSpec::U64) => {
+        PlannedType::Int(IntSpec::I64) => {
             requirements.long = true;
         }
         PlannedType::Option(inner) | PlannedType::List(inner) => {

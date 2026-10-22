@@ -1465,7 +1465,7 @@ fn resolve_authored_field_type_spec(
     match ty {
         Type::Bool => Ok(TypeSpec::Bool),
         Type::S8 | Type::S16 | Type::S32 => Ok(TypeSpec::Int(IntSpec::I32)),
-        Type::S64 => Ok(TypeSpec::Int(IntSpec::I64)),
+        Type::S64 => Ok(TypeSpec::Int(IntSpec::S64)),
         Type::U8 | Type::U16 | Type::U32 => Ok(TypeSpec::Int(IntSpec::U32)),
         Type::U64 => Ok(TypeSpec::Int(IntSpec::U64)),
         Type::F32 | Type::F64 => Ok(TypeSpec::Float),
@@ -2475,7 +2475,7 @@ fn primitive_wit_type(type_name: &str) -> Option<TypeSpec> {
     match type_name {
         "bool" => Some(TypeSpec::Bool),
         "s8" | "s16" | "s32" => Some(TypeSpec::Int(IntSpec::I32)),
-        "s64" => Some(TypeSpec::Int(IntSpec::I64)),
+        "s64" => Some(TypeSpec::Int(IntSpec::S64)),
         "u8" | "u16" | "u32" => Some(TypeSpec::Int(IntSpec::U32)),
         "u64" => Some(TypeSpec::Int(IntSpec::U64)),
         "f32" | "f64" => Some(TypeSpec::Float),

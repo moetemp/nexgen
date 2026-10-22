@@ -306,6 +306,12 @@ type SyncReport struct {
 	Attempts []Result[string, string]
 	// RegionStatus - Required.
 	RegionStatus map[string]Result[string, string]
+	// ItemCount - Required.
+	ItemCount int32
+	// ByteCount - Required.
+	ByteCount int64
+	// ClockSkewMs - Required.
+	ClockSkewMs int64
 }
 
 func (m SyncReport) GetRoute() []Tuple2[float64, float64] {
@@ -318,6 +324,18 @@ func (m SyncReport) GetAttempts() []Result[string, string] {
 
 func (m SyncReport) GetRegionStatus() map[string]Result[string, string] {
 	return m.RegionStatus
+}
+
+func (m SyncReport) GetItemCount() int32 {
+	return m.ItemCount
+}
+
+func (m SyncReport) GetByteCount() int64 {
+	return m.ByteCount
+}
+
+func (m SyncReport) GetClockSkewMs() int64 {
+	return m.ClockSkewMs
 }
 
 type GetUserOptions struct {

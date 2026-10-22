@@ -1,4 +1,3 @@
-import Long from "long";
 import { getUser, recordSync } from "../../wit/type-showcase/index.ts";
 import { UserCapability, type SyncReport } from "../../wit/type-showcase/models.ts";
 
@@ -17,8 +16,8 @@ const syncReport = (): SyncReport => ({
     "eu-central": { tag: "err" as const, value: "degraded" },
   },
   itemCount: 3,
-  byteCount: Long.fromNumber(5_000_000_000),
-  clockSkewMs: Long.fromNumber(-5_000_000_000),
+  byteCount: 5_000_000_000,
+  clockSkewMs: -5_000_000_000,
 });
 
 export async function typeShowcaseCaller(): Promise<{

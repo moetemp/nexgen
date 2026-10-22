@@ -1516,7 +1516,7 @@ impl<'a> ApiPlanner<'a> {
         match value {
             PlannedType::Float => "double".to_string(),
             PlannedType::Int(IntSpec::I32) => "int".to_string(),
-            PlannedType::Int(IntSpec::I64) => "long".to_string(),
+            PlannedType::Int(IntSpec::I64 | IntSpec::S64) => "long".to_string(),
             PlannedType::Int(IntSpec::U32) => "uint".to_string(),
             PlannedType::Int(IntSpec::U64) => "ulong".to_string(),
             PlannedType::Bool => "bool".to_string(),
@@ -3770,7 +3770,7 @@ fn dotnet_authored_type(wit_type: &PlannedType) -> String {
     match wit_type {
         TypeSpec::Bool => "bool".to_string(),
         TypeSpec::Int(IntSpec::I32) => "int".to_string(),
-        TypeSpec::Int(IntSpec::I64) => "long".to_string(),
+        TypeSpec::Int(IntSpec::I64 | IntSpec::S64) => "long".to_string(),
         TypeSpec::Int(IntSpec::U32) => "uint".to_string(),
         TypeSpec::Int(IntSpec::U64) => "ulong".to_string(),
         TypeSpec::Float => "double".to_string(),

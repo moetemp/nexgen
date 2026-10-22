@@ -4712,6 +4712,12 @@ fn render_client_module(
             }
         }
     }
+    body.push_str(resource_classes);
+    model_names.extend(used_python_symbol_imports(
+        resource_classes,
+        all_model_names,
+    ));
+
     // A helper that no method uses would be dead code in the module.
     let uses_proto = services
         .iter()

@@ -218,6 +218,10 @@ code calls `support.workflowNamespace()`. Include both the support module and
 generated output in your project. Run the project's TypeScript type checker (the
 sample uses `npm run typecheck`).
 
+Validation helpers such as `requiredField` are generated privately in each
+module that needs them. They are not exported and do not belong in your support
+module.
+
 ### .NET
 
 Pass the C# **namespace**, not a source path or assembly name:
@@ -484,9 +488,9 @@ Whether a field is required or optional is determined by the WIT `option<>`
 wrapper (for WIT-direct fields) or proto field presence semantics (for
 proto-backed fields).
 
-In a record backed by `@nexus.proto`, `list<u8>` is how a proto `bytes` field is
-authored, and it generates the field as bytes. Anywhere else `list<u8>` is a
-list of integers, like any other `list<T>`.
+In a record with `@nexus.proto`, write a proto `bytes` field as `list<u8>`.
+nexgen generates the field as bytes. In other records, `list<u8>` is a list of
+integers, like any other `list<T>`.
 
 ---
 
@@ -871,32 +875,39 @@ export interface ActivityOptions {
     retryPolicy: common.RetryPolicy;
 }
 
-export const ActivityOptions = {
-    fromProto(proto: temporal.api.activity.v1.IActivityOptions | null | undefined) {
-        if (proto == null) return undefined;
-        return {
-            taskQueue: proto.taskQueue == null ? undefined
-                : taskQueueFromProto(proto.taskQueue),
-            retryPolicy: requiredField(
-                retryPolicyFromProto(requiredField(proto.retryPolicy, ...)), ...
-            ),
-        };
-    },
-    toProto(model: ActivityOptions | null | undefined) {
-        if (model == null) return undefined;
-        return {
-            taskQueue: model.taskQueue == null ? undefined
-                : taskQueueToProto(model.taskQueue),
-            retryPolicy: retryPolicyToProto(model.retryPolicy),
-        };
-    },
-};
+function activityOptionsFromProto(
+    proto: temporal.api.activity.v1.IActivityOptions,
+): ActivityOptions {
+    return {
+        taskQueue: proto.taskQueue == null ? undefined
+            : taskQueueFromProto(proto.taskQueue),
+        retryPolicy: requiredField(
+            retryPolicyFromProto(requiredField(proto.retryPolicy, ...)), ...
+        ),
+    };
+}
+
+function activityOptionsToProto(
+    model: ActivityOptions,
+): temporal.api.activity.v1.IActivityOptions {
+    return {
+        taskQueue: model.taskQueue == null ? undefined
+            : taskQueueToProto(model.taskQueue),
+        retryPolicy: retryPolicyToProto(model.retryPolicy),
+    };
+}
 ```
 
 Required fields are validated in `from_proto` -- missing required proto fields
 raise a `ValueError` (Python) or throw an `Error` (TypeScript). .NET output
 requires `Temporalio` 1.18.0 or newer, or 1.19.0 or newer for generic
 proto-backed models.
+
+Generated TypeScript message-conversion helpers take non-null inputs and return
+non-null outputs. Callers guard optional fields before conversion and validate
+required wire fields before passing them to a helper. Required results from
+authored support converters are still validated; those converters retain their
+own nullable contracts.
 
 ### Sourced Fields
 
@@ -987,9 +998,10 @@ async def signal_with_start_workflow(
 ```
 
 In the snippet above, notice that the entire `user-metadata` field is `None` if
-all its constituent fields are `None`. This is the behavior in Python and
-Typescript, but not in Go; in Go we implement flattening with value embedding,
-so `user-metadata` is never nil.
+all its constituent fields are `None`. Python, TypeScript, .NET, and Go all omit
+the optional nested record when none of its fields are supplied. Go uses nil
+pointers internally for wire presence, but its public options use
+default-punning: empty strings mean omitted.
 
 ### Output Transforms
 
@@ -1384,8 +1396,7 @@ and one opaque payload, packed into the wire argument list. Without an override,
 Go groups each reference with its signature-derived arguments, preserves the
 other groups' authored order, and places primary variadic arguments last. Only a
 final argument list uses `...T`; other lists use `[]T`. An explicit primary
-descriptor replaces signature-derived typing, so no additional `Typed` wrapper
-is emitted.
+descriptor replaces signature-derived typing.
 
 `@nexus.function-args` options:
 
@@ -1477,6 +1488,22 @@ Encoding a required variant property that holds `null` (for example after
 `null!`) also throws `InvalidOperationException`. An unset `option<variant>`
 decodes to `null`, and encoding `null` leaves the oneof unset.
 
+TypeScript uses tagged object unions, such as
+`{ tag: "success", value: output }`. The containing record's transfer converter
+switches on the SDK's oneof discriminator and writes the discriminator together
+with the selected member. A missing required discriminator throws an `Error`; an
+absent optional discriminator decodes as `undefined`. Plain wire objects must
+supply the discriminator when a case is selected; member presence is not used to
+infer it. Unknown discriminator values and missing selected member values throw
+an `Error`, as does encoding an invalid variant tag. Model-only modules export
+their model types and transfer converters from `index.ts` without emitting an
+empty service.
+
+Generated TypeScript oneof switches use `satisfies never` in their default
+branches. Adding an unhandled case to the SDK discriminator or the generated
+variant is therefore a compile-time error. Runtime errors still protect against
+invalid values passed from JavaScript.
+
 Other targets reject a reachable model containing a oneof they cannot convert.
 Unreachable declarations and omitted oneofs remain valid.
 
@@ -1512,12 +1539,12 @@ A language-specific field-level `@nexus.type` override replaces that field
 occurrence and therefore removes it from generic inference for that target.
 
 Type parameters are not currently supported in proto-backed records except in
-Python and .NET when a field or oneof member maps to Temporal's protobuf
-`Payload` or `Payloads` carrier. When decoding a parameterized Python model,
-concrete type arguments propagate through nested proto-backed records and become
-type hints for single-value `Payload` fields. An unparameterized model decodes
-those fields as `typing.Any`. `Payloads` fields continue to decode as untyped
-sequences.
+Python, .NET, and TypeScript when a field or oneof member maps to Temporal's
+protobuf `Payload` or `Payloads` carrier. When decoding a parameterized Python
+model, concrete type arguments propagate through nested proto-backed records and
+become type hints for single-value `Payload` fields. An unparameterized model
+decodes those fields as `typing.Any`. `Payloads` fields continue to decode as
+untyped sequences.
 
 .NET generic proto-backed records declare an open generic transfer-type
 converter, such as `typeof(Request<,>.TransferTypeConverter)`, which the SDK
@@ -1529,6 +1556,16 @@ with no payload decodes as the default value of the type argument, for example
 for a `NoValue` result. If a `Payloads` carrier holds more than one payload,
 decoding throws `InvalidOperationException` with the field name and the payload
 count. This requires `Temporalio` 1.19.0 or newer.
+
+TypeScript retains model type parameters on transfer-converter methods. Generic
+`Payload` fields use the support module's `payloadToValue<T>` and
+`valueToPayload` helpers; generic `Payloads` fields use
+`singleValueFromPayloads<T>` and `payloadsToProto([value])`. The single-value
+decoder returns `undefined` for an empty payload list and rejects more than one
+payload. These helpers must use the configured application payload converter.
+Generic type arguments describe the decoded values statically; they do not
+supply runtime type hints. Required carrier fields require a wire envelope but
+can contain application values that are themselves `null` or `undefined`.
 
 Type parameters are also unsupported in resources, map keys, function-signature
 metadata, or resource-bound generic operations.
@@ -1849,20 +1886,26 @@ record user-metadata {
 
 Only supported on record types.
 
-In Go, `@nexus.flatten-in-api` is rendered as value embedding in the generated
+In Go, `@nexus.flatten-in-api` promotes the record's fields into the generated
 operation options struct. For a parent request with
-`user-metadata: option<user-metadata>`, the options struct embeds
-`UserMetadata`, so callers can set fields through the embedded value:
+`user-metadata: option<user-metadata>` and string flattened-type overrides, the
+options struct exposes `StaticSummary string` and `StaticDetails string`:
 
 ```go
 opts := SomeOperationOptions{}
 opts.StaticSummary = "Nightly sync"
 ```
 
-This differs from the nil-collapse behavior shown in
-[Flattened Records](#flattened-records): because the Go options struct contains
-an embedded zero-value record, generated Go cannot distinguish "omitted" from
-"present with zero-value fields".
+As described in [Flattened Records](#flattened-records), the generated helper
+leaves the nested metadata nil when both strings are empty. Each nonempty option
+populates its corresponding payload; an empty option remains absent from the
+nested protobuf message. This follows Go's default-punning convention, so the
+public options cannot distinguish an omitted string from an explicitly empty
+string.
+
+The containing record is an unexported implementation type in Go unless another
+public signature exposes it, such as an operation result or a non-flattened
+input field. Types referenced by the promoted fields remain public as needed.
 
 ---
 

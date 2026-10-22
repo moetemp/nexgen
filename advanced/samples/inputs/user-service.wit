@@ -36,6 +36,7 @@ interface user-service {
     email: option<string>,
   }
 
+  /// @nexus.doc "Get a user by id."
   get-user: func(request: get-user-request) -> user-result;
   update-email: func(request: update-email-request) -> user-result;
   notify: func(request: notify-request);

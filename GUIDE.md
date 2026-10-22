@@ -727,6 +727,26 @@ return StartedWorkflow(
 If a resource constructor field name cannot be found in either, the generator
 raises `InvalidResource`.
 
+**A result record that holds the resource.** An operation can also return a
+proto-backed record with one `own<T>` field and other fields. The resource binds
+from the record's message as above, and the other fields come from the fields of
+the same name. The record is the API model only. Its message travels as a wire
+record that takes the proto message's name. Only the Python target generates
+this, and the other targets refuse it.
+
+```wit
+/// @nexus.proto "temporal.api.streamservice.v1.CreateStreamResponse"
+record create-stream-result {
+  %stream: own<%stream>,
+  created: option<bool>,
+}
+```
+
+```python
+result = await handle  # CreateStreamResponse
+return CreateStreamResult(stream=Stream(stream=result.stream), created=result.created)
+```
+
 A response model field is always optional. When the resource field is required,
 the Python operation checks it first, and raises `RuntimeError` when the
 response leaves it empty:
@@ -1100,9 +1120,12 @@ Each caller method converts its request to a payload, gives it to the transport,
 and converts the answer. A proto-backed model travels as a `binary/protobuf`
 payload of its proto message, so a transport that moves proto bytes needs
 nothing else. An answer for it can be `binary/protobuf`, `json/protobuf` or
-`json/plain`. Other models go through the payload converter that the caller
-takes (the SDK default when none is given). A `payload_codec`, when given,
-encodes each request payload and decodes each answer. A transport raises
+`json/plain`. The caller takes a `data_converter` (the SDK default when none is
+given). Each payload and failure inside a proto-backed model, such as a Record
+body or a close failure, goes through its payload converter, failure converter
+and codec, as in Workflow code. The model's own payload doesn't, since the
+service reads it. A model that is not proto-backed is one user value, and the
+data converter converts and encodes it whole. A transport raises
 `TransportError` for a call that failed, with `retryable` set when the same call
 can succeed later.
 
@@ -1124,6 +1147,17 @@ wait is followed by a pause, from 50 ms and doubling up to 2 s. A
 
 ```python
 answer = await client.read_records_until_records(request, deadline=timedelta(seconds=30))
+```
+
+Each resource with methods also gets a class in `client.py`, of the same name as
+the Workflow class. It takes the caller and the constructor fields, and each
+method fills in the request from them and calls the caller. A method that
+returns a resource is left out, since the caller answers with the resource's
+wire model.
+
+```python
+stream = Stream(client, StreamRef(id="chat"))
+await stream.close(result=final_answer)
 ```
 
 When the long poll also names `offset-field` and `next-offset-field`, the caller
@@ -1871,10 +1905,11 @@ variant outcome {
 
 ### @nexus.doc
 
-**Placement:** Record, record field, variant, variant case, or operation
-(function) **Syntax:** `@nexus.doc "<text>" [returns="<text>"]` Per-language
-overrides: `python="<text>"` `typescript="<text>"` `go="<text>"`
-`dotnet="<text>"` `java="<text>"` Return docs: `python-returns="<text>"`
+**Placement:** Record, record field, variant, variant case, operation
+(function), resource, or resource method **Syntax:**
+`@nexus.doc "<text>" [returns="<text>"]` Per-language overrides:
+`python="<text>"` `typescript="<text>"` `go="<text>"` `dotnet="<text>"`
+`java="<text>"` Return docs: `python-returns="<text>"`
 `typescript-returns="<text>"` `go-returns="<text>"` `dotnet-returns="<text>"`
 `java-returns="<text>"`
 
@@ -1890,6 +1925,9 @@ Javadoc text) so authored content cannot break the generated source.
 ///   returns="A workflow handle to the started workflow."
 signal-with-start-workflow: func(...) -> ...;
 ```
+
+Python emits the docs of a resource and its methods as docstrings. The other
+targets don't emit them yet.
 
 Variant documentation is emitted by Python, TypeScript, Go, and .NET; Java does
 not currently generate WIT variants. Python emits an attribute docstring after

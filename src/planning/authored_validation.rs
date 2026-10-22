@@ -662,6 +662,14 @@ fn validate_authored_field_types(
         if model_config.is_field_omitted(field_name) {
             continue;
         }
+        // A resource field holds a resource that an operation result builds from this
+        // message, so it has no proto field type of its own.
+        if matches!(
+            field_spec.field_type.without_option(),
+            TypeSpec::Resource(_)
+        ) {
+            continue;
+        }
 
         validate_authored_field_type(
             message_name,

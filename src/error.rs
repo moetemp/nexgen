@@ -215,6 +215,15 @@ pub enum Error {
     )]
     IncompleteOperationOutputTransform { service: String, operation: String },
 
+    #[error(
+        "{language} cannot generate operation `{service}.{operation}`: its result record holds a resource, which only Python generates"
+    )]
+    UnsupportedResourceHolder {
+        language: Language,
+        service: String,
+        operation: String,
+    },
+
     #[error("{language} cannot generate a caller for operation `{service}.{operation}`: {reason}")]
     UnsupportedClientOperation {
         language: Language,

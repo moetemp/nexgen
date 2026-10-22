@@ -1126,6 +1126,29 @@ wait is followed by a pause, from 50 ms and doubling up to 2 s. A
 answer = await client.read_records_until_records(request, deadline=timedelta(seconds=30))
 ```
 
+When the long poll also names `offset-field` and `next-offset-field`, the caller
+gets `iter_<operation>`, an async iterator over the items of the result list.
+Each page is one `_until_` call, so it waits and backs off by the same rules.
+The next page starts at the answer's next offset. The iterator ends after an
+answer with the done field set, or when its optional `deadline` passes. With no
+deadline, it ends only on done. The idle timeout counts within one page.
+
+```python
+async for record in client.iter_read_records(request):
+    print(record.offset)
+```
+
+A resource method bound to such an operation gets `iter_<method>` too, with the
+method's parameters and a keyword `deadline`. It fills the request from `self`,
+calls the operation once per page, sets the wait field to what is left of the
+deadline, and pauses after a quick empty answer as the caller does. In a
+Workflow, the clock and the pauses are the Workflow's own, so they replay.
+
+```python
+async for record in stream.iter_read_records(topics=["tokens"]):
+    ...
+```
+
 The caller supports operations whose input and output are models of the same
 module. An operation whose models take type parameters, or that returns a
 resource without a wire type, is a generation error. TypeScript and .NET do not
@@ -1769,7 +1792,9 @@ Cannot be combined with `@nexus.source`.
 Declares that the endpoint parks a call for up to the wait the caller sends, and
 answers early when it has something. Each member is a WIT field name. The
 directive changes no model and no wire byte. A generated client uses it to
-repeat the call until it answers with something or a deadline passes.
+repeat the call until it answers with something or a deadline passes. With both
+offset fields, the client and a bound resource method also read the pages as one
+async iterator.
 
 - `wait-field` is an optional input field, a `duration` or an integer count of
   milliseconds. The caller sets it on each call, so it is not a parameter.

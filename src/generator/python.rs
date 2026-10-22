@@ -862,6 +862,10 @@ impl<'a> ApiPlanner<'a> {
         if !service.delay_load_temporalio_workflow {
             module_imports.insert("temporalio.workflow".to_string());
         }
+        if body.contains("_LONG_POLL_FIRST_PAUSE") {
+            body.insert_str(0, LONG_POLL_PAUSES);
+            module_imports.insert("asyncio".to_string());
+        }
 
         let mut output = String::new();
         render_generated_file_header(&mut output);
@@ -965,41 +969,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    async def ");
         output.push_str(&python_field_name(&method.name));
         output.push_str("(\n");
-        output.push_str("        self,\n");
-        // Python refuses a parameter without a default after one with a default, and WIT
-        // allows any order, so such a method takes keyword arguments only.
-        let has_default = |param: &PlannedResourceField| {
-            param.optional || resource_method_list_param(param).is_some()
-        };
-        if method
-            .params
-            .iter()
-            .skip_while(|param| !has_default(param))
-            .any(|param| !has_default(param))
-        {
-            output.push_str("        *,\n");
-        }
-        for param in &method.params {
-            output.push_str("        ");
-            output.push_str(&python_field_name(&param.name));
-            output.push_str(": ");
-            if let Some(value) = resource_method_list_param(param) {
-                // A list request field defaults to empty, as in the standalone wrapper.
-                output.push_str("list[");
-                output.push_str(&self.python_resource_value_annotation(value));
-                output.push_str("] | None = None");
-            } else {
-                output.push_str(&self.python_resource_field_annotation(
-                    &param.kind,
-                    param.optional,
-                    param.function.as_ref(),
-                ));
-                if param.optional {
-                    output.push_str(" = None");
-                }
-            }
-            output.push_str(",\n");
-        }
+        self.render_resource_method_params(output, method, None);
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
@@ -1027,6 +997,7 @@ impl<'a> ApiPlanner<'a> {
                         operation,
                         &result_annotation,
                     );
+                    self.render_resource_method_iterator(output, service, method, operation);
                 }
             }
             PlannedResourceMethodBindingSpec::Stub => {
@@ -1038,6 +1009,136 @@ impl<'a> ApiPlanner<'a> {
                 )));
                 output.push_str(")\n");
             }
+        }
+    }
+
+    /// A method bound to a long poll that moves an offset also reads its pages as one
+    /// sequence. It waits and backs off by the rules of the caller's `_until_` loop.
+    fn render_resource_method_iterator(
+        &self,
+        output: &mut String,
+        service: &RenderedService<'_>,
+        method: &PlannedResourceMethod,
+        operation: &RenderedOperation<'_>,
+    ) {
+        let Some(long_poll) = &operation.client_long_poll else {
+            return;
+        };
+        let (
+            Some(_),
+            Some((offset, next_offset)),
+            PlannedResourceMethodBindingSpec::Operation { request_plan, .. },
+        ) = (
+            &long_poll.iter_method_name,
+            &long_poll.offset_attrs,
+            &method.binding,
+        )
+        else {
+            return;
+        };
+        output.push_str("\n    async def iter_");
+        output.push_str(&python_field_name(&method.name));
+        output.push_str("(\n");
+        self.render_resource_method_params(
+            output,
+            method,
+            Some("deadline: datetime.timedelta | None = None"),
+        );
+        output.push_str("    ) -> collections.abc.AsyncIterator[");
+        output.push_str(&long_poll.item_annotation);
+        output.push_str("]:\n");
+        render_long_poll_iterator_docstring(
+            output,
+            long_poll,
+            &format!("``{}`` operation", operation.wire_name),
+        );
+        render_resource_method_request(output, method, operation, request_plan);
+        output.push_str("        clock = asyncio.get_running_loop()\n");
+        output.push_str(
+            "        end = None if deadline is None else clock.time() + deadline.total_seconds()\n",
+        );
+        output.push_str("        pause = _LONG_POLL_FIRST_PAUSE\n");
+        output.push_str("        while True:\n");
+        // A local name that no request field has, so it shadows no parameter.
+        output.push_str("            page_wait = ");
+        output.push_str(LONG_POLL_ITERATOR_PAGE_SECONDS);
+        output.push_str(" if end is None else max(end - clock.time(), 0.001)\n");
+        if let Some(max_wait) = &long_poll.max_wait_seconds {
+            output.push_str("            page_wait = min(page_wait, ");
+            output.push_str(max_wait);
+            output.push_str(")\n");
+        }
+        output.push_str("            request = dataclasses.replace(\n");
+        output.push_str("                request, ");
+        output.push_str(&long_poll.wait.attr);
+        output.push('=');
+        output.push_str(&long_poll.wait.from_seconds("page_wait"));
+        output.push_str("\n            )\n");
+        output.push_str("            asked = clock.time()\n");
+        output.push_str("            handle = await ");
+        output.push_str(&request_operation_function_name(service, operation));
+        output.push_str("(request)\n");
+        output.push_str("            answer = await handle\n");
+        render_long_poll_iterator_page_end(output, long_poll, offset, next_offset, "request");
+        output.push_str("            if end is not None and clock.time() >= end:\n");
+        output.push_str("                return\n");
+        output.push_str("            if not answer.");
+        output.push_str(&long_poll.result_attr);
+        output.push_str(" and clock.time() - asked < page_wait / 2:\n");
+        output.push_str("                await asyncio.sleep(pause)\n");
+        output.push_str("                pause = min(pause * 2, _LONG_POLL_LAST_PAUSE)\n");
+        output.push_str("            else:\n");
+        output.push_str("                pause = _LONG_POLL_FIRST_PAUSE\n");
+    }
+
+    fn render_resource_method_params(
+        &self,
+        output: &mut String,
+        method: &PlannedResourceMethod,
+        keyword_param: Option<&str>,
+    ) {
+        output.push_str("        self,\n");
+        // Python refuses a parameter without a default after one with a default, and WIT
+        // allows any order, so such a method takes keyword arguments only.
+        let has_default = |param: &PlannedResourceField| {
+            param.optional || resource_method_list_param(param).is_some()
+        };
+        let keyword_only = method
+            .params
+            .iter()
+            .skip_while(|param| !has_default(param))
+            .any(|param| !has_default(param));
+        if keyword_only {
+            output.push_str("        *,\n");
+        }
+        for param in &method.params {
+            output.push_str("        ");
+            output.push_str(&python_field_name(&param.name));
+            output.push_str(": ");
+            if let Some(value) = resource_method_list_param(param) {
+                // A list request field defaults to empty, as in the standalone wrapper.
+                output.push_str("list[");
+                output.push_str(&self.python_resource_value_annotation(value));
+                output.push_str("] | None = None");
+            } else {
+                output.push_str(&self.python_resource_field_annotation(
+                    &param.kind,
+                    param.optional,
+                    param.function.as_ref(),
+                ));
+                if param.optional {
+                    output.push_str(" = None");
+                }
+            }
+            output.push_str(",\n");
+        }
+        if let Some(keyword_param) = keyword_param {
+            if !keyword_only {
+                output.push_str("        *,\n");
+            }
+            output.push_str("        ");
+            output.push_str(keyword_param);
+            output.push_str(",\n");
         }
     }
 
@@ -1399,6 +1500,20 @@ impl<'a> ApiPlanner<'a> {
             kind: field.kind,
         };
         let result_attr = attr(output, &long_poll.result_field);
+        let item = match &output
+            .fields
+            .get(&long_poll.result_field)
+            .expect("the parser resolves long-poll fields")
+            .field_type
+        {
+            PlannedType::List(item) | PlannedType::Option(item) => item.as_ref(),
+            other => other,
+        };
+        let item_annotation = self.python_resource_value_annotation(item);
+        let item_model = match item {
+            PlannedType::Record(record) => Some(record.model_name.clone()),
+            _ => None,
+        };
         let attr_name = operation
             .code_name
             .value()
@@ -1406,6 +1521,12 @@ impl<'a> ApiPlanner<'a> {
             .unwrap_or_else(|| python_ident(&operation.name.to_snake_case()));
         Ok(RenderedLongPoll {
             method_name: format!("{attr_name}_until_{result_attr}"),
+            iter_method_name: long_poll
+                .offset
+                .as_ref()
+                .map(|_| format!("iter_{attr_name}")),
+            item_annotation,
+            item_model,
             wait: duration(&long_poll.wait_field),
             max_wait_seconds: long_poll
                 .max_wait_ms
@@ -2678,6 +2799,10 @@ struct RenderedOperation<'a> {
 #[derive(Debug)]
 struct RenderedLongPoll {
     method_name: String,
+    /// Set when the long poll moves an offset, so the pages can be read as one sequence.
+    iter_method_name: Option<String>,
+    item_annotation: String,
+    item_model: Option<String>,
     wait: RenderedLongPollDuration,
     max_wait_seconds: Option<String>,
     result_attr: String,
@@ -4308,6 +4433,10 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
                     &input_model,
                     output_model,
                 );
+                if long_poll.iter_method_name.is_some() {
+                    model_names.extend(long_poll.item_model.iter().cloned());
+                    render_client_long_poll_iterator(&mut body, long_poll, &input_model);
+                }
             }
         }
     }
@@ -4316,10 +4445,10 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
     for service in services {
         for operation in &service.operations {
             for name in std::iter::once(operation.attr_name.clone()).chain(
-                operation
-                    .client_long_poll
-                    .iter()
-                    .map(|long_poll| long_poll.method_name.clone()),
+                operation.client_long_poll.iter().flat_map(|long_poll| {
+                    std::iter::once(long_poll.method_name.clone())
+                        .chain(long_poll.iter_method_name.iter().cloned())
+                }),
             ) {
                 if !method_names.insert((service.name, name.clone())) {
                     return Err(Error::UnsupportedClientOperation {
@@ -4335,14 +4464,7 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
     if body.contains("_LONG_POLL_FIRST_PAUSE") {
         body = body.replacen(
             "\n\n_MessageT = ",
-            concat!(
-                "\n\n# An answer with nothing that comes back in less than half of its wait is\n",
-                "# followed by a pause, so a service that ignores the wait is not asked again\n",
-                "# at once. The pause doubles up to the last one.\n",
-                "_LONG_POLL_FIRST_PAUSE = 0.05\n",
-                "_LONG_POLL_LAST_PAUSE = 2.0\n",
-                "\n\n_MessageT = ",
-            ),
+            &format!("\n\n{LONG_POLL_PAUSES}_MessageT = "),
             1,
         );
     }
@@ -4350,7 +4472,7 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
-    for module in ["asyncio", "dataclasses", "datetime"] {
+    for module in ["asyncio", "collections.abc", "dataclasses", "datetime"] {
         if body.contains(&format!("{module}.")) {
             output.push_str("import ");
             output.push_str(module);
@@ -4440,6 +4562,146 @@ fn render_client_method(
             output.push_str("        )\n");
         }
     }
+}
+
+const LONG_POLL_PAUSES: &str = concat!(
+    "# An answer with nothing that comes back in less than half of its wait is\n",
+    "# followed by a pause, so a service that ignores the wait is not asked again\n",
+    "# at once. The pause doubles up to the last one.\n",
+    "_LONG_POLL_FIRST_PAUSE = 0.05\n",
+    "_LONG_POLL_LAST_PAUSE = 2.0\n",
+    "\n\n",
+);
+
+/// The page budget when the iterator has no deadline. A page is one bounded loop, so the
+/// iterator checks between pages that the caller still reads.
+const LONG_POLL_ITERATOR_PAGE_SECONDS: &str = "60.0";
+
+/// Each page is one call of the `_until_` loop, so the pages wait and back off by its rules.
+fn render_client_long_poll_iterator(
+    output: &mut String,
+    long_poll: &RenderedLongPoll,
+    input_model: &str,
+) {
+    let (Some(iter_method_name), Some((offset, next_offset))) =
+        (&long_poll.iter_method_name, &long_poll.offset_attrs)
+    else {
+        return;
+    };
+    output.push('\n');
+    output.push_str("    async def ");
+    output.push_str(iter_method_name);
+    output.push_str("(\n");
+    output.push_str("        self,\n");
+    output.push_str("        request: ");
+    output.push_str(input_model);
+    output.push_str(",\n");
+    output.push_str("        *,\n");
+    output.push_str("        deadline: datetime.timedelta | None = None,\n");
+    output.push_str("    ) -> collections.abc.AsyncIterator[");
+    output.push_str(&long_poll.item_annotation);
+    output.push_str("]:\n");
+    render_long_poll_iterator_docstring(
+        output,
+        long_poll,
+        &format!("``{}``", long_poll.method_name),
+    );
+    output.push_str("        clock = asyncio.get_running_loop()\n");
+    output.push_str(
+        "        end = None if deadline is None else clock.time() + deadline.total_seconds()\n",
+    );
+    output.push_str("        attempt = request\n");
+    output.push_str("        while True:\n");
+    output.push_str("            left = ");
+    output.push_str(LONG_POLL_ITERATOR_PAGE_SECONDS);
+    output.push_str(" if end is None else end - clock.time()\n");
+    output.push_str("            if left <= 0:\n");
+    output.push_str("                return\n");
+    output.push_str("            answer = await self.");
+    output.push_str(&long_poll.method_name);
+    output.push_str("(\n");
+    output.push_str("                attempt, deadline=datetime.timedelta(seconds=left)\n");
+    output.push_str("            )\n");
+    render_long_poll_iterator_page_end(output, long_poll, offset, next_offset, "attempt");
+}
+
+fn render_long_poll_iterator_docstring(
+    output: &mut String,
+    long_poll: &RenderedLongPoll,
+    page_call: &str,
+) {
+    let wait = &long_poll.wait.attr;
+    let (_, next_offset) = long_poll
+        .offset_attrs
+        .as_ref()
+        .expect("an iterator needs offsets");
+    let mut doc = vec![
+        format!(
+            "Yield each item of ``{}``, page after page, as one sequence.",
+            long_poll.result_attr
+        ),
+        String::new(),
+        format!(
+            "Each page is one {page_call} call, which sets ``{wait}`` to what is left of the deadline. The next page starts at the answer's ``{next_offset}``."
+        ),
+    ];
+    doc.push(match &long_poll.done_attr {
+        Some(done) => format!(
+            "The iterator ends after an answer with ``{done}`` set, or when the deadline passes. With no deadline, it ends only on ``{done}``."
+        ),
+        None => "The iterator ends when the deadline passes. With no deadline, it does not end.".to_string(),
+    });
+    output.push_str("        \"\"\"");
+    let mut first = true;
+    for line in &doc {
+        if line.is_empty() {
+            output.push('\n');
+            continue;
+        }
+        let mut lines = Vec::new();
+        push_wrapped_python_docstring_line(&mut lines, "", "", line, PYTHON_FORMAT_LINE_LENGTH - 8);
+        for wrapped in lines {
+            if !first {
+                output.push_str("        ");
+            }
+            output.push_str(&wrapped);
+            output.push('\n');
+            first = false;
+        }
+    }
+    output.push_str("        \"\"\"\n");
+}
+
+/// Yields the page, then ends on `done` or moves the offset for the next page.
+fn render_long_poll_iterator_page_end(
+    output: &mut String,
+    long_poll: &RenderedLongPoll,
+    offset: &str,
+    next_offset: &str,
+    request_var: &str,
+) {
+    output.push_str("            for item in answer.");
+    output.push_str(&long_poll.result_attr);
+    output.push_str(" or []:\n");
+    output.push_str("                yield item\n");
+    if let Some(done) = &long_poll.done_attr {
+        output.push_str("            if answer.");
+        output.push_str(done);
+        output.push_str(":\n");
+        output.push_str("                return\n");
+    }
+    output.push_str("            if answer.");
+    output.push_str(next_offset);
+    output.push_str(" is not None:\n");
+    output.push_str("                ");
+    output.push_str(request_var);
+    output.push_str(" = dataclasses.replace(");
+    output.push_str(request_var);
+    output.push_str(", ");
+    output.push_str(offset);
+    output.push_str("=answer.");
+    output.push_str(next_offset);
+    output.push_str(")\n");
 }
 
 /// The loop repeats the single call. Each call asks the service to wait for

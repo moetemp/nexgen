@@ -842,6 +842,17 @@ fn log_descriptors() -> FileDescriptorSet {
                     ],
                 ),
                 proto_message(
+                    "CreateLogRequest",
+                    vec![proto_field("name", 1, Type::String, None)],
+                ),
+                proto_message(
+                    "CreateLogResponse",
+                    vec![
+                        proto_field("log", 1, Type::Message, Some(".acme.logs.v1.LogRef")),
+                        proto_field("created", 2, Type::Bool, None),
+                    ],
+                ),
+                proto_message(
                     "ReadLogResponse",
                     vec![
                         entries,
@@ -898,6 +909,19 @@ interface log-service {
     /// @nexus.operation "read-log"
     read: func(from-offset: option<s64>) -> read-log-response;
   }
+
+  /// @nexus.proto "acme.logs.v1.CreateLogRequest"
+  record create-log-request {
+    name: string,
+  }
+
+  /// @nexus.proto "acme.logs.v1.CreateLogResponse"
+  record create-log-result {
+    log: own<log>,
+    created: option<bool>,
+  }
+
+  create-log: func(request: create-log-request) -> create-log-result;
 
   /// @nexus.long-poll
   ///   wait-field="wait-ms"
@@ -979,4 +1003,75 @@ fn python_long_poll_without_offsets_has_no_sequence_reader() {
     let log = file(&files, "_resources/log.py");
     assert!(log.contains("    async def read(\n"), "{log}");
     assert!(!log.contains("iter_read"), "{log}");
+}
+
+#[test]
+fn python_operation_returns_a_record_that_holds_the_resource() {
+    let files = generate_log_handle(client_config(), LOG_HANDLE_WIT);
+    let create = file(&files, "operations/create_log.py");
+    let models = file(&files, "models.py");
+
+    assert!(
+        create.contains(
+            "    result = await handle\n    if result.log is None:\n        \
+             raise RuntimeError(\"CreateLog answered without `log`\")\n    \
+             return CreateLogResult(\n        log=Log(\n            log=result.log,\n        ),\n        \
+             created=result.created,\n    )\n"
+        ),
+        "{create}"
+    );
+    assert!(
+        create.contains("        output_type=CreateLogResponse,\n"),
+        "{create}"
+    );
+    // The holder is the API model, and its message travels as a wire record of the
+    // message's name.
+    assert!(
+        models.contains("class CreateLogResult:\n    log: Log\n    created: bool | None = None\n"),
+        "{models}"
+    );
+    assert!(models.contains("class CreateLogResponse:\n"), "{models}");
+    assert!(
+        !models.contains("_CreateLogResultTransferTypeConverter"),
+        "{models}"
+    );
+    assert!(
+        models.contains("if typing.TYPE_CHECKING:\n    from ._resources import Log\n"),
+        "{models}"
+    );
+}
+
+#[test]
+fn a_record_that_holds_a_resource_needs_a_proto_and_python() {
+    let without_proto = LOG_HANDLE_WIT.replace(
+        "  /// @nexus.proto \"acme.logs.v1.CreateLogResponse\"\n  record create-log-result {",
+        "  record create-log-result {",
+    );
+    let error = try_generate_with_descriptors(
+        client_config(),
+        Language::Python,
+        &without_proto,
+        Vec::new(),
+        Some(&log_descriptors()),
+    )
+    .unwrap_err();
+    assert!(error.contains("so it needs `@nexus.proto`"), "{error}");
+
+    for language in [Language::TypeScript, Language::Dotnet] {
+        let error = try_generate_with_descriptors(
+            NexgenConfig {
+                mode: GenerationMode::NativeApi,
+                ..Default::default()
+            },
+            language,
+            LOG_HANDLE_WIT,
+            Vec::new(),
+            Some(&log_descriptors()),
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("its result record holds a resource, which only Python generates"),
+            "{language:?}: {error}"
+        );
+    }
 }

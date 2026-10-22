@@ -15,9 +15,9 @@ use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
     PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
-    PlannedResourceField, PlannedResourceMethod, PlannedResourceMethodBindingSpec,
-    PlannedResourceMethodResultKind, PlannedSpec, PlannedType, message_model_name,
-    operation_input_model, operation_output_direct_result,
+    PlannedResourceField, PlannedResourceHolder, PlannedResourceMethod,
+    PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind, PlannedSpec, PlannedType,
+    message_model_name, operation_input_model, operation_output_direct_result,
 };
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{
@@ -1384,9 +1384,13 @@ impl<'a> ApiPlanner<'a> {
         let overload_output_annotation = output_transform
             .and_then(|transform| transform.type_name.value().map(str::to_string))
             .or_else(|| {
-                output_resource_return
-                    .as_ref()
-                    .map(|resource| resource.resource_type_name.clone())
+                output_resource_return.as_ref().map(|resource| {
+                    resource
+                        .holder
+                        .as_ref()
+                        .map(|holder| holder.model_name.clone())
+                        .unwrap_or_else(|| resource.resource_type_name.clone())
+                })
             })
             .unwrap_or_else(|| output_annotation_default.clone());
         let unpacked_input = if let (Some(input), Some(rendered_input)) = (input, &rendered_input) {
@@ -4224,10 +4228,25 @@ fn render_models_module(
         return Ok(None);
     }
 
+    // A result record that holds a resource names the resource class, and the resource
+    // module imports the models, so the class comes in for type checking only.
+    let held_resources = api_plan
+        .services
+        .iter()
+        .flat_map(|service| service.operations.iter())
+        .filter_map(|operation| operation.data.output_resource_return.as_ref())
+        .filter(|resource_return| resource_return.holder.is_some())
+        .map(|resource_return| resource_return.resource_type_name.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
-    let import_scan_body = if model_hoists.is_none() && api_plan.data.module_imports.is_empty() {
+    let import_scan_body = if model_hoists.is_none()
+        && api_plan.data.module_imports.is_empty()
+        && held_resources.is_empty()
+    {
         body.clone()
     } else {
         format!("{body}\ntyping.TYPE_CHECKING\n")
@@ -4273,6 +4292,10 @@ fn render_models_module(
             output.push('\n');
         }
         render_support_import(&mut output, &body, support_package, sourced_support_import);
+    }
+    if !held_resources.is_empty() {
+        output.push_str("\nif typing.TYPE_CHECKING:\n");
+        render_named_python_import_with_indent(&mut output, "._resources", &held_resources, "    ");
     }
     output.push('\n');
     output.push('\n');
@@ -7856,6 +7879,10 @@ fn render_request_only_operation_function(
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("    result = await handle\n");
         render_resource_return_guards(output, "    ", operation, resource_return);
+        if let Some(holder) = &resource_return.holder {
+            render_resource_holder_return(output, resource_return, holder);
+            return;
+        }
         if service.endpoint.is_none() {
             output.push_str("    resource = ");
         } else {
@@ -7876,6 +7903,40 @@ fn render_request_only_operation_function(
             output.push_str("    return resource\n");
         }
     }
+}
+
+/// The holder record gets the resource in its resource field, and each other field from the
+/// field of the same name in the wire record.
+fn render_resource_holder_return(
+    output: &mut String,
+    resource_return: &PlannedOperationResourceReturn,
+    holder: &PlannedResourceHolder,
+) {
+    output.push_str("    return ");
+    output.push_str(&holder.model_name);
+    output.push_str("(\n");
+    output.push_str("        ");
+    output.push_str(&python_field_name(&holder.resource_field));
+    output.push('=');
+    output.push_str(&resource_return.resource_type_name);
+    output.push_str("(\n");
+    for binding in &resource_return.bindings {
+        output.push_str("            ");
+        output.push_str(&python_field_name(&binding.field_name));
+        output.push('=');
+        output.push_str(&resource_return_binding_expr_python(binding));
+        output.push_str(",\n");
+    }
+    output.push_str("        ),\n");
+    for field in &holder.other_fields {
+        let name = python_field_name(field);
+        output.push_str("        ");
+        output.push_str(&name);
+        output.push_str("=result.");
+        output.push_str(&name);
+        output.push_str(",\n");
+    }
+    output.push_str("    )\n");
 }
 
 fn render_unpacked_operation_docstring(

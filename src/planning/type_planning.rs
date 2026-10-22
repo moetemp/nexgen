@@ -658,6 +658,7 @@ impl<'a> TypePlanningContext<'a> {
             long_poll: operation.long_poll.clone(),
             data: PlannedOperationData {
                 output_resource_return: plan_operation_resource_return(
+                    &self.spec,
                     operation.data.output_resource_return.as_ref(),
                 ),
             },
@@ -1271,9 +1272,24 @@ impl<'a> TypePlanningContext<'a> {
 }
 
 fn plan_operation_resource_return(
+    spec: &ApiSpec<OperationLoweredFamily>,
     output_resource_return: Option<&ResolvedResourceReturnSpec>,
 ) -> Option<PlannedOperationResourceReturn> {
     output_resource_return.map(|resource_return| PlannedOperationResourceReturn {
+        holder: resource_return.holder.as_ref().and_then(|holder| {
+            let record = spec.record(&holder.record_name)?;
+            Some(PlannedResourceHolder {
+                record_full_name: record.full_name.clone(),
+                model_name: record.name.clone(),
+                resource_field: record.fields.get(&holder.field_key)?.name.clone(),
+                other_fields: record
+                    .fields
+                    .iter()
+                    .filter(|(key, _)| **key != holder.field_key)
+                    .map(|(_, field)| field.name.clone())
+                    .collect(),
+            })
+        }),
         resource_type_name: resource_return.resource_name.to_upper_camel_case(),
         bindings: resource_return
             .bindings

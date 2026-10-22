@@ -727,6 +727,26 @@ return StartedWorkflow(
 If a resource constructor field name cannot be found in either, the generator
 raises `InvalidResource`.
 
+**A result record that holds the resource.** An operation can also return a
+proto-backed record with one `own<T>` field and other fields. The resource binds
+from the record's message as above, and the other fields come from the fields of
+the same name. The record is the API model only. Its message travels as a wire
+record that takes the proto message's name. Only the Python target generates
+this, and the other targets refuse it.
+
+```wit
+/// @nexus.proto "temporal.api.streamservice.v1.CreateStreamResponse"
+record create-stream-result {
+  %stream: own<%stream>,
+  created: option<bool>,
+}
+```
+
+```python
+result = await handle  # CreateStreamResponse
+return CreateStreamResult(stream=Stream(stream=result.stream), created=result.created)
+```
+
 A response model field is always optional. When the resource field is required,
 the Python operation checks it first, and raises `RuntimeError` when the
 response leaves it empty:

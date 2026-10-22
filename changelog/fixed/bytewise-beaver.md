@@ -1,1 +1,1 @@
-In a record backed by `@nexus.proto`, WIT `list<u8>` matches a proto `bytes` field and generates it as bytes. A WIT record with no proto keeps `list<u8>` as a list of integers.
+In a record with `@nexus.proto`, a WIT `list<u8>` field is accepted for a proto `bytes` field and generated as bytes. In a WIT record without a proto, `list<u8>` is still a list of integers.

@@ -1,5 +1,4 @@
-//! A WIT `list<u8>` matches a proto `bytes` field, and outside a proto-backed
-//! record it keeps the list wire form.
+//! A WIT `list<u8>` field of a `@nexus.proto` record generates as proto `bytes`.
 
 use std::fs;
 use std::path::PathBuf;
@@ -7,28 +6,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use nexgen::language::Language;
 use nexgen::{GenerateRequest, generate_to_file};
-
-/// The reviewer's repro: a plain WIT record with no `@nexus.proto`.
-const PLAIN_RECORD_WIT: &str = r#"package acme:store@1.0.0;
-
-world store {
-  export store-service;
-}
-
-interface store-service {
-  record put-request {
-    key: string,
-    data: list<u8>,
-    ints: list<s32>,
-  }
-
-  record put-response {
-    key: string,
-  }
-
-  put: func(request: put-request) -> put-response;
-}
-"#;
 
 /// `add-rpc` scaffolds proto `bytes` as `list<u8>`.
 const PROTO_BYTES_WIT: &str = r#"package temporal:nexus@1.0.0;
@@ -45,42 +22,35 @@ interface callbacks {
 }
 "#;
 
-fn generate(language: Language, support_package: &str) -> String {
-    generate_from(PLAIN_RECORD_WIT, Vec::new(), language, support_package)
-}
-
-fn generate_from(
-    wit: &str,
-    descriptor_paths: Vec<PathBuf>,
-    language: Language,
-    support_package: &str,
-) -> String {
+fn generate_python(wit: &str) -> Result<String, String> {
+    let descriptors = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("advanced/samples/descriptors/temporal_api.bin");
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let temp_dir: PathBuf =
-        std::env::temp_dir().join(format!("nexgen-wit-byte-lists-{language:?}-{unique}"));
+    let temp_dir = std::env::temp_dir().join(format!("nexgen-wit-byte-lists-{unique}"));
     fs::create_dir_all(&temp_dir).unwrap();
-    let input_path = temp_dir.join("store.wit");
+    let input_path = temp_dir.join("system.wit");
     fs::write(&input_path, wit).unwrap();
     let output_path = temp_dir.join("generated");
-    generate_to_file(&GenerateRequest {
+    let result = generate_to_file(&GenerateRequest {
         config: Default::default(),
-        language,
+        language: Language::Python,
         input_paths: vec![input_path],
-        support_package: Some(support_package.to_string()),
-        descriptor_paths,
+        support_package: Some("temporal_support".to_string()),
+        descriptor_paths: vec![descriptors],
         output_path: output_path.clone(),
         format: false,
         java_package_name: None,
         ts_date_time_types: Default::default(),
-    })
-    .unwrap();
+    });
     let mut rendered = String::new();
-    read_all(&output_path, &mut rendered);
+    if result.is_ok() {
+        read_all(&output_path, &mut rendered);
+    }
     fs::remove_dir_all(temp_dir).unwrap();
-    rendered
+    result.map(|_| rendered).map_err(|err| err.to_string())
 }
 
 fn read_all(dir: &std::path::Path, out: &mut String) {
@@ -99,21 +69,14 @@ fn read_all(dir: &std::path::Path, out: &mut String) {
 }
 
 #[test]
-fn python_keeps_a_plain_wit_byte_list_as_a_list_of_integers() {
-    let models = generate(Language::Python, "temporal_support");
-    assert!(models.contains("    data: list[int]"), "{models}");
-    assert!(!models.contains("bytes"), "{models}");
+fn python_reads_a_proto_backed_wit_byte_list_as_bytes() {
+    let models = generate_python(PROTO_BYTES_WIT).unwrap();
+    assert!(models.contains("    data: bytes\n"), "{models}");
 }
 
 #[test]
-fn python_reads_a_proto_backed_wit_byte_list_as_bytes() {
-    let descriptors = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("advanced/samples/descriptors/temporal_api.bin");
-    let models = generate_from(
-        PROTO_BYTES_WIT,
-        vec![descriptors],
-        Language::Python,
-        "temporal_support",
-    );
-    assert!(models.contains("    data: bytes\n"), "{models}");
+fn python_refuses_a_wider_wit_integer_list_for_a_proto_bytes_field() {
+    let wit = PROTO_BYTES_WIT.replace("data: list<u8>", "data: list<u32>");
+    let err = generate_python(&wit).unwrap_err();
+    assert!(err.contains("bytes"), "{err}");
 }

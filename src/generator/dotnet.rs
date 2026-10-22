@@ -2335,8 +2335,8 @@ impl<'a> ApiPlanner<'a> {
                 output.push_str("Async(request);\n                return (Task<NexusWorkflowOperationHandle<TResult>>)(object)handle;\n            }\n");
             }
         }
-        // An operation outside the generated set goes to the generic hook, so a
-        // plugin outside the SDK can serve its own System Nexus service.
+        // The generic hook gets each operation outside the generated set. Then a plugin
+        // outside the SDK can serve its own System Nexus service.
         output.push_str("            return outbound.Value.ScheduleSystemNexusOperationAsync<TResult>(new(\n                Service: service,\n                Operation: new(\n                    operationName,\n                    arg?.GetType() ?? typeof(object),\n                    typeof(TResult)),\n                Arg: arg,\n                Headers: null));\n        }\n\n");
         output.push_str("        internal partial class OutboundImpl\n        {\n");
         for service in &self.api_plan.services {

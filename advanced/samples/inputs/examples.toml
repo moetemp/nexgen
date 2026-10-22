@@ -5,13 +5,20 @@ system_nexus = true
 system_nexus = true
 
 [proto-generic]
-languages = ["python", "dotnet"]
+languages = ["python", "dotnet", "typescript"]
 
 [proto-oneof]
-languages = ["python", "dotnet"]
+languages = ["python", "dotnet", "typescript"]
 
 [notification-service]
-languages = ["python", "dotnet"]
+languages = ["python", "dotnet", "typescript"]
+
+[start-workflow]
+client = true
+
+[log-service]
+languages = ["python"]
+client = true
 
 [workflow-run]
 system_nexus = true

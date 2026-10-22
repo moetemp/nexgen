@@ -883,10 +883,12 @@ fn build_wit_record_spec(
     let model_doc = directive(&directives, "doc", path, &context)?
         .map(directive_language_string)
         .unwrap_or_default();
+    let proto_backed = directive(&directives, "proto", path, &context)?.is_some();
     let (doc, fields) = build_fields_from_record(
         resolve,
         type_def.owner,
         record,
+        proto_backed,
         model_doc,
         path,
         &context,
@@ -1127,6 +1129,7 @@ fn build_fields_from_record(
     resolve: &Resolve,
     owner: TypeOwner,
     record: &Record,
+    proto_backed: bool,
     doc: LanguageStringSpec,
     path: &Path,
     context: &str,
@@ -1215,7 +1218,13 @@ fn build_fields_from_record(
             }
 
             let field_type = authored_field_type_for_language(
-                resolve_authored_field_type_spec(resolve, &field.ty, path, &field_context)?,
+                resolve_record_field_type_spec(
+                    resolve,
+                    &field.ty,
+                    proto_backed,
+                    path,
+                    &field_context,
+                )?,
                 language,
             );
             fields.insert(
@@ -1241,7 +1250,7 @@ fn build_fields_from_record(
             .map(directive_language_string)
             .filter(|doc| !doc.is_empty());
         let field_type = authored_field_type_for_language(
-            resolve_authored_field_type_spec(resolve, &field.ty, path, &field_context)?,
+            resolve_record_field_type_spec(resolve, &field.ty, proto_backed, path, &field_context)?,
             language,
         );
         let field_default =
@@ -1411,6 +1420,40 @@ fn build_type_replacement(
         from_proto,
         to_proto,
     }))
+}
+
+/// Resolves the type of a record field. A proto-backed record spells a proto `bytes` field as
+/// `list<u8>`, so the field is bytes there. A record without a proto keeps a list of integers.
+fn resolve_record_field_type_spec(
+    resolve: &Resolve,
+    ty: &Type,
+    proto_backed: bool,
+    path: &Path,
+    context: &str,
+) -> Result<TypeSpec> {
+    if proto_backed && let Some(bytes) = proto_bytes_type_spec(resolve, ty) {
+        return Ok(bytes);
+    }
+    resolve_authored_field_type_spec(resolve, ty, path, context)
+}
+
+/// Matches only an unnamed `list<u8>`, so a WIT width other than `u8` still fails validation
+/// against a proto `bytes` field, and a named type keeps its own directives.
+fn proto_bytes_type_spec(resolve: &Resolve, ty: &Type) -> Option<TypeSpec> {
+    let Type::Id(id) = ty else {
+        return None;
+    };
+    let type_def = &resolve.types[*id];
+    if type_def.name.is_some() {
+        return None;
+    }
+    match &type_def.kind {
+        TypeDefKind::List(Type::U8) => Some(TypeSpec::Bytes),
+        TypeDefKind::Option(inner) => {
+            proto_bytes_type_spec(resolve, inner).map(|bytes| TypeSpec::Option(Box::new(bytes)))
+        }
+        _ => None,
+    }
 }
 
 fn resolve_authored_field_type_spec(
@@ -1709,6 +1752,54 @@ pub(crate) fn find_proto_name_for_type_def(
 ) -> Result<Option<String>> {
     let directives = parse_directives(type_def.docs.contents.as_deref(), path, context)?;
     directive_value(&directives, "proto", path, context, "value")
+}
+
+/// Reads `@nexus.offset "<type-name>"` on a record field. The field must be an
+/// integer or an optional integer, because an offset is a position in an
+/// ordered log that the service gives and the caller passes back.
+fn build_field_offset(
+    resolve: &Resolve,
+    ty: &Type,
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<String>> {
+    let Some(directive) = directive(directives, "offset", path, context)? else {
+        return Ok(None);
+    };
+    let invalid = |reason: &str| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.offset".to_string(),
+        reason: reason.to_string(),
+    };
+    if directive.args.keys().any(|key| key != "value") {
+        return Err(invalid("takes only the offset type name"));
+    }
+    let Some(name) = directive.value("value") else {
+        return Err(invalid("missing the offset type name"));
+    };
+    if !is_wit_identifier(name) {
+        return Err(invalid(&format!(
+            "`{name}` is not a kebab-case WIT identifier"
+        )));
+    }
+    if !is_integer_or_optional_integer(resolve, ty) {
+        return Err(invalid("is only supported on integer fields"));
+    }
+    Ok(Some(name.to_upper_camel_case()))
+}
+
+fn is_wit_identifier(name: &str) -> bool {
+    !name.is_empty()
+        && name.split('-').all(|part| {
+            part.chars()
+                .next()
+                .is_some_and(|first| first.is_ascii_lowercase())
+                && part
+                    .chars()
+                    .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
+        })
 }
 
 fn build_field_default(
@@ -3155,35 +3246,19 @@ fn build_operation_long_poll(
         field(output, "output", "next-offset-field")?,
     ) {
         (None, None) => None,
-        (Some((input_field, input_type)), Some((output_field, _))) => {
+        (Some((input_field, input_type)), Some((output_field, output_type))) => {
             if optional_inner_type(resolve, &input_type).is_none() {
                 return Err(invalid(
                     "`offset-field` must name an optional field, since a first call may omit it"
                         .to_string(),
                 ));
             }
-            let offset_type = |record: &Record, name: &str| -> Result<Option<String>> {
-                let field = record
-                    .fields
-                    .iter()
-                    .find(|field| field.name == name)
-                    .expect("long-poll field resolved above");
-                let field_context = format!("{context} field `{name}`");
-                let field_directives =
-                    parse_directives(field.docs.contents.as_deref(), path, &field_context)?;
-                build_field_offset(resolve, &field.ty, &field_directives, path, &field_context)
-            };
-            let input_offset = offset_type(input, directive.value("offset-field").unwrap())?;
-            let output_offset = offset_type(output, directive.value("next-offset-field").unwrap())?;
-            match (input_offset, output_offset) {
-                (Some(input_offset), Some(output_offset)) if input_offset == output_offset => {}
-                _ => {
-                    return Err(invalid(
-                        "`offset-field` and `next-offset-field` must name fields marked with \
-                         the same `@nexus.offset` type"
-                            .to_string(),
-                    ));
-                }
+            if !is_integer_or_optional_integer(resolve, &input_type)
+                || !is_integer_or_optional_integer(resolve, &output_type)
+            {
+                return Err(invalid(
+                    "`offset-field` and `next-offset-field` must name integer fields".to_string(),
+                ));
             }
             Some(LongPollOffsetFields {
                 input_field,
@@ -3605,52 +3680,14 @@ fn experimental_directive(directives: &[Directive], path: &Path, context: &str) 
     Ok(true)
 }
 
-/// Reads `@nexus.offset "<type-name>"` on a record field. The field must be an
-/// integer or an optional integer, because an offset is a position in an
-/// ordered log that the service gives and the caller passes back.
-fn build_field_offset(
-    resolve: &Resolve,
-    ty: &Type,
-    directives: &[Directive],
-    path: &Path,
-    context: &str,
-) -> Result<Option<String>> {
-    let Some(directive) = directive(directives, "offset", path, context)? else {
-        return Ok(None);
-    };
-    let invalid = |reason: &str| Error::InvalidWitDirective {
-        path: path.to_path_buf(),
-        context: context.to_string(),
-        directive: "@nexus.offset".to_string(),
-        reason: reason.to_string(),
-    };
-    if directive.args.keys().any(|key| key != "value") {
-        return Err(invalid("takes only the offset type name"));
+fn is_integer_type(resolve: &Resolve, ty: &Type) -> bool {
+    match ty {
+        Type::Id(id) => match &resolve.types[*id].kind {
+            TypeDefKind::Type(inner) => is_integer_type(resolve, inner),
+            _ => false,
+        },
+        _ => is_integer_or_optional_integer(resolve, ty),
     }
-    let Some(name) = directive.value("value") else {
-        return Err(invalid("missing the offset type name"));
-    };
-    if !is_wit_identifier(name) {
-        return Err(invalid(&format!(
-            "`{name}` is not a kebab-case WIT identifier"
-        )));
-    }
-    if !is_integer_or_optional_integer(resolve, ty) {
-        return Err(invalid("is only supported on integer fields"));
-    }
-    Ok(Some(name.to_upper_camel_case()))
-}
-
-fn is_wit_identifier(name: &str) -> bool {
-    !name.is_empty()
-        && name.split('-').all(|part| {
-            part.chars()
-                .next()
-                .is_some_and(|first| first.is_ascii_lowercase())
-                && part
-                    .chars()
-                    .all(|character| character.is_ascii_lowercase() || character.is_ascii_digit())
-        })
 }
 
 fn is_integer_or_optional_integer(resolve: &Resolve, ty: &Type) -> bool {
@@ -3669,16 +3706,6 @@ fn is_integer_or_optional_integer(resolve: &Resolve, ty: &Type) -> bool {
             _ => false,
         },
         _ => false,
-    }
-}
-
-fn is_integer_type(resolve: &Resolve, ty: &Type) -> bool {
-    match ty {
-        Type::Id(id) => match &resolve.types[*id].kind {
-            TypeDefKind::Type(inner) => is_integer_type(resolve, inner),
-            _ => false,
-        },
-        _ => is_integer_or_optional_integer(resolve, ty),
     }
 }
 

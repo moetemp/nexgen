@@ -1062,15 +1062,7 @@ fn authored_field_matches_singular_proto(
         ) => matches!(authored_type, TypeSpec::Int(_)),
         Some(Type::Bool) => matches!(authored_type, TypeSpec::Bool),
         Some(Type::String) => matches!(authored_type, TypeSpec::String),
-        // `add-rpc` scaffolds proto `bytes` as WIT `list<u8>`. Only here, where a
-        // proto field backs it, is it planned as bytes, so a record without a
-        // proto keeps its list wire form. WIT integer widths are not kept past
-        // the parser, so any integer list matches.
-        Some(Type::Bytes) => match authored_type {
-            TypeSpec::Bytes => true,
-            TypeSpec::List(inner) => matches!(inner.as_ref(), TypeSpec::Int(_)),
-            _ => false,
-        },
+        Some(Type::Bytes) => matches!(authored_type, TypeSpec::Bytes),
         Some(Type::Enum | Type::Message | Type::Group) => match authored_type {
             TypeSpec::External(ExternalTypeSpec::Proto(proto_name)) => field
                 .type_name
@@ -1209,8 +1201,8 @@ fn validate_model_required_field(
     let field = validate_model_override_field(message_name, field_name, message)?;
     let field_type = field_type(field);
 
-    // A bare WIT `list<T>` or `map<K, V>` is how a collection is authored, and an
-    // empty collection is its unset value, so there is no presence to require.
+    // An empty repeated or map field is the unset value. The field has no presence,
+    // so a bare `list<T>` or `map<K, V>` is not a required field.
     if field_label(field) == Some(Label::Repeated) {
         return Ok(());
     }

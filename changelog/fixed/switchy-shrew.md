@@ -1,1 +1,1 @@
-Dispatch every operation of a service to its typed hook in the TypeScript `--system-nexus` `interceptors.ts`. Only the first operation of each service reached its hook before.
+The TypeScript `--system-nexus` `interceptors.ts` calls the typed hook of every operation of a service. Before, it called only the hook of the first operation.

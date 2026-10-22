@@ -4108,14 +4108,30 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
         }
     }
 
+    // A helper that no method uses would be dead code in the module.
+    let uses_proto = services
+        .iter()
+        .flat_map(|service| service.operations.iter())
+        .any(|operation| {
+            operation.client_input_proto_model.is_some()
+                || operation.client_output_proto_model.is_some()
+        });
+    if uses_proto {
+        body.insert_str(CLIENT_RUNTIME.len(), CLIENT_PROTO_RUNTIME);
+    }
+
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
-    output.push_str("import collections.abc\n");
+    if uses_proto {
+        output.push_str("import collections.abc\n");
+    }
     output.push_str("import contextlib\n");
     output.push_str("import typing\n\n");
-    output.push_str("import google.protobuf.json_format\n");
-    output.push_str("import google.protobuf.message\n");
+    if uses_proto {
+        output.push_str("import google.protobuf.json_format\n");
+        output.push_str("import google.protobuf.message\n");
+    }
     output.push_str("import temporalio.api.common.v1\n");
     output.push_str("import temporalio.converter\n");
     output.push_str("import temporalio.nexus.system\n");
@@ -4239,7 +4255,10 @@ class TransportError(Exception):
         """Create a transport error."""
         super().__init__(message)
         self.retryable: bool = retryable
+"#;
 
+/// The helpers of a caller that moves proto-backed models.
+const CLIENT_PROTO_RUNTIME: &str = r#"
 
 _MessageT = typing.TypeVar("_MessageT", bound=google.protobuf.message.Message)
 

@@ -1852,29 +1852,6 @@ variant notification-target {
 
 ---
 
-### @nexus.one-way
-
-**Placement:** Operation (function) **Syntax:** `@nexus.one-way`
-
-Marks an operation whose result the Workflow caller does not use, such as an
-append that a plugin buffers. The directive takes no arguments.
-
-**Python:** the Workflow stubs are synchronous and return `None`. Each stub
-still starts the operation through the Workflow's Nexus client, so every
-outbound interceptor sees the call. An interceptor must take the call and
-complete it without suspending, for example by buffering it and returning a done
-handle. If the start suspends, the stub raises `RuntimeError`.
-
-```python
-def append_records(*, stream: StreamRef | None = None, ...) -> None: ...
-```
-
-TypeScript and .NET accept the directive and keep their asynchronous stubs.
-Cannot be combined with `@nexus.long-poll` or `@nexus.output-transform`, and the
-operation cannot return a resource.
-
----
-
 ### @nexus.operation
 
 **Placement:** Operation (function) **Syntax:**

@@ -2965,28 +2965,6 @@ fn build_operation(
         path,
         &context,
     )?;
-    let one_way = one_way_directive(&directives, path, &context)?;
-    if one_way {
-        let reject = |reason: &str| Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.clone(),
-            directive: "@nexus.one-way".to_string(),
-            reason: reason.to_string(),
-        };
-        if output_transform.is_some() {
-            return Err(reject("cannot be combined with `@nexus.output-transform`"));
-        }
-        if long_poll.is_some() {
-            return Err(reject("cannot be combined with `@nexus.long-poll`"));
-        }
-        if function.result.as_ref().is_some_and(|output_type| {
-            find_owned_resource_name_for_type(resolve, output_type).is_some()
-        }) {
-            return Err(reject(
-                "cannot return a resource, since the caller drops the result",
-            ));
-        }
-    }
     let output = if let Some(output_type) = function.result.as_ref() {
         Some(
             find_operation_type_spec(resolve, output_type, path, &context)?.ok_or_else(|| {
@@ -3027,7 +3005,6 @@ fn build_operation(
         output_transform,
         serialization_context,
         long_poll,
-        one_way,
         data: (),
     })
 }
@@ -3684,21 +3661,6 @@ fn is_integer_type(resolve: &Resolve, ty: &Type) -> bool {
         },
         _ => is_integer_or_optional_integer(resolve, ty),
     }
-}
-
-fn one_way_directive(directives: &[Directive], path: &Path, context: &str) -> Result<bool> {
-    let Some(directive) = directive(directives, "one-way", path, context)? else {
-        return Ok(false);
-    };
-    if !directive.args.is_empty() {
-        return Err(Error::InvalidWitDirective {
-            path: path.to_path_buf(),
-            context: context.to_string(),
-            directive: "@nexus.one-way".to_string(),
-            reason: "does not take arguments".to_string(),
-        });
-    }
-    Ok(true)
 }
 
 fn delay_load_temporalio_workflow_directive(

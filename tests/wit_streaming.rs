@@ -1,6 +1,6 @@
-//! WIT annotations for streaming services (`@nexus.offset` on record fields,
-//! and `@nexus.long-poll` and `@nexus.one-way` on operations) and the caller
-//! that `--client` generates for code outside a Workflow.
+//! WIT annotations for streaming services (`@nexus.offset` on record fields
+//! and `@nexus.long-poll` on operations) and the caller that `--client`
+//! generates for code outside a Workflow.
 #![cfg(feature = "advanced")]
 
 use std::collections::BTreeMap;
@@ -61,7 +61,6 @@ interface log-service {
     done: option<bool>,
   }
 
-  /// @nexus.one-way
   append: func(request: append-request) -> append-response;
 
   /// @nexus.long-poll
@@ -395,74 +394,6 @@ fn long_poll_rejects_an_operation_whose_output_is_not_a_record() {
     );
 }
 
-#[test]
-fn python_one_way_stub_is_synchronous_and_returns_nothing() {
-    let files = generate(Language::Python, GenerationMode::NativeApi, LOG_WIT);
-    let append = file(&files, "operations/append.py");
-
-    assert!(
-        append.contains("\ndef _append(\n    request: AppendRequest,\n) -> None:\n"),
-        "{append}"
-    );
-    assert!(append.contains("\ndef append(\n    *,\n"), "{append}");
-    assert!(!append.contains("async def"), "{append}");
-    assert!(!append.contains("NexusOperationHandle"), "{append}");
-    // The call goes through the Nexus client, so the outbound interceptors see
-    // it, and the stub drives the start to its end without suspending.
-    assert!(
-        append.contains("    start = nexus_client.start_operation(\n"),
-        "{append}"
-    );
-    assert!(
-        append
-            .contains("        _ = start.send(None)\n    except StopIteration:\n        return\n"),
-        "{append}"
-    );
-    assert!(
-        append.contains("    start.close()\n    raise RuntimeError("),
-        "{append}"
-    );
-    assert!(append.contains("    _append(request)\n"), "{append}");
-
-    let read = file(&files, "operations/read.py");
-    assert!(read.contains("async def read("), "{read}");
-}
-
-#[test]
-fn one_way_generates_in_typescript_and_dotnet() {
-    for language in [Language::TypeScript, Language::Dotnet] {
-        let files = generate(language, GenerationMode::NativeApi, LOG_WIT);
-        assert!(!files.is_empty(), "{language:?}");
-    }
-}
-
-#[test]
-fn one_way_rejects_arguments_and_conflicting_directives() {
-    for (from, to, reason) in [
-        (
-            "  /// @nexus.one-way\n",
-            "  /// @nexus.one-way buffered=true\n",
-            "does not take arguments",
-        ),
-        (
-            "  /// @nexus.long-poll\n",
-            "  /// @nexus.one-way\n  /// @nexus.long-poll\n",
-            "cannot be combined with `@nexus.long-poll`",
-        ),
-        (
-            "  /// @nexus.one-way\n",
-            "  /// @nexus.one-way\n  /// @nexus.output-transform python-type=\"int\" python=\"1\"\n",
-            "cannot be combined with `@nexus.output-transform`",
-        ),
-    ] {
-        let error = generate_error(Language::Python, &LOG_WIT.replacen(from, to, 1));
-        assert!(
-            error.contains("@nexus.one-way") && error.contains(reason),
-            "{to}: {error}"
-        );
-    }
-}
-
 fn client_config() -> NexgenConfig {
     NexgenConfig {
         mode: GenerationMode::NativeApi,
@@ -510,8 +441,6 @@ fn python_client_calls_each_operation_over_a_transport() {
         ),
         "{client}"
     );
-    // A one-way operation is synchronous in a Workflow only. Outside one, the
-    // caller still answers with the result.
     assert!(
         client.contains("    async def read(self, request: ReadRequest) -> ReadResponse:"),
         "{client}"

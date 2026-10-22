@@ -10,6 +10,7 @@ descriptors = "temporal"
 
 [start-workflow]
 descriptors = "temporal"
+system_nexus_languages = ["typescript"]
 
 [type-roundtrip]
 descriptors = "temporal"

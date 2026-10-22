@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use nexgen::language::Language;
@@ -22,6 +23,10 @@ interface callbacks {
 }
 "#;
 
+// Tests run in parallel and can read the same clock value, so the counter keeps their
+// directories apart.
+static OUTPUT_COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 fn generate_python(wit: &str) -> Result<String, String> {
     let descriptors = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("advanced/samples/descriptors/temporal_api.bin");
@@ -29,7 +34,8 @@ fn generate_python(wit: &str) -> Result<String, String> {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let temp_dir = std::env::temp_dir().join(format!("nexgen-wit-byte-lists-{unique}"));
+    let counter = OUTPUT_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temp_dir = std::env::temp_dir().join(format!("nexgen-wit-byte-lists-{unique}-{counter}"));
     fs::create_dir_all(&temp_dir).unwrap();
     let input_path = temp_dir.join("system.wit");
     fs::write(&input_path, wit).unwrap();

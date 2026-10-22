@@ -965,21 +965,15 @@ fn python_operation_returns_a_record_that_holds_the_resource() {
         create.contains("        output_type=CreateLogResponse,\n"),
         "{create}"
     );
-    // The holder is the API model, and its message travels as a wire record of the
-    // message's name.
+    // The holder lives beside its resource, and its message travels as a wire record of
+    // the message's name.
+    let log = file(&files, "_resources/log.py");
     assert!(
-        models.contains("class CreateLogResult:\n    log: Log\n    created: bool | None = None\n"),
-        "{models}"
+        log.contains("class CreateLogResult:\n    log: Log\n    created: bool | None = None\n"),
+        "{log}"
     );
     assert!(models.contains("class CreateLogResponse:\n"), "{models}");
-    assert!(
-        !models.contains("_CreateLogResultTransferTypeConverter"),
-        "{models}"
-    );
-    assert!(
-        models.contains("if typing.TYPE_CHECKING:\n    from ._resources import Log\n"),
-        "{models}"
-    );
+    assert!(!models.contains("CreateLogResult"), "{models}");
 }
 
 #[test]
@@ -1084,5 +1078,52 @@ fn python_client_only_service_gets_a_caller_and_no_workflow_surface() {
             "        async for item in self._client.iter_read_log(request, deadline=deadline):\n"
         ),
         "{client}"
+    );
+}
+
+fn generate_workflow_run(language: Language) -> BTreeMap<String, String> {
+    let wit = fs::read_to_string(project_root().join("advanced/samples/inputs/workflow-run.wit"))
+        .unwrap();
+    let config = NexgenConfig {
+        mode: GenerationMode::NativeApi,
+        system_nexus: true,
+        ..Default::default()
+    };
+    try_generate_with(config, language, &wit, Vec::new()).unwrap()
+}
+
+#[test]
+fn typescript_result_record_holds_the_resource() {
+    let files = generate_workflow_run(Language::TypeScript);
+    let start = file(&files, "operations/start-run.ts");
+    assert!(
+        start.contains(
+            "  return { run: new WorkflowRun(request.workflowId, result.runId ?? undefined), started: result.started };\n"
+        ),
+        "{start}"
+    );
+}
+
+#[test]
+fn dotnet_result_record_holds_the_resource() {
+    let files = generate_workflow_run(Language::Dotnet);
+    let operations = file(&files, "Operations.cs");
+    assert!(
+        operations.contains(
+            "return new StartRunResult(new WorkflowRun(request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId)) { Started = result.Started };"
+        ),
+        "{operations}"
+    );
+}
+
+#[test]
+fn go_result_record_holds_the_resource() {
+    let files = generate_workflow_run(Language::Go);
+    let service = file(&files, "workflowrunservice.go");
+    assert!(
+        service.contains(
+            "\t\tvalue := StartRunResult{Run: NewWorkflowRun(request.WorkflowID, result.GetRunId()), Started: heldStarted}\n"
+        ),
+        "{service}"
     );
 }

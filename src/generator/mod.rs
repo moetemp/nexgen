@@ -589,11 +589,12 @@ fn reject_resource_holders(language: Language, node: &ApiSpecNode<PlannedFamily>
                     });
                 }
                 for operation in &service.operations {
-                    if operation
-                        .data
-                        .output_resource_return
-                        .as_ref()
-                        .is_some_and(|resource_return| resource_return.holder.is_some())
+                    if language == Language::Java
+                        && operation
+                            .data
+                            .output_resource_return
+                            .as_ref()
+                            .is_some_and(|resource_return| resource_return.holder.is_some())
                     {
                         return Err(Error::UnsupportedResourceHolder {
                             language,

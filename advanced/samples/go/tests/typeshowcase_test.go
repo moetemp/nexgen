@@ -103,6 +103,9 @@ func sampleSyncReport() typeshowcase.SyncReport {
 			"west":    {Result: "healthy"},
 			"central": {Error: "degraded"},
 		},
+		ItemCount:   3,
+		ByteCount:   5_000_000_000,
+		ClockSkewMs: -5_000_000_000,
 	}
 }
 

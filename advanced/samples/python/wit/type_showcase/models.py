@@ -67,7 +67,7 @@ class RecordSyncRequest:
     report: SyncReport
 
 
-@dataclasses.dataclass(slots=True)
+@dataclasses.dataclass(slots=True, kw_only=True)
 class SyncReport:
     route: list[tuple[float, float]] | None = dataclasses.field(default_factory=list)
     attempts: (
@@ -78,6 +78,9 @@ class SyncReport:
         dict[str, tuple[typing.Literal["ok"], str] | tuple[typing.Literal["err"], str]]
         | None
     ) = dataclasses.field(default_factory=dict)
+    item_count: int
+    byte_count: int
+    clock_skew_ms: int
 
 
 @dataclasses.dataclass(slots=True)

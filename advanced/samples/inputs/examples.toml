@@ -16,3 +16,6 @@ languages = ["python", "dotnet", "typescript"]
 [workflow-run]
 system_nexus = true
 languages = ["python", "typescript", "dotnet", "go"]
+
+[start-workflow]
+system_nexus_languages = ["typescript"]

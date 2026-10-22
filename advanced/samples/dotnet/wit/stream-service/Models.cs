@@ -109,6 +109,22 @@ namespace Nexgen.StreamService
     }
 
     [GeneratedCode("nexgen", null)]
+    public record CreateStreamResult
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="CreateStreamResult"/> class.
+        /// </summary>
+        public CreateStreamResult(Stream stream, bool created)
+        {
+            Stream = stream;
+            Created = created;
+        }
+
+        public Stream Stream { get; init; }
+        public bool Created { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
     public record DescribeStreamRequest
     {
         /// <summary>

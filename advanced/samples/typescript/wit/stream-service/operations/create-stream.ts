@@ -2,13 +2,15 @@
 
 import * as workflow from "@temporalio/workflow";
 import { streamService } from "../services";
-import type { CreateStreamRequest } from "../models";
+import type { CreateStreamResult, CreateStreamRequest } from "../models";
 import { Stream } from "../resources";
 
 /**
  * @param request - Request for the operation.
  */
-export async function createStream(request: CreateStreamRequest): Promise<Stream> {
+export async function createStream(
+  request: CreateStreamRequest,
+): Promise<CreateStreamResult> {
   const client = workflow.createNexusServiceClient({
     service: streamService,
     endpoint: "streams",
@@ -17,6 +19,6 @@ export async function createStream(request: CreateStreamRequest): Promise<Stream
     streamService.operations.createStream,
     request,
   );
-  const resource = await handle.result();
-  return new Stream(resource.stream);
+  const result = await handle.result();
+  return { ...result, stream: new Stream(result.stream.stream) };
 }

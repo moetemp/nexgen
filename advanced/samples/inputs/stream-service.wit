@@ -108,7 +108,10 @@ interface stream-service {
     describe: func() -> describe-stream-response;
   }
 
-  type create-stream-result = own<%stream>;
+  record create-stream-result {
+    %stream: own<%stream>,
+    created: bool,
+  }
 
   create-stream: func(request: create-stream-request) -> create-stream-result;
   append-records: func(request: append-records-request) -> append-records-response;

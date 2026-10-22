@@ -523,7 +523,8 @@ impl<'a> ApiPlanner<'a> {
             output_transform_type_import: output_transform
                 .and_then(|transform| transform.type_import.value().map(str::to_string)),
             output_transform_expr: output_transform
-                .and_then(|transform| transform.transform.value().map(str::to_string)),
+                .and_then(|transform| transform.transform.value().map(str::to_string))
+                .or_else(|| held_resource_transform(self.api_plan, operation.output_type()?)),
             output_resource_return,
             output_direct_result: operation.output_direct_result(),
             output_model_name: operation
@@ -4251,6 +4252,15 @@ fn render_models_module(
         .filter_map(|operation| operation.data.output_resource_return.as_ref())
         .filter(|resource_return| resource_return.holder.is_some())
         .map(|resource_return| resource_return.resource_type_name.clone())
+        .chain(api_plan.records().filter_map(|(_, record)| {
+            record
+                .fields
+                .values()
+                .find_map(|field| match field.field_type.without_option() {
+                    TypeSpec::Resource(resource) => Some(resource.type_name.clone()),
+                    _ => None,
+                })
+        }))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
@@ -6557,6 +6567,36 @@ fn render_operation_input_alias(
         output.push_str("?: never");
     }
     output.push_str(" }\n    : never\n  : never;\n\n");
+}
+
+/// A WIT-only result record that holds a resource gets the resource as a plain object, so the
+/// operation builds the class from it.
+fn held_resource_transform(api_plan: &PlannedSpec, output: &PlannedType) -> Option<String> {
+    let PlannedType::Record(record) = output else {
+        return None;
+    };
+    let record = api_plan.record(&record.full_name)?;
+    if record.source.is_some() {
+        return None;
+    }
+    let (field_name, resource_name) =
+        record
+            .fields
+            .values()
+            .find_map(|field| match field.field_type.without_option() {
+                TypeSpec::Resource(resource) => Some((&field.name, &resource.type_name)),
+                _ => None,
+            })?;
+    let resource = api_plan
+        .services
+        .iter()
+        .flat_map(|service| service.resources.iter())
+        .map(|resource| &resource.data)
+        .find(|resource| resource.type_name == *resource_name)?;
+    let field = typescript_generated_field_name(field_name);
+    let mut value = String::new();
+    render_resource_constructor(&mut value, resource, &format!("result.{field}"), "  ");
+    Some(format!("{{ ...result, {field}: {value} }}"))
 }
 
 fn render_resource_constructor(

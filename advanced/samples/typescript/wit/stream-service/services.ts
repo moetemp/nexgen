@@ -2,6 +2,7 @@
 
 import * as nexus from "nexus-rpc";
 import type {
+  CreateStreamResult,
   CreateStreamRequest,
   AppendRecordsResponse,
   AppendRecordsRequest,
@@ -12,10 +13,11 @@ import type {
   DescribeStreamResponse,
   DescribeStreamRequest,
 } from "./models";
-import type { Stream } from "./resources";
 
 export const streamService = nexus.service("StreamService", {
-  createStream: nexus.operation<CreateStreamRequest, Stream>({ name: "CreateStream" }),
+  createStream: nexus.operation<CreateStreamRequest, CreateStreamResult>({
+    name: "CreateStream",
+  }),
   appendRecords: nexus.operation<AppendRecordsRequest, AppendRecordsResponse>({
     name: "AppendRecords",
   }),

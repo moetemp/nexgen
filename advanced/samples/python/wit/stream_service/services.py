@@ -14,14 +14,14 @@ from .models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
 )
-from ._resources.stream import Stream
+from ._resources.stream import CreateStreamResult
 
 
 @service
 class StreamService:
     create_stream: Operation[
         CreateStreamRequest,
-        Stream,
+        CreateStreamResult,
     ] = Operation(name="CreateStream")
 
     append_records: Operation[

@@ -223,14 +223,6 @@ pub enum Error {
         reason: String,
     },
 
-    #[error("{language} cannot generate one-way operation `{service}.{operation}`: {reason}")]
-    UnsupportedOneWayOperation {
-        language: Language,
-        service: String,
-        operation: String,
-        reason: String,
-    },
-
     #[error(
         "service `{service}` operation `{operation}` references unknown input proto type `{type_name}`"
     )]

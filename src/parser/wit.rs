@@ -883,10 +883,12 @@ fn build_wit_record_spec(
     let model_doc = directive(&directives, "doc", path, &context)?
         .map(directive_language_string)
         .unwrap_or_default();
+    let proto_backed = directive(&directives, "proto", path, &context)?.is_some();
     let (doc, fields) = build_fields_from_record(
         resolve,
         type_def.owner,
         record,
+        proto_backed,
         model_doc,
         path,
         &context,
@@ -1127,6 +1129,7 @@ fn build_fields_from_record(
     resolve: &Resolve,
     owner: TypeOwner,
     record: &Record,
+    proto_backed: bool,
     doc: LanguageStringSpec,
     path: &Path,
     context: &str,
@@ -1215,7 +1218,13 @@ fn build_fields_from_record(
             }
 
             let field_type = authored_field_type_for_language(
-                resolve_authored_field_type_spec(resolve, &field.ty, path, &field_context)?,
+                resolve_record_field_type_spec(
+                    resolve,
+                    &field.ty,
+                    proto_backed,
+                    path,
+                    &field_context,
+                )?,
                 language,
             );
             fields.insert(
@@ -1241,7 +1250,7 @@ fn build_fields_from_record(
             .map(directive_language_string)
             .filter(|doc| !doc.is_empty());
         let field_type = authored_field_type_for_language(
-            resolve_authored_field_type_spec(resolve, &field.ty, path, &field_context)?,
+            resolve_record_field_type_spec(resolve, &field.ty, proto_backed, path, &field_context)?,
             language,
         );
         let field_default =
@@ -1411,6 +1420,40 @@ fn build_type_replacement(
         from_proto,
         to_proto,
     }))
+}
+
+/// Resolves the type of a record field. A proto-backed record spells a proto `bytes` field as
+/// `list<u8>`, so the field is bytes there. A record without a proto keeps a list of integers.
+fn resolve_record_field_type_spec(
+    resolve: &Resolve,
+    ty: &Type,
+    proto_backed: bool,
+    path: &Path,
+    context: &str,
+) -> Result<TypeSpec> {
+    if proto_backed && let Some(bytes) = proto_bytes_type_spec(resolve, ty) {
+        return Ok(bytes);
+    }
+    resolve_authored_field_type_spec(resolve, ty, path, context)
+}
+
+/// Matches only an unnamed `list<u8>`, so a WIT width other than `u8` still fails validation
+/// against a proto `bytes` field, and a named type keeps its own directives.
+fn proto_bytes_type_spec(resolve: &Resolve, ty: &Type) -> Option<TypeSpec> {
+    let Type::Id(id) = ty else {
+        return None;
+    };
+    let type_def = &resolve.types[*id];
+    if type_def.name.is_some() {
+        return None;
+    }
+    match &type_def.kind {
+        TypeDefKind::List(Type::U8) => Some(TypeSpec::Bytes),
+        TypeDefKind::Option(inner) => {
+            proto_bytes_type_spec(resolve, inner).map(|bytes| TypeSpec::Option(Box::new(bytes)))
+        }
+        _ => None,
+    }
 }
 
 fn resolve_authored_field_type_spec(

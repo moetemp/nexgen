@@ -4,7 +4,7 @@ import type * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
 import * as support from "../../support/temporal_model_converters";
 
-export function requiredField<T>(
+function requiredField<T>(
   value: T | null | undefined,
   owner: string,
   field: string,
@@ -23,11 +23,8 @@ export interface ActivityOptions {
 }
 
 function activityOptionsFromProto(
-  proto: temporal.api.activity.v1.IActivityOptions | null | undefined,
-): ActivityOptions | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.activity.v1.IActivityOptions,
+): ActivityOptions {
   return {
     taskQueue:
       proto.taskQueue == null ? undefined : support.taskQueueFromProto(proto.taskQueue),
@@ -48,11 +45,8 @@ function activityOptionsFromProto(
 }
 
 function activityOptionsToProto(
-  model: ActivityOptions | null | undefined,
-): temporal.api.activity.v1.IActivityOptions | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: ActivityOptions,
+): temporal.api.activity.v1.IActivityOptions {
   return {
     taskQueue:
       model.taskQueue == null ? undefined : support.taskQueueToProto(model.taskQueue),
@@ -70,11 +64,11 @@ function activityOptionsToProto(
 
 export const activityOptionsTransferTypeConverter = {
   fromTransferType(value: temporal.api.activity.v1.IActivityOptions): ActivityOptions {
-    return activityOptionsFromProto(value)!;
+    return activityOptionsFromProto(value);
   },
 
   toTransferType(value: ActivityOptions): temporal.api.activity.v1.IActivityOptions {
-    return activityOptionsToProto(value) ?? {};
+    return activityOptionsToProto(value);
   },
 };
 export interface FailureContainer {
@@ -82,14 +76,8 @@ export interface FailureContainer {
 }
 
 function failureContainerFromProto(
-  proto:
-    | temporal.api.command.v1.IFailWorkflowExecutionCommandAttributes
-    | null
-    | undefined,
-): FailureContainer | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.command.v1.IFailWorkflowExecutionCommandAttributes,
+): FailureContainer {
   return {
     failure:
       proto.failure == null ? undefined : support.failureFromProto(proto.failure),
@@ -97,11 +85,8 @@ function failureContainerFromProto(
 }
 
 function failureContainerToProto(
-  model: FailureContainer | null | undefined,
-): temporal.api.command.v1.IFailWorkflowExecutionCommandAttributes | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: FailureContainer,
+): temporal.api.command.v1.IFailWorkflowExecutionCommandAttributes {
   return {
     failure: model.failure == null ? undefined : support.failureToProto(model.failure),
   };
@@ -111,13 +96,13 @@ export const failureContainerTransferTypeConverter = {
   fromTransferType(
     value: temporal.api.command.v1.IFailWorkflowExecutionCommandAttributes,
   ): FailureContainer {
-    return failureContainerFromProto(value)!;
+    return failureContainerFromProto(value);
   },
 
   toTransferType(
     value: FailureContainer,
   ): temporal.api.command.v1.IFailWorkflowExecutionCommandAttributes {
-    return failureContainerToProto(value) ?? {};
+    return failureContainerToProto(value);
   },
 };
 export interface WorkflowExecutionInfo {
@@ -126,18 +111,11 @@ export interface WorkflowExecutionInfo {
 }
 
 function workflowExecutionInfoFromProto(
-  proto: temporal.api.workflow.v1.IWorkflowExecutionInfo | null | undefined,
-): WorkflowExecutionInfo | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.workflow.v1.IWorkflowExecutionInfo,
+): WorkflowExecutionInfo {
   return {
-    execution: requiredField(
-      workflowExecutionFromProto(
-        requiredField(proto.execution, "WorkflowExecutionInfo", "execution"),
-      ),
-      "WorkflowExecutionInfo",
-      "execution",
+    execution: workflowExecutionFromProto(
+      requiredField(proto.execution, "WorkflowExecutionInfo", "execution"),
     ),
     parentExecution:
       proto.parentExecution == null
@@ -147,20 +125,16 @@ function workflowExecutionInfoFromProto(
 }
 
 function workflowExecutionInfoToProto(
-  model: WorkflowExecutionInfo | null | undefined,
-): temporal.api.workflow.v1.IWorkflowExecutionInfo | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: WorkflowExecutionInfo,
+): temporal.api.workflow.v1.IWorkflowExecutionInfo {
   return {
-    execution:
-      workflowExecutionToProto(
-        requiredField(model.execution, "WorkflowExecutionInfo", "execution"),
-      ) ?? {},
+    execution: workflowExecutionToProto(
+      requiredField(model.execution, "WorkflowExecutionInfo", "execution"),
+    ),
     parentExecution:
       model.parentExecution == null
         ? undefined
-        : (workflowExecutionToProto(model.parentExecution) ?? {}),
+        : workflowExecutionToProto(model.parentExecution),
   };
 }
 
@@ -168,13 +142,13 @@ export const workflowExecutionInfoTransferTypeConverter = {
   fromTransferType(
     value: temporal.api.workflow.v1.IWorkflowExecutionInfo,
   ): WorkflowExecutionInfo {
-    return workflowExecutionInfoFromProto(value)!;
+    return workflowExecutionInfoFromProto(value);
   },
 
   toTransferType(
     value: WorkflowExecutionInfo,
   ): temporal.api.workflow.v1.IWorkflowExecutionInfo {
-    return workflowExecutionInfoToProto(value) ?? {};
+    return workflowExecutionInfoToProto(value);
   },
 };
 export interface WorkflowExecution {
@@ -183,11 +157,8 @@ export interface WorkflowExecution {
 }
 
 function workflowExecutionFromProto(
-  proto: temporal.api.common.v1.IWorkflowExecution | null | undefined,
-): WorkflowExecution | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.common.v1.IWorkflowExecution,
+): WorkflowExecution {
   return {
     workflowId: requiredField(
       proto.workflowId === "" ? undefined : proto.workflowId,
@@ -203,11 +174,8 @@ function workflowExecutionFromProto(
 }
 
 function workflowExecutionToProto(
-  model: WorkflowExecution | null | undefined,
-): temporal.api.common.v1.IWorkflowExecution | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: WorkflowExecution,
+): temporal.api.common.v1.IWorkflowExecution {
   return {
     workflowId: requiredField(model.workflowId, "WorkflowExecution", "workflowId"),
     runId: requiredField(model.runId, "WorkflowExecution", "runId"),
@@ -218,11 +186,11 @@ export const workflowExecutionTransferTypeConverter = {
   fromTransferType(
     value: temporal.api.common.v1.IWorkflowExecution,
   ): WorkflowExecution {
-    return workflowExecutionFromProto(value)!;
+    return workflowExecutionFromProto(value);
   },
 
   toTransferType(value: WorkflowExecution): temporal.api.common.v1.IWorkflowExecution {
-    return workflowExecutionToProto(value) ?? {};
+    return workflowExecutionToProto(value);
   },
 };
 export interface TaskQueuePartitions {
@@ -230,30 +198,21 @@ export interface TaskQueuePartitions {
 }
 
 function taskQueuePartitionsFromProto(
-  proto:
-    | temporal.api.workflowservice.v1.IListTaskQueuePartitionsResponse
-    | null
-    | undefined,
-): TaskQueuePartitions | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.workflowservice.v1.IListTaskQueuePartitionsResponse,
+): TaskQueuePartitions {
   return {
-    workflowTaskQueuePartitions: proto.workflowTaskQueuePartitions?.map(
-      (value: any) => taskQueuePartitionFromProto(value)!,
+    workflowTaskQueuePartitions: proto.workflowTaskQueuePartitions?.map((value: any) =>
+      taskQueuePartitionFromProto(value),
     ),
   };
 }
 
 function taskQueuePartitionsToProto(
-  model: TaskQueuePartitions | null | undefined,
-): temporal.api.workflowservice.v1.IListTaskQueuePartitionsResponse | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: TaskQueuePartitions,
+): temporal.api.workflowservice.v1.IListTaskQueuePartitionsResponse {
   return {
-    workflowTaskQueuePartitions: model.workflowTaskQueuePartitions?.map(
-      (value) => taskQueuePartitionToProto(value) ?? {},
+    workflowTaskQueuePartitions: model.workflowTaskQueuePartitions?.map((value) =>
+      taskQueuePartitionToProto(value),
     ),
   };
 }
@@ -262,13 +221,13 @@ export const taskQueuePartitionsTransferTypeConverter = {
   fromTransferType(
     value: temporal.api.workflowservice.v1.IListTaskQueuePartitionsResponse,
   ): TaskQueuePartitions {
-    return taskQueuePartitionsFromProto(value)!;
+    return taskQueuePartitionsFromProto(value);
   },
 
   toTransferType(
     value: TaskQueuePartitions,
   ): temporal.api.workflowservice.v1.IListTaskQueuePartitionsResponse {
-    return taskQueuePartitionsToProto(value) ?? {};
+    return taskQueuePartitionsToProto(value);
   },
 };
 export interface TaskQueuePartition {
@@ -277,11 +236,8 @@ export interface TaskQueuePartition {
 }
 
 function taskQueuePartitionFromProto(
-  proto: temporal.api.taskqueue.v1.ITaskQueuePartitionMetadata | null | undefined,
-): TaskQueuePartition | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.taskqueue.v1.ITaskQueuePartitionMetadata,
+): TaskQueuePartition {
   return {
     key: requiredField(
       proto.key === "" ? undefined : proto.key,
@@ -297,11 +253,8 @@ function taskQueuePartitionFromProto(
 }
 
 function taskQueuePartitionToProto(
-  model: TaskQueuePartition | null | undefined,
-): temporal.api.taskqueue.v1.ITaskQueuePartitionMetadata | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: TaskQueuePartition,
+): temporal.api.taskqueue.v1.ITaskQueuePartitionMetadata {
   return {
     key: requiredField(model.key, "TaskQueuePartition", "key"),
     ownerHostName: requiredField(
@@ -316,13 +269,13 @@ export const taskQueuePartitionTransferTypeConverter = {
   fromTransferType(
     value: temporal.api.taskqueue.v1.ITaskQueuePartitionMetadata,
   ): TaskQueuePartition {
-    return taskQueuePartitionFromProto(value)!;
+    return taskQueuePartitionFromProto(value);
   },
 
   toTransferType(
     value: TaskQueuePartition,
   ): temporal.api.taskqueue.v1.ITaskQueuePartitionMetadata {
-    return taskQueuePartitionToProto(value) ?? {};
+    return taskQueuePartitionToProto(value);
   },
 };
 export interface BadBinaries {
@@ -330,11 +283,8 @@ export interface BadBinaries {
 }
 
 function badBinariesFromProto(
-  proto: temporal.api.namespace.v1.IBadBinaries | null | undefined,
-): BadBinaries | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.namespace.v1.IBadBinaries,
+): BadBinaries {
   return {
     binaries:
       proto.binaries == null
@@ -348,18 +298,15 @@ function badBinariesFromProto(
 }
 
 function badBinariesToProto(
-  model: BadBinaries | null | undefined,
-): temporal.api.namespace.v1.IBadBinaries | undefined {
-  if (model == null) {
-    return undefined;
-  }
+  model: BadBinaries,
+): temporal.api.namespace.v1.IBadBinaries {
   return {
     binaries:
       model.binaries == null
         ? undefined
         : Object.fromEntries(
             Object.entries(model.binaries as Record<string, any>).map(
-              ([key, value]: [string, any]) => [key, badBinaryToProto(value) ?? {}],
+              ([key, value]: [string, any]) => [key, badBinaryToProto(value)],
             ),
           ),
   };
@@ -367,11 +314,11 @@ function badBinariesToProto(
 
 export const badBinariesTransferTypeConverter = {
   fromTransferType(value: temporal.api.namespace.v1.IBadBinaries): BadBinaries {
-    return badBinariesFromProto(value)!;
+    return badBinariesFromProto(value);
   },
 
   toTransferType(value: BadBinaries): temporal.api.namespace.v1.IBadBinaries {
-    return badBinariesToProto(value) ?? {};
+    return badBinariesToProto(value);
   },
 };
 export interface BadBinary {
@@ -380,11 +327,8 @@ export interface BadBinary {
 }
 
 function badBinaryFromProto(
-  proto: temporal.api.namespace.v1.IBadBinaryInfo | null | undefined,
-): BadBinary | undefined {
-  if (proto == null) {
-    return undefined;
-  }
+  proto: temporal.api.namespace.v1.IBadBinaryInfo,
+): BadBinary {
   return {
     reason: requiredField(
       proto.reason === "" ? undefined : proto.reason,
@@ -399,12 +343,7 @@ function badBinaryFromProto(
   };
 }
 
-function badBinaryToProto(
-  model: BadBinary | null | undefined,
-): temporal.api.namespace.v1.IBadBinaryInfo | undefined {
-  if (model == null) {
-    return undefined;
-  }
+function badBinaryToProto(model: BadBinary): temporal.api.namespace.v1.IBadBinaryInfo {
   return {
     reason: requiredField(model.reason, "BadBinary", "reason"),
     operator: requiredField(model.operator, "BadBinary", "operator"),
@@ -413,10 +352,10 @@ function badBinaryToProto(
 
 export const badBinaryTransferTypeConverter = {
   fromTransferType(value: temporal.api.namespace.v1.IBadBinaryInfo): BadBinary {
-    return badBinaryFromProto(value)!;
+    return badBinaryFromProto(value);
   },
 
   toTransferType(value: BadBinary): temporal.api.namespace.v1.IBadBinaryInfo {
-    return badBinaryToProto(value) ?? {};
+    return badBinaryToProto(value);
   },
 };

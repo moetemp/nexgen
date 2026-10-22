@@ -4180,42 +4180,53 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
         body.push_str("        transport: Transport,\n");
         body.push_str("        *,\n");
         body.push_str(
-            "        payload_converter: temporalio.converter.PayloadConverter | None = None,\n",
+            "        data_converter: temporalio.converter.DataConverter | None = None,\n",
         );
-        body.push_str("        payload_codec: temporalio.converter.PayloadCodec | None = None,\n");
         body.push_str("    ) -> None:\n");
         body.push_str("        \"\"\"Create a caller.\n\n");
         body.push_str("        Args:\n");
         body.push_str("            transport: Carries each call to the service.\n");
         body.push_str(
-            "            payload_converter: Converts the models that are not proto-backed.\n",
+            "            data_converter: Converts and encodes the user values. A proto-backed\n",
         );
-        body.push_str("                Defaults to the SDK's default payload converter.\n");
         body.push_str(
-            "            payload_codec: Encodes each request payload and decodes each answer.\n",
+            "                model travels as is, and each payload and failure inside it goes\n",
         );
+        body.push_str(
+            "                through the converter and the codec, as in Workflow code. A model\n",
+        );
+        body.push_str(
+            "                that is not proto-backed is one user value. Defaults to the SDK's\n",
+        );
+        body.push_str("                default data converter.\n");
         body.push_str("        \"\"\"\n");
-        body.push_str("        self._transport = transport\n");
-        body.push_str("        self._payload_converter = (\n");
-        body.push_str("            payload_converter or temporalio.converter.DataConverter.default.payload_converter\n");
+        body.push_str("        self._transport: Transport = transport\n");
+        body.push_str("        self._data_converter: temporalio.converter.DataConverter = (\n");
+        body.push_str("            data_converter or temporalio.converter.DataConverter.default\n");
         body.push_str("        )\n");
-        body.push_str("        self._payload_codec = payload_codec\n");
+        body.push_str("\n");
+        body.push_str("    def _converters(self) -> contextlib.AbstractContextManager[None]:\n");
+        body.push_str("        return temporalio.nexus.system._user_converter_context(\n");
+        body.push_str("            temporalio.nexus.system._SystemNexusUserConverters(\n");
+        body.push_str(
+            "                payload_converter=self._data_converter.payload_converter,\n",
+        );
+        body.push_str(
+            "                failure_converter=self._data_converter.failure_converter,\n",
+        );
+        body.push_str("            )\n");
+        body.push_str("        )\n");
         body.push_str("\n");
         body.push_str("    async def _call(\n");
         body.push_str("        self, operation: str, payload: temporalio.api.common.v1.Payload\n");
         body.push_str("    ) -> temporalio.api.common.v1.Payload:\n");
-        body.push_str("        if self._payload_codec is not None:\n");
-        body.push_str("            [payload] = await self._payload_codec.encode([payload])\n");
-        body.push_str("        answer = await self._transport.call(\n");
+        body.push_str("        return await self._transport.call(\n");
         body.push_str("            service=");
         body.push_str(&python_string_literal(service.wire_name));
         body.push_str(",\n");
         body.push_str("            operation=operation,\n");
         body.push_str("            input=payload,\n");
         body.push_str("        )\n");
-        body.push_str("        if self._payload_codec is not None:\n");
-        body.push_str("            [answer] = await self._payload_codec.decode([answer])\n");
-        body.push_str("        return answer\n");
         for operation in &service.operations {
             let Some(input) = &operation.input else {
                 return Err(Error::UnsupportedClientOperation {
@@ -4280,56 +4291,33 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
         }
     }
 
-    let mut method_names = BTreeSet::new();
-    for service in services {
-        for operation in &service.operations {
-            for name in std::iter::once(operation.attr_name.clone()).chain(
-                operation
-                    .client_long_poll
-                    .iter()
-                    .map(|long_poll| long_poll.method_name.clone()),
-            ) {
-                if !method_names.insert((service.name, name.clone())) {
-                    return Err(Error::UnsupportedClientOperation {
-                        language: Language::Python,
-                        service: service.name.to_string(),
-                        operation: operation.name.to_string(),
-                        reason: format!("its caller method `{name}` is already declared"),
-                    });
-                }
-            }
-        }
-    }
-    if body.contains("_LONG_POLL_FIRST_PAUSE") {
-        body = body.replacen(
-            "\n\n_MessageT = ",
-            concat!(
-                "\n\n# An answer with nothing that comes back in less than half of its wait is\n",
-                "# followed by a pause, so a service that ignores the wait is not asked again\n",
-                "# at once. The pause doubles up to the last one.\n",
-                "_LONG_POLL_FIRST_PAUSE = 0.05\n",
-                "_LONG_POLL_LAST_PAUSE = 2.0\n",
-                "\n\n_MessageT = ",
-            ),
-            1,
-        );
+    // A helper that no method uses would be dead code in the module.
+    let uses_proto = services
+        .iter()
+        .flat_map(|service| service.operations.iter())
+        .any(|operation| {
+            operation.client_input_proto_model.is_some()
+                || operation.client_output_proto_model.is_some()
+        });
+    if uses_proto {
+        body.insert_str(CLIENT_RUNTIME.len(), CLIENT_PROTO_RUNTIME);
     }
 
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
-    for module in ["asyncio", "dataclasses", "datetime"] {
-        if body.contains(&format!("{module}.")) {
-            output.push_str("import ");
-            output.push_str(module);
-            output.push('\n');
-        }
+    if uses_proto {
+        output.push_str("import collections.abc\n");
     }
+    output.push_str("import contextlib\n");
     output.push_str("import typing\n\n");
-    output.push_str("import google.protobuf.json_format\n");
-    output.push_str("import google.protobuf.message\n");
+    if uses_proto {
+        output.push_str("import google.protobuf.json_format\n");
+        output.push_str("import google.protobuf.message\n");
+    }
     output.push_str("import temporalio.api.common.v1\n");
     output.push_str("import temporalio.converter\n");
+    output.push_str("import temporalio.nexus.system\n");
     output.push('\n');
     render_named_python_import(
         &mut output,
@@ -4367,14 +4355,21 @@ fn render_client_method(
         None,
         operation.experimental,
     );
-    output.push_str("        payload = ");
+    let codec = "self._data_converter.payload_codec";
     match &operation.client_input_proto_model {
         Some(proto_model) => {
-            output.push_str("_proto_payload(_");
+            output.push_str("        with self._converters():\n");
+            output.push_str("            message = _");
             output.push_str(proto_model);
-            output.push_str("TransferTypeConverter().to_transfer_type(request))\n");
+            output.push_str("TransferTypeConverter().to_transfer_type(request)\n");
+            output.push_str("        await _encode_payloads(message, ");
+            output.push_str(codec);
+            output.push_str(")\n");
+            output.push_str("        payload = _proto_payload(message)\n");
         }
-        None => output.push_str("self._payload_converter.to_payload(request)\n"),
+        None => {
+            output.push_str("        [payload] = await self._data_converter.encode([request])\n");
+        }
     }
     let Some(output_model) = output_model else {
         output.push_str("        _ = await self._call(");
@@ -4390,22 +4385,22 @@ fn render_client_method(
             output.push_str("        converter = _");
             output.push_str(proto_model);
             output.push_str("TransferTypeConverter()\n");
-            output.push_str("        return converter.from_transfer_type(\n");
-            output.push_str("            _proto_message(answer, converter.transfer_type),\n");
-            output.push_str("            ");
+            output.push_str("        message = _proto_message(answer, converter.transfer_type)\n");
+            output.push_str("        await _decode_payloads(message, ");
+            output.push_str(codec);
+            output.push_str(")\n");
+            output.push_str("        with self._converters():\n");
+            output.push_str("            return converter.from_transfer_type(message, ");
             output.push_str(output_model);
-            output.push_str(",\n");
-            output.push_str("        )\n");
+            output.push_str(")\n");
         }
         None => {
-            output.push_str("        return typing.cast(\n");
-            output.push_str("            ");
+            output.push_str("        [value] = await self._data_converter.decode([answer], [");
             output.push_str(output_model);
-            output.push_str(",\n");
-            output.push_str("            self._payload_converter.from_payload(answer, ");
+            output.push_str("])\n");
+            output.push_str("        return typing.cast(");
             output.push_str(output_model);
-            output.push_str("),\n");
-            output.push_str("        )\n");
+            output.push_str(", value)\n");
         }
     }
 }
@@ -4603,7 +4598,10 @@ class TransportError(Exception):
         """Create a transport error."""
         super().__init__(message)
         self.retryable: bool = retryable
+"#;
 
+/// The helpers of a caller that moves proto-backed models.
+const CLIENT_PROTO_RUNTIME: &str = r#"
 
 _MessageT = typing.TypeVar("_MessageT", bound=google.protobuf.message.Message)
 
@@ -4637,6 +4635,50 @@ def _proto_message(
             f"cannot read {message.DESCRIPTOR.full_name} from a {encoding.decode()!r} payload"
         )
     return message
+
+
+# The codec runs on the user payloads inside a proto-backed model, failure details
+# included, and never on the model's own payload, which the service reads.
+def _payloads_in(
+    message: google.protobuf.message.Message,
+) -> list[temporalio.api.common.v1.Payload]:
+    if isinstance(message, temporalio.api.common.v1.Payload):
+        return [message]
+    found: list[temporalio.api.common.v1.Payload] = []
+    for _, value in message.ListFields():
+        if isinstance(value, google.protobuf.message.Message):
+            found.extend(_payloads_in(value))
+        elif not isinstance(value, (str, bytes, int, float, bool)):
+            items = typing.cast(
+                "collections.abc.Iterable[object]",
+                value.values() if hasattr(value, "values") else value,
+            )
+            for item in items:
+                if isinstance(item, google.protobuf.message.Message):
+                    found.extend(_payloads_in(item))
+    return found
+
+
+async def _encode_payloads(
+    message: google.protobuf.message.Message,
+    codec: temporalio.converter.PayloadCodec | None,
+) -> None:
+    if codec is None:
+        return
+    for payload in _payloads_in(message):
+        [encoded] = await codec.encode([payload])
+        payload.CopyFrom(encoded)
+
+
+async def _decode_payloads(
+    message: google.protobuf.message.Message,
+    codec: temporalio.converter.PayloadCodec | None,
+) -> None:
+    if codec is None:
+        return
+    for payload in _payloads_in(message):
+        [decoded] = await codec.decode([payload])
+        payload.CopyFrom(decoded)
 "#;
 
 fn render_resources_package_init(services: &[RenderedService<'_>]) -> String {
@@ -5291,8 +5333,8 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         output.push_str(&operation.attr_name);
         output.push_str("(typed_input.input),\n        )\n");
     }
-    // An operation outside the generated set goes to the generic hook, so a
-    // plugin outside the SDK can serve its own System Nexus service.
+    // The generic hook gets each operation outside the generated set. Then a plugin
+    // outside the SDK can serve its own System Nexus service.
     output.push_str("    return await interceptor.start_system_nexus_operation(input)\n");
 
     output.push_str("\n\nclass _SystemNexusWorkflowOutboundInterceptorBase(abc.ABC):\n");

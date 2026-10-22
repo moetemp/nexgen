@@ -15,6 +15,7 @@ languages = ["python", "dotnet", "typescript"]
 
 [start-workflow]
 client = true
+system_nexus_languages = ["typescript"]
 
 [log-service]
 languages = ["python"]

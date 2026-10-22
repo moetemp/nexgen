@@ -436,7 +436,11 @@ fn planned_value_type(value_type: &PlannedType, spec: &PlannedSpec) -> PlannedVa
     match value_type.without_option() {
         TypeSpec::Bool => PlannedValueType::Scalar(PlannedScalarType::Bool),
         TypeSpec::Int(IntSpec::I32) => PlannedValueType::Scalar(PlannedScalarType::Int32),
-        TypeSpec::Int(IntSpec::I64) => PlannedValueType::Scalar(PlannedScalarType::Int64),
+        // Go keeps signed integers, as Go APIs do.
+        TypeSpec::Int(IntSpec::U32) => PlannedValueType::Scalar(PlannedScalarType::Int32),
+        TypeSpec::Int(IntSpec::I64 | IntSpec::U64) => {
+            PlannedValueType::Scalar(PlannedScalarType::Int64)
+        }
         TypeSpec::Float => PlannedValueType::Scalar(PlannedScalarType::Float),
         TypeSpec::String => PlannedValueType::Scalar(PlannedScalarType::String),
         TypeSpec::Bytes => PlannedValueType::Scalar(PlannedScalarType::Bytes),
@@ -2924,7 +2928,8 @@ pub(in crate::generator) fn go_authored_type_annotation(wit_type: &PlannedType) 
     match wit_type {
         TypeSpec::Bool => "bool".to_string(),
         TypeSpec::Int(IntSpec::I32) => "int32".to_string(),
-        TypeSpec::Int(IntSpec::I64) => "int64".to_string(),
+        TypeSpec::Int(IntSpec::U32) => "int32".to_string(),
+        TypeSpec::Int(IntSpec::I64 | IntSpec::U64) => "int64".to_string(),
         TypeSpec::Float => "float64".to_string(),
         TypeSpec::String => "string".to_string(),
         TypeSpec::Bytes => "[]byte".to_string(),

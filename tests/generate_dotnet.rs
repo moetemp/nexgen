@@ -860,7 +860,7 @@ interface conflict-models {
 }
 
 #[test]
-fn dotnet_wit_64_bit_integers_map_to_long() {
+fn dotnet_wit_integers_keep_their_size_and_sign() {
     let temp_dir = unique_output_path("dotnet-64-bit-ints");
     fs::create_dir_all(&temp_dir).unwrap();
     let wit_path = temp_dir.join("counters.wit");
@@ -878,6 +878,7 @@ interface api {
     total: s64,
     limit: u64,
     small: s32,
+    count: u32,
   }
 
   run: func(request: request);
@@ -892,11 +893,15 @@ interface api {
         "{rendered}"
     );
     assert!(
-        rendered.contains("public long Limit { get; init; }"),
+        rendered.contains("public ulong Limit { get; init; }"),
         "{rendered}"
     );
     assert!(
         rendered.contains("public int Small { get; init; }"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("public uint Count { get; init; }"),
         "{rendered}"
     );
     fs::remove_dir_all(temp_dir).unwrap();

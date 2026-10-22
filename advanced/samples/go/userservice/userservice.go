@@ -29,6 +29,19 @@ func (m updateEmailRequest) GetEmail() string {
 	return m.Email
 }
 
+type sendVerificationRequest struct {
+	UserID string
+	Email  *string
+}
+
+func (m sendVerificationRequest) GetUserID() string {
+	return m.UserID
+}
+
+func (m sendVerificationRequest) GetEmail() *string {
+	return m.Email
+}
+
 // --- Resources ---
 
 type User struct {
@@ -49,6 +62,10 @@ func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.Future {
 	return updateEmail(ctx, updateEmailRequest{UserID: u.UserID, Email: email})
 }
 
+func (u *User) SendVerification(ctx workflow.Context) workflow.Future {
+	return sendVerification(ctx, sendVerificationRequest{UserID: u.UserID, Email: &u.Email})
+}
+
 // --- Operations (internal) ---
 
 func getUser(ctx workflow.Context, request getUserRequest) workflow.Future {
@@ -60,6 +77,12 @@ func getUser(ctx workflow.Context, request getUserRequest) workflow.Future {
 func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.Future {
 	c := workflow.NewNexusClient("user-service", "UserService")
 	fut := c.ExecuteOperation(ctx, "UpdateEmail", request, workflow.NexusOperationOptions{})
+	return fut
+}
+
+func sendVerification(ctx workflow.Context, request sendVerificationRequest) workflow.Future {
+	c := workflow.NewNexusClient("user-service", "UserService")
+	fut := c.ExecuteOperation(ctx, "SendVerification", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
@@ -87,5 +110,23 @@ func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.Future 
 	return updateEmail(ctx, updateEmailRequest{
 		UserID: opts.UserID,
 		Email:  opts.Email,
+	})
+}
+
+type SendVerificationOptions struct {
+	// UserID - Required.
+	UserID string
+	// Email - Optional.
+	Email string
+}
+
+func SendVerification(ctx workflow.Context, opts SendVerificationOptions) workflow.Future {
+	var email *string
+	if opts.Email != "" {
+		email = &opts.Email
+	}
+	return sendVerification(ctx, sendVerificationRequest{
+		UserID: opts.UserID,
+		Email:  email,
 	})
 }

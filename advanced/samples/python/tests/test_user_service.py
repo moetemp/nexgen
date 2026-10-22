@@ -63,6 +63,14 @@ class UserServiceHandler:
         assert input.email == "new@example.com"
         return user_resource(email=input.email)
 
+    @sync_operation
+    async def send_verification(
+        self,
+        _ctx: StartOperationContext,
+        input: user_service_models.SendVerificationRequest,
+    ) -> None:
+        self.calls.append(("SendVerification", input))
+
 
 @workflow.defn
 class UserServiceCallerWorkflow:

@@ -14,3 +14,9 @@ class GetUserRequest:
 class UpdateEmailRequest:
     user_id: str
     email: str
+
+
+@dataclasses.dataclass(slots=True)
+class SendVerificationRequest:
+    user_id: str
+    email: str | None = None

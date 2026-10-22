@@ -8,6 +8,7 @@ import temporalio.workflow
 
 from .models import (
     GetUserRequest,
+    SendVerificationRequest,
     UpdateEmailRequest,
 )
 from ._resources.user import (
@@ -30,6 +31,11 @@ class UserService:
         UpdateEmailRequest,
         User,
     ] = Operation(name="UpdateEmail")
+
+    send_verification: Operation[
+        SendVerificationRequest,
+        None,
+    ] = Operation(name="SendVerification")
 
 
 class UserServiceClient:
@@ -72,3 +78,18 @@ class UserServiceClient:
         )
         resource = await handle
         return bind_user_client(resource, self._nexus_client)
+
+    async def send_verification(
+        self,
+        *,
+        user_id: str,
+        email: str | None = None,
+    ) -> temporalio.workflow.NexusOperationHandle[None]:
+        request = SendVerificationRequest(
+            user_id=user_id,
+            email=email,
+        )
+        return await self._nexus_client.start_operation(
+            operation="SendVerification",
+            input=request,
+        )

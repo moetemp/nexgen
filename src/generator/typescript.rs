@@ -6128,7 +6128,7 @@ fn render_request_plan_typescript(plan: &RequestPlan) -> String {
                 format!("{{ {} }}", fields.join(", "))
             }
         },
-        |name| format!("this.{}", typescript_generated_field_name(name)),
+        |name, _| format!("this.{}", typescript_generated_field_name(name)),
         typescript_generated_field_name,
     )
 }

@@ -153,6 +153,7 @@ pub enum RequestPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestPlanField {
     pub field_name: String,
+    pub required: bool,
     pub value: RequestPlan,
 }
 
@@ -492,6 +493,7 @@ fn synthesize_request_plan(
         if let Some(source) = environment.get(&field.api_name) {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
+                required: field.required,
                 value: RequestPlan::Source(source.clone()),
             });
             continue;
@@ -504,6 +506,7 @@ fn synthesize_request_plan(
             {
                 fields.push(RequestPlanField {
                     field_name: field.api_name,
+                    required: field.required,
                     value,
                 });
                 continue;
@@ -532,6 +535,7 @@ fn synthesize_record_request_plan(
         if let Some(source) = environment.get(&field.api_name) {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
+                required: field.required,
                 value: RequestPlan::Source(source.clone()),
             });
             continue;
@@ -546,6 +550,7 @@ fn synthesize_record_request_plan(
         {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
+                required: field.required,
                 value,
             });
             continue;
@@ -557,6 +562,7 @@ fn synthesize_record_request_plan(
         {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
+                required: field.required,
                 value,
             });
             continue;

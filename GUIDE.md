@@ -1118,7 +1118,7 @@ started = await client.start_workflow(request)  # StartedWorkflow
 await started.cancel(reason="done")
 ```
 
-When the long poll also names `offset-field` and `next-offset-field`, the caller
+When the long poll also sets `offset-field` and `next-offset-field`, the caller
 gets `iter_<operation>`, an async iterator over the items of the result list.
 Each page is one `_until_` call, so it waits and backs off by the same rules.
 The next page starts at the answer's next offset. The iterator ends after an

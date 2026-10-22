@@ -2794,8 +2794,8 @@ struct RenderedOperation<'a> {
     /// transfer-type converters instead of the payload converter.
     client_input_proto_model: Option<String>,
     client_output_proto_model: Option<String>,
-    /// The long-poll loop of a caller outside a Workflow, by Python attribute
-    /// names. Set when the operation declares `@nexus.long-poll`.
+    /// The long-poll loop of a caller outside a Workflow, with the Python attribute of
+    /// each member. Set when the operation declares `@nexus.long-poll`.
     client_long_poll: Option<RenderedLongPoll>,
 }
 
@@ -4234,7 +4234,7 @@ fn render_models_module(
     Ok(Some(output))
 }
 
-/// The model a caller outside a Workflow names for an operation's input or
+/// The model that a caller outside a Workflow uses for an operation's input or
 /// output. The caller supports the models of this module only.
 fn client_model_name(
     service: &RenderedService<'_>,

@@ -195,19 +195,15 @@ type StartedWorkflow struct {
 	Namespace string
 	// WorkflowID - Required.
 	WorkflowID string
-	// RunID - Optional.
-	RunID *string
+	// RunID - Required.
+	RunID string
 }
 
 func NewStartedWorkflow(namespace string, workflowID string, runID string) StartedWorkflow {
-	var runIDPtr *string
-	if runID != "" {
-		runIDPtr = &runID
-	}
 	return StartedWorkflow{
 		Namespace:  namespace,
 		WorkflowID: workflowID,
-		RunID:      runIDPtr,
+		RunID:      runID,
 	}
 }
 

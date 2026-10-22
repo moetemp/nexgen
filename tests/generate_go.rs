@@ -2176,7 +2176,7 @@ fn go_proto_resource_return_converts_request_and_constructs_resource() {
         "value := NewStartedWorkflow(request.Namespace, request.WorkflowID, result.GetRunId())"
     ));
     assert!(rendered.contains(
-        "type StartedWorkflow struct {\n\t// Namespace - Required.\n\tNamespace string\n\t// WorkflowID - Required.\n\tWorkflowID string\n\t// RunID - Optional.\n\tRunID *string\n}"
+        "type StartedWorkflow struct {\n\t// Namespace - Required.\n\tNamespace string\n\t// WorkflowID - Required.\n\tWorkflowID string\n\t// RunID - Required.\n\tRunID string\n}"
     ));
     assert!(rendered.contains(
         "func NewStartedWorkflow(namespace string, workflowID string, runID string) StartedWorkflow"

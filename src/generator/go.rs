@@ -1483,9 +1483,42 @@ impl<'a> ApiPlanner<'a> {
                         }
                         _ => None,
                     };
-                    let embed_in_options = !planned_field.required
+                    let flatten_in_options = !planned_field.required
                         && field_kind_is_flattened_message(&planned_field.kind, self.api_plan);
-                    let default_punning_zero = (!planned_field.required && !embed_in_options)
+                    let flattened_fields = if flatten_in_options {
+                        let PlannedFieldKind::Singular(PlannedValueType::Message(message)) =
+                            &planned_field.kind
+                        else {
+                            unreachable!()
+                        };
+                        let record = record_for_message(self.api_plan, message)
+                            .expect("flattened message should have a record");
+                        Some(
+                            self.models[&message.info.full_name]
+                                .fields
+                                .iter()
+                                .zip(record.public_fields())
+                                .map(|(field, (name, spec))| {
+                                    let planned =
+                                        self::planned_field(record, name, spec, self.api_plan);
+                                    RenderedFlattenedField {
+                                        field: field.clone(),
+                                        default_punning_zero: (!field.required)
+                                            .then(|| {
+                                                public_default_punning_zero_for_field(
+                                                    &planned.kind,
+                                                    &field.go_type,
+                                                )
+                                            })
+                                            .flatten(),
+                                    }
+                                })
+                                .collect(),
+                        )
+                    } else {
+                        None
+                    };
+                    let default_punning_zero = (!planned_field.required && !flatten_in_options)
                         .then(|| {
                             public_default_punning_zero_for_field(
                                 &planned_field.kind,
@@ -1505,14 +1538,18 @@ impl<'a> ApiPlanner<'a> {
                     Some(RenderedUnpackedParam {
                         field_name: field.name.clone(),
                         doc: field.doc.clone(),
-                        param_name: go_unexported_name(&field.name),
+                        param_name: if flatten_in_options {
+                            format!("{}Value", go_unexported_name(&field.name))
+                        } else {
+                            go_unexported_name(&field.name)
+                        },
                         go_type: field.go_type.clone(),
                         public_go_type,
                         default_punning_zero,
                         function,
                         function_args,
                         required: field.required,
-                        embed_in_options,
+                        flattened_fields,
                     })
                 })
                 .collect()
@@ -1873,7 +1910,15 @@ impl<'a> ApiPlanner<'a> {
             .map(|annotation| self.package.go_type_expr(annotation));
 
         let go_type = if let Some(annotated) = annotated_go_type {
-            annotated
+            if !field.required
+                && field.flattened_annotation_override.is_some()
+                && !annotated.starts_with('*')
+                && !go_type_is_nilable(&annotated)
+            {
+                format!("*{annotated}")
+            } else {
+                annotated
+            }
         } else {
             match &field.kind {
                 PlannedFieldKind::Map { key, value } => {
@@ -2229,9 +2274,31 @@ struct RenderedUnpackedParam {
     /// Whether this parameter is required (positional argument) or optional
     /// (placed in the options struct).
     required: bool,
-    /// Whether this optional parameter should be embedded as a value in the
-    /// generated options struct because its model is marked `flatten-in-api`.
-    embed_in_options: bool,
+    /// Fields promoted into the options struct for a `flatten-in-api` record.
+    /// Their presence determines whether the optional nested request is built.
+    flattened_fields: Option<Vec<RenderedFlattenedField>>,
+}
+
+/// A promoted field retains the internal type and the same default-punning
+/// policy as an ordinary operation option.
+#[derive(Debug)]
+struct RenderedFlattenedField {
+    field: RenderedField,
+    default_punning_zero: Option<String>,
+}
+
+impl RenderedFlattenedField {
+    fn presence_condition(&self) -> String {
+        if let Some(zero) = &self.default_punning_zero {
+            format!("opts.{} != {zero}", self.field.name)
+        } else if self.field.required
+            || (!self.field.go_type.starts_with('*') && !go_type_is_nilable(&self.field.go_type))
+        {
+            "true".to_string()
+        } else {
+            format!("opts.{} != nil", self.field.name)
+        }
+    }
 }
 
 /// A WIT enum rendered as a Go `type <Name> int32` with associated constants.
@@ -2314,7 +2381,7 @@ pub(in crate::generator) struct RenderedModel {
 }
 
 /// A single field of a [`RenderedModel`].
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(in crate::generator) struct RenderedField {
     /// Exported Go field name in UpperCamelCase (e.g. `"UserId"`, `"First"`).
     pub(in crate::generator) name: String,
@@ -2503,10 +2570,25 @@ impl GoVisibilityMarker<'_> {
             && let Some(planned_model) = record_for_message(self.api_plan, &input)
         {
             for (_, field) in planned_model.public_fields() {
-                self.mark_operation_field_kind(
-                    &planned_field_kind(&field.field_type, self.api_plan),
-                    field.name.as_str(),
-                );
+                let kind = planned_field_kind(&field.field_type, self.api_plan);
+                if !field.required && field_kind_is_flattened_message(&kind, self.api_plan) {
+                    let PlannedFieldKind::Singular(PlannedValueType::Message(message)) = &kind
+                    else {
+                        unreachable!()
+                    };
+                    // Options expose the children, not the containing model.
+                    // Other public uses can still mark that model normally.
+                    let record = record_for_message(self.api_plan, message)
+                        .expect("flattened message should have a record");
+                    for (_, child) in record.public_fields() {
+                        self.mark_operation_field_kind(
+                            &planned_field_kind(&child.field_type, self.api_plan),
+                            child.name.as_str(),
+                        );
+                    }
+                } else {
+                    self.mark_operation_field_kind(&kind, field.name.as_str());
+                }
             }
         }
 
@@ -2705,6 +2787,13 @@ fn apply_go_visibility(
             if let Some(params) = &mut operation.unpacked_input {
                 for param in params {
                     param.go_type = visibility.rewrite_go_expr(&param.go_type);
+                    param.public_go_type = visibility.rewrite_go_expr(&param.public_go_type);
+                    if let Some(fields) = &mut param.flattened_fields {
+                        for flattened in fields {
+                            flattened.field.go_type =
+                                visibility.rewrite_go_expr(&flattened.field.go_type);
+                        }
+                    }
                 }
             }
         }
@@ -3674,17 +3763,6 @@ fn render_file(
                         package,
                         visibility,
                     );
-                    if unary_primary_varargs_function_param(params).is_some() {
-                        output.push('\n');
-                        render_typed_convenience_wrapper(
-                            &mut output,
-                            service,
-                            operation,
-                            params,
-                            package,
-                            visibility,
-                        );
-                    }
                 } else {
                     // External input type — generate a simple forwarding wrapper
                     output.push('\n');
@@ -4430,7 +4508,7 @@ fn render_resource_methods(
                         function: primary.function.clone(),
                         function_args: None,
                         required: true,
-                        embed_in_options: false,
+                        flattened_fields: None,
                     };
                     render_function_name_inline_assignment(output, &synthetic, package);
                     name_var
@@ -4725,6 +4803,25 @@ fn render_options_struct(
     render_go_model_type_parameter_declaration(output, &operation.model_type_parameters);
     output.push_str(" struct {\n");
     for param in params.iter().filter(|p| param_belongs_in_options(p)) {
+        if let Some(fields) = &param.flattened_fields {
+            for flattened in fields {
+                let field = &flattened.field;
+                render_field_doc_comment(
+                    output,
+                    "\t",
+                    &field.name,
+                    field.doc.as_deref(),
+                    field.required,
+                );
+                let public_type = if flattened.default_punning_zero.is_some() {
+                    field.go_type.trim_start_matches('*')
+                } else {
+                    &field.go_type
+                };
+                output.push_str(&format!("\t{} {}\n", field.name, public_type));
+            }
+            continue;
+        }
         render_field_doc_comment(
             output,
             "\t",
@@ -4733,13 +4830,9 @@ fn render_options_struct(
             param.required,
         );
         output.push('\t');
-        if param.embed_in_options {
-            output.push_str(param.public_go_type.trim_start_matches('*'));
-        } else {
-            output.push_str(&param.field_name);
-            output.push(' ');
-            output.push_str(&param.public_go_type);
-        }
+        output.push_str(&param.field_name);
+        output.push(' ');
+        output.push_str(&param.public_go_type);
         output.push('\n');
     }
     output.push_str("}\n");
@@ -4789,22 +4882,10 @@ fn required_function_type_parameters(
         .collect()
 }
 
-fn typed_wrapper_type_parameter_names(primary: &RenderedUnpackedParam) -> (String, String) {
-    let function = primary.function.as_ref().unwrap();
-    (
-        format!("{}Arg", primary.field_name),
-        function
-            .result_type_parameter
-            .clone()
-            .unwrap_or_else(|| format!("{}Result", primary.field_name)),
-    )
-}
-
-// Planning and both wrapper renderers share the complete declaration namespace.
+// Planning and rendering share the complete declaration namespace.
 fn wrapper_type_parameters(
     operation: &RenderedOperation<'_>,
     params: &[RenderedUnpackedParam],
-    typed_primary: Option<&RenderedUnpackedParam>,
     package: &GoPackageContext,
     visibility: &GoVisibility,
 ) -> Vec<(String, String)> {
@@ -4816,10 +4897,6 @@ fn wrapper_type_parameters(
     declarations.extend(required_function_type_parameters(
         params, package, visibility,
     ));
-    if let Some(primary) = typed_primary {
-        let (arg, result) = typed_wrapper_type_parameter_names(primary);
-        declarations.extend([(arg, "any".to_string()), (result, "any".to_string())]);
-    }
     declarations
 }
 
@@ -4829,31 +4906,23 @@ fn validate_wrapper_type_parameters(
     package: &GoPackageContext,
     visibility: &GoVisibility,
 ) -> Result<()> {
-    let typed_primary = unary_primary_varargs_function_param(params);
-    for primary in std::iter::once(None).chain(typed_primary.map(Some)) {
-        let mut occupied = BTreeMap::new();
-        for (index, (name, _)) in
-            wrapper_type_parameters(operation, params, primary, package, visibility)
-                .into_iter()
-                .enumerate()
-        {
-            let source = if index < operation.model_type_parameters.len() {
-                format!("model type parameter `{name}`")
-            } else {
-                format!("generated type parameter `{name}`")
-            };
-            if let Some(previous) = occupied.insert(name.clone(), source) {
-                return Err(Error::UnsupportedGoType {
-                    context: format!(
-                        "operation `{}`{} wrapper",
-                        operation.name,
-                        if primary.is_some() { " Typed" } else { "" }
-                    ),
-                    reason: format!(
-                        "{previous} collides with generated reserved name `{name}` in the Go generic parameter namespace"
-                    ),
-                });
-            }
+    let mut occupied = BTreeMap::new();
+    for (index, (name, _)) in wrapper_type_parameters(operation, params, package, visibility)
+        .into_iter()
+        .enumerate()
+    {
+        let source = if index < operation.model_type_parameters.len() {
+            format!("model type parameter `{name}`")
+        } else {
+            format!("generated type parameter `{name}`")
+        };
+        if let Some(previous) = occupied.insert(name.clone(), source) {
+            return Err(Error::UnsupportedGoType {
+                context: format!("operation `{}` wrapper", operation.name),
+                reason: format!(
+                    "{previous} collides with generated reserved name `{name}` in the Go generic parameter namespace"
+                ),
+            });
         }
     }
     Ok(())
@@ -5252,7 +5321,7 @@ fn render_convenience_wrapper(
     visibility: &GoVisibility,
 ) {
     let exported_name = go_field_name(operation.name);
-    let type_params = wrapper_type_parameters(operation, params, None, package, visibility);
+    let type_params = wrapper_type_parameters(operation, params, package, visibility);
 
     let positional_params = ordered_positional_params(params);
     let input_docs = wrapper_input_docs(positional_params.iter().copied());
@@ -5327,7 +5396,7 @@ fn render_convenience_wrapper(
     // Function body -- build the request as a multi-line struct literal,
     // sourcing required fields from positional args and optional fields from
     // opts.
-    render_public_default_punning_locals(output, params);
+    render_public_input_locals(output, params);
     render_function_name_inlining(output, params, package);
     output.push_str("\treturn ");
     output.push_str(&operation.func_name);
@@ -5354,12 +5423,8 @@ fn render_convenience_wrapper(
             output.push_str(&function_name_local_var_for_params(param, params));
         } else if param.function_args.is_some() {
             output.push_str(&param.param_name);
-        } else if param.default_punning_zero.is_some() {
+        } else if param.default_punning_zero.is_some() || param.flattened_fields.is_some() {
             output.push_str(&param.param_name);
-        } else if param.embed_in_options {
-            output.push('&');
-            output.push_str("opts.");
-            output.push_str(&param.field_name);
         } else {
             output.push_str("opts.");
             output.push_str(&param.field_name);
@@ -5427,11 +5492,46 @@ fn wrapper_param_signature(
     }
 }
 
-fn render_public_default_punning_locals(output: &mut String, params: &[RenderedUnpackedParam]) {
+fn render_public_input_locals(output: &mut String, params: &[RenderedUnpackedParam]) {
     for param in params
         .iter()
         .filter(|param| param_belongs_in_options(param))
     {
+        if let Some(fields) = &param.flattened_fields {
+            output.push_str(&format!("\tvar {} {}\n", param.param_name, param.go_type));
+            let conditions = fields
+                .iter()
+                .map(RenderedFlattenedField::presence_condition)
+                .collect::<Vec<_>>();
+            let condition = if conditions.is_empty() {
+                "false".to_string()
+            } else {
+                conditions.join(" || ")
+            };
+            output.push_str(&format!(
+                "\tif {condition} {{\n\t\t{} = &{}{{}}\n",
+                param.param_name,
+                param.go_type.trim_start_matches('*')
+            ));
+            for flattened in fields {
+                let field = &flattened.field;
+                if flattened.default_punning_zero.is_some() {
+                    output.push_str(&format!(
+                        "\t\tif {} {{\n\t\t\t{}.{} = &opts.{}\n\t\t}}\n",
+                        flattened.presence_condition(),
+                        param.param_name,
+                        field.name,
+                        field.name
+                    ));
+                } else {
+                    output.push_str(&format!(
+                        "\t\t{}.{} = opts.{}\n",
+                        param.param_name, field.name, field.name
+                    ));
+                }
+            }
+            output.push_str("\t}\n");
+        }
         if let Some(zero) = &param.default_punning_zero {
             output.push_str("\tvar ");
             output.push_str(&param.param_name);
@@ -5449,150 +5549,6 @@ fn render_public_default_punning_locals(output: &mut String, params: &[RenderedU
             output.push_str("\n\t}\n");
         }
     }
-}
-
-fn render_operation_params(
-    output: &mut String,
-    signature_params: &[(String, String)],
-    package: &GoPackageContext,
-) {
-    let multiline_signature = signature_params.len() + 1 > 3;
-    if multiline_signature {
-        output.push_str("(\n\tctx ");
-        output.push_str(&package.workflow_context_type());
-        output.push_str(",\n");
-        for (name, ty) in signature_params {
-            output.push('\t');
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(ty);
-            output.push_str(",\n");
-        }
-        output.push(')');
-    } else {
-        output.push_str("(ctx ");
-        output.push_str(&package.workflow_context_type());
-        for (name, ty) in signature_params {
-            output.push_str(", ");
-            output.push_str(name);
-            output.push(' ');
-            output.push_str(ty);
-        }
-        output.push(')');
-    }
-}
-
-fn render_typed_convenience_wrapper(
-    output: &mut String,
-    _service: &RenderedService<'_>,
-    operation: &RenderedOperation<'_>,
-    params: &[RenderedUnpackedParam],
-    package: &GoPackageContext,
-    visibility: &GoVisibility,
-) {
-    let primary = unary_primary_varargs_function_param(params)
-        .expect("typed wrapper requires a unary-capable primary function");
-    let function = primary.function.as_ref().unwrap();
-    let exported_name = format!("{}Typed", go_field_name(operation.name));
-    let options_name = format!("{}Options", go_field_name(operation.name));
-    let (arg_type, result_type) = typed_wrapper_type_parameter_names(primary);
-    let mut signature = vec![(
-        "opts".to_string(),
-        go_generic_reference(&options_name, &operation.model_type_parameters, false),
-    )];
-    let positional = ordered_positional_params(params);
-    let type_params =
-        wrapper_type_parameters(operation, params, Some(primary), package, visibility);
-    for (index, param) in positional.iter().enumerate() {
-        if param.field_name == primary.field_name {
-            let mut args = match &function.args {
-                FunctionArgsSpec::Varargs { prefix, .. } => prefix
-                    .iter()
-                    .map(|arg| go_authored_function_type_expr(&arg.field_type, package, visibility))
-                    .collect::<Vec<_>>(),
-                FunctionArgsSpec::Fixed(_) => Vec::new(),
-            };
-            args.push(arg_type.clone());
-            signature.push((
-                param.param_name.clone(),
-                format!("func({}) {result_type}", args.join(", ")),
-            ));
-            signature.push(("arg".to_string(), arg_type.clone()));
-        } else if param.function_args.as_ref() == Some(function) {
-            continue;
-        } else {
-            signature.push(wrapper_param_signature(
-                param,
-                params,
-                index + 1 == positional.len(),
-                package,
-                visibility,
-            ));
-        }
-    }
-    render_operation_doc_comment(
-        output,
-        operation,
-        &wrapper_input_docs(ordered_positional_params(params)),
-    );
-    output.push_str("func ");
-    output.push_str(&exported_name);
-    output.push('[');
-    output.push_str(
-        &type_params
-            .iter()
-            .map(|(name, constraint)| format!("{name} {constraint}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-    );
-    output.push(']');
-    render_operation_params(output, &signature, package);
-    output.push(' ');
-    render_operation_wrapper_return_type(output, package);
-    output.push_str(" {\n");
-    render_public_default_punning_locals(output, params);
-    render_function_name_inlining(output, params, package);
-    output.push_str("\treturn ");
-    output.push_str(&operation.func_name);
-    output.push_str("(ctx, ");
-    output.push_str(&operation.input_type);
-    output.push_str("{\n");
-    for param in params {
-        output.push_str("\t\t");
-        output.push_str(&param.field_name);
-        output.push_str(": ");
-        if param.field_name == primary.field_name {
-            output.push_str(&function_name_local_var_for_params(param, params));
-        } else if param.function_args.as_ref() == Some(function) {
-            output.push_str(&format!("{}{{arg}}", param.go_type));
-        } else if param
-            .function
-            .as_ref()
-            .is_some_and(function_value_is_string)
-        {
-            output.push_str(&param.param_name);
-        } else if has_explicit_args(param) {
-            output.push_str(&format!(
-                "{}{{{}}}",
-                param.go_type,
-                singular_args_public_param_name(param)
-            ));
-        } else if param.function.is_some() {
-            output.push_str(&function_name_local_var_for_params(param, params));
-        } else if param.function_args.is_some() {
-            output.push_str(&param.param_name);
-        } else if param.default_punning_zero.is_some() {
-            output.push_str(&param.param_name);
-        } else if param.embed_in_options {
-            output.push_str("&opts.");
-            output.push_str(&param.field_name);
-        } else {
-            output.push_str("opts.");
-            output.push_str(&param.field_name);
-        }
-        output.push_str(",\n");
-    }
-    output.push_str("\t})\n}\n");
 }
 
 /// Renders an exported forwarding wrapper for operations whose input type is

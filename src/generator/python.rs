@@ -4972,8 +4972,8 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         output.push_str(&operation.attr_name);
         output.push_str("(typed_input.input),\n        )\n");
     }
-    // An operation outside the generated set goes to the generic hook, so a
-    // plugin outside the SDK can serve its own System Nexus service.
+    // The generic hook gets each operation outside the generated set. Then a plugin
+    // outside the SDK can serve its own System Nexus service.
     output.push_str("    return await interceptor.start_system_nexus_operation(input)\n");
 
     output.push_str("\n\nclass _SystemNexusWorkflowOutboundInterceptorBase(abc.ABC):\n");

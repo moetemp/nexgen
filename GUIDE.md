@@ -29,6 +29,7 @@ of `@nexus` directives.
   - [Omitted Fields](#omitted-fields)
   - [Flattened Records](#flattened-records)
   - [Output Transforms](#output-transforms)
+- [Callers Outside a Workflow](#callers-outside-a-workflow)
 - [Function References](#function-references)
 - [Directive Glossary](#directive-glossary)
 
@@ -1055,6 +1056,46 @@ return handles.FromSignalWithStart(request, &result)
 ```
 
 ---
+
+## Callers Outside a Workflow
+
+With `--client`, the Python target also writes `client.py` beside `models.py`.
+It declares one caller per service, `<Service>Client`, for code that is not in a
+Workflow, such as an Activity or a client process. The caller does not choose
+how a call travels. It takes a `Transport`, an object with one method:
+
+```python
+class Transport(typing.Protocol):
+    async def call(
+        self,
+        *,
+        service: str,
+        operation: str,
+        input: temporalio.api.common.v1.Payload,
+    ) -> temporalio.api.common.v1.Payload: ...
+```
+
+Each caller method converts its request to a payload, gives it to the transport,
+and converts the answer. A proto-backed model travels as a `binary/protobuf`
+payload of its proto message, so a transport that moves proto bytes needs
+nothing else. An answer for it can be `binary/protobuf`, `json/protobuf` or
+`json/plain`. The caller takes a `data_converter`, the SDK default when none is
+given. Each payload and failure inside a proto-backed model goes through its
+converters and codec, as in Workflow code. The model's own payload doesn't,
+since the service reads it. A model that is not proto-backed is one user value,
+and the data converter converts and encodes it whole. A transport raises
+`TransportError` for a call that failed, with `retryable` set when the same call
+can succeed later.
+
+```python
+client = StartWorkflowServiceClient(my_transport)
+response = await client.cancel_workflow(request)
+```
+
+The caller supports operations whose input and output are models of the same
+module. An operation whose models take type parameters, or that returns a
+resource without a wire type, is a generation error. TypeScript and .NET do not
+generate a caller yet.
 
 ## Function References
 

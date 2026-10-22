@@ -182,8 +182,11 @@ cargo run --features advanced -- dotnet \
 
 Inputs are positional; pass more than one path (a file or a directory) to link
 additional WIT into the parser workspace. Generation produces definitions by
-default. Add `--native-api` to also generate native API bindings. Add `--format`
-to run a formatter after generation:
+default. Add `--native-api` to also generate native API bindings. Add `--client`
+to also generate, in Python, a `client.py` with one caller per service for code
+outside a Workflow. The caller sends each call through a `Transport` that you
+give, so the same caller works over HTTP, a bridge, or a test double. Add
+`--format` to run a formatter after generation:
 
 - Python: `ruff format`
 - TypeScript: `prettier --write`

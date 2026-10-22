@@ -580,7 +580,7 @@ fn python_client_long_poll_sends_milliseconds_for_an_integer_wait() {
 #[test]
 fn python_client_rejects_a_long_poll_method_that_another_method_names() {
     let wit = LOG_WIT.replace(
-        "  /// @nexus.one-way\n  append: func(request: append-request) -> append-response;",
+        "  append: func(request: append-request) -> append-response;",
         "  read-until-entries: func(request: append-request) -> append-response;",
     );
     let error = try_generate_with(client_config(), Language::Python, &wit, Vec::new()).unwrap_err();

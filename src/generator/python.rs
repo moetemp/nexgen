@@ -491,7 +491,7 @@ impl<'a> ApiPlanner<'a> {
                 let operations = service
                     .operations
                     .iter()
-                    .map(|operation| self.resolve_operation(operation))
+                    .map(|operation| self.resolve_operation(&service.name, operation))
                     .collect::<Result<Vec<_>>>()?;
 
                 Ok(RenderedService {
@@ -1147,6 +1147,7 @@ impl<'a> ApiPlanner<'a> {
 
     fn resolve_operation<'operation>(
         &mut self,
+        service_name: &str,
         operation: &'operation OperationSpec<PlannedFamily>,
     ) -> Result<RenderedOperation<'operation>> {
         let output_resource_return = operation.data.output_resource_return.clone();

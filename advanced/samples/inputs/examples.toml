@@ -21,3 +21,6 @@ languages = ["python", "typescript", "dotnet", "go"]
 [workflow-handle]
 languages = ["typescript"]
 system_nexus = true
+
+[stream-service]
+languages = ["python", "typescript", "dotnet"]

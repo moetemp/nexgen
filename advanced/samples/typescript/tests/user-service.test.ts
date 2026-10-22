@@ -29,6 +29,10 @@ describe("user-service generated output", () => {
           calls.push(["UpdateEmail", input]);
           return new User(input.userId, input.email);
         },
+        async notify() {},
+        async getProfile() {
+          return { displayName: "Alice" };
+        },
       });
 
       const result = await executeWorkflowWithNexus<{

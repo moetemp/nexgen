@@ -15,7 +15,8 @@ use crate::planning::{
     PlannedSpec, PlannedType, operation_input_model,
 };
 use crate::planning::{
-    PlannedResourceHolderField, RequestPlan, RequestPlanSource, ResolvedResourceBindingSource,
+    PlannedResourceHolderField, RequestPlan, RequestPlanField, RequestPlanSource,
+    ResolvedResourceBindingSource,
 };
 use crate::spec::{
     AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec,
@@ -446,7 +447,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(")\n    {\n");
         for field in &resource.fields {
             output.push_str("        ");
-            output.push_str(&csharp_type_name(&field.name));
+            output.push_str(&resource_property_name(&type_name, &field.name));
             output.push_str(" = ");
             output.push_str(&csharp_parameter_name(&field.name));
             output.push_str(";\n");
@@ -456,7 +457,7 @@ impl<'a> ApiPlanner<'a> {
             output.push_str("    public ");
             output.push_str(&self.resource_field_type(&field.kind, field.optional));
             output.push(' ');
-            output.push_str(&csharp_type_name(&field.name));
+            output.push_str(&resource_property_name(&type_name, &field.name));
             output.push_str(" { get; }\n");
         }
         if service.endpoint.is_none() {
@@ -486,7 +487,7 @@ impl<'a> ApiPlanner<'a> {
             output.push('\n');
         }
         for method in &resource.methods {
-            self.render_resource_method(output, service, method);
+            self.render_resource_method(output, service, &type_name, method);
         }
         output.push_str("}\n\n");
     }
@@ -495,6 +496,7 @@ impl<'a> ApiPlanner<'a> {
         &self,
         output: &mut String,
         service: &PlannedService,
+        type_name: &str,
         method: &PlannedResourceMethod,
     ) {
         let operation = match &method.binding {
@@ -539,6 +541,7 @@ impl<'a> ApiPlanner<'a> {
             } => {
                 let operation =
                     operation.expect("bound resource operation should exist on the service");
+                let request_plan = &with_resource_property_names(request_plan, type_name);
                 output.push_str("\n    {\n");
                 if service.endpoint.is_none() {
                     self.render_resource_method_inline_operation_body(
@@ -3983,6 +3986,40 @@ fn dotnet_endpoint_service_class_name(service: &PlannedService) -> String {
 
 fn service_endpoint_constant_name(service: &PlannedService) -> String {
     csharp_type_name(&format!("{}-endpoint", service.name))
+}
+
+// C# refuses a member with the name of its class, as a `stream` field on a `stream` resource.
+fn resource_property_name(type_name: &str, field_name: &str) -> String {
+    let name = csharp_type_name(field_name);
+    if name == type_name {
+        format!("{name}Value")
+    } else {
+        name
+    }
+}
+
+fn with_resource_property_names(plan: &RequestPlan, type_name: &str) -> RequestPlan {
+    match plan {
+        RequestPlan::Source(RequestPlanSource::ResourceField(name))
+            if csharp_type_name(name) == type_name =>
+        {
+            RequestPlan::Source(RequestPlanSource::ResourceField(format!("{name}-value")))
+        }
+        RequestPlan::Construct {
+            message_name,
+            fields,
+        } => RequestPlan::Construct {
+            message_name: message_name.clone(),
+            fields: fields
+                .iter()
+                .map(|field| RequestPlanField {
+                    value: with_resource_property_names(&field.value, type_name),
+                    ..field.clone()
+                })
+                .collect(),
+        },
+        RequestPlan::Source(_) => plan.clone(),
+    }
 }
 
 pub(in crate::generator) fn field_property_name(field: &RecordFieldSpec<PlannedFamily>) -> String {

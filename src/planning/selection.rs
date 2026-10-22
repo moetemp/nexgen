@@ -319,6 +319,7 @@ mod tests {
                                     args_type: text("CallbackArgs"),
                                 }),
                             }),
+                            offset: None,
                             data: (),
                         },
                     )]),

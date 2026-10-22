@@ -819,6 +819,10 @@ pub struct RecordFieldSpec<F: TypeFamily = AuthoredFamily> {
     pub required: bool,
     pub visibility: RecordFieldVisibility,
     pub function: Option<FunctionFieldSpec<F>>,
+    /// The offset type that `@nexus.offset` gives, in UpperCamelCase. The field
+    /// keeps its integer type. The name gives callers a type for the
+    /// positions they hold, shared by every field that uses it.
+    pub offset: Option<String>,
     pub data: F::FieldData,
 }
 
@@ -1082,6 +1086,7 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             required: self.required,
             visibility: self.visibility,
             function: self.function.map(|function| function.map_names_with(map)),
+            offset: self.offset,
             data,
         }
     }
@@ -1095,6 +1100,7 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             && !self.required
             && self.visibility == RecordFieldVisibility::Public
             && self.function.is_none()
+            && self.offset.is_none()
     }
 }
 

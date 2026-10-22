@@ -1703,6 +1703,34 @@ Cannot be combined with `@nexus.source`.
 
 ---
 
+### @nexus.offset
+
+**Placement:** Record field of an integer type, or an `option` of one
+**Syntax:** `@nexus.offset "<offset-type-name>"`
+
+Marks the field as a position in an ordered log, such as a stream offset. The
+name is a kebab-case WIT identifier. Every field that uses the same type shares
+one declaration, so an offset read from one operation can be passed to another.
+The field keeps its integer type, and the wire form does not change.
+
+```wit
+record read-request {
+  /// @nexus.offset "stream-offset"
+  from-offset: option<s64>,
+}
+```
+
+**Python:** the models module declares the type once.
+
+```python
+StreamOffset = typing.NewType("StreamOffset", int)
+```
+
+TypeScript and .NET accept the directive and declare no type. Cannot be combined
+with `@nexus.omit`.
+
+---
+
 ### @nexus.experimental
 
 **Placement:** Interface, record, variant, or operation (function) **Syntax:**

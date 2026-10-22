@@ -10,6 +10,7 @@ interface user-service {
 
     update-email: func(email: string) -> user-result;
     notify: func(reason: option<string>, channels: list<string>, sender: string);
+    get-profile: func() -> user-profile;
   }
 
   type user-result = own<user>;
@@ -30,7 +31,16 @@ interface user-service {
     sender: string,
   }
 
+  record get-profile-request {
+    user-id: string,
+  }
+
+  record user-profile {
+    display-name: string,
+  }
+
   get-user: func(request: get-user-request) -> user-result;
   update-email: func(request: update-email-request) -> user-result;
   notify: func(request: notify-request);
+  get-profile: func(request: get-profile-request) -> user-profile;
 }

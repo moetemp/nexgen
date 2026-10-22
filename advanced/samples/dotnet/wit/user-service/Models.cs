@@ -10,6 +10,20 @@ namespace Nexgen.UserService
 {
 
     [GeneratedCode("nexgen", null)]
+    public record GetProfileRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="GetProfileRequest"/> class.
+        /// </summary>
+        public GetProfileRequest(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
     public record GetUserRequest
     {
         /// <summary>
@@ -56,6 +70,20 @@ namespace Nexgen.UserService
 
         public string UserId { get; init; }
         public string Email { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public record UserProfile
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="UserProfile"/> class.
+        /// </summary>
+        public UserProfile(string displayName)
+        {
+            DisplayName = displayName;
+        }
+
+        public string DisplayName { get; init; }
     }
 
 }

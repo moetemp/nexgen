@@ -52,6 +52,14 @@ namespace Nexgen.UserService
             await RequireNexgenClient().ExecuteNexusOperationAsync(svc => svc.Notify(request)).ConfigureAwait(true);
         }
 
+        [GeneratedCode("nexgen", null)]
+        public async Task<UserProfile> GetProfileAsync()
+        {
+            var request = new GetProfileRequest(UserId);
+            var result = await RequireNexgenClient().ExecuteNexusOperationAsync<UserProfile>(svc => svc.GetProfile(request)).ConfigureAwait(true);
+            return result;
+        }
+
     }
 
 }

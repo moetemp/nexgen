@@ -6,8 +6,10 @@ import dataclasses
 import typing
 
 from ..models import (
+    GetProfileRequest,
     NotifyRequest,
     UpdateEmailRequest,
+    UserProfile,
 )
 
 
@@ -55,6 +57,20 @@ class User:
             input=request,
         )
         await handle
+
+    async def get_profile(
+        self,
+    ) -> UserProfile:
+        request = GetProfileRequest(
+            user_id=self.user_id,
+        )
+        nexus_client = getattr(self, "_nexus_client")
+        handle = await nexus_client.start_operation(
+            operation="GetProfile",
+            input=request,
+            output_type=UserProfile,
+        )
+        return await handle
 
 
 def bind_user_client(

@@ -557,6 +557,29 @@ Key observations:
   2. `_update_email(request)` -- internal standalone, takes request object
   3. `update_email(*, user_id, email)` -- public standalone convenience
 
+**Method parameters in Python.** WIT allows a required parameter after an
+optional one, and Python does not. When a required parameter follows one with a
+default, the method takes keyword arguments only (`self, *, ...`). A `list<T>`
+parameter defaults to empty, as in the standalone wrapper:
+
+```python
+async def append(self, sequence: int | None = None, texts: list[str] | None = None) -> None:
+    request = AppendRequest(log=self.log, sequence=sequence, texts=texts or [])
+```
+
+**A record as the identity.** A constructor field can be a record, such as a
+proto-backed reference. Each method then fills in the request field of that
+name, and a handle passes through Workflow input as its record:
+
+```wit
+resource log {
+  constructor(log: log-ref);
+
+  /// @nexus.operation "close-log"
+  close: func(reason: option<string>);
+}
+```
+
 ### Name-Binding: How Resource Methods Find Operations
 
 This is the non-obvious part. The generator does not require you to explicitly
@@ -703,6 +726,16 @@ return StartedWorkflow(
 
 If a resource constructor field name cannot be found in either, the generator
 raises `InvalidResource`.
+
+A response model field is always optional. When the resource field is required,
+the Python operation checks it first, and raises `RuntimeError` when the
+response leaves it empty:
+
+```python
+result = await handle
+if result.run_id is None:
+    raise RuntimeError("StartWorkflow answered without `run_id`")
+```
 
 ### Edge Cases and Error Conditions
 

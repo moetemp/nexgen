@@ -15,9 +15,9 @@ use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
     PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
-    PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
-    PlannedSpec, PlannedType, message_model_name, operation_input_model,
-    operation_output_direct_result,
+    PlannedResourceField, PlannedResourceMethod, PlannedResourceMethodBindingSpec,
+    PlannedResourceMethodResultKind, PlannedSpec, PlannedType, message_model_name,
+    operation_input_model, operation_output_direct_result,
 };
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{
@@ -846,6 +846,18 @@ impl<'a> ApiPlanner<'a> {
         if service.endpoint.is_none() {
             body.push_str("\n\n");
             render_resource_client_binder(&mut body, resource);
+        } else {
+            // The standalone wrappers and the methods name the proto module of an enum
+            // parameter.
+            module_imports.extend(
+                bound_operations
+                    .iter()
+                    .filter_map(|bound_operation| bound_operation.operation.unpacked_input.as_ref())
+                    .flat_map(|unpacked_input| {
+                        unpacked_input.parameter_imports.module_imports.iter()
+                    })
+                    .cloned(),
+            );
         }
         if !service.delay_load_temporalio_workflow {
             module_imports.insert("temporalio.workflow".to_string());
@@ -954,17 +966,37 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(&python_field_name(&method.name));
         output.push_str("(\n");
         output.push_str("        self,\n");
+        // Python refuses a parameter without a default after one with a default, and WIT
+        // allows any order, so such a method takes keyword arguments only.
+        let has_default = |param: &PlannedResourceField| {
+            param.optional || resource_method_list_param(param).is_some()
+        };
+        if method
+            .params
+            .iter()
+            .skip_while(|param| !has_default(param))
+            .any(|param| !has_default(param))
+        {
+            output.push_str("        *,\n");
+        }
         for param in &method.params {
             output.push_str("        ");
             output.push_str(&python_field_name(&param.name));
             output.push_str(": ");
-            output.push_str(&self.python_resource_field_annotation(
-                &param.kind,
-                param.optional,
-                param.function.as_ref(),
-            ));
-            if param.optional {
-                output.push_str(" = None");
+            if let Some(value) = resource_method_list_param(param) {
+                // A list request field defaults to empty, as in the standalone wrapper.
+                output.push_str("list[");
+                output.push_str(&self.python_resource_value_annotation(value));
+                output.push_str("] | None = None");
+            } else {
+                output.push_str(&self.python_resource_field_annotation(
+                    &param.kind,
+                    param.optional,
+                    param.function.as_ref(),
+                ));
+                if param.optional {
+                    output.push_str(" = None");
+                }
             }
             output.push_str(",\n");
         }
@@ -5718,6 +5750,7 @@ fn render_endpoint_service_object_operation_body(
             output.push('\n');
         } else if let Some(resource_return) = &operation.output_resource_return {
             output.push_str("        result = await handle\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
@@ -6024,7 +6057,7 @@ fn render_resource_method_inline_operation_body(
         return;
     };
 
-    render_resource_method_request(output, operation, request_plan);
+    render_resource_method_request(output, method, operation, request_plan);
     output.push_str("        nexus_client = getattr(self, \"_nexus_client\")\n");
     let returns_direct = operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
@@ -6086,6 +6119,7 @@ fn render_resource_method_inline_operation_body(
             output.push('\n');
         } else if let Some(resource_return) = &operation.output_resource_return {
             output.push_str("        result = await handle\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
@@ -6126,10 +6160,11 @@ fn render_resource_method_inline_operation_body(
 
 fn render_resource_method_request(
     output: &mut String,
+    method: &PlannedResourceMethod,
     operation: &RenderedOperation<'_>,
     request_plan: &RequestPlan,
 ) {
-    let request_expr = render_request_plan_python(request_plan);
+    let request_expr = render_request_plan_python(method, request_plan);
     output.push_str("        request = ");
     if let Some(unpacked_input) = &operation.unpacked_input {
         output.push_str(&unpacked_input.model_name);
@@ -6143,7 +6178,7 @@ fn render_resource_method_request(
                 output.push_str("            ");
                 output.push_str(&python_field_name(&field.field_name));
                 output.push('=');
-                output.push_str(&render_request_plan_python(&field.value));
+                output.push_str(&render_request_plan_python(method, &field.value));
                 output.push_str(",\n");
             }
         }
@@ -6193,7 +6228,7 @@ fn render_resource_method_operation_body(
     };
 
     let operation_attr_name = request_operation_function_name(service, operation);
-    render_resource_method_request(output, operation, request_plan);
+    render_resource_method_request(output, method, operation, request_plan);
     if *direct_return {
         if result_annotation == "None" {
             output.push_str("        await ");
@@ -6228,7 +6263,18 @@ fn render_resource_operation_call_args(output: &mut String, service: &RenderedSe
     }
 }
 
-fn render_request_plan_python(plan: &RequestPlan) -> String {
+fn render_request_plan_python(method: &PlannedResourceMethod, plan: &RequestPlan) -> String {
+    let render_method_param = |name: &str| {
+        let is_list = method
+            .params
+            .iter()
+            .any(|param| param.name == name && resource_method_list_param(param).is_some());
+        if is_list {
+            format!("{} or []", python_field_name(name))
+        } else {
+            python_field_name(name)
+        }
+    };
     render_request_plan(
         plan,
         python_field_name,
@@ -6242,8 +6288,47 @@ fn render_request_plan_python(plan: &RequestPlan) -> String {
             }
         },
         |name| format!("self.{}", python_field_name(name)),
-        python_field_name,
+        render_method_param,
     )
+}
+
+fn resource_method_list_param(param: &PlannedResourceField) -> Option<&PlannedType> {
+    match &param.kind {
+        PlannedType::List(value) if !param.optional && param.function.is_none() => Some(value),
+        _ => None,
+    }
+}
+
+/// A resource field that the response fills in is optional in the response model, so a
+/// required one is checked before the resource is built.
+fn render_resource_return_guards(
+    output: &mut String,
+    indent: &str,
+    operation: &RenderedOperation<'_>,
+    resource_return: &PlannedOperationResourceReturn,
+) {
+    for binding in &resource_return.bindings {
+        let ResolvedResourceBindingSource::ResultField {
+            proto_field_name, ..
+        } = &binding.source
+        else {
+            continue;
+        };
+        if binding.optional {
+            continue;
+        }
+        output.push_str(indent);
+        output.push_str("if result.");
+        output.push_str(proto_field_name);
+        output.push_str(" is None:\n");
+        output.push_str(indent);
+        output.push_str("    raise RuntimeError(");
+        output.push_str(&python_string_literal(&format!(
+            "{} answered without `{}`",
+            operation.wire_name, proto_field_name
+        )));
+        output.push_str(")\n");
+    }
 }
 
 fn resource_return_binding_expr_python(binding: &PlannedOperationResourceFieldBinding) -> String {
@@ -7508,6 +7593,7 @@ fn render_request_only_operation_function(
         output.push('\n');
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("    result = await handle\n");
+        render_resource_return_guards(output, "    ", operation, resource_return);
         if service.endpoint.is_none() {
             output.push_str("    resource = ");
         } else {

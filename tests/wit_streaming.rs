@@ -1,6 +1,7 @@
 //! WIT annotations for streaming services (`@nexus.offset` on record fields
-//! and `@nexus.long-poll` on operations) and the caller that `--client`
-//! generates for code outside a Workflow.
+//! and `@nexus.long-poll` on operations), the caller that `--client`
+//! generates for code outside a Workflow, and a resource handle whose methods
+//! take the rest of each request.
 #![cfg(feature = "advanced")]
 
 use std::collections::BTreeMap;
@@ -588,4 +589,185 @@ fn python_client_rejects_a_long_poll_method_that_another_method_names() {
         error.contains("its caller method `read_until_entries` is already declared"),
         "{error}"
     );
+}
+
+/// A handle that carries a proto-backed record, with a method whose parameters
+/// mix defaults, a list, a proto enum and a required value.
+const RUN_WIT: &str = r#"package acme:runs@1.0.0;
+
+world runs {
+  export run-service;
+}
+
+/// @nexus.endpoint "runs"
+interface run-service {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution"
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  /// @nexus.proto "temporal.api.enums.v1.ResetReapplyExcludeType"
+  enum reset-reapply-exclude-type {
+    reset-reapply-exclude-type-unspecified,
+    reset-reapply-exclude-type-signal,
+    reset-reapply-exclude-type-update,
+    reset-reapply-exclude-type-nexus,
+    reset-reapply-exclude-type-cancel-request,
+  }
+
+  /// @nexus.proto "temporal.api.enums.v1.ResetReapplyType"
+  enum reset-reapply-type {
+    reset-reapply-type-unspecified,
+    reset-reapply-type-signal,
+    reset-reapply-type-none,
+    reset-reapply-type-all-eligible,
+  }
+
+  // The handle carries the execution, so its methods take the rest of each request.
+  resource workflow-run {
+    constructor(workflow-execution: workflow-execution);
+
+    /// @nexus.operation "reset-workflow"
+    reset: func(
+      reason: option<string>,
+      reset-reapply-type: option<reset-reapply-type>,
+      reset-reapply-exclude-types: list<reset-reapply-exclude-type>,
+      workflow-task-finish-event-id: s64,
+    );
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.ResetWorkflowExecutionRequest"
+  record reset-workflow-request {
+    workflow-execution: option<workflow-execution>,
+    reason: option<string>,
+    workflow-task-finish-event-id: option<s64>,
+    reset-reapply-type: option<reset-reapply-type>,
+    reset-reapply-exclude-types: list<reset-reapply-exclude-type>,
+    /// @nexus.omit
+    namespace: placeholder,
+    /// @nexus.omit
+    request-id: placeholder,
+    /// @nexus.omit
+    post-reset-operations: placeholder,
+    /// @nexus.omit
+    identity: placeholder,
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.ResetWorkflowExecutionResponse"
+  record reset-workflow-response {
+    run-id: option<string>,
+  }
+
+  reset-workflow: func(request: reset-workflow-request) -> reset-workflow-response;
+}
+"#;
+
+#[test]
+fn python_resource_method_takes_keywords_when_a_required_parameter_follows_a_default() {
+    let files = generate(Language::Python, GenerationMode::NativeApi, RUN_WIT);
+    let run = file(&files, "_resources/workflow_run.py");
+
+    assert!(
+        run.contains("class WorkflowRun:\n    workflow_execution: WorkflowExecution\n"),
+        "{run}"
+    );
+    assert!(
+        run.contains(
+            "    async def reset(\n        self,\n        *,\n        reason: str | None = None,\n"
+        ),
+        "{run}"
+    );
+    assert!(
+        run.contains("        workflow_task_finish_event_id: int,\n    ) -> None:\n"),
+        "{run}"
+    );
+    assert!(
+        run.contains("            workflow_execution=self.workflow_execution,\n"),
+        "{run}"
+    );
+    assert!(run.contains("        await handle\n"), "{run}");
+    // The enum annotations name the proto module, so the module imports it.
+    assert!(
+        run.contains("\nimport temporalio.api.enums.v1.reset_pb2\n"),
+        "{run}"
+    );
+}
+
+#[test]
+fn python_resource_method_list_parameter_defaults_to_empty() {
+    let files = generate(Language::Python, GenerationMode::NativeApi, RUN_WIT);
+    let run = file(&files, "_resources/workflow_run.py");
+
+    assert!(
+        run.contains(
+            "        reset_reapply_exclude_types: list[temporalio.api.enums.v1.reset_pb2.ResetReapplyExcludeType.ValueType] | None = None,\n"
+        ),
+        "{run}"
+    );
+    assert!(
+        run.contains(
+            "            reset_reapply_exclude_types=reset_reapply_exclude_types or [],\n"
+        ),
+        "{run}"
+    );
+}
+
+#[test]
+fn python_resource_method_stays_positional_when_every_default_comes_last() {
+    let wit = RUN_WIT.replace(
+        "      workflow-task-finish-event-id: s64,\n    );",
+        "      workflow-task-finish-event-id: option<s64>,\n    );",
+    );
+    let files = generate(Language::Python, GenerationMode::NativeApi, &wit);
+    let run = file(&files, "_resources/workflow_run.py");
+
+    assert!(
+        run.contains("    async def reset(\n        self,\n        reason: str | None = None,\n"),
+        "{run}"
+    );
+    assert!(!run.contains("        *,\n"), "{run}");
+}
+
+#[test]
+fn python_checks_a_required_resource_field_that_the_response_fills_in() {
+    let root = project_root();
+    let sample =
+        fs::read_to_string(root.join("advanced/samples/inputs/start-workflow.wit")).unwrap();
+    let wit = sample.replace(
+        "constructor(namespace: string, workflow-id: string, run-id: option<string>);",
+        "constructor(namespace: string, workflow-id: string, run-id: string);",
+    );
+    assert_ne!(wit, sample);
+    let files = generate(Language::Python, GenerationMode::NativeApi, &wit);
+    let start = file(&files, "operations/start_workflow.py");
+
+    assert!(
+        start.contains(
+            "    result = await handle\n    if result.run_id is None:\n        \
+             raise RuntimeError(\"StartWorkflow answered without `run_id`\")\n    \
+             return StartedWorkflow(\n"
+        ),
+        "{start}"
+    );
+    assert!(start.contains("        run_id=result.run_id,\n"), "{start}");
+
+    // An optional resource field takes the response field as it is.
+    let files = generate(Language::Python, GenerationMode::NativeApi, &sample);
+    let start = file(&files, "operations/start_workflow.py");
+    assert!(!start.contains("is None:"), "{start}");
+    assert!(
+        start.contains("        run_id=result.run_id or None,\n"),
+        "{start}"
+    );
+}
+
+#[test]
+fn resource_handle_generates_in_typescript_and_dotnet() {
+    for language in [Language::TypeScript, Language::Dotnet] {
+        let files = generate(language, GenerationMode::NativeApi, RUN_WIT);
+        assert!(!files.is_empty(), "{language:?}");
+    }
 }

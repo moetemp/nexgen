@@ -1120,9 +1120,12 @@ Each caller method converts its request to a payload, gives it to the transport,
 and converts the answer. A proto-backed model travels as a `binary/protobuf`
 payload of its proto message, so a transport that moves proto bytes needs
 nothing else. An answer for it can be `binary/protobuf`, `json/protobuf` or
-`json/plain`. Other models go through the payload converter that the caller
-takes (the SDK default when none is given). A `payload_codec`, when given,
-encodes each request payload and decodes each answer. A transport raises
+`json/plain`. The caller takes a `data_converter` (the SDK default when none is
+given). Each payload and failure inside a proto-backed model, such as a Record
+body or a close failure, goes through its payload converter, failure converter
+and codec, as in Workflow code. The model's own payload doesn't, since the
+service reads it. A model that is not proto-backed is one user value, and the
+data converter converts and encodes it whole. A transport raises
 `TransportError` for a call that failed, with `retryable` set when the same call
 can succeed later.
 
@@ -1144,6 +1147,17 @@ wait is followed by a pause, from 50 ms and doubling up to 2 s. A
 
 ```python
 answer = await client.read_records_until_records(request, deadline=timedelta(seconds=30))
+```
+
+Each resource with methods also gets a class in `client.py`, of the same name as
+the Workflow class. It takes the caller and the constructor fields, and each
+method fills in the request from them and calls the caller. A method that
+returns a resource is left out, since the caller answers with the resource's
+wire model.
+
+```python
+stream = Stream(client, StreamRef(id="chat"))
+await stream.close(result=final_answer)
 ```
 
 When the long poll also names `offset-field` and `next-offset-field`, the caller
@@ -1892,9 +1906,10 @@ variant outcome {
 ### @nexus.doc
 
 **Placement:** Record, record field, variant, variant case, operation
-(function), resource, or resource method **Syntax:** `@nexus.doc "<text>" [returns="<text>"]` Per-language
-overrides: `python="<text>"` `typescript="<text>"` `go="<text>"`
-`dotnet="<text>"` `java="<text>"` Return docs: `python-returns="<text>"`
+(function), resource, or resource method **Syntax:**
+`@nexus.doc "<text>" [returns="<text>"]` Per-language overrides:
+`python="<text>"` `typescript="<text>"` `go="<text>"` `dotnet="<text>"`
+`java="<text>"` Return docs: `python-returns="<text>"`
 `typescript-returns="<text>"` `go-returns="<text>"` `dotnet-returns="<text>"`
 `java-returns="<text>"`
 

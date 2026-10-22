@@ -452,12 +452,14 @@ fn python_client_calls_each_operation_over_a_transport() {
         client.contains("            service=\"LogService\",\n            operation=operation,"),
         "{client}"
     );
-    // A model that is not proto-backed goes through the payload converter.
+    // A model that is not proto-backed is one user value, so the data converter
+    // converts and encodes it whole.
     assert!(
         client.contains(
             "    async def append(self, request: AppendRequest) -> AppendResponse:\n        \
-             payload = self._payload_converter.to_payload(request)\n        \
-             answer = await self._call(\"Append\", payload)\n"
+             [payload] = await self._data_converter.encode([request])\n        \
+             answer = await self._call(\"Append\", payload)\n        \
+             [value] = await self._data_converter.decode([answer], [AppendResponse])\n"
         ),
         "{client}"
     );
@@ -466,11 +468,9 @@ fn python_client_calls_each_operation_over_a_transport() {
         "{client}"
     );
     assert!(
-        client.contains("[payload] = await self._payload_codec.encode([payload])"),
-        "{client}"
-    );
-    assert!(
-        client.contains("[answer] = await self._payload_codec.decode([answer])"),
+        client.contains(
+            "        data_converter: temporalio.converter.DataConverter | None = None,\n"
+        ),
         "{client}"
     );
 }
@@ -487,17 +487,24 @@ fn python_client_converts_proto_backed_models_through_their_converters() {
     .unwrap();
     let client = file(&files, "client.py");
 
+    // A proto-backed model travels as is. The user payloads inside it go through the
+    // data converter and its codec.
     assert!(
         client.contains(
-            "        payload = _proto_payload(_CancelWorkflowRequestTransferTypeConverter().to_transfer_type(request))\n"
+            "        with self._converters():\n            \
+             message = _CancelWorkflowRequestTransferTypeConverter().to_transfer_type(request)\n        \
+             await _encode_payloads(message, self._data_converter.payload_codec)\n        \
+             payload = _proto_payload(message)\n"
         ),
         "{client}"
     );
     assert!(
         client.contains(
             "        converter = _CancelWorkflowResponseTransferTypeConverter()\n        \
-             return converter.from_transfer_type(\n            \
-             _proto_message(answer, converter.transfer_type),\n            CancelWorkflowResponse,\n        )\n"
+             message = _proto_message(answer, converter.transfer_type)\n        \
+             await _decode_payloads(message, self._data_converter.payload_codec)\n        \
+             with self._converters():\n            \
+             return converter.from_transfer_type(message, CancelWorkflowResponse)\n"
         ),
         "{client}"
     );
@@ -563,7 +570,7 @@ fn python_client_long_polls_an_operation_that_declares_it() {
          attempt = dataclasses.replace(attempt, from_offset=answer.next_offset)\n",
         "            if left <= 0:\n                return answer\n",
         "_LONG_POLL_FIRST_PAUSE = 0.05\n_LONG_POLL_LAST_PAUSE = 2.0\n",
-        "\nimport asyncio\nimport collections.abc\nimport dataclasses\nimport datetime\nimport typing\n",
+        "\nimport asyncio\nimport collections.abc\nimport contextlib\nimport dataclasses\nimport datetime\nimport typing\n",
     ] {
         assert!(
             client.contains(expected),
@@ -1090,5 +1097,52 @@ fn python_resource_and_its_methods_carry_their_docs() {
     assert!(
         log.contains(") -> ReadLogResponse:\n        \"\"\"Read one page of the log.\"\"\"\n"),
         "{log}"
+    );
+}
+
+#[test]
+fn python_client_resource_calls_the_caller_with_the_resource_filled_in() {
+    let files = generate_log_handle(client_config(), LOG_HANDLE_WIT);
+    let client = file(&files, "client.py");
+
+    for expected in [
+        "class Log:\n    \"\"\"A handle on one log.\"\"\"\n\n    def __init__(\n        self,\n        \
+         client: LogServiceClient,\n        log: LogRef,\n    ) -> None:\n",
+        "        self._client = client\n        self.log = log\n",
+        "        \"\"\"Read one page of the log.\"\"\"\n        request = ReadLogRequest(\n            \
+         log=self.log,\n",
+        "        return await self._client.read_log(request)\n",
+        "        async for item in self._client.iter_read_log(request, deadline=deadline):\n            \
+         yield item\n",
+        "    LogRef,\n",
+    ] {
+        assert!(
+            client.contains(expected),
+            "missing {expected:?} in\n{client}"
+        );
+    }
+}
+
+#[test]
+fn python_client_resource_leaves_out_a_method_that_returns_a_resource() {
+    let root = project_root();
+    let files = try_generate_with(
+        client_config(),
+        Language::Python,
+        &fs::read_to_string(root.join("advanced/samples/inputs/start-workflow.wit")).unwrap(),
+        Vec::new(),
+    )
+    .unwrap();
+    let client = file(&files, "client.py");
+
+    assert!(client.contains("class StartedWorkflow:\n"), "{client}");
+    assert!(client.contains("    async def cancel(\n"), "{client}");
+    assert!(
+        client.contains("        await self._client.cancel_workflow(request)\n"),
+        "{client}"
+    );
+    assert!(
+        !client.contains("async def restart_workflow(\n        self,\n        workflow"),
+        "{client}"
     );
 }

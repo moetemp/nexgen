@@ -84,6 +84,97 @@ mod format_tests {
     }
 
     #[test]
+    fn java_formats_output_directory_and_propagates_errors() {
+        let root = project_root();
+        let temp = tempfile::tempdir().unwrap();
+        let output = temp.path().join("output with spaces/generated");
+        fs::create_dir_all(&output).unwrap();
+        let neighbor = output.join("nested/UserCode.java");
+        fs::create_dir(output.join("nested")).unwrap();
+        fs::write(&neighbor, "class UserCode {}").unwrap();
+        let manifest = output.join("notes.txt");
+        fs::write(&manifest, "leave alone").unwrap();
+        let formatter = temp.path().join("google-java-format");
+        fs::write(
+            &formatter,
+            r#"#!/bin/sh
+[ "$1" = --replace ] || exit 1
+shift
+printf 'invoked\n' >> "$FORMAT_LOG"
+for arg do
+  case "$arg" in
+    *.java)
+      printf '\n// formatted by test\n' >> "$arg"
+      ;;
+  esac
+done
+"#,
+        )
+        .unwrap();
+        let mut permissions = fs::metadata(&formatter).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&formatter, permissions).unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_nexgen"));
+        command
+            .env("PATH", formatter_path_env(temp.path()))
+            .env("FORMAT_LOG", temp.path().join("format.log"))
+            .args([
+                "java",
+                root.join("samples/schemas/chat.nexusrpc.yaml")
+                    .to_str()
+                    .unwrap(),
+                "--output",
+                output.to_str().unwrap(),
+                "--package-name",
+                "test.generated",
+                "--format",
+            ]);
+        assert!(command.status().unwrap().success());
+        let log = fs::read_to_string(temp.path().join("format.log")).unwrap();
+        assert_eq!(log.lines().count(), 1);
+        assert!(
+            fs::read_to_string(output.join("Message.java"))
+                .unwrap()
+                .contains("// formatted by test")
+        );
+        assert_eq!(
+            fs::read_to_string(&neighbor).unwrap(),
+            "class UserCode {}\n// formatted by test\n"
+        );
+        assert_eq!(fs::read_to_string(&manifest).unwrap(), "leave alone");
+
+        fs::write(formatter, "#!/bin/sh\nexit 23\n").unwrap();
+        let failure = command.output().unwrap();
+        assert!(!failure.status.success());
+        assert!(String::from_utf8_lossy(&failure.stderr).contains("failed for"));
+    }
+
+    #[test]
+    fn java_reports_missing_preinstalled_formatter() {
+        let root = project_root();
+        let temp = tempfile::tempdir().unwrap();
+        let failure = Command::new(env!("CARGO_BIN_EXE_nexgen"))
+            .env("PATH", temp.path())
+            .args([
+                "java",
+                root.join("samples/schemas/chat.nexusrpc.yaml")
+                    .to_str()
+                    .unwrap(),
+                "--output",
+                temp.path().join("generated").to_str().unwrap(),
+                "--package-name",
+                "test.generated",
+                "--format",
+            ])
+            .output()
+            .unwrap();
+        assert!(!failure.status.success());
+        let stderr = String::from_utf8_lossy(&failure.stderr);
+        assert!(stderr.contains("google-java-format"), "{stderr}");
+        assert!(stderr.contains("failed to run formatter"), "{stderr}");
+    }
+
+    #[test]
     fn cli_generates_and_formats_typescript_file() {
         let root = project_root();
         let temp_dir = unique_temp_dir("typescript-format");

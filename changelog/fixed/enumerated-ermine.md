@@ -1,1 +1,1 @@
-Python, TypeScript and .NET use the generated enum of a WIT enum with `@nexus.proto` and no replacement type for fields of that proto enum, also when only an operation reaches the record. Before, the Python and TypeScript models used an undeclared enum name, and the .NET models used the proto enum.
+A field whose type is a WIT enum with `@nexus.proto` now uses the generated enum in Python, TypeScript and .NET. Before, Python and TypeScript referenced an enum they didn't generate, and .NET used the proto enum.

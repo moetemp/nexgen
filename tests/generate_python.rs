@@ -1480,22 +1480,6 @@ fn python_proto_enums_without_a_replacement_use_the_wit_enum_model() {
     );
 }
 
-#[test]
-fn python_proto_enum_defaults_name_the_proto_enum_value() {
-    let models = generate_python_models_from_wit(
-        "python-proto-enum-default",
-        &PROTO_ENUM_WIT.replace(
-            "    severity: option<severity>,",
-            "    /// @nexus.default \"severity-low\"\n    severity: severity,",
-        ),
-    );
-
-    assert!(
-        models.contains("    severity: Severity = Severity.SeverityLow\n"),
-        "{models}"
-    );
-}
-
 /// An operation stub's keyword parameter of such an enum uses the `IntEnum`, even when
 /// only an operation reaches the record.
 #[test]

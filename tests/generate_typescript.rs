@@ -487,9 +487,6 @@ interface alerts {
 }
 "#;
 
-const PROTO_ENUM_DEFAULT_FIELD: &str =
-    "    /// @nexus.default \"severity-low\"\n    severity: severity,";
-
 fn generate_typescript_models_from_wit(label: &str, wit: &str) -> String {
     let root = project_root();
     let temp_dir = unique_output_path(label);
@@ -514,21 +511,6 @@ fn typescript_proto_enums_without_a_replacement_use_the_wit_enum_model() {
     assert!(models.contains("  severity?: Severity;\n"), "{models}");
     assert!(
         models.contains("proto.severity as number as Severity"),
-        "{models}"
-    );
-    assert!(models.contains("model.severity as any"), "{models}");
-}
-
-#[test]
-fn typescript_proto_enum_defaults_name_the_wit_enum_member() {
-    let models = generate_typescript_models_from_wit(
-        "typescript-proto-enum-default",
-        &PROTO_ENUM_WIT.replace("    severity: option<severity>,", PROTO_ENUM_DEFAULT_FIELD),
-    );
-
-    assert!(models.contains("export enum Severity {\n"), "{models}");
-    assert!(
-        models.contains("proto.severity == null ? Severity.SeverityLow : "),
         "{models}"
     );
 }

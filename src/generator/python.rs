@@ -534,7 +534,12 @@ impl<'a> ApiPlanner<'a> {
             });
             self.resolve_message_value_conversion(&model_type)?;
         }
-        let model_refs = self.models.values().collect::<Vec<_>>();
+        let holders = resource_holders(api_plan);
+        let model_refs = self
+            .models
+            .values()
+            .filter(|model| !holders.contains_key(&model.full_name))
+            .collect::<Vec<_>>();
         let variant_refs = self.variants.values().collect::<Vec<_>>();
         let model_fragments =
             self.render_model_fragments(model_refs.as_slice(), variant_refs.as_slice())?;
@@ -630,6 +635,11 @@ impl<'a> ApiPlanner<'a> {
                     .iter()
                     .map(|resource| resource.type_name.clone())
             })
+            .chain(
+                resource_holders(self.api_plan)
+                    .into_values()
+                    .map(|(model_name, _)| model_name),
+            )
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -713,7 +723,7 @@ impl<'a> ApiPlanner<'a> {
         if !resource_names.is_empty() {
             files.insert(
                 "_resources/__init__.py",
-                render_resources_package_init(services),
+                render_resources_package_init(services, self.api_plan),
                 GeneratedFileOrigin::fixed("generated Python resources package initializer"),
             )?;
         }
@@ -857,6 +867,17 @@ impl<'a> ApiPlanner<'a> {
             body.push_str("\n\n");
         }
         self.render_resource(&mut body, service, resource, bound_operations);
+        for (full_name, (_, resource_type)) in resource_holders(self.api_plan) {
+            if resource_type != resource.type_name {
+                continue;
+            }
+            let model = &self.models[&full_name];
+            body.push_str("\n\n");
+            render_record_model(&mut body, model, None);
+            for field in &model.fields {
+                module_imports.extend(field.imports.module_imports.iter().cloned());
+            }
+        }
         if !bound_operations.is_empty() && service.endpoint.is_some() {
             body.push_str("\n\n");
             for (index, bound_operation) in bound_operations.iter().enumerate() {
@@ -931,9 +952,15 @@ impl<'a> ApiPlanner<'a> {
                 self.model_hoists,
             );
         }
+        let own_names = resource_holders(self.api_plan)
+            .into_values()
+            .filter(|(_, resource_type)| *resource_type == resource.type_name)
+            .map(|(model_name, _)| model_name)
+            .chain(std::iter::once(resource.type_name.clone()))
+            .collect::<BTreeSet<_>>();
         let used_resource_names = used_python_symbol_imports(&body, resource_names)
             .into_iter()
-            .filter(|name| name != &resource.type_name)
+            .filter(|name| !own_names.contains(name))
             .collect::<Vec<_>>();
         if !used_resource_names.is_empty() {
             render_named_python_import(&mut output, ".", &used_resource_names);
@@ -4401,25 +4428,10 @@ fn render_models_module(
         return Ok(None);
     }
 
-    // A result record that holds a resource names the resource class, and the resource
-    // module imports the models, so the class comes in for type checking only.
-    let held_resources = api_plan
-        .services
-        .iter()
-        .flat_map(|service| service.operations.iter())
-        .filter_map(|operation| operation.data.output_resource_return.as_ref())
-        .filter(|resource_return| resource_return.holder.is_some())
-        .map(|resource_return| resource_return.resource_type_name.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
-    let import_scan_body = if model_hoists.is_none()
-        && api_plan.data.module_imports.is_empty()
-        && held_resources.is_empty()
-    {
+    let import_scan_body = if model_hoists.is_none() && api_plan.data.module_imports.is_empty() {
         body.clone()
     } else {
         format!("{body}\ntyping.TYPE_CHECKING\n")
@@ -4465,10 +4477,6 @@ fn render_models_module(
             output.push('\n');
         }
         render_support_import(&mut output, &body, support_package, sourced_support_import);
-    }
-    if !held_resources.is_empty() {
-        output.push_str("\nif typing.TYPE_CHECKING:\n");
-        render_named_python_import_with_indent(&mut output, "._resources", &held_resources, "    ");
     }
     output.push('\n');
     output.push('\n');
@@ -5257,11 +5265,49 @@ async def _decode_payloads(
         payload.CopyFrom(decoded)
 "#;
 
-fn render_resources_package_init(services: &[RenderedService<'_>]) -> String {
+/// The result records that hold a resource, by full name, with the model name and the
+/// resource type. Each one lives in its resource's module, since the resource module imports
+/// the models and the record names the resource class.
+fn resource_holders(api_plan: &PlannedSpec) -> BTreeMap<String, (String, String)> {
+    api_plan
+        .services
+        .iter()
+        .filter(|service| !service.client_only)
+        .flat_map(|service| service.operations.iter())
+        .filter_map(|operation| operation.data.output_resource_return.as_ref())
+        .filter_map(|resource_return| {
+            resource_return.holder.as_ref().map(|holder| {
+                (
+                    holder.record_full_name.clone(),
+                    (
+                        holder.model_name.clone(),
+                        resource_return.resource_type_name.clone(),
+                    ),
+                )
+            })
+        })
+        .collect()
+}
+
+fn render_resources_package_init(
+    services: &[RenderedService<'_>],
+    api_plan: &PlannedSpec,
+) -> String {
     let resources = services
         .iter()
         .flat_map(|service| service.resources.iter())
         .collect::<Vec<_>>();
+    let holders = resource_holders(api_plan);
+    let names_of = |resource: &PlannedResource| {
+        std::iter::once(resource.type_name.clone())
+            .chain(
+                holders
+                    .values()
+                    .filter(|(_, resource_type)| *resource_type == resource.type_name)
+                    .map(|(model_name, _)| model_name.clone()),
+            )
+            .collect::<Vec<_>>()
+    };
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
@@ -5269,14 +5315,16 @@ fn render_resources_package_init(services: &[RenderedService<'_>]) -> String {
         render_named_python_import(
             &mut output,
             &format!(".{}", resource_module_name(resource)),
-            std::slice::from_ref(&resource.type_name),
+            &names_of(resource),
         );
     }
     output.push_str("\n__all__ = [\n");
     for resource in &resources {
-        output.push_str("    ");
-        output.push_str(&python_string_literal(&resource.type_name));
-        output.push_str(",\n");
+        for name in names_of(resource) {
+            output.push_str("    ");
+            output.push_str(&python_string_literal(&name));
+            output.push_str(",\n");
+        }
     }
     output.push_str("]\n");
     output
@@ -8216,26 +8264,27 @@ fn render_resource_holder_return(
     output.push_str("    return ");
     output.push_str(&holder.model_name);
     output.push_str("(\n");
-    output.push_str("        ");
-    output.push_str(&python_field_name(&holder.resource_field));
-    output.push('=');
-    output.push_str(&resource_return.resource_type_name);
-    output.push_str("(\n");
-    for binding in &resource_return.bindings {
-        output.push_str("            ");
-        output.push_str(&python_field_name(&binding.field_name));
-        output.push('=');
-        output.push_str(&resource_return_binding_expr_python(binding));
-        output.push_str(",\n");
-    }
-    output.push_str("        ),\n");
-    for field in &holder.other_fields {
-        let name = python_field_name(field);
+    for field in &holder.fields {
+        let name = python_field_name(&field.name);
         output.push_str("        ");
         output.push_str(&name);
-        output.push_str("=result.");
-        output.push_str(&name);
-        output.push_str(",\n");
+        if !field.resource {
+            output.push_str("=result.");
+            output.push_str(&name);
+            output.push_str(",\n");
+            continue;
+        }
+        output.push('=');
+        output.push_str(&resource_return.resource_type_name);
+        output.push_str("(\n");
+        for binding in &resource_return.bindings {
+            output.push_str("            ");
+            output.push_str(&python_field_name(&binding.field_name));
+            output.push('=');
+            output.push_str(&resource_return_binding_expr_python(binding));
+            output.push_str(",\n");
+        }
+        output.push_str("        ),\n");
     }
     output.push_str("    )\n");
 }

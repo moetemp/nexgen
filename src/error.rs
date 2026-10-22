@@ -216,7 +216,7 @@ pub enum Error {
     IncompleteOperationOutputTransform { service: String, operation: String },
 
     #[error(
-        "{language} cannot generate operation `{service}.{operation}`: its result record holds a resource, which only Python generates"
+        "{language} cannot generate operation `{service}.{operation}`: its result record holds a resource, which this target doesn't generate"
     )]
     UnsupportedResourceHolder {
         language: Language,

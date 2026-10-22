@@ -1,1 +1,1 @@
-A Python operation can return a proto-backed record that holds a resource in one `own<T>` field. The resource binds from the record's message, the other fields come from the same message, and the message travels as a wire record named after it. The other targets refuse such a record.
+An operation can return a proto-backed record that holds a resource in one `own<T>` field, in Python, TypeScript, .NET and Go. The resource binds from the record's message, the other fields come from the same message, and the message travels as a wire record named after it.

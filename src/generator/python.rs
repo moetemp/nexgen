@@ -891,7 +891,7 @@ impl<'a> ApiPlanner<'a> {
             body.push_str("\n\n");
             render_resource_client_binder(&mut body, resource);
         } else {
-            // The standalone wrappers and the methods name the proto module of an enum
+            // The standalone wrappers and the methods refer to the proto module of an enum
             // parameter.
             module_imports.extend(
                 bound_operations
@@ -1071,7 +1071,7 @@ impl<'a> ApiPlanner<'a> {
                 for method in &resource.methods {
                     self.render_client_resource_method(&mut output, service, method);
                 }
-                // The methods name the proto module of an enum parameter.
+                // The methods refer to the proto module of an enum parameter.
                 module_imports.extend(
                     service
                         .operations

@@ -1184,31 +1184,6 @@ async for entry in client.iter_read(request):
     print(entry.offset)
 ```
 
-Each resource with methods also gets a class in `client.py`, of the same name as
-the Workflow class. It takes the caller and the constructor fields, and each
-method fills in the request from them and calls the caller. A caller method
-whose operation returns such a resource gives back an instance bound to the
-caller. A result record that holds a resource comes back as its wire model.
-
-```python
-writer = await writers.open_writer(OpenWriterRequest(stream=ref, producer=producer))
-answer = await writer.write_records([record])
-stream = Stream(client, StreamRef(id="chat"))
-await stream.close(result=final_answer)
-```
-
-When the long poll also names `offset-field` and `next-offset-field`, the caller
-gets `iter_<operation>`, an async iterator over the items of the result list.
-Each page is one `_until_` call, so it waits and backs off by the same rules.
-The next page starts at the answer's next offset. The iterator ends after an
-answer with the done field set, or when its optional `deadline` passes. With no
-deadline, it ends only on done. The idle timeout counts within one page.
-
-```python
-async for record in client.iter_read_records(request):
-    print(record.offset)
-```
-
 A resource method bound to such an operation gets `iter_<method>` too, with the
 method's parameters and a keyword `deadline`. It fills the request from `self`,
 calls the operation once per page, sets the wait field to what is left of the

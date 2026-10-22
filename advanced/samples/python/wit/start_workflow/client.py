@@ -240,6 +240,8 @@ class StartWorkflowServiceClient:
 
 
 class StartedWorkflow:
+    """A handle on one started Workflow."""
+
     def __init__(
         self,
         client: StartWorkflowServiceClient,
@@ -257,6 +259,7 @@ class StartedWorkflow:
         self,
         reason: str | None = None,
     ) -> None:
+        """Request the cancellation of the Workflow."""
         request = CancelWorkflowRequest(
             workflow_execution=WorkflowExecution(
                 workflow_id=self.workflow_id, run_id=self.run_id

@@ -1051,11 +1051,19 @@ impl<'a> ApiPlanner<'a> {
                 }
                 output.push_str("    ) -> None:\n");
                 output.push_str("        \"\"\"Bind the handle to a caller.\"\"\"\n");
-                output.push_str("        self._client = client\n");
+                output.push_str("        self._client: ");
+                output.push_str(&client_class_name(service));
+                output.push_str(" = client\n");
                 for field in &resource.fields {
                     let name = python_field_name(&field.name);
                     output.push_str("        self.");
                     output.push_str(&name);
+                    output.push_str(": ");
+                    output.push_str(&self.python_resource_field_annotation(
+                        &field.kind,
+                        field.optional,
+                        field.function.as_ref(),
+                    ));
                     output.push_str(" = ");
                     output.push_str(&name);
                     output.push('\n');
@@ -1118,8 +1126,9 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(":\n");
         render_python_docstring(output, "        ", method.doc.as_deref(), &[], None, false);
         render_resource_method_request(output, method, operation, request_plan);
+        // A method with no result drops the answer.
         output.push_str(if result_annotation == "None" {
-            "        await self._client."
+            "        _ = await self._client."
         } else {
             "        return await self._client."
         });
@@ -4712,11 +4721,6 @@ fn render_client_module(
             }
         }
     }
-    body.push_str(resource_classes);
-    model_names.extend(used_python_symbol_imports(
-        resource_classes,
-        all_model_names,
-    ));
 
     // A helper that no method uses would be dead code in the module.
     let uses_proto = services

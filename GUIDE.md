@@ -1151,11 +1151,13 @@ answer = await client.read_records_until_records(request, deadline=timedelta(sec
 
 Each resource with methods also gets a class in `client.py`, of the same name as
 the Workflow class. It takes the caller and the constructor fields, and each
-method fills in the request from them and calls the caller. A method that
-returns a resource is left out, since the caller answers with the resource's
-wire model.
+method fills in the request from them and calls the caller. A caller method
+whose operation returns such a resource gives back an instance bound to the
+caller. A result record that holds a resource comes back as its wire model.
 
 ```python
+writer = await writers.open_writer(OpenWriterRequest(stream=ref, producer=producer))
+answer = await writer.write_records([record])
 stream = Stream(client, StreamRef(id="chat"))
 await stream.close(result=final_answer)
 ```
@@ -1899,6 +1901,24 @@ variant outcome {
   success(string),
   failure(string),
 }
+```
+
+---
+
+### @nexus.client-only
+
+**Placement:** Interface **Syntax:** `@nexus.client-only` (no arguments)
+
+Marks a service that only code outside a Workflow calls, such as an in-process
+call surface of a Worker extension. The Python target generates its models, its
+caller and its resource classes in `client.py`, and no Workflow stubs, services
+or System Nexus dispatch. It cannot have `@nexus.endpoint`. The other targets
+refuse it.
+
+```wit
+/// @nexus.service-name "temporal.sdk.streams.v1.StreamWriter"
+/// @nexus.client-only
+interface stream-writer { ... }
 ```
 
 ---

@@ -16,9 +16,8 @@ use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
     PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
     PlannedResourceField, PlannedResourceHolder, PlannedResourceMethod,
-    PlannedResourceMethodBindingSpec, PlannedResourceMethodResult, PlannedResourceMethodResultKind,
-    PlannedSpec, PlannedType, message_model_name, operation_input_model,
-    operation_output_direct_result,
+    PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind, PlannedSpec, PlannedType,
+    message_model_name, operation_input_model, operation_output_direct_result,
 };
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{
@@ -485,9 +484,18 @@ impl<'a> ApiPlanner<'a> {
 
     fn build(mut self, module_origin: GeneratedFileOrigin) -> Result<PythonGenerationResult> {
         let api_plan = self.api_plan;
+        // A client-only service gets no Workflow surface, so it comes last and only the
+        // caller module sees it.
         let services = api_plan
             .services
             .iter()
+            .filter(|service| !service.client_only)
+            .chain(
+                api_plan
+                    .services
+                    .iter()
+                    .filter(|service| service.client_only),
+            )
             .map(|service| {
                 let operations = service
                     .operations
@@ -503,6 +511,7 @@ impl<'a> ApiPlanner<'a> {
                     experimental: service.experimental,
                     deprecated: service.deprecated,
                     delay_load_temporalio_workflow: service.delay_load_temporalio_workflow,
+                    client_only: service.client_only,
                     operations,
                     resources: service
                         .resources
@@ -538,8 +547,13 @@ impl<'a> ApiPlanner<'a> {
                 .chain(offset_types.values()),
         )?;
 
+        let workflow_services = services
+            .iter()
+            .take_while(|service| !service.client_only)
+            .count();
         let (files, exported_names) = self.render_package(
             &model_fragments,
+            &services[..workflow_services],
             &services,
             &offset_types.keys().cloned().collect::<Vec<_>>(),
             module_origin,
@@ -565,6 +579,7 @@ impl<'a> ApiPlanner<'a> {
         &self,
         model_fragments: &RenderedModelFragments,
         services: &[RenderedService<'_>],
+        client_services: &[RenderedService<'_>],
         offset_types: &[String],
         module_origin: GeneratedFileOrigin,
     ) -> Result<(GeneratedFileMap, BTreeSet<String>)> {
@@ -702,11 +717,17 @@ impl<'a> ApiPlanner<'a> {
                 GeneratedFileOrigin::fixed("generated Python resources package initializer"),
             )?;
         }
-        if crate::nexgen_config::current().client && !services.is_empty() {
-            let (resource_classes, resource_imports) = self.render_client_resources(services);
+        if crate::nexgen_config::current().client && !client_services.is_empty() {
+            let (resource_classes, resource_imports) =
+                self.render_client_resources(client_services);
             files.insert(
                 "client.py",
-                render_client_module(services, &resource_classes, &resource_imports, &model_names)?,
+                render_client_module(
+                    client_services,
+                    &resource_classes,
+                    &resource_imports,
+                    &model_names,
+                )?,
                 module_origin.clone(),
             )?;
         }
@@ -1044,17 +1065,6 @@ impl<'a> ApiPlanner<'a> {
         else {
             return;
         };
-        // The caller answers with the wire model of a resource, so a method that returns a
-        // resource stays on the Workflow class only.
-        if matches!(
-            &method.result,
-            Some(PlannedResourceMethodResult {
-                kind: PlannedResourceMethodResultKind::Resource { .. },
-                ..
-            })
-        ) {
-            return;
-        }
         let Some(operation) = service
             .operations
             .iter()
@@ -1062,6 +1072,15 @@ impl<'a> ApiPlanner<'a> {
         else {
             return;
         };
+        // The caller answers a result record that holds a resource with its wire model, so
+        // such a method stays on the Workflow class only.
+        if operation
+            .output_resource_return
+            .as_ref()
+            .is_some_and(|resource_return| resource_return.holder.is_some())
+        {
+            return;
+        }
         let result_annotation = self.python_resource_method_result_annotation(method);
         output.push_str("\n    async def ");
         output.push_str(&python_field_name(&method.name));
@@ -2914,6 +2933,7 @@ struct RenderedService<'a> {
     experimental: bool,
     deprecated: bool,
     delay_load_temporalio_workflow: bool,
+    client_only: bool,
     operations: Vec<RenderedOperation<'a>>,
     resources: Vec<PlannedResource>,
 }
@@ -4614,7 +4634,26 @@ fn render_client_module(
             {
                 model_names.insert(format!("_{proto_model}TransferTypeConverter"));
             }
-            render_client_method(&mut body, operation, &input_model, output_model.as_deref());
+            // An operation that returns a resource with a client class gives back an instance
+            // of it, bound to this caller.
+            let client_resource =
+                operation
+                    .output_resource_return
+                    .as_ref()
+                    .filter(|resource_return| {
+                        resource_return.holder.is_none()
+                            && service.resources.iter().any(|resource| {
+                                resource.type_name == resource_return.resource_type_name
+                                    && !resource.methods.is_empty()
+                            })
+                    });
+            render_client_method(
+                &mut body,
+                operation,
+                &input_model,
+                output_model.as_deref(),
+                client_resource,
+            );
             if let (Some(long_poll), Some(output_model)) =
                 (&operation.client_long_poll, output_model.as_deref())
             {
@@ -4714,6 +4753,7 @@ fn render_client_method(
     operation: &RenderedOperation<'_>,
     input_model: &str,
     output_model: Option<&str>,
+    client_resource: Option<&PlannedOperationResourceReturn>,
 ) {
     output.push('\n');
     output.push_str("    async def ");
@@ -4721,7 +4761,12 @@ fn render_client_method(
     output.push_str("(self, request: ");
     output.push_str(input_model);
     output.push_str(") -> ");
-    output.push_str(output_model.unwrap_or("None"));
+    output.push_str(
+        client_resource
+            .map(|resource_return| resource_return.resource_type_name.as_str())
+            .or(output_model)
+            .unwrap_or("None"),
+    );
     output.push_str(":\n");
     render_python_docstring(
         output,
@@ -4766,9 +4811,27 @@ fn render_client_method(
             output.push_str(codec);
             output.push_str(")\n");
             output.push_str("        with self._converters():\n");
-            output.push_str("            return converter.from_transfer_type(message, ");
+            let Some(resource_return) = client_resource else {
+                output.push_str("            return converter.from_transfer_type(message, ");
+                output.push_str(output_model);
+                output.push_str(")\n");
+                return;
+            };
+            output.push_str("            result = converter.from_transfer_type(message, ");
             output.push_str(output_model);
             output.push_str(")\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
+            output.push_str("        return ");
+            output.push_str(&resource_return.resource_type_name);
+            output.push_str("(\n            self,\n");
+            for binding in &resource_return.bindings {
+                output.push_str("            ");
+                output.push_str(&python_field_name(&binding.field_name));
+                output.push('=');
+                output.push_str(&resource_return_binding_expr_python(binding));
+                output.push_str(",\n");
+            }
+            output.push_str("        )\n");
         }
         None => {
             output.push_str("        [value] = await self._data_converter.decode([answer], [");

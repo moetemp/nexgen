@@ -1124,7 +1124,7 @@ fn python_client_resource_calls_the_caller_with_the_resource_filled_in() {
 }
 
 #[test]
-fn python_client_resource_leaves_out_a_method_that_returns_a_resource() {
+fn python_client_resource_and_caller_give_back_client_resources() {
     let root = project_root();
     let files = try_generate_with(
         client_config(),
@@ -1141,10 +1141,77 @@ fn python_client_resource_leaves_out_a_method_that_returns_a_resource() {
         client.contains("        await self._client.cancel_workflow(request)\n"),
         "{client}"
     );
+    // An operation that returns a resource gives back the client class, bound to the
+    // caller, so a method that returns one is on the client class too.
     assert!(
-        !client.contains("async def restart_workflow(\n        self,\n        workflow"),
+        client.contains(
+            "    async def start_workflow(self, request: StartWorkflowRequest) -> StartedWorkflow:\n"
+        ),
         "{client}"
     );
+    assert!(
+        client.contains(
+            "        return StartedWorkflow(\n            self,\n            namespace=request.namespace,\n"
+        ),
+        "{client}"
+    );
+    assert!(
+        client.contains("        return await self._client.restart_workflow(request)\n"),
+        "{client}"
+    );
+}
+
+#[test]
+fn python_client_only_service_gets_a_caller_and_no_workflow_surface() {
+    let wit = LOG_HANDLE_WIT.replace(
+        "/// @nexus.endpoint \"logs\"\ninterface log-service {",
+        "/// @nexus.client-only\ninterface log-service {",
+    );
+    assert_ne!(wit, LOG_HANDLE_WIT);
+    let files = generate_log_handle(client_config(), &wit);
+
+    let workflow_files = files
+        .keys()
+        .filter(|name| {
+            name.starts_with("operations/")
+                || name.starts_with("_resources/")
+                || name.as_str() == "services.py"
+        })
+        .collect::<Vec<_>>();
+    assert!(workflow_files.is_empty(), "{workflow_files:?}");
+    let client = file(&files, "client.py");
+    assert!(client.contains("class LogServiceClient:\n"), "{client}");
+    assert!(client.contains("class Log:\n"), "{client}");
+    assert!(
+        client.contains(
+            "        async for item in self._client.iter_read_log(request, deadline=deadline):\n"
+        ),
+        "{client}"
+    );
+}
+
+#[test]
+fn client_only_rejects_an_endpoint_and_other_targets() {
+    let wit = LOG_HANDLE_WIT.replace(
+        "/// @nexus.endpoint \"logs\"\n",
+        "/// @nexus.endpoint \"logs\"\n/// @nexus.client-only\n",
+    );
+    let error = try_generate_with_descriptors(
+        client_config(),
+        Language::Python,
+        &wit,
+        Vec::new(),
+        Some(&log_descriptors()),
+    )
+    .unwrap_err();
+    assert!(
+        error.contains("cannot be combined with `@nexus.endpoint`"),
+        "{error}"
+    );
+
+    let wit = RUN_WIT.replace("/// @nexus.endpoint \"runs\"\n", "/// @nexus.client-only\n");
+    let error = try_generate(Language::TypeScript, GenerationMode::NativeApi, &wit).unwrap_err();
+    assert!(error.contains("it is client-only"), "{error}");
 }
 
 #[test]

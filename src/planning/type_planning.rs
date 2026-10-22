@@ -1720,6 +1720,7 @@ mod tests {
                 namespace: LanguageStringSpec::default(),
                 operations_class: LanguageStringSpec::default(),
                 endpoint: Some("example".to_string()),
+                client_only: false,
                 experimental: false,
                 deprecated: false,
                 delay_load_temporalio_workflow: false,

@@ -29,6 +29,29 @@ func (m updateEmailRequest) GetEmail() string {
 	return m.Email
 }
 
+type notifyRequest struct {
+	UserID   string
+	Reason   *string
+	Channels []string
+	Sender   string
+}
+
+func (m notifyRequest) GetUserID() string {
+	return m.UserID
+}
+
+func (m notifyRequest) GetReason() *string {
+	return m.Reason
+}
+
+func (m notifyRequest) GetChannels() []string {
+	return m.Channels
+}
+
+func (m notifyRequest) GetSender() string {
+	return m.Sender
+}
+
 // --- Resources ---
 
 type User struct {
@@ -49,6 +72,14 @@ func (u *User) UpdateEmail(ctx workflow.Context, email string) workflow.Future {
 	return updateEmail(ctx, updateEmailRequest{UserID: u.UserID, Email: email})
 }
 
+func (u *User) Notify(ctx workflow.Context, reason string, channels []string, sender string) workflow.Future {
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+	return notify(ctx, notifyRequest{UserID: u.UserID, Reason: reasonPtr, Channels: channels, Sender: sender})
+}
+
 // --- Operations (internal) ---
 
 func getUser(ctx workflow.Context, request getUserRequest) workflow.Future {
@@ -60,6 +91,12 @@ func getUser(ctx workflow.Context, request getUserRequest) workflow.Future {
 func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.Future {
 	c := workflow.NewNexusClient("user-service", "UserService")
 	fut := c.ExecuteOperation(ctx, "UpdateEmail", request, workflow.NexusOperationOptions{})
+	return fut
+}
+
+func notify(ctx workflow.Context, request notifyRequest) workflow.Future {
+	c := workflow.NewNexusClient("user-service", "UserService")
+	fut := c.ExecuteOperation(ctx, "Notify", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
@@ -87,5 +124,29 @@ func UpdateEmail(ctx workflow.Context, opts UpdateEmailOptions) workflow.Future 
 	return updateEmail(ctx, updateEmailRequest{
 		UserID: opts.UserID,
 		Email:  opts.Email,
+	})
+}
+
+type NotifyOptions struct {
+	// UserID - Required.
+	UserID string
+	// Reason - Optional.
+	Reason string
+	// Channels - Required.
+	Channels []string
+	// Sender - Required.
+	Sender string
+}
+
+func Notify(ctx workflow.Context, opts NotifyOptions) workflow.Future {
+	var reason *string
+	if opts.Reason != "" {
+		reason = &opts.Reason
+	}
+	return notify(ctx, notifyRequest{
+		UserID:   opts.UserID,
+		Reason:   reason,
+		Channels: opts.Channels,
+		Sender:   opts.Sender,
 	})
 }

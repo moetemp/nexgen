@@ -583,6 +583,9 @@ pub struct ServiceSpec<F: TypeFamily = AuthoredFamily> {
     pub namespace: F::Text,
     pub operations_class: F::Text,
     pub endpoint: Option<String>,
+    /// Whether only callers outside a Workflow reach the service, so a target generates no
+    /// Workflow surface for it.
+    pub client_only: bool,
     pub experimental: bool,
     /// Whether the authored service is deprecated. Parsers carry this
     /// language-neutral annotation through planning; each backend chooses the
@@ -619,6 +622,7 @@ impl<F: TypeFamily> ServiceSpec<F> {
             namespace: map.map_text(self.namespace),
             operations_class: map.map_text(self.operations_class),
             endpoint: self.endpoint,
+            client_only: self.client_only,
             experimental: self.experimental,
             deprecated: self.deprecated,
             delay_load_temporalio_workflow: self.delay_load_temporalio_workflow,

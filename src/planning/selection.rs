@@ -183,6 +183,7 @@ mod tests {
                 namespace: Default::default(),
                 operations_class: Default::default(),
                 endpoint: None,
+                client_only: false,
                 experimental: false,
                 deprecated: false,
                 delay_load_temporalio_workflow: false,

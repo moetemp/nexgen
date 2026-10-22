@@ -576,11 +576,18 @@ fn generation_warnings(plan: &PlannedSpec) -> Vec<String> {
         .collect()
 }
 
-/// Only the Python target builds a result record that holds a resource.
+/// Only the Python target builds a result record that holds a resource, or a client-only
+/// service.
 fn reject_resource_holders(language: Language, node: &ApiSpecNode<PlannedFamily>) -> Result<()> {
     match node {
         ApiSpecNode::Leaf(leaf) => {
             for service in &leaf.spec.services {
+                if service.client_only {
+                    return Err(Error::UnsupportedClientOnlyService {
+                        language,
+                        service: service.name.clone(),
+                    });
+                }
                 for operation in &service.operations {
                     if operation
                         .data

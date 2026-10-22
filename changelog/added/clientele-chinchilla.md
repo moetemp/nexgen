@@ -1,0 +1,1 @@
+`@nexus.client-only` on an interface makes the Python target generate only its models, caller and resource classes, for code outside a Workflow. A Python caller method whose operation returns a resource with methods gives back the client resource class.

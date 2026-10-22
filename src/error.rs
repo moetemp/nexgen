@@ -224,6 +224,11 @@ pub enum Error {
         operation: String,
     },
 
+    #[error(
+        "{language} cannot generate service `{service}`: it is client-only, and only Python generates a caller outside a Workflow"
+    )]
+    UnsupportedClientOnlyService { language: Language, service: String },
+
     #[error("{language} cannot generate a caller for operation `{service}.{operation}`: {reason}")]
     UnsupportedClientOperation {
         language: Language,

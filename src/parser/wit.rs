@@ -2626,6 +2626,16 @@ fn build_service(
     let experimental = experimental_directive(&directives, path, &context)?;
     let delay_load_temporalio_workflow =
         delay_load_temporalio_workflow_directive(&directives, path, &context)?;
+    let client_only = client_only_directive(&directives, path, &context)?;
+    if client_only && endpoint.is_some() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.clone(),
+            directive: "@nexus.client-only".to_string(),
+            reason: "cannot be combined with `@nexus.endpoint`, since no Workflow calls it"
+                .to_string(),
+        });
+    }
 
     let operations = interface
         .functions
@@ -2659,6 +2669,7 @@ fn build_service(
         namespace,
         operations_class,
         endpoint,
+        client_only,
         experimental,
         deprecated: false,
         delay_load_temporalio_workflow,
@@ -3669,6 +3680,21 @@ fn is_integer_type(resolve: &Resolve, ty: &Type) -> bool {
         },
         _ => is_integer_or_optional_integer(resolve, ty),
     }
+}
+
+fn client_only_directive(directives: &[Directive], path: &Path, context: &str) -> Result<bool> {
+    let Some(directive) = directive(directives, "client-only", path, context)? else {
+        return Ok(false);
+    };
+    if !directive.args.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.client-only".to_string(),
+            reason: "does not take arguments".to_string(),
+        });
+    }
+    Ok(true)
 }
 
 fn delay_load_temporalio_workflow_directive(

@@ -7,6 +7,7 @@ import typing
 
 from ..models import (
     NotifyRequest,
+    SendVerificationRequest,
     UpdateEmailRequest,
 )
 
@@ -52,6 +53,20 @@ class User:
         nexus_client = getattr(self, "_nexus_client")
         handle = await nexus_client.start_operation(
             operation="Notify",
+            input=request,
+        )
+        await handle
+
+    async def send_verification(
+        self,
+    ) -> None:
+        request = SendVerificationRequest(
+            user_id=self.user_id,
+            email=self.email,
+        )
+        nexus_client = getattr(self, "_nexus_client")
+        handle = await nexus_client.start_operation(
+            operation="SendVerification",
             input=request,
         )
         await handle

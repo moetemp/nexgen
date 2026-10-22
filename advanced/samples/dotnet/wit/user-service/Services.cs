@@ -29,6 +29,10 @@ namespace Nexgen.UserService
         [NexusOperation("Notify")]
         void Notify(NotifyRequest request);
 
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("SendVerification")]
+        void SendVerification(SendVerificationRequest request);
+
     }
 
     [GeneratedCode("nexgen", null)]
@@ -78,6 +82,21 @@ namespace Nexgen.UserService
         public string? Reason { get; set; }
         public IReadOnlyList<string> Channels { get; set; }
         public string Sender { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class SendVerificationOptions
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="SendVerificationOptions"/> class.
+        /// </summary>
+        public SendVerificationOptions(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; set; }
+        public string? Email { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -135,6 +154,23 @@ namespace Nexgen.UserService
                 Reason = options.Reason,
             };
             return NotifyAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task SendVerificationAsync(SendVerificationRequest request)
+        {
+            await _client.ExecuteNexusOperationAsync(svc => svc.SendVerification(request)).ConfigureAwait(true);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task SendVerificationAsync(SendVerificationOptions options)
+        {
+            var request = new SendVerificationRequest(options.UserId)
+            {
+                Email = options.Email,
+            };
+            return SendVerificationAsync(request);
         }
 
     }

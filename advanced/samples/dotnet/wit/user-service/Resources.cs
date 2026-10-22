@@ -52,6 +52,13 @@ namespace Nexgen.UserService
             await RequireNexgenClient().ExecuteNexusOperationAsync(svc => svc.Notify(request)).ConfigureAwait(true);
         }
 
+        [GeneratedCode("nexgen", null)]
+        public async Task SendVerificationAsync()
+        {
+            var request = new SendVerificationRequest(UserId) { Email = Email };
+            await RequireNexgenClient().ExecuteNexusOperationAsync(svc => svc.SendVerification(request)).ConfigureAwait(true);
+        }
+
     }
 
 }

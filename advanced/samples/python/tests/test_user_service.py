@@ -71,6 +71,14 @@ class UserServiceHandler:
     ) -> None:
         self.calls.append(("Notify", input))
 
+    @sync_operation
+    async def send_verification(
+        self,
+        _ctx: StartOperationContext,
+        input: user_service_models.SendVerificationRequest,
+    ) -> None:
+        self.calls.append(("SendVerification", input))
+
 
 @workflow.defn
 class UserServiceCallerWorkflow:

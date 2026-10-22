@@ -10,6 +10,7 @@ interface user-service {
 
     update-email: func(email: string) -> user-result;
     notify: func(reason: option<string>, channels: list<string>, sender: string);
+    send-verification: func();
   }
 
   type user-result = own<user>;
@@ -30,7 +31,13 @@ interface user-service {
     sender: string,
   }
 
+  record send-verification-request {
+    user-id: string,
+    email: option<string>,
+  }
+
   get-user: func(request: get-user-request) -> user-result;
   update-email: func(request: update-email-request) -> user-result;
   notify: func(request: notify-request);
+  send-verification: func(request: send-verification-request);
 }

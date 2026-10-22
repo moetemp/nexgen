@@ -21,7 +21,7 @@ class StartedWorkflow:
 
     namespace: str
     workflow_id: str
-    run_id: str | None
+    run_id: str
 
     async def cancel(
         self,
@@ -94,10 +94,12 @@ async def _restart_workflow(
         output_type=StartWorkflowResult,
     )
     result = await handle
+    if result.run_id is None:
+        raise RuntimeError("RestartWorkflow answered without `run_id`")
     return StartedWorkflow(
         namespace=request.namespace,
         workflow_id=request.workflow_id,
-        run_id=result.run_id or None,
+        run_id=result.run_id,
     )
 
 

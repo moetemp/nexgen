@@ -43,6 +43,21 @@ namespace Nexgen.UserService
     }
 
     [GeneratedCode("nexgen", null)]
+    public record SendVerificationRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="SendVerificationRequest"/> class.
+        /// </summary>
+        public SendVerificationRequest(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; init; }
+        public string? Email { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
     public record UpdateEmailRequest
     {
         /// <summary>

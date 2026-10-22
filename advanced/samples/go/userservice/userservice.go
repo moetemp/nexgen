@@ -52,6 +52,19 @@ func (m notifyRequest) GetSender() string {
 	return m.Sender
 }
 
+type sendVerificationRequest struct {
+	UserID string
+	Email  *string
+}
+
+func (m sendVerificationRequest) GetUserID() string {
+	return m.UserID
+}
+
+func (m sendVerificationRequest) GetEmail() *string {
+	return m.Email
+}
+
 // --- Resources ---
 
 type User struct {
@@ -80,6 +93,10 @@ func (u *User) Notify(ctx workflow.Context, reason string, channels []string, se
 	return notify(ctx, notifyRequest{UserID: u.UserID, Reason: reasonPtr, Channels: channels, Sender: sender})
 }
 
+func (u *User) SendVerification(ctx workflow.Context) workflow.Future {
+	return sendVerification(ctx, sendVerificationRequest{UserID: u.UserID, Email: &u.Email})
+}
+
 // --- Operations (internal) ---
 
 func getUser(ctx workflow.Context, request getUserRequest) workflow.Future {
@@ -97,6 +114,12 @@ func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.Futu
 func notify(ctx workflow.Context, request notifyRequest) workflow.Future {
 	c := workflow.NewNexusClient("user-service", "UserService")
 	fut := c.ExecuteOperation(ctx, "Notify", request, workflow.NexusOperationOptions{})
+	return fut
+}
+
+func sendVerification(ctx workflow.Context, request sendVerificationRequest) workflow.Future {
+	c := workflow.NewNexusClient("user-service", "UserService")
+	fut := c.ExecuteOperation(ctx, "SendVerification", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
@@ -148,5 +171,23 @@ func Notify(ctx workflow.Context, opts NotifyOptions) workflow.Future {
 		Reason:   reason,
 		Channels: opts.Channels,
 		Sender:   opts.Sender,
+	})
+}
+
+type SendVerificationOptions struct {
+	// UserID - Required.
+	UserID string
+	// Email - Optional.
+	Email string
+}
+
+func SendVerification(ctx workflow.Context, opts SendVerificationOptions) workflow.Future {
+	var email *string
+	if opts.Email != "" {
+		email = &opts.Email
+	}
+	return sendVerification(ctx, sendVerificationRequest{
+		UserID: opts.UserID,
+		Email:  email,
 	})
 }

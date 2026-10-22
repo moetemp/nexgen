@@ -4597,7 +4597,22 @@ fn render_resource_methods(
                             format!("{type_name}{{{}}}", fields.join(", "))
                         }
                     },
-                    |name| format!("u.{}", go_field_name(name)),
+                    |name, target_required| {
+                        let value = format!("u.{}", go_field_name(name));
+                        // An optional request field is a pointer where the resource field is not.
+                        let pointer = !target_required
+                            && resource.fields.iter().any(|field| {
+                                field.name == name
+                                    && !field.optional
+                                    && resolve_resource_field_kind(
+                                        &planned_field_kind(&field.kind, api_plan),
+                                        true,
+                                        package,
+                                    )
+                                    .starts_with('*')
+                            });
+                        if pointer { format!("&{value}") } else { value }
+                    },
                     |name| {
                         method_param_sources
                             .get(name)

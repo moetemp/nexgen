@@ -195,11 +195,13 @@ class StartWorkflowServiceClient:
         await _decode_payloads(message, self._data_converter.payload_codec)
         with self._converters():
             result = converter.from_transfer_type(message, StartWorkflowResult)
+        if result.run_id is None:
+            raise RuntimeError("StartWorkflow answered without `run_id`")
         return StartedWorkflow(
             self,
             namespace=request.namespace,
             workflow_id=request.workflow_id,
-            run_id=result.run_id or None,
+            run_id=result.run_id,
         )
 
     async def restart_workflow(self, request: StartWorkflowRequest) -> StartedWorkflow:
@@ -215,11 +217,13 @@ class StartWorkflowServiceClient:
         await _decode_payloads(message, self._data_converter.payload_codec)
         with self._converters():
             result = converter.from_transfer_type(message, StartWorkflowResult)
+        if result.run_id is None:
+            raise RuntimeError("RestartWorkflow answered without `run_id`")
         return StartedWorkflow(
             self,
             namespace=request.namespace,
             workflow_id=request.workflow_id,
-            run_id=result.run_id or None,
+            run_id=result.run_id,
         )
 
     async def cancel_workflow(
@@ -247,13 +251,13 @@ class StartedWorkflow:
         client: StartWorkflowServiceClient,
         namespace: str,
         workflow_id: str,
-        run_id: str | None,
+        run_id: str,
     ) -> None:
         """Bind the handle to a caller."""
         self._client: StartWorkflowServiceClient = client
         self.namespace: str = namespace
         self.workflow_id: str = workflow_id
-        self.run_id: str | None = run_id
+        self.run_id: str = run_id
 
     async def cancel(
         self,

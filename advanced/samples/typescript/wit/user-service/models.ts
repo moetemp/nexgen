@@ -15,3 +15,8 @@ export interface NotifyRequest {
   channels?: string[];
   sender: string;
 }
+
+export interface SendVerificationRequest {
+  userId: string;
+  email?: string;
+}

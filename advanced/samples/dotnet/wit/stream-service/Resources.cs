@@ -15,9 +15,9 @@ namespace Nexgen.StreamService
     [GeneratedCode("nexgen", null)]
     public class Stream
     {
-        public Stream(StreamRef stream)
+        public Stream(StreamRef streamValue)
         {
-            StreamValue = stream;
+            StreamValue = streamValue;
         }
 
         public StreamRef StreamValue { get; }

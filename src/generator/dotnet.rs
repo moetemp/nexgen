@@ -441,14 +441,14 @@ impl<'a> ApiPlanner<'a> {
             }
             output.push_str(&self.resource_field_type(&field.kind, field.optional));
             output.push(' ');
-            output.push_str(&csharp_parameter_name(&field.name));
+            output.push_str(&resource_parameter_name(&type_name, &field.name));
         }
         output.push_str(")\n    {\n");
         for field in &resource.fields {
             output.push_str("        ");
             output.push_str(&resource_property_name(&type_name, &field.name));
             output.push_str(" = ");
-            output.push_str(&csharp_parameter_name(&field.name));
+            output.push_str(&resource_parameter_name(&type_name, &field.name));
             output.push_str(";\n");
         }
         output.push_str("    }\n\n");
@@ -3930,6 +3930,11 @@ fn resource_property_name(type_name: &str, field_name: &str) -> String {
     } else {
         name
     }
+}
+
+// System.Text.Json binds each constructor parameter to the property of the same name.
+fn resource_parameter_name(type_name: &str, field_name: &str) -> String {
+    csharp_parameter_name(&resource_property_name(type_name, field_name))
 }
 
 fn with_resource_property_names(plan: &RequestPlan, type_name: &str) -> RequestPlan {

@@ -1800,3 +1800,38 @@ properties:
     assert!(!models.contains("from 'long'"), "{models}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+#[test]
+fn typescript_system_nexus_operation_builds_the_returned_resource() {
+    let root = project_root();
+    let temp_dir = unique_output_path("typescript-system-nexus-resource");
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            system_nexus: true,
+            ..Default::default()
+        },
+        language: nexgen::language::Language::TypeScript,
+        input_paths: example_input_paths(&root, "start-workflow"),
+        support_package: Some("./support".to_string()),
+        descriptor_paths: vec![descriptor_path(&root)],
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let start = fs::read_to_string(output_path.join("operations/start-workflow.ts")).unwrap();
+    assert!(
+        start.contains(
+            "  return new StartedWorkflow(requiredField(request.namespace, \"resource\", \"namespace\"), request.workflowId, result.runId ?? undefined);\n"
+        ),
+        "{start}"
+    );
+    assert!(
+        !start.contains("return result as StartedWorkflow"),
+        "{start}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}

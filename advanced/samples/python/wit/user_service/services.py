@@ -8,6 +8,7 @@ import temporalio.workflow
 
 from .models import (
     GetUserRequest,
+    NotifyRequest,
     UpdateEmailRequest,
 )
 from ._resources.user import (
@@ -30,6 +31,11 @@ class UserService:
         UpdateEmailRequest,
         User,
     ] = Operation(name="UpdateEmail")
+
+    notify: Operation[
+        NotifyRequest,
+        None,
+    ] = Operation(name="Notify")
 
 
 class UserServiceClient:
@@ -72,3 +78,22 @@ class UserServiceClient:
         )
         resource = await handle
         return bind_user_client(resource, self._nexus_client)
+
+    async def notify(
+        self,
+        *,
+        user_id: str,
+        reason: str | None = None,
+        channels: list[str] | None = None,
+        sender: str,
+    ) -> temporalio.workflow.NexusOperationHandle[None]:
+        request = NotifyRequest(
+            user_id=user_id,
+            reason=reason,
+            channels=channels or [],
+            sender=sender,
+        )
+        return await self._nexus_client.start_operation(
+            operation="Notify",
+            input=request,
+        )

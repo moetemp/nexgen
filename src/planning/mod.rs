@@ -128,8 +128,16 @@ pub(crate) struct PlannedOperationResourceReturn {
 pub(crate) struct PlannedResourceHolder {
     pub(crate) record_full_name: String,
     pub(crate) model_name: String,
-    pub(crate) resource_field: String,
-    pub(crate) other_fields: Vec<String>,
+    /// The record's fields in order. The resource field holds the resource.
+    pub(crate) fields: Vec<PlannedResourceHolderField>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct PlannedResourceHolderField {
+    pub(crate) name: String,
+    pub(crate) proto_name: String,
+    pub(crate) required: bool,
+    pub(crate) resource: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]

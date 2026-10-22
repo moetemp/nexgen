@@ -1284,12 +1284,15 @@ fn plan_operation_resource_return(
             Some(PlannedResourceHolder {
                 record_full_name: record.full_name.clone(),
                 model_name: record.name.clone(),
-                resource_field: record.fields.get(&holder.field_key)?.name.clone(),
-                other_fields: record
+                fields: record
                     .fields
                     .iter()
-                    .filter(|(key, _)| **key != holder.field_key)
-                    .map(|(_, field)| field.name.clone())
+                    .map(|(key, field)| PlannedResourceHolderField {
+                        name: field.name.clone(),
+                        proto_name: key.clone(),
+                        required: field.required,
+                        resource: *key == holder.field_key,
+                    })
                     .collect(),
             })
         }),

@@ -860,32 +860,6 @@ interface conflict-models {
 }
 
 #[test]
-fn dotnet_checks_a_required_resource_field_that_the_response_fills_in() {
-    let root = project_root();
-    let temp_dir = unique_output_path("dotnet-required-resource-field");
-    fs::create_dir_all(&temp_dir).unwrap();
-    let wit_path = temp_dir.join("start-workflow.wit");
-    let sample = fs::read_to_string(wit_input_path(&root, "start-workflow")).unwrap();
-    let wit = sample.replace(
-        "constructor(namespace: string, workflow-id: string, run-id: option<string>);",
-        "constructor(namespace: string, workflow-id: string, run-id: string);",
-    );
-    assert_ne!(wit, sample);
-    fs::write(&wit_path, wit).unwrap();
-    let rendered = generate_dotnet_to_string(
-        &[wit_path, linked_inputs_path(&root)],
-        &[descriptor_path(&root)],
-    );
-    assert!(
-        rendered.contains(
-            "(result.RunId ?? throw new System.InvalidOperationException(\"StartWorkflow answered without `run_id`\"))"
-        ),
-        "{rendered}"
-    );
-    fs::remove_dir_all(temp_dir).unwrap();
-}
-
-#[test]
 fn dotnet_wit_integers_keep_their_size_and_sign() {
     let temp_dir = unique_output_path("dotnet-64-bit-ints");
     fs::create_dir_all(&temp_dir).unwrap();

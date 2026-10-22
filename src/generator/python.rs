@@ -6952,7 +6952,7 @@ fn render_request_plan_python(method: &PlannedResourceMethod, plan: &RequestPlan
                 format!("{model_name}({})", fields.join(", "))
             }
         },
-        |name| format!("self.{}", python_field_name(name)),
+        |name, _| format!("self.{}", python_field_name(name)),
         render_method_param,
     )
 }

@@ -2,7 +2,12 @@
 
 import * as workflow from "@temporalio/workflow";
 import * as nexus from "nexus-rpc";
-import type { GetUserRequest, UpdateEmailRequest, NotifyRequest } from "./models";
+import type {
+  GetUserRequest,
+  UpdateEmailRequest,
+  NotifyRequest,
+  SendVerificationRequest,
+} from "./models";
 import type { User } from "./resources";
 import { bindUserClient } from "./resources";
 
@@ -10,6 +15,9 @@ export const userService = nexus.service("UserService", {
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
   updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
   notify: nexus.operation<NotifyRequest, void>({ name: "Notify" }),
+  sendVerification: nexus.operation<SendVerificationRequest, void>({
+    name: "SendVerification",
+  }),
 });
 
 export class UserServiceClient {
@@ -53,5 +61,17 @@ export class UserServiceClient {
     request: NotifyRequest,
   ): Promise<workflow.NexusOperationHandle<void>> {
     return await this.client.startOperation(userService.operations.notify, request);
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async sendVerification(
+    request: SendVerificationRequest,
+  ): Promise<workflow.NexusOperationHandle<void>> {
+    return await this.client.startOperation(
+      userService.operations.sendVerification,
+      request,
+    );
   }
 }

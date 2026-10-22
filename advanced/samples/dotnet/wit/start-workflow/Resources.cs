@@ -15,7 +15,7 @@ namespace Nexgen.StartWorkflowService
     [GeneratedCode("nexgen", null)]
     public class StartedWorkflow
     {
-        public StartedWorkflow(string @namespace, string workflowId, string? runId)
+        public StartedWorkflow(string @namespace, string workflowId, string runId)
         {
             Namespace = @namespace;
             WorkflowId = workflowId;
@@ -24,7 +24,7 @@ namespace Nexgen.StartWorkflowService
 
         public string Namespace { get; }
         public string WorkflowId { get; }
-        public string? RunId { get; }
+        public string RunId { get; }
 
         [GeneratedCode("nexgen", null)]
         public Task CancelAsync(string? reason)

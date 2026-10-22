@@ -40,6 +40,15 @@ export class User {
     );
     await handle.result();
   }
+
+  public async sendVerification(): Promise<void> {
+    const request = { userId: this.userId, email: this.email };
+    const handle = await requireUserClient(this).startOperation(
+      userService.operations.sendVerification,
+      request,
+    );
+    await handle.result();
+  }
 }
 
 export function bindUserClient(

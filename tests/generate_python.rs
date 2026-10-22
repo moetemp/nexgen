@@ -1469,3 +1469,30 @@ interface collections {
         "{models}"
     );
 }
+
+#[test]
+fn python_checks_a_required_resource_field_that_the_response_fills_in() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-required-resource-field");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("start-workflow.wit");
+    let sample = fs::read_to_string(wit_input_path(&root, "start-workflow")).unwrap();
+    let wit = sample.replace(
+        "constructor(namespace: string, workflow-id: string, run-id: option<string>);",
+        "constructor(namespace: string, workflow-id: string, run-id: string);",
+    );
+    assert_ne!(wit, sample);
+    fs::write(&wit_path, wit).unwrap();
+    let rendered = generate_python_to_string(
+        &[wit_path, linked_inputs_path(&root)],
+        &[descriptor_path(&root)],
+    );
+    assert!(
+        rendered.contains(
+            "    result = await handle\n    if result.run_id is None:\n        \
+             raise RuntimeError(\"StartWorkflow answered without `run_id`\")\n"
+        ),
+        "{rendered}"
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}

@@ -1792,7 +1792,7 @@ read-records: func(request: read-records-request) -> read-records-response;
 **Syntax:** `@nexus.offset "<offset-type-name>"`
 
 Marks the field as a position in an ordered log, such as a stream offset. The
-name is a kebab-case WIT identifier. Every field that names the same type shares
+name is a kebab-case WIT identifier. Every field that uses the same type shares
 one declaration, so an offset read from one operation can be passed to another.
 The field keeps its integer type, and the wire form does not change.
 

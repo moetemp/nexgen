@@ -3829,8 +3829,8 @@ fn render_temporalio_workflow_type_checking_imports(
     true
 }
 
-/// The offset types that `@nexus.offset` names in this module, each with the
-/// first field that names it. Fields that name one type share its declaration.
+/// The offset types that `@nexus.offset` gives in this module, each with the
+/// first field that uses it. Fields that use one type share its declaration.
 fn python_offset_types(api_plan: &PlannedSpec) -> BTreeMap<String, PythonGeneratedName> {
     let mut offset_types = BTreeMap::new();
     for (_, record) in api_plan.records() {

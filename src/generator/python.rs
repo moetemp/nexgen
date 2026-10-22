@@ -3959,7 +3959,7 @@ fn render_models_module(
 
 /// The result records that hold a resource, by full name, with the model name and the
 /// resource type. Each one lives in its resource's module, since the resource module imports
-/// the models and the record names the resource class.
+/// the models and the record uses the resource class.
 fn resource_holders(api_plan: &PlannedSpec) -> BTreeMap<String, (String, String)> {
     api_plan
         .services

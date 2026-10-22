@@ -1460,7 +1460,7 @@ fn build_rendered_resource_return(
         Some(holder) => {
             let record = api_plan
                 .record(&holder.record_full_name)
-                .expect("the holder record is planned");
+                .expect("the plan has the holder record");
             let mut resource_field = String::new();
             let mut fields = Vec::new();
             for field in &holder.fields {

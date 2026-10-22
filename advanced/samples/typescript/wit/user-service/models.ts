@@ -8,3 +8,8 @@ export interface UpdateEmailRequest {
   userId: string;
   email: string;
 }
+
+export interface SendVerificationRequest {
+  userId: string;
+  email?: string;
+}

@@ -9,6 +9,7 @@ interface user-service {
     constructor(user-id: string, email: string);
 
     update-email: func(email: string) -> user-result;
+    send-verification: func();
   }
 
   type user-result = own<user>;
@@ -22,6 +23,12 @@ interface user-service {
     email: string,
   }
 
+  record send-verification-request {
+    user-id: string,
+    email: option<string>,
+  }
+
   get-user: func(request: get-user-request) -> user-result;
   update-email: func(request: update-email-request) -> user-result;
+  send-verification: func(request: send-verification-request);
 }

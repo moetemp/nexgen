@@ -5517,7 +5517,7 @@ fn render_request_plan_python(plan: &RequestPlan) -> String {
                 format!("{model_name}({})", fields.join(", "))
             }
         },
-        |name| format!("self.{}", python_field_name(name)),
+        |name, _| format!("self.{}", python_field_name(name)),
         python_field_name,
     )
 }

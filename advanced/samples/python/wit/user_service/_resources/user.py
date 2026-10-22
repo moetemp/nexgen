@@ -5,7 +5,10 @@ from __future__ import annotations
 import dataclasses
 import typing
 
-from ..models import UpdateEmailRequest
+from ..models import (
+    SendVerificationRequest,
+    UpdateEmailRequest,
+)
 
 
 @dataclasses.dataclass
@@ -32,6 +35,20 @@ class User:
             resource,
             nexus_client,
         )
+
+    async def send_verification(
+        self,
+    ) -> None:
+        request = SendVerificationRequest(
+            user_id=self.user_id,
+            email=self.email,
+        )
+        nexus_client = getattr(self, "_nexus_client")
+        handle = await nexus_client.start_operation(
+            operation="SendVerification",
+            input=request,
+        )
+        await handle
 
 
 def bind_user_client(

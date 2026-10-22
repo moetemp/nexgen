@@ -75,7 +75,8 @@ sample-project instructions for [Go](go/README.md), [Python](python/README.md),
 A System Nexus operation that returns a resource. TypeScript only for now.
 
 - WIT: [`inputs/workflow-handle.wit`](inputs/workflow-handle.wit)
-- TypeScript: [`typescript/wit/workflow-handle/`](typescript/wit/workflow-handle/)
+- TypeScript:
+  [`typescript/wit/workflow-handle/`](typescript/wit/workflow-handle/)
 
 ### `workflow-service`
 

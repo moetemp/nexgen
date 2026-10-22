@@ -1544,7 +1544,7 @@ fn python_proto_enum_defaults_name_the_proto_enum_value() {
     );
 }
 
-/// An operation stub's keyword parameters name the proto enum module of an
+/// An operation stub's keyword parameters refer to the proto enum module of an
 /// enum field without a replacement type, so the stub imports that module.
 #[test]
 fn python_operation_stubs_import_the_proto_enum_module_of_a_parameter() {

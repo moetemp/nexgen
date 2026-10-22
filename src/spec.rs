@@ -659,7 +659,7 @@ pub struct LongPollDurationField {
 
 /// The long-poll contract of an operation (`@nexus.long-poll` on WIT).
 ///
-/// Each member names a field of the input or output record by its record
+/// Each member refers to a field of the input or output record by its record
 /// field key. The contract changes no model and no wire byte. It tells a
 /// generated caller how to repeat the call until it answers with something.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -877,9 +877,9 @@ pub struct RecordFieldSpec<F: TypeFamily = AuthoredFamily> {
     pub required: bool,
     pub visibility: RecordFieldVisibility,
     pub function: Option<FunctionFieldSpec<F>>,
-    /// The offset type named by `@nexus.offset`, in UpperCamelCase. The field
+    /// The offset type that `@nexus.offset` gives, in UpperCamelCase. The field
     /// keeps its integer type. The name gives callers a type for the
-    /// positions they hold, shared by every field that names it.
+    /// positions they hold, shared by every field that uses it.
     pub offset: Option<String>,
     pub data: F::FieldData,
 }

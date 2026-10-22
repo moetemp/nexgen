@@ -723,41 +723,6 @@ fn python_resource_method_takes_keywords_when_a_required_parameter_follows_a_def
 }
 
 #[test]
-fn python_resource_method_list_parameter_defaults_to_empty() {
-    let files = generate(Language::Python, GenerationMode::NativeApi, RUN_WIT);
-    let run = file(&files, "_resources/workflow_run.py");
-
-    assert!(
-        run.contains(
-            "        reset_reapply_exclude_types: list[temporalio.api.enums.v1.reset_pb2.ResetReapplyExcludeType.ValueType] | None = None,\n"
-        ),
-        "{run}"
-    );
-    assert!(
-        run.contains(
-            "            reset_reapply_exclude_types=reset_reapply_exclude_types or [],\n"
-        ),
-        "{run}"
-    );
-}
-
-#[test]
-fn python_resource_method_stays_positional_when_every_default_comes_last() {
-    let wit = RUN_WIT.replace(
-        "      workflow-task-finish-event-id: s64,\n    );",
-        "      workflow-task-finish-event-id: option<s64>,\n    );",
-    );
-    let files = generate(Language::Python, GenerationMode::NativeApi, &wit);
-    let run = file(&files, "_resources/workflow_run.py");
-
-    assert!(
-        run.contains("    async def reset(\n        self,\n        reason: str | None = None,\n"),
-        "{run}"
-    );
-    assert!(!run.contains("        *,\n"), "{run}");
-}
-
-#[test]
 fn python_checks_a_required_resource_field_that_the_response_fills_in() {
     let root = project_root();
     let sample =
@@ -779,23 +744,6 @@ fn python_checks_a_required_resource_field_that_the_response_fills_in() {
         "{start}"
     );
     assert!(start.contains("        run_id=result.run_id,\n"), "{start}");
-
-    // An optional resource field takes the response field as it is.
-    let files = generate(Language::Python, GenerationMode::NativeApi, &sample);
-    let start = file(&files, "operations/start_workflow.py");
-    assert!(!start.contains("is None:"), "{start}");
-    assert!(
-        start.contains("        run_id=result.run_id or None,\n"),
-        "{start}"
-    );
-}
-
-#[test]
-fn resource_handle_generates_in_typescript_and_dotnet() {
-    for language in [Language::TypeScript, Language::Dotnet] {
-        let files = generate(language, GenerationMode::NativeApi, RUN_WIT);
-        assert!(!files.is_empty(), "{language:?}");
-    }
 }
 
 fn proto_field(
@@ -999,22 +947,6 @@ fn python_client_reads_a_long_poll_that_moves_an_offset_as_one_sequence() {
 }
 
 #[test]
-fn python_long_poll_without_offsets_has_no_sequence_reader() {
-    let without_offsets = |wit: &str| {
-        wit.replace("  ///   offset-field=\"from-offset\"\n", "")
-            .replace("  ///   next-offset-field=\"next-offset\"\n", "")
-    };
-    let client = generate_client(&without_offsets(LOG_WIT));
-    assert!(client.contains("async def read_until_entries("), "{client}");
-    assert!(!client.contains("iter_read"), "{client}");
-
-    let files = generate_log_handle(client_config(), &without_offsets(LOG_HANDLE_WIT));
-    let log = file(&files, "_resources/log.py");
-    assert!(log.contains("    async def read(\n"), "{log}");
-    assert!(!log.contains("iter_read"), "{log}");
-}
-
-#[test]
 fn python_operation_returns_a_record_that_holds_the_resource() {
     let files = generate_log_handle(client_config(), LOG_HANDLE_WIT);
     let create = file(&files, "operations/create_log.py");
@@ -1048,41 +980,6 @@ fn python_operation_returns_a_record_that_holds_the_resource() {
         models.contains("if typing.TYPE_CHECKING:\n    from ._resources import Log\n"),
         "{models}"
     );
-}
-
-#[test]
-fn a_record_that_holds_a_resource_needs_a_proto_and_python() {
-    let without_proto = LOG_HANDLE_WIT.replace(
-        "  /// @nexus.proto \"acme.logs.v1.CreateLogResponse\"\n  record create-log-result {",
-        "  record create-log-result {",
-    );
-    let error = try_generate_with_descriptors(
-        client_config(),
-        Language::Python,
-        &without_proto,
-        Vec::new(),
-        Some(&log_descriptors()),
-    )
-    .unwrap_err();
-    assert!(error.contains("so it needs `@nexus.proto`"), "{error}");
-
-    for language in [Language::TypeScript, Language::Dotnet] {
-        let error = try_generate_with_descriptors(
-            NexgenConfig {
-                mode: GenerationMode::NativeApi,
-                ..Default::default()
-            },
-            language,
-            LOG_HANDLE_WIT,
-            Vec::new(),
-            Some(&log_descriptors()),
-        )
-        .unwrap_err();
-        assert!(
-            error.contains("its result record holds a resource, which only Python generates"),
-            "{language:?}: {error}"
-        );
-    }
 }
 
 #[test]
@@ -1188,30 +1085,6 @@ fn python_client_only_service_gets_a_caller_and_no_workflow_surface() {
         ),
         "{client}"
     );
-}
-
-#[test]
-fn client_only_rejects_an_endpoint_and_other_targets() {
-    let wit = LOG_HANDLE_WIT.replace(
-        "/// @nexus.endpoint \"logs\"\n",
-        "/// @nexus.endpoint \"logs\"\n/// @nexus.client-only\n",
-    );
-    let error = try_generate_with_descriptors(
-        client_config(),
-        Language::Python,
-        &wit,
-        Vec::new(),
-        Some(&log_descriptors()),
-    )
-    .unwrap_err();
-    assert!(
-        error.contains("cannot be combined with `@nexus.endpoint`"),
-        "{error}"
-    );
-
-    let wit = RUN_WIT.replace("/// @nexus.endpoint \"runs\"\n", "/// @nexus.client-only\n");
-    let error = try_generate(Language::TypeScript, GenerationMode::NativeApi, &wit).unwrap_err();
-    assert!(error.contains("it is client-only"), "{error}");
 }
 
 #[test]

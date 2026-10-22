@@ -22,7 +22,7 @@ use crate::planning::{
     PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
     PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
     PlannedSpec, PlannedType, PlannedWireFieldBinding, operation_input_model,
-    operation_output_direct_result,
+    operation_output_direct_result, proto_enum_model,
 };
 use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{
@@ -1310,6 +1310,18 @@ impl<'a> ApiPlanner<'a> {
                     self.ensure_rendered_enum(&enumeration.clone());
                 }
             }
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(enum_type)))
+                if enum_type
+                    .replacement
+                    .as_ref()
+                    .and_then(typescript_replacement_type_name)
+                    .is_none() =>
+            {
+                // The field type names the WIT enum, so declare it as a plain WIT enum would be.
+                if let Some(enumeration) = proto_enum_model(self.api_plan, enum_type) {
+                    self.ensure_rendered_enum(&enumeration.clone());
+                }
+            }
             PlannedType::Flags(flags_type) => {
                 if let Some(flags) = self.api_plan.flags_decl(&flags_type.full_name) {
                     self.ensure_rendered_flags(&flags.clone());
@@ -1952,7 +1964,12 @@ fn enum_default_expr(
             .value_namespace_imports
             .insert(namespace.to_string());
     }
-    let value_name = if resolved_type.wire_conversion.is_some() {
+    // A replacement type has proto member names. A generated WIT enum keeps the WIT names.
+    let value_name = if resolved_type
+        .wire_conversion
+        .as_ref()
+        .is_some_and(|conversion| !conversion.uses_rendered_model_annotation())
+    {
         enum_value.name.to_shouty_snake_case()
     } else {
         enum_value.name.clone()

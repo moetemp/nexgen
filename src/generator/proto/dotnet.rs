@@ -1,26 +1,44 @@
+use std::collections::BTreeMap;
+
 use heck::ToLowerCamelCase;
 
 use crate::error::{Error, Result};
 use crate::generator::dotnet::{
     WireValueConversion, csharp_parameter_name, csharp_type_name, csharp_type_parameter_name,
-    field_property_name, function_args_parameter_type, qualify_dotnet_support_reference,
+    dotnet_namespace, enum_value_name, field_property_name, function_args_parameter_type,
+    qualify_dotnet_support_reference,
 };
 use crate::planning::{
-    PlannedFamily, PlannedProtoMessageType, PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec,
-    PlannedType, PlannedWireFieldBinding, PlannedWireVariantMember,
+    PlannedFamily, PlannedProtoEnumType, PlannedProtoMessageType, PlannedProtoType,
+    PlannedProtoTypeInfo, PlannedSpec, PlannedType, PlannedWireFieldBinding,
+    PlannedWireVariantMember, proto_enum_model,
 };
 use crate::spec::{
-    AliasTypeSpec, ExternalTypeSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec,
-    TypeReplacementSpec,
+    AliasTypeSpec, ExternalTypeSourceSpec, ExternalTypeSpec, RecordFieldSpec,
+    RecordFieldVisibility, RecordSpec, TypeReplacementSpec,
 };
 
 #[derive(Debug, Default)]
-pub(in crate::generator) struct ModelBackend;
+pub(in crate::generator) struct ModelBackend {
+    /// The C# names of the WIT enums that model proto enums, by proto full name.
+    enum_models: BTreeMap<String, String>,
+    namespace: String,
+}
 
 impl ModelBackend {
     pub(in crate::generator) fn prepare(&mut self, api_plan: &PlannedSpec) -> Result<()> {
         for (_, record) in api_plan.records() {
             validate_record_conversion(api_plan, record)?;
+        }
+        self.namespace = dotnet_namespace(api_plan);
+        for (_, enumeration) in api_plan.enums() {
+            if let Some(ExternalTypeSourceSpec::Proto(source)) = &enumeration.source
+                && let PlannedProtoType::Enum(proto) = &source.proto
+            {
+                self.enum_models
+                    .entry(proto.proto.full_name.clone())
+                    .or_insert_with(|| csharp_type_name(&enumeration.name));
+            }
         }
         Ok(())
     }
@@ -39,10 +57,20 @@ impl ModelBackend {
                 .replacement
                 .as_ref()
                 .and_then(dotnet_replacement_type_name)
+                .or_else(|| self.enum_model(enumeration).cloned())
                 .unwrap_or_else(|| {
                     dotnet_proto_or_local_type(&enumeration.proto, Some(&enumeration.name))
                 }),
         })
+    }
+
+    /// Returns the WIT enum that models a proto enum with no replacement type. The field uses
+    /// that model, and only the converters use the proto enum.
+    fn enum_model(&self, enumeration: &PlannedProtoEnumType) -> Option<&String> {
+        if !proto_enum_uses_model(enumeration) {
+            return None;
+        }
+        self.enum_models.get(&enumeration.proto.full_name)
     }
 
     pub(in crate::generator) fn wire_conversion(
@@ -270,6 +298,14 @@ impl ModelBackend {
                 }
             }
             PlannedType::Resource(_) => source_expr.to_string(),
+            PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(enumeration)))
+                if self.enum_model(enumeration).is_some() =>
+            {
+                format!(
+                    "({}){source_expr}",
+                    dotnet_proto_type_name_for_info(&enumeration.proto)
+                )
+            }
             PlannedType::External(ExternalTypeSpec::Alias(AliasTypeSpec {
                 target: fallback,
                 ..
@@ -584,6 +620,17 @@ fn dotnet_message_type_for_proto_message(proto: &PlannedProtoMessageType) -> Str
         .as_ref()
         .and_then(dotnet_replacement_type_name)
         .unwrap_or_else(|| dotnet_proto_type_name_for_info(&proto.proto))
+}
+
+/// A proto enum from the descriptors with no replacement type gets the WIT enum that
+/// `@nexus.proto` binds as its model.
+fn proto_enum_uses_model(enumeration: &PlannedProtoEnumType) -> bool {
+    enumeration.proto.file_name.is_some()
+        && enumeration
+            .replacement
+            .as_ref()
+            .and_then(dotnet_replacement_type_name)
+            .is_none()
 }
 
 pub(crate) fn dotnet_replacement_type_name(
@@ -1090,14 +1137,24 @@ fn value_from_wire_expr(
         PlannedType::Bytes => source_expr.to_string(),
         PlannedType::Enum(_)
         | PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(_))) => {
+            let converted = match value {
+                PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Enum(
+                    enumeration,
+                ))) if proto_enum_uses_model(enumeration) => {
+                    proto_enum_model(api_plan, enumeration)
+                        .map(|model| format!("({}){source_expr}", csharp_type_name(&model.name)))
+                }
+                _ => None,
+            }
+            .unwrap_or_else(|| source_expr.to_string());
             if optional {
                 if has_presence == Some(true) {
-                    optional_presence_from_wire_expr(source_expr, source_expr)
+                    optional_presence_from_wire_expr(source_expr, &converted)
                 } else {
-                    format!("(int){source_expr} == 0 ? null : {source_expr}")
+                    format!("(int){source_expr} == 0 ? null : {converted}")
                 }
             } else {
-                source_expr.to_string()
+                converted
             }
         }
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => {
@@ -1274,7 +1331,7 @@ fn render_field_to_proto_assignment(
             support_namespace,
         ));
         output.push_str(end);
-        if let Some(default_expr) = default_enum_proto_expr(field) {
+        if let Some(default_expr) = default_enum_proto_expr(backend, field) {
             output.push_str("        }\n        else\n        {\n            ");
             output.push_str(&target);
             output.push_str(" = ");
@@ -1349,7 +1406,10 @@ fn render_oneof_to_proto_assignment(
     output.push_str("        }\n");
 }
 
-fn default_enum_proto_expr(field: &RecordFieldSpec<PlannedFamily>) -> Option<String> {
+fn default_enum_proto_expr(
+    backend: &ModelBackend,
+    field: &RecordFieldSpec<PlannedFamily>,
+) -> Option<String> {
     field.default_value.as_ref()?;
     let enum_value = field
         .data
@@ -1368,6 +1428,16 @@ fn default_enum_proto_expr(field: &RecordFieldSpec<PlannedFamily>) -> Option<Str
         }
         _ => return None,
     };
+    // The default names a WIT member, so it goes through the model when there is one. The
+    // model is qualified because a property of the same name hides it.
+    if let Some(model) = backend.enum_model(proto) {
+        return Some(format!(
+            "({})global::{}.{model}.{}",
+            dotnet_proto_type_name_for_info(&proto.proto),
+            backend.namespace,
+            csharp_type_name(&enum_value_name(&enum_value.name))
+        ));
+    }
     Some(format!(
         "{}.{}",
         dotnet_proto_type_name_for_info(&proto.proto),

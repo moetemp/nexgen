@@ -7,7 +7,7 @@ use prost_types::FileOptions;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::spec::{
-    AliasTypeSpec, ApiSpec, ApiSpecTransform, EnumValueSpec, ExternalTypeSourceSpec,
+    AliasTypeSpec, ApiSpec, ApiSpecTransform, EnumSpec, EnumValueSpec, ExternalTypeSourceSpec,
     ExternalTypeSpec, ExternalVariantSourceSpec, FunctionArgSpec, FunctionArgsSpec,
     FunctionFieldSpec, FunctionResultSpec, JsonModelSpec, ModulePath, OperationSpec,
     RecordFieldVisibility, RecordSpec, ResourceFieldSpec, SelectedFamily, SelectedResourceType,
@@ -106,6 +106,37 @@ pub(crate) fn operation_output_direct_result(operation: &OperationSpec<PlannedFa
             wire_type: None,
             ..
         }))
+    )
+}
+
+/// Returns the WIT enums that `@nexus.proto` binds to a proto enum.
+pub(crate) fn proto_enum_models<'a>(
+    spec: &'a PlannedSpec,
+    proto_full_name: &'a str,
+) -> impl Iterator<Item = (&'a str, &'a EnumSpec<PlannedFamily>)> + 'a {
+    spec.enums()
+        .filter(move |(_, enumeration)| binds_proto_enum(enumeration, proto_full_name))
+}
+
+/// Returns the WIT enum that models a proto enum with no replacement type, so the proto enum
+/// stays inside the converters.
+pub(crate) fn proto_enum_model<'a>(
+    spec: &'a PlannedSpec,
+    enumeration: &PlannedProtoEnumType,
+) -> Option<&'a EnumSpec<PlannedFamily>> {
+    spec.enums()
+        .map(|(_, model)| model)
+        .find(|model| binds_proto_enum(model, &enumeration.proto.full_name))
+}
+
+fn binds_proto_enum(enumeration: &EnumSpec<PlannedFamily>, proto_full_name: &str) -> bool {
+    matches!(
+        &enumeration.source,
+        Some(ExternalTypeSourceSpec::Proto(source))
+            if matches!(
+                &source.proto,
+                PlannedProtoType::Enum(proto) if proto.proto.full_name == proto_full_name
+            )
     )
 }
 

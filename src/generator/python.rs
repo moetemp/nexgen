@@ -17,7 +17,7 @@ use crate::planning::{
     PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
     PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
     PlannedSpec, PlannedType, message_model_name, operation_input_model,
-    operation_output_direct_result,
+    operation_output_direct_result, proto_enum_model,
 };
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{
@@ -1805,15 +1805,7 @@ impl<'a> ApiPlanner<'a> {
             {
                 // A proto enum with no replacement type gets the `IntEnum` of its WIT enum, as
                 // a plain WIT enum does, so the field type is never the proto enum.
-                if let Some((_, enum_spec)) = self.api_plan.enums().find(|(_, enum_spec)| {
-                    matches!(
-                        &enum_spec.source,
-                        Some(ExternalTypeSourceSpec::Proto(crate::spec::ProtoTypeSpec {
-                            proto: PlannedProtoType::Enum(proto),
-                            ..
-                        })) if proto.proto.full_name == enum_type.proto.full_name
-                    )
-                }) {
+                if let Some(enum_spec) = proto_enum_model(self.api_plan, enum_type) {
                     self.ensure_rendered_enum(enum_spec);
                 }
             }

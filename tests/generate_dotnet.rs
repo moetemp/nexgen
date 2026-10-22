@@ -604,6 +604,83 @@ fn dotnet_renders_proto_backed_temporal_types() {
     assert!(rendered.contains("System.TimeSpan? ExecutionTimeout"));
 }
 
+const PROTO_ENUM_WIT: &str = r#"package temporal:nexus@1.0.0;
+
+world system {
+  export alerts;
+}
+
+interface alerts {
+  /// @nexus.proto "temporal.api.enums.v1.Severity"
+  enum severity {
+    severity-unspecified,
+    severity-high,
+    severity-medium,
+    severity-low,
+  }
+
+  /// @nexus.proto "temporal.api.version.v1.Alert"
+  record alert {
+    message: string,
+    severity: option<severity>,
+  }
+}
+"#;
+
+const PROTO_ENUM_DEFAULT_FIELD: &str =
+    "    /// @nexus.default \"severity-low\"\n    severity: severity,";
+
+fn generate_dotnet_models_from_wit(label: &str, wit: &str) -> String {
+    let root = project_root();
+    let temp_dir = unique_output_path(label);
+    fs::create_dir_all(&temp_dir).unwrap();
+    let input_path = temp_dir.join("input.wit");
+    fs::write(&input_path, wit).unwrap();
+    let files = generate_dotnet_files(&[input_path], &[descriptor_path(&root)]);
+    fs::remove_dir_all(temp_dir).unwrap();
+    files
+        .get(&PathBuf::from("Models.cs"))
+        .expect("the package should include Models.cs")
+        .clone()
+}
+
+/// A proto enum with no replacement type gets the generated enum of its WIT enum. Only the
+/// converter uses the proto enum.
+#[test]
+fn dotnet_proto_enums_without_a_replacement_use_the_wit_enum_model() {
+    let models = generate_dotnet_models_from_wit("dotnet-proto-enum", PROTO_ENUM_WIT);
+
+    assert!(models.contains("public enum Severity\n"), "{models}");
+    assert!(
+        models.contains("public Severity? Severity { get; init; }"),
+        "{models}"
+    );
+    assert!(
+        models.contains("Severity = (int)wire.Severity == 0 ? null : (Severity)wire.Severity,"),
+        "{models}"
+    );
+    assert!(
+        models.contains("proto.Severity = (Temporalio.Api.Enums.V1.Severity)severity;"),
+        "{models}"
+    );
+}
+
+/// The `Severity` property hides the enum of the same name, so the default qualifies it.
+#[test]
+fn dotnet_proto_enum_defaults_name_the_wit_enum_member() {
+    let models = generate_dotnet_models_from_wit(
+        "dotnet-proto-enum-default",
+        &PROTO_ENUM_WIT.replace("    severity: option<severity>,", PROTO_ENUM_DEFAULT_FIELD),
+    );
+
+    assert!(
+        models.contains(
+            "proto.Severity = (Temporalio.Api.Enums.V1.Severity)global::Nexgen.Alerts.Severity.SeverityLow;"
+        ),
+        "{models}"
+    );
+}
+
 #[test]
 fn dotnet_uses_annotated_namespace_and_operations_class() {
     let temp_dir = unique_output_path("dotnet-annotated-namespace");

@@ -3852,7 +3852,7 @@ fn value_uses_result(value: &PlannedType) -> bool {
     }
 }
 
-fn dotnet_namespace(api_plan: &PlannedSpec) -> String {
+pub(in crate::generator) fn dotnet_namespace(api_plan: &PlannedSpec) -> String {
     if crate::nexgen_config::current().system_nexus {
         return "Temporalio.Workflows".to_string();
     }
@@ -3922,7 +3922,7 @@ pub(in crate::generator) fn field_property_name(field: &RecordFieldSpec<PlannedF
     csharp_type_name(&field.name)
 }
 
-fn enum_value_name(name: &str) -> String {
+pub(in crate::generator) fn enum_value_name(name: &str) -> String {
     name.trim_start_matches(|ch: char| ch == '_' || ch.is_ascii_digit())
         .trim_start_matches("UNSPECIFIED")
         .trim_start_matches('_')

@@ -1,1 +1,1 @@
-Python generates the `IntEnum` of a WIT enum with `@nexus.proto` and no replacement type, and uses it for fields of that proto enum, also when only an operation reaches the record. Before, the models used an undefined enum name.
+Python, TypeScript and .NET use the generated enum of a WIT enum with `@nexus.proto` and no replacement type for fields of that proto enum, also when only an operation reaches the record. Before, the Python and TypeScript models used an undeclared enum name, and the .NET models used the proto enum.

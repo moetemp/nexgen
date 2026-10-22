@@ -666,7 +666,16 @@ fn enum_wire_conversion(value_type: &PlannedType) -> Option<WireValueConversion>
         });
     }
 
-    None
+    // The model is the generated enum of the WIT enum. The protobufjs enum has the same numbers
+    // but is a different TypeScript enum, so the cast goes through `number`.
+    Some(WireValueConversion {
+        annotation: enum_type.name.clone(),
+        from_wire: format!("{{wire}} as number as {}", enum_type.name),
+        to_wire: "{value} as any".to_string(),
+        function_name_to_wire: None,
+        wire_function_names: None,
+        uses_rendered_model_annotation: true,
+    })
 }
 
 fn rendered_model_wire_annotation(

@@ -891,7 +891,7 @@ impl<'a> ApiPlanner<'a> {
             body.push_str("\n\n");
             render_resource_client_binder(&mut body, resource);
         } else {
-            // The standalone wrappers and the methods name the proto module of an enum
+            // The standalone wrappers and the methods refer to the proto module of an enum
             // parameter.
             module_imports.extend(
                 bound_operations
@@ -1071,7 +1071,7 @@ impl<'a> ApiPlanner<'a> {
                 for method in &resource.methods {
                     self.render_client_resource_method(&mut output, service, method);
                 }
-                // The methods name the proto module of an enum parameter.
+                // The methods refer to the proto module of an enum parameter.
                 module_imports.extend(
                     service
                         .operations
@@ -3004,8 +3004,8 @@ struct RenderedOperation<'a> {
     /// transfer-type converters instead of the payload converter.
     client_input_proto_model: Option<String>,
     client_output_proto_model: Option<String>,
-    /// The long-poll loop of a caller outside a Workflow, by Python attribute
-    /// names. Set when the operation declares `@nexus.long-poll`.
+    /// The long-poll loop of a caller outside a Workflow, with the Python attribute of
+    /// each member. Set when the operation declares `@nexus.long-poll`.
     client_long_poll: Option<RenderedLongPoll>,
 }
 
@@ -4311,8 +4311,8 @@ fn render_temporalio_workflow_type_checking_imports(
     true
 }
 
-/// The offset types that `@nexus.offset` names in this module, each with the
-/// first field that names it. Fields that name one type share its declaration.
+/// The offset types that `@nexus.offset` gives in this module, each with the
+/// first field that uses it. Fields that use one type share its declaration.
 fn python_offset_types(api_plan: &PlannedSpec) -> BTreeMap<String, PythonGeneratedName> {
     let mut offset_types = BTreeMap::new();
     for (_, record) in api_plan.records() {
@@ -4500,7 +4500,7 @@ fn render_models_module(
     Ok(Some(output))
 }
 
-/// The model a caller outside a Workflow names for an operation's input or
+/// The model that a caller outside a Workflow uses for an operation's input or
 /// output. The caller supports the models of this module only.
 fn client_model_name(
     service: &RenderedService<'_>,
@@ -5298,7 +5298,7 @@ async def _decode_payloads(
 
 /// The result records that hold a resource, by full name, with the model name and the
 /// resource type. Each one lives in its resource's module, since the resource module imports
-/// the models and the record names the resource class.
+/// the models and the record uses the resource class.
 fn resource_holders(api_plan: &PlannedSpec) -> BTreeMap<String, (String, String)> {
     api_plan
         .services

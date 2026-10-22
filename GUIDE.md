@@ -1172,7 +1172,7 @@ started = await client.start_workflow(request)  # StartedWorkflow
 await started.cancel(reason="done")
 ```
 
-When the long poll also names `offset-field` and `next-offset-field`, the caller
+When the long poll also sets `offset-field` and `next-offset-field`, the caller
 gets `iter_<operation>`, an async iterator over the items of the result list.
 Each page is one `_until_` call, so it waits and backs off by the same rules.
 The next page starts at the answer's next offset. The iterator ends after an
@@ -1887,6 +1887,34 @@ async iterator.
 ///   done-field="done" offset-field="from-offset" next-offset-field="next-offset"
 read: func(request: read-request) -> read-response;
 ```
+
+---
+
+### @nexus.offset
+
+**Placement:** Record field of an integer type, or an `option` of one
+**Syntax:** `@nexus.offset "<offset-type-name>"`
+
+Marks the field as a position in an ordered log, such as a stream offset. The
+name is a kebab-case WIT identifier. Every field that uses the same type shares
+one declaration, so an offset read from one operation can be passed to another.
+The field keeps its integer type, and the wire form does not change.
+
+```wit
+record read-request {
+  /// @nexus.offset "stream-offset"
+  from-offset: option<s64>,
+}
+```
+
+**Python:** the models module declares the type once.
+
+```python
+StreamOffset = typing.NewType("StreamOffset", int)
+```
+
+TypeScript and .NET accept the directive and declare no type. Cannot be combined
+with `@nexus.omit`.
 
 ---
 

@@ -17,6 +17,9 @@ namespace Nexgen.UserService
     [NexusService("UserService")]
     internal interface IUserService
     {
+        /// <summary>
+        /// Get a user by id.
+        /// </summary>
         [GeneratedCode("nexgen", null)]
         [NexusOperation("GetUser")]
         User GetUser(GetUserRequest request);
@@ -27,6 +30,9 @@ namespace Nexgen.UserService
 
     }
 
+    /// <summary>
+    /// Get a user by id.
+    /// </summary>
     [GeneratedCode("nexgen", null)]
     public class GetUserOptions
     {
@@ -67,6 +73,9 @@ namespace Nexgen.UserService
             _client = Workflow.CreateNexusWorkflowClient<IUserService>(endpoint);
         }
 
+        /// <summary>
+        /// Get a user by id.
+        /// </summary>
         [GeneratedCode("nexgen", null)]
         private async Task<User> GetUserAsync(GetUserRequest request)
         {
@@ -74,6 +83,9 @@ namespace Nexgen.UserService
             return User.BindClient(result, _client);
         }
 
+        /// <summary>
+        /// Get a user by id.
+        /// </summary>
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nexgen", null)]
         public Task<User> GetUserAsync(GetUserOptions options)

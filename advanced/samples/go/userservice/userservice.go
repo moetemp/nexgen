@@ -70,6 +70,7 @@ type GetUserOptions struct {
 	UserID string
 }
 
+// Get a user by id.
 func GetUser(ctx workflow.Context, opts GetUserOptions) workflow.Future {
 	return getUser(ctx, getUserRequest{
 		UserID: opts.UserID,

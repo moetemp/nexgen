@@ -102,13 +102,17 @@ interface stream-service {
     constructor(%stream: stream-ref);
 
     /// @nexus.doc "Append records. The answer has the first and the last offset."
-    append-records: func(records: list<append-record>) -> append-records-response;
+    append-records: func(
+      sequence: option<s64>,
+      records: list<append-record>,
+    ) -> append-records-response;
 
     /// @nexus.operation "close-stream"
     close: func(%result: option<payload>);
 
     /// @nexus.doc "Read one page of records."
     read-records: func(
+      from-offset: option<s64>,
       topics: list<string>,
       max-records: option<s32>,
       wait: option<duration>,

@@ -16,8 +16,11 @@ import { describeStream } from "./operations/describe-stream";
 export class Stream {
   public constructor(public readonly stream: StreamRef) {}
 
-  public async appendRecords(records: AppendRecord[]): Promise<AppendRecordsResponse> {
-    const request = { stream: this.stream, records: records };
+  public async appendRecords(
+    sequence: number | undefined,
+    records: AppendRecord[],
+  ): Promise<AppendRecordsResponse> {
+    const request = { stream: this.stream, sequence: sequence, records: records };
     const handle = await appendRecords(request);
     return await handle.result();
   }
@@ -29,12 +32,14 @@ export class Stream {
   }
 
   public async readRecords(
+    fromOffset: number | undefined,
     topics: string[],
     maxRecords?: number,
     wait?: common.Duration,
   ): Promise<ReadRecordsResponse> {
     const request = {
       stream: this.stream,
+      fromOffset: fromOffset,
       topics: topics,
       maxRecords: maxRecords,
       wait: wait,

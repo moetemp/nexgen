@@ -87,3 +87,10 @@ message CloseWritersRequest {
 message CloseWritersResponse {
     int32 failed = 1;
 }
+
+message OpenWriterRequest {
+    StreamRef stream = 1;
+}
+
+message OpenWriterResponse {
+}

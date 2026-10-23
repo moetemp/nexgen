@@ -156,6 +156,17 @@ interface stream-service {
 // The writer has no endpoint, as the stream writer service has none.
 /// @nexus.service-name "streamsample.v1.StreamWriter"
 interface stream-writer {
+  use stream-service.{stream-ref};
+
+  /// @nexus.proto "streamsample.v1.OpenWriterRequest" typescript-import="#streamsample"
+  record open-writer-request {
+    %stream: option<stream-ref>,
+  }
+
+  /// @nexus.proto "streamsample.v1.OpenWriterResponse" typescript-import="#streamsample"
+  record open-writer-response {
+  }
+
   /// @nexus.proto "streamsample.v1.CloseWritersRequest" typescript-import="#streamsample"
   record close-writers-request {
   }
@@ -164,6 +175,9 @@ interface stream-writer {
   record close-writers-response {
     failed: option<s32>,
   }
+
+  /// @nexus.operation name="OpenWriter"
+  open-writer: func(request: open-writer-request) -> open-writer-response;
 
   /// @nexus.doc "Drop every open writer, for example at shutdown."
   /// @nexus.operation name="CloseWriters"

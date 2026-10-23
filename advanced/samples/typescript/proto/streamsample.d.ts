@@ -82,5 +82,11 @@ export namespace streamsample {
     interface ICloseWritersResponse {
       failed?: number | null;
     }
+
+    interface IOpenWriterRequest {
+      stream?: IStreamRef | null;
+    }
+
+    interface IOpenWriterResponse {}
   }
 }

@@ -5321,6 +5321,8 @@ fn render_service_module(
                 input_model.into_iter().chain(output_model)
             })
         })
+        // An unpacked parameter can have the type of another model of this module.
+        .chain(api_plan.records().map(|(_, record)| record.name.clone()))
         .filter(|name| !model_type_imports.contains(name))
         .collect::<BTreeSet<_>>()
         .into_iter()

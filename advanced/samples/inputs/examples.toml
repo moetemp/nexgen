@@ -12,3 +12,11 @@ languages = ["python", "dotnet", "typescript"]
 
 [notification-service]
 languages = ["python", "dotnet", "typescript"]
+
+[stream-service]
+languages = ["python", "typescript", "dotnet"]
+
+# A System Nexus operation that returns a resource.
+[workflow-handle]
+languages = ["python", "dotnet", "typescript"]
+system_nexus = true

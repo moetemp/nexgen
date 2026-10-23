@@ -153,7 +153,6 @@ pub enum RequestPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestPlanField {
     pub field_name: String,
-    pub required: bool,
     pub value: RequestPlan,
 }
 
@@ -430,6 +429,9 @@ fn resource_method_result_matches_operation(
             operation_output_ref(operation) == Some(proto_name.as_str())
                 || operation_output_resource_message_name(operation) == Some(proto_name.as_str())
         }
+        TypeSpec::Record(record_name) => {
+            operation_output_ref(operation) == Some(record_name.as_str())
+        }
         _ => false,
     }
 }
@@ -493,7 +495,6 @@ fn synthesize_request_plan(
         if let Some(source) = environment.get(&field.api_name) {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
-                required: field.required,
                 value: RequestPlan::Source(source.clone()),
             });
             continue;
@@ -506,7 +507,6 @@ fn synthesize_request_plan(
             {
                 fields.push(RequestPlanField {
                     field_name: field.api_name,
-                    required: field.required,
                     value,
                 });
                 continue;
@@ -535,7 +535,6 @@ fn synthesize_record_request_plan(
         if let Some(source) = environment.get(&field.api_name) {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
-                required: field.required,
                 value: RequestPlan::Source(source.clone()),
             });
             continue;
@@ -550,7 +549,6 @@ fn synthesize_record_request_plan(
         {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
-                required: field.required,
                 value,
             });
             continue;
@@ -562,7 +560,6 @@ fn synthesize_record_request_plan(
         {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
-                required: field.required,
                 value,
             });
             continue;
@@ -1090,14 +1087,12 @@ interface user-service {
                 assert_eq!(fields.len(), 2);
                 assert!(fields.contains(&super::RequestPlanField {
                     field_name: "user-id".to_string(),
-                    required: true,
                     value: RequestPlan::Source(RequestPlanSource::ResourceField(
                         "user-id".to_string()
                     )),
                 }));
                 assert!(fields.contains(&super::RequestPlanField {
                     field_name: "email".to_string(),
-                    required: true,
                     value: RequestPlan::Source(RequestPlanSource::MethodParam("email".to_string())),
                 }));
             }

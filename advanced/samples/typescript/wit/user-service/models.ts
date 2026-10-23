@@ -9,7 +9,25 @@ export interface UpdateEmailRequest {
   email: string;
 }
 
-export interface SendVerificationRequest {
+export interface NotifyRequest {
   userId: string;
-  email?: string;
+  reason?: string;
+  channels?: string[];
+  sender: string;
+}
+
+export interface UserProfile {
+  displayName: string;
+}
+
+export interface GetProfileRequest {
+  userId: string;
+}
+
+export interface OpenSessionRequest {
+  userId: string;
+}
+
+export interface EndSessionRequest {
+  session: string;
 }

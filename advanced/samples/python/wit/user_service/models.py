@@ -16,7 +16,29 @@ class UpdateEmailRequest:
     email: str
 
 
-@dataclasses.dataclass(slots=True)
-class SendVerificationRequest:
+@dataclasses.dataclass(slots=True, kw_only=True)
+class NotifyRequest:
     user_id: str
-    email: str | None = None
+    reason: str | None = None
+    channels: list[str] | None = dataclasses.field(default_factory=list)
+    sender: str
+
+
+@dataclasses.dataclass(slots=True)
+class GetProfileRequest:
+    user_id: str
+
+
+@dataclasses.dataclass(slots=True)
+class UserProfile:
+    display_name: str
+
+
+@dataclasses.dataclass(slots=True)
+class OpenSessionRequest:
+    user_id: str
+
+
+@dataclasses.dataclass(slots=True)
+class EndSessionRequest:
+    session: str

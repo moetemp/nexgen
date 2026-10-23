@@ -41,14 +41,8 @@ func (s *UserServiceIntegrationSuite) SetupTest() {
 			return *userservice.NewUser(stringField(input, "UserID"), stringField(input, "Email")), nil
 		})
 
-	sendVerification := nexus.NewSyncOperation("SendVerification",
-		func(ctx context.Context, input any, opts nexus.StartOperationOptions) (nexus.NoValue, error) {
-			s.calls = append(s.calls, nexusCall{"SendVerification", input})
-			return nil, nil
-		})
-
 	service := nexus.NewService(userServiceName)
-	s.NoError(service.Register(getUser, updateEmail, sendVerification))
+	s.NoError(service.Register(getUser, updateEmail))
 	s.env.RegisterNexusService(service)
 }
 
@@ -88,18 +82,6 @@ func (s *UserServiceIntegrationSuite) TestOperationsAndResourceMethod() {
 	s.Equal("direct@example.com", stringField(s.calls[1].Input, "Email"))
 	s.Equal("user-123", stringField(s.calls[2].Input, "UserID"))
 	s.Equal("resource@example.com", stringField(s.calls[2].Input, "Email"))
-}
-
-func (s *UserServiceIntegrationSuite) TestResourceMethodFillsAnOptionalField() {
-	s.env.ExecuteWorkflow(func(ctx workflow.Context) error {
-		user := userservice.NewUser("user-123", "alice@example.com")
-		return user.SendVerification(ctx).Get(ctx, nil)
-	})
-
-	s.True(s.env.IsWorkflowCompleted())
-	s.NoError(s.env.GetWorkflowError())
-	s.Require().Len(s.calls, 1)
-	s.Equal("alice@example.com", stringField(s.calls[0].Input, "Email"))
 }
 
 func (s *UserServiceIntegrationSuite) TestOperationFailure() {

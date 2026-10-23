@@ -7,7 +7,7 @@ export class StartedWorkflow {
   public constructor(
     public readonly namespace: string,
     public readonly workflowId: string,
-    public readonly runId: string,
+    public readonly runId: string | undefined,
   ) {}
 
   public async cancel(reason?: string): Promise<void> {

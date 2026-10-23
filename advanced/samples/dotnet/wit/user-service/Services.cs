@@ -26,8 +26,20 @@ namespace Nexgen.UserService
         User UpdateEmail(UpdateEmailRequest request);
 
         [GeneratedCode("nexgen", null)]
-        [NexusOperation("SendVerification")]
-        void SendVerification(SendVerificationRequest request);
+        [NexusOperation("Notify")]
+        void Notify(NotifyRequest request);
+
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("GetProfile")]
+        UserProfile GetProfile(GetProfileRequest request);
+
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("OpenSession")]
+        Session OpenSession(OpenSessionRequest request);
+
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("EndSession")]
+        void EndSession(EndSessionRequest request);
 
     }
 
@@ -62,18 +74,64 @@ namespace Nexgen.UserService
     }
 
     [GeneratedCode("nexgen", null)]
-    public class SendVerificationOptions
+    public class NotifyOptions
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="SendVerificationOptions"/> class.
+        /// Initializes a new instance of the <see cref="NotifyOptions"/> class.
         /// </summary>
-        public SendVerificationOptions(string userId)
+        public NotifyOptions(string userId, IReadOnlyList<string> channels, string sender)
+        {
+            UserId = userId;
+            Channels = channels;
+            Sender = sender;
+        }
+
+        public string UserId { get; set; }
+        public string? Reason { get; set; }
+        public IReadOnlyList<string> Channels { get; set; }
+        public string Sender { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class GetProfileOptions
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="GetProfileOptions"/> class.
+        /// </summary>
+        public GetProfileOptions(string userId)
         {
             UserId = userId;
         }
 
         public string UserId { get; set; }
-        public string? Email { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class OpenSessionOptions
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="OpenSessionOptions"/> class.
+        /// </summary>
+        public OpenSessionOptions(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class EndSessionOptions
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EndSessionOptions"/> class.
+        /// </summary>
+        public EndSessionOptions(string session)
+        {
+            Session = session;
+        }
+
+        public string Session { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -117,20 +175,64 @@ namespace Nexgen.UserService
         }
 
         [GeneratedCode("nexgen", null)]
-        private async Task SendVerificationAsync(SendVerificationRequest request)
+        private async Task NotifyAsync(NotifyRequest request)
         {
-            await _client.ExecuteNexusOperationAsync(svc => svc.SendVerification(request)).ConfigureAwait(true);
+            await _client.ExecuteNexusOperationAsync(svc => svc.Notify(request)).ConfigureAwait(true);
         }
 
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nexgen", null)]
-        public Task SendVerificationAsync(SendVerificationOptions options)
+        public Task NotifyAsync(NotifyOptions options)
         {
-            var request = new SendVerificationRequest(options.UserId)
+            var request = new NotifyRequest(options.UserId, options.Channels, options.Sender)
             {
-                Email = options.Email,
+                Reason = options.Reason,
             };
-            return SendVerificationAsync(request);
+            return NotifyAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task<UserProfile> GetProfileAsync(GetProfileRequest request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<UserProfile>(svc => svc.GetProfile(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task<UserProfile> GetProfileAsync(GetProfileOptions options)
+        {
+            var request = new GetProfileRequest(options.UserId);
+            return GetProfileAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task<Session> OpenSessionAsync(OpenSessionRequest request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<Session>(svc => svc.OpenSession(request)).ConfigureAwait(true);
+            return Session.BindClient(result, _client);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task<Session> OpenSessionAsync(OpenSessionOptions options)
+        {
+            var request = new OpenSessionRequest(options.UserId);
+            return OpenSessionAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task EndSessionAsync(EndSessionRequest request)
+        {
+            await _client.ExecuteNexusOperationAsync(svc => svc.EndSession(request)).ConfigureAwait(true);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task EndSessionAsync(EndSessionOptions options)
+        {
+            var request = new EndSessionRequest(options.Session);
+            return EndSessionAsync(request);
         }
 
     }

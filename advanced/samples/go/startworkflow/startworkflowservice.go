@@ -195,15 +195,19 @@ type StartedWorkflow struct {
 	Namespace string
 	// WorkflowID - Required.
 	WorkflowID string
-	// RunID - Required.
-	RunID string
+	// RunID - Optional.
+	RunID *string
 }
 
 func NewStartedWorkflow(namespace string, workflowID string, runID string) StartedWorkflow {
+	var runIDPtr *string
+	if runID != "" {
+		runIDPtr = &runID
+	}
 	return StartedWorkflow{
 		Namespace:  namespace,
 		WorkflowID: workflowID,
-		RunID:      runID,
+		RunID:      runIDPtr,
 	}
 }
 
@@ -212,7 +216,7 @@ func (u *StartedWorkflow) Cancel(ctx workflow.Context, reason string) workflow.F
 	if reason != "" {
 		reasonPtr = &reason
 	}
-	return cancelWorkflow(ctx, cancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowID: u.WorkflowID, RunID: &u.RunID}, Reason: reasonPtr})
+	return cancelWorkflow(ctx, cancelWorkflowRequest{WorkflowExecution: WorkflowExecution{WorkflowID: u.WorkflowID, RunID: u.RunID}, Reason: reasonPtr})
 }
 
 func (u *StartedWorkflow) RestartWorkflow(ctx workflow.Context, workflow string, taskQueue string) workflow.Future {

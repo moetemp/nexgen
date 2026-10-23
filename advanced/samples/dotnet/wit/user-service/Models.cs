@@ -10,6 +10,34 @@ namespace Nexgen.UserService
 {
 
     [GeneratedCode("nexgen", null)]
+    public record EndSessionRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EndSessionRequest"/> class.
+        /// </summary>
+        public EndSessionRequest(string session)
+        {
+            Session = session;
+        }
+
+        public string Session { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public record GetProfileRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="GetProfileRequest"/> class.
+        /// </summary>
+        public GetProfileRequest(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
     public record GetUserRequest
     {
         /// <summary>
@@ -24,18 +52,36 @@ namespace Nexgen.UserService
     }
 
     [GeneratedCode("nexgen", null)]
-    public record SendVerificationRequest
+    public record NotifyRequest
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="SendVerificationRequest"/> class.
+        /// Initializes a new instance of the <see cref="NotifyRequest"/> class.
         /// </summary>
-        public SendVerificationRequest(string userId)
+        public NotifyRequest(string userId, IReadOnlyList<string> channels, string sender)
+        {
+            UserId = userId;
+            Channels = channels;
+            Sender = sender;
+        }
+
+        public string UserId { get; init; }
+        public string? Reason { get; init; }
+        public IReadOnlyList<string> Channels { get; init; }
+        public string Sender { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public record OpenSessionRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="OpenSessionRequest"/> class.
+        /// </summary>
+        public OpenSessionRequest(string userId)
         {
             UserId = userId;
         }
 
         public string UserId { get; init; }
-        public string? Email { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -52,6 +98,20 @@ namespace Nexgen.UserService
 
         public string UserId { get; init; }
         public string Email { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public record UserProfile
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="UserProfile"/> class.
+        /// </summary>
+        public UserProfile(string displayName)
+        {
+            DisplayName = displayName;
+        }
+
+        public string DisplayName { get; init; }
     }
 
 }

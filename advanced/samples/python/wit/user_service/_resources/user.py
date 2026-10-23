@@ -6,8 +6,10 @@ import dataclasses
 import typing
 
 from ..models import (
-    SendVerificationRequest,
+    GetProfileRequest,
+    NotifyRequest,
     UpdateEmailRequest,
+    UserProfile,
 )
 
 
@@ -36,19 +38,39 @@ class User:
             nexus_client,
         )
 
-    async def send_verification(
+    async def notify(
         self,
+        *,
+        reason: str | None = None,
+        channels: list[str] | None = None,
+        sender: str,
     ) -> None:
-        request = SendVerificationRequest(
+        request = NotifyRequest(
             user_id=self.user_id,
-            email=self.email,
+            reason=reason,
+            channels=channels or [],
+            sender=sender,
         )
         nexus_client = getattr(self, "_nexus_client")
         handle = await nexus_client.start_operation(
-            operation="SendVerification",
+            operation="Notify",
             input=request,
         )
         await handle
+
+    async def get_profile(
+        self,
+    ) -> UserProfile:
+        request = GetProfileRequest(
+            user_id=self.user_id,
+        )
+        nexus_client = getattr(self, "_nexus_client")
+        handle = await nexus_client.start_operation(
+            operation="GetProfile",
+            input=request,
+            output_type=UserProfile,
+        )
+        return await handle
 
 
 def bind_user_client(

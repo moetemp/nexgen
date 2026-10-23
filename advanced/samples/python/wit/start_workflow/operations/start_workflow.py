@@ -25,12 +25,10 @@ async def _start_workflow(
         output_type=StartWorkflowResult,
     )
     result = await handle
-    if result.run_id is None:
-        raise RuntimeError("StartWorkflow answered without `run_id`")
     return StartedWorkflow(
         namespace=request.namespace,
         workflow_id=request.workflow_id,
-        run_id=result.run_id,
+        run_id=result.run_id or None,
     )
 
 

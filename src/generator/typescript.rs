@@ -5578,10 +5578,14 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
         output.push_str("  public async ");
         output.push_str(&typescript_generated_field_name(&method.name));
         output.push_str("(\n");
-        for param in &method.params {
+        // TypeScript refuses an optional parameter before a required one, and WIT allows
+        // any order, so such a parameter takes `undefined` explicitly.
+        let last_required = method.params.iter().rposition(|param| !param.optional);
+        for (index, param) in method.params.iter().enumerate() {
+            let before_required = last_required.is_some_and(|last| index < last);
             output.push_str("    ");
             output.push_str(&typescript_generated_field_name(&param.name));
-            if param.optional {
+            if param.optional && !before_required {
                 output.push('?');
             }
             output.push_str(": ");
@@ -5590,6 +5594,9 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                 false,
                 param.function.as_ref(),
             ));
+            if param.optional && before_required {
+                output.push_str(" | undefined");
+            }
             output.push_str(",\n");
         }
         output.push_str("  ): Promise<");
@@ -6128,7 +6135,7 @@ fn render_request_plan_typescript(plan: &RequestPlan) -> String {
                 format!("{{ {} }}", fields.join(", "))
             }
         },
-        |name, _| format!("this.{}", typescript_generated_field_name(name)),
+        |name| format!("this.{}", typescript_generated_field_name(name)),
         typescript_generated_field_name,
     )
 }
@@ -6328,6 +6335,18 @@ fn render_operation_function(
             output.push_str("  return ");
             output.push_str(transform_expr);
             output.push_str(";\n");
+        } else if let Some(resource_return) = &operation.output_resource_return {
+            // The answer is the resource's wire message, so the resource is built from it.
+            let args = resource_return
+                .bindings
+                .iter()
+                .map(resource_return_binding_expr_typescript)
+                .collect::<Vec<_>>();
+            output.push_str("  return new ");
+            output.push_str(&resource_return.resource_type_name);
+            output.push('(');
+            output.push_str(&args.join(", "));
+            output.push_str(");\n");
         } else {
             output.push_str("  return result as ");
             output.push_str(&operation.output_annotation);

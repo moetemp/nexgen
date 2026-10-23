@@ -82,7 +82,7 @@ namespace Nexgen.StartWorkflowService
         {
             var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
             var result = await client.ExecuteNexusOperationAsync<StartWorkflowResult>(svc => svc.StartWorkflow(request)).ConfigureAwait(true);
-            return new StartedWorkflow(request.Namespace, request.WorkflowId, (result.RunId ?? throw new System.InvalidOperationException("StartWorkflow answered without `run_id`")));
+            return new StartedWorkflow(request.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
         }
 
         /// <param name="options">Options for the operation.</param>
@@ -101,7 +101,7 @@ namespace Nexgen.StartWorkflowService
         {
             var client = Workflow.CreateNexusWorkflowClient<IStartWorkflowService>(StartWorkflowServiceEndpoint);
             var result = await client.ExecuteNexusOperationAsync<StartWorkflowResult>(svc => svc.RestartWorkflow(request)).ConfigureAwait(true);
-            return new StartedWorkflow(request.Namespace, request.WorkflowId, (result.RunId ?? throw new System.InvalidOperationException("RestartWorkflow answered without `run_id`")));
+            return new StartedWorkflow(request.Namespace, request.WorkflowId, string.IsNullOrEmpty(result.RunId) ? null : result.RunId);
         }
 
         /// <param name="options">Options for the operation.</param>

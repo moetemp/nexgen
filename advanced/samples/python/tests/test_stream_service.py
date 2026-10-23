@@ -7,12 +7,11 @@ from temporalio.api.common.v1 import Payload
 
 import wit.stream_service.client as stream_service_client
 import wit.stream_service.models as stream_service_models
-from wit.stream_service._resources import Stream
 
 CONVERTER = temporalio.converter.DataConverter.default.payload_converter
 
 
-async def test_client_create_stream_returns_the_stream_class() -> None:
+async def test_client_create_stream_returns_a_bound_stream() -> None:
     class Transport:
         async def call(
             self, *, service: str, operation: str, input: Payload
@@ -31,9 +30,10 @@ async def test_client_create_stream_returns_the_stream_class() -> None:
         )
     )
 
-    assert isinstance(result.stream, Stream)
+    assert isinstance(result.stream, stream_service_client.Stream)
     assert result.stream.stream.id == "stream-1"
     assert result.created
+    assert result.stream._client is client
 
 
 async def test_iterator_reads_every_page_from_the_next_offset() -> None:

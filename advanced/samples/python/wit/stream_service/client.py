@@ -27,7 +27,7 @@ from .models import (
     StreamRecord,
     StreamRef,
 )
-from ._resources import CreateStreamResult
+from . import _resources
 
 
 class Transport(typing.Protocol):
@@ -119,8 +119,13 @@ class StreamServiceClient:
     async def create_stream(self, request: CreateStreamRequest) -> CreateStreamResult:
         [payload] = await self._data_converter.encode([request])
         answer = await self._call("CreateStream", payload)
-        [value] = await self._data_converter.decode([answer], [CreateStreamResult])
-        return typing.cast(CreateStreamResult, value)
+        [value] = await self._data_converter.decode(
+            [answer], [_resources.CreateStreamResult]
+        )
+        result = typing.cast(_resources.CreateStreamResult, value)
+        return CreateStreamResult(
+            stream=Stream(self, stream=result.stream.stream), created=result.created
+        )
 
     async def append_records(
         self, request: AppendRecordsRequest
@@ -312,3 +317,9 @@ class Stream:
             stream=self.stream,
         )
         return await self._client.describe_stream(request)
+
+
+@dataclasses.dataclass(slots=True)
+class CreateStreamResult:
+    stream: Stream
+    created: bool

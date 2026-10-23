@@ -72,9 +72,11 @@ sample-project instructions for [Go](go/README.md), [Python](python/README.md),
 
 ### `workflow-handle`
 
-A System Nexus operation that returns a resource. TypeScript only for now.
+A System Nexus operation that returns a resource.
 
 - WIT: [`inputs/workflow-handle.wit`](inputs/workflow-handle.wit)
+- .NET: [`dotnet/wit/workflow-handle/`](dotnet/wit/workflow-handle/)
+- Python: [`python/wit/workflow_handle/`](python/wit/workflow_handle/)
 - TypeScript:
   [`typescript/wit/workflow-handle/`](typescript/wit/workflow-handle/)
 

@@ -1509,10 +1509,7 @@ pub enum TypeSpec<F: TypeFamily = AuthoredFamily> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntSpec {
     I32,
-    /// From a proto 64-bit field.
     I64,
-    /// From a WIT `s64`.
-    S64,
     U32,
     U64,
 }
@@ -1613,7 +1610,7 @@ where
         match self {
             TypeSpec::Bool => "bool".to_string(),
             TypeSpec::Int(IntSpec::I32) => "s32".to_string(),
-            TypeSpec::Int(IntSpec::I64 | IntSpec::S64) => "s64".to_string(),
+            TypeSpec::Int(IntSpec::I64) => "s64".to_string(),
             TypeSpec::Int(IntSpec::U32) => "u32".to_string(),
             TypeSpec::Int(IntSpec::U64) => "u64".to_string(),
             TypeSpec::Float => "float64".to_string(),

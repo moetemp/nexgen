@@ -216,6 +216,15 @@ pub enum Error {
     IncompleteOperationOutputTransform { service: String, operation: String },
 
     #[error(
+        "{language} cannot generate operation `{service}.{operation}`: its result record holds a resource, which this target doesn't generate"
+    )]
+    UnsupportedResourceHolder {
+        language: Language,
+        service: String,
+        operation: String,
+    },
+
+    #[error(
         "service `{service}` operation `{operation}` references unknown input proto type `{type_name}`"
     )]
     UnknownOperationInputProto {

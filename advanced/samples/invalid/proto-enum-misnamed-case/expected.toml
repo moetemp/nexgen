@@ -1,0 +1,9 @@
+descriptors = "temporal"
+
+[error]
+kind = "invalid-proto-enum-binding"
+contains = [
+  "temporal.api.enums.v1.Severity",
+  "authored case `severity-unknown`",
+  "corresponding protobuf case is `SEVERITY_LOW = 3`",
+]

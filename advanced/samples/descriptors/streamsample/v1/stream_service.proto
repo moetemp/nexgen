@@ -80,3 +80,10 @@ message DescribeStreamResponse {
     int64 last_offset = 1;
     google.protobuf.Duration retention = 2;
 }
+
+message CloseWritersRequest {
+}
+
+message CloseWritersResponse {
+    int32 failed = 1;
+}

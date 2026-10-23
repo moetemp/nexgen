@@ -1,5 +1,5 @@
 
-Õ
+œ
 $streamsample/v1/stream_service.protostreamsample.v1google/protobuf/duration.proto$temporal/api/common/v1/message.proto"<
 	StreamRef
 id (	Rid
@@ -53,4 +53,7 @@ nextOffset
 DescribeStreamResponse
 last_offset (R
 lastOffset7
-	retention (2.google.protobuf.DurationR	retentionBªStreamSample.V1bproto3
+	retention (2.google.protobuf.DurationR	retention"
+CloseWritersRequest".
+CloseWritersResponse
+failed (RfailedBªStreamSample.V1bproto3

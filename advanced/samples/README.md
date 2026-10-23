@@ -142,12 +142,14 @@ records are proto-backed, as a stream service's are, on the sample proto in
 - [`inputs/deps/`](inputs/deps/): reusable Temporal semantic/common type WIT
   inputs linked into proto-backed example generation.
 - [`descriptors/temporal_api.bin`](descriptors/temporal_api.bin): Temporal API
-  descriptor set used by proto-backed examples.
+  descriptor set. An example selects it with `descriptors = "temporal"` in
+  [`inputs/examples.toml`](inputs/examples.toml). Descriptors are opt-in, as in
+  the compiler rejection fixtures, so an example with no `descriptors` gets
+  none. A list specifies files in `descriptors/`.
 - [`descriptors/stream_service.bin`](descriptors/stream_service.bin): descriptor
   set of the `stream-service` sample proto. Only `stream-service` lists it in
-  `descriptors` in [`inputs/examples.toml`](inputs/examples.toml). An example
-  with no `descriptors` gets `temporal_api.bin`. The sample projects hold its
-  bindings: [`python/streamsample/`](python/streamsample/),
+  `descriptors`. The sample projects hold its bindings:
+  [`python/streamsample/`](python/streamsample/),
   [`dotnet/proto/`](dotnet/proto/) and
   [`typescript/proto/streamsample.d.ts`](typescript/proto/streamsample.d.ts).
 - [`wire/proto/`](wire/proto/): proto wire fixtures used by the

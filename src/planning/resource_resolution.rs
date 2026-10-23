@@ -1090,12 +1090,14 @@ interface user-service {
                 assert_eq!(fields.len(), 2);
                 assert!(fields.contains(&super::RequestPlanField {
                     field_name: "user-id".to_string(),
+                    required: true,
                     value: RequestPlan::Source(RequestPlanSource::ResourceField(
                         "user-id".to_string()
                     )),
                 }));
                 assert!(fields.contains(&super::RequestPlanField {
                     field_name: "email".to_string(),
+                    required: true,
                     value: RequestPlan::Source(RequestPlanSource::MethodParam("email".to_string())),
                 }));
             }

@@ -71,7 +71,7 @@ export class Writer {
   public constructor(public readonly writerId: number) {}
 
   public async close(): Promise<CloseWriterResponse> {
-    const request = { writerId: this.writerId };
+    const request = { writerId: Long.fromNumber(this.writerId) };
     const handle = await requireWriterClient(this).startOperation(
       streamWriter.operations.closeWriter,
       request,

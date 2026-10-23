@@ -9,10 +9,10 @@ use prost_types::field_descriptor_proto::Type;
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ApiSpecTransform, ExternalTypeSpec, JsonModelSpec, OperationSpec, RecordFieldSpec,
-    RecordFieldVisibility, RecordSpec, ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec,
-    ResourceSpec, SelectedFamily, SelectedResourceType, SelectedTextSpec, ServiceSpec, Symbol,
-    TypeFamily, TypeSpec,
+    ApiSpec, ApiSpecTransform, ExternalTypeSpec, IntSpec, JsonModelSpec, OperationSpec,
+    RecordFieldSpec, RecordFieldVisibility, RecordSpec, ResourceFieldSpec, ResourceMethodSpec,
+    ResourceResultSpec, ResourceSpec, SelectedFamily, SelectedResourceType, SelectedTextSpec,
+    ServiceSpec, Symbol, TypeFamily, TypeSpec,
 };
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 /// Selected IR after resource-method and resource-return bindings are resolved.
@@ -137,6 +137,8 @@ pub struct ResolvedResourceHolder {
 pub struct ResolvedResourceFieldBinding {
     pub field_name: String,
     pub optional: bool,
+    /// A 64-bit integer, which a proto answer holds as a wider type than the resource field.
+    pub wide_int: bool,
     pub source: ResolvedResourceBindingSource,
 }
 
@@ -259,6 +261,10 @@ pub(crate) fn resolve_service_resources(
                 Ok(ResolvedResourceFieldBinding {
                     field_name: field.name.clone(),
                     optional: field.optional,
+                    wide_int: matches!(
+                        field.field_type,
+                        TypeSpec::Int(IntSpec::I64 | IntSpec::U64)
+                    ),
                     source,
                 })
             })

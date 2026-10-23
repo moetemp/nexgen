@@ -1303,6 +1303,7 @@ fn plan_operation_resource_return(
             .map(|binding| PlannedOperationResourceFieldBinding {
                 field_name: binding.field_name.clone(),
                 optional: binding.optional,
+                wide_int: binding.wide_int,
                 source: binding.source.clone(),
             })
             .collect(),

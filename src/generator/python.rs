@@ -6154,7 +6154,8 @@ fn render_endpoint_service_object_unpacked_method(
     output.push_str("    ) -> ");
     output.push_str(&operation_public_return_annotation(service, operation));
     output.push_str(":\n");
-    render_unpacked_operation_docstring(output, operation, unpacked_input, None);
+    // A method body sits one level deeper than a module function body.
+    render_unpacked_operation_docstring(output, "        ", operation, unpacked_input, None);
     for flattened_message in &unpacked_input.flattened_messages {
         render_flattened_message_setup(output, flattened_message);
     }
@@ -7958,7 +7959,7 @@ fn render_request_only_operation_function(
         output.push_str(",\n");
         output.push_str("]:\n");
         if render_request_doc {
-            render_operation_docstring(output, operation, &[], None);
+            render_operation_docstring(output, "    ", operation, &[], None);
         }
         render_temporalio_workflow_runtime_imports(
             output,
@@ -8018,7 +8019,7 @@ fn render_request_only_operation_function(
     }
 
     if render_request_doc {
-        render_operation_docstring(output, operation, &[], None);
+        render_operation_docstring(output, "    ", operation, &[], None);
     }
 
     render_temporalio_workflow_runtime_imports(
@@ -8139,6 +8140,7 @@ fn render_resource_holder_return(
 
 fn render_unpacked_operation_docstring(
     output: &mut String,
+    indent: &str,
     operation: &RenderedOperation<'_>,
     unpacked_input: &RenderedUnpackedInput,
     primary_function: Option<&RenderedFunctionField>,
@@ -8220,7 +8222,13 @@ fn render_unpacked_operation_docstring(
         }
     }
 
-    render_operation_docstring(output, operation, &args, operation.return_doc.as_deref());
+    render_operation_docstring(
+        output,
+        indent,
+        operation,
+        &args,
+        operation.return_doc.as_deref(),
+    );
 }
 
 fn python_field_doc_rendered_as_function_arg(
@@ -8238,13 +8246,14 @@ fn python_field_doc_rendered_as_function_arg(
 
 fn render_operation_docstring(
     output: &mut String,
+    indent: &str,
     operation: &RenderedOperation<'_>,
     args: &[(String, String)],
     returns: Option<&str>,
 ) {
     render_python_docstring(
         output,
-        "    ",
+        indent,
         operation.doc.as_deref(),
         args,
         returns,
@@ -8488,7 +8497,7 @@ fn render_unpacked_operation_function(
         output.push_str(",\n");
         output.push_str("]:\n");
     }
-    render_unpacked_operation_docstring(output, operation, unpacked_input, None);
+    render_unpacked_operation_docstring(output, "    ", operation, unpacked_input, None);
     for flattened_message in &unpacked_input.flattened_messages {
         render_flattened_message_setup(output, flattened_message);
     }
@@ -8655,7 +8664,13 @@ fn render_function_unpacked_implementation(
         output.push_str(",\n");
         output.push_str("]:\n");
     }
-    render_unpacked_operation_docstring(output, operation, unpacked_input, primary_function);
+    render_unpacked_operation_docstring(
+        output,
+        "    ",
+        operation,
+        unpacked_input,
+        primary_function,
+    );
 
     for function in &unpacked_input.functions {
         if function.primary && matches!(function.args, RenderedFunctionArgs::Typed { .. }) {

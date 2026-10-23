@@ -21,6 +21,8 @@ from .models import (
     AppendRecordsResponse,
     CloseStreamRequest,
     CloseStreamResponse,
+    CloseWritersRequest,
+    CloseWritersResponse,
     CreateStreamRequest,
     CreateStreamResponse,
     DescribeStreamRequest,
@@ -33,6 +35,8 @@ from .models import (
     _AppendRecordsResponseTransferTypeConverter,
     _CloseStreamRequestTransferTypeConverter,
     _CloseStreamResponseTransferTypeConverter,
+    _CloseWritersRequestTransferTypeConverter,
+    _CloseWritersResponseTransferTypeConverter,
     _CreateStreamRequestTransferTypeConverter,
     _CreateStreamResponseTransferTypeConverter,
     _DescribeStreamRequestTransferTypeConverter,
@@ -368,6 +372,65 @@ class StreamServiceClient:
         await _decode_payloads(message, self._data_converter.payload_codec)
         with self._converters():
             return converter.from_transfer_type(message, DescribeStreamResponse)
+
+
+class StreamWriterClient:
+    """Calls the `streamsample.v1.StreamWriter` operations over a transport.
+
+    For code outside a Workflow. Workflow code uses the operation stubs.
+    """
+
+    def __init__(
+        self,
+        transport: Transport,
+        *,
+        data_converter: temporalio.converter.DataConverter | None = None,
+    ) -> None:
+        """Create a caller.
+
+        Args:
+            transport: Carries each call to the service.
+            data_converter: Converts and encodes the user values. A proto-backed
+                model travels as is, and each payload and failure inside it goes
+                through the converter and the codec, as in Workflow code. A model
+                that is not proto-backed is one user value. Defaults to the SDK's
+                default data converter.
+        """
+        self._transport: Transport = transport
+        self._data_converter: temporalio.converter.DataConverter = (
+            data_converter or temporalio.converter.DataConverter.default
+        )
+
+    def _converters(self) -> contextlib.AbstractContextManager[None]:
+        return temporalio.nexus.system._user_converter_context(
+            temporalio.nexus.system._SystemNexusUserConverters(
+                payload_converter=self._data_converter.payload_converter,
+                failure_converter=self._data_converter.failure_converter,
+            )
+        )
+
+    async def _call(
+        self, operation: str, payload: temporalio.api.common.v1.Payload
+    ) -> temporalio.api.common.v1.Payload:
+        return await self._transport.call(
+            service="streamsample.v1.StreamWriter",
+            operation=operation,
+            input=payload,
+        )
+
+    async def close_writers(self, request: CloseWritersRequest) -> CloseWritersResponse:
+        with self._converters():
+            message = _CloseWritersRequestTransferTypeConverter().to_transfer_type(
+                request
+            )
+        await _encode_payloads(message, self._data_converter.payload_codec)
+        payload = _proto_payload(message)
+        answer = await self._call("CloseWriters", payload)
+        converter = _CloseWritersResponseTransferTypeConverter()
+        message = _proto_message(answer, converter.transfer_type)
+        await _decode_payloads(message, self._data_converter.payload_codec)
+        with self._converters():
+            return converter.from_transfer_type(message, CloseWritersResponse)
 
 
 class Stream:

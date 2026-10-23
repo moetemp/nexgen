@@ -7,6 +7,7 @@ import typing
 
 import nexusrpc
 import temporalio.converter
+from .services import StreamWriterClient
 from . import services as _services
 from .operations.create_stream import create_stream
 from ._resources.stream import append_records
@@ -15,6 +16,7 @@ from ._resources.stream import read_records
 from ._resources.stream import describe_stream
 
 __all__ = [
+    "StreamWriterClient",
     "append_records",
     "close_stream",
     "create_stream",
@@ -77,5 +79,11 @@ __nexus_operation_registry__: dict[
         "DescribeStream",
     ): _NexusOperationInfo(
         operation=_services.StreamService.describe_stream,
+    ),
+    (
+        "streamsample.v1.StreamWriter",
+        "CloseWriters",
+    ): _NexusOperationInfo(
+        operation=_services.StreamWriter.close_writers,
     ),
 }

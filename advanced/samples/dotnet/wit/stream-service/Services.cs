@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using NexusRpc;
 using Temporalio.Converters;
+using Temporalio.Workflows;
 using Nexgen.Support;
 
 namespace Nexgen.StreamService
@@ -36,6 +37,35 @@ namespace Nexgen.StreamService
         [GeneratedCode("nexgen", null)]
         [NexusOperation("DescribeStream")]
         DescribeStreamResponse DescribeStream(DescribeStreamRequest request);
+
+    }
+
+    [GeneratedCode("nexgen", null)]
+    [NexusService("streamsample.v1.StreamWriter")]
+    internal interface IStreamWriter
+    {
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("CloseWriters")]
+        CloseWritersResponse CloseWriters();
+
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class StreamWriterClient
+    {
+        private readonly NexusWorkflowClient<IStreamWriter> _client;
+
+        public StreamWriterClient(string endpoint)
+        {
+            _client = Workflow.CreateNexusWorkflowClient<IStreamWriter>(endpoint);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        public async Task<CloseWritersResponse> CloseWritersAsync()
+        {
+            var result = await _client.ExecuteNexusOperationAsync<CloseWritersResponse>(svc => svc.CloseWriters()).ConfigureAwait(true);
+            return result;
+        }
 
     }
 

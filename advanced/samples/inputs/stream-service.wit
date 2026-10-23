@@ -165,6 +165,7 @@ interface stream-writer {
     failed: option<s32>,
   }
 
+  /// @nexus.doc "Drop every open writer, for example at shutdown."
   /// @nexus.operation name="CloseWriters"
   close-writers: func(request: close-writers-request) -> close-writers-response;
 }

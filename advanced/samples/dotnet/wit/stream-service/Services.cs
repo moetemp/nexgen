@@ -44,6 +44,9 @@ namespace Nexgen.StreamService
     [NexusService("streamsample.v1.StreamWriter")]
     internal interface IStreamWriter
     {
+        /// <summary>
+        /// Drop every open writer, for example at shutdown.
+        /// </summary>
         [GeneratedCode("nexgen", null)]
         [NexusOperation("CloseWriters")]
         CloseWritersResponse CloseWriters();
@@ -60,6 +63,9 @@ namespace Nexgen.StreamService
             _client = Workflow.CreateNexusWorkflowClient<IStreamWriter>(endpoint);
         }
 
+        /// <summary>
+        /// Drop every open writer, for example at shutdown.
+        /// </summary>
         [GeneratedCode("nexgen", null)]
         public async Task<CloseWritersResponse> CloseWritersAsync()
         {

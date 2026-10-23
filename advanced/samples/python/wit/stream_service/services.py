@@ -9,19 +9,19 @@ from .models import (
     CloseStreamRequest,
     CloseStreamResponse,
     CreateStreamRequest,
+    CreateStreamResponse,
     DescribeStreamRequest,
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
 )
-from ._resources.stream import Stream
 
 
-@service
+@service(name="streamsample.v1.StreamService")
 class StreamService:
     create_stream: Operation[
         CreateStreamRequest,
-        Stream,
+        CreateStreamResponse,
     ] = Operation(name="CreateStream")
 
     append_records: Operation[

@@ -1509,9 +1509,9 @@ pub enum TypeSpec<F: TypeFamily = AuthoredFamily> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IntSpec {
     I32,
-    /// A proto 64-bit field. TypeScript reads it as the proto runtime's `Long`.
+    /// From a proto 64-bit field.
     I64,
-    /// A WIT `s64`. It travels as a JSON number, so TypeScript uses `number`.
+    /// From a WIT `s64`.
     S64,
     U32,
     U64,

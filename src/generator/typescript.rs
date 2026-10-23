@@ -1395,6 +1395,8 @@ fn resolve_typescript_value_type(
             requirements: TypeScriptRequirements::default(),
             wire_conversion: None,
         },
+        // A proto 64-bit field is the proto runtime's `Long`. A WIT integer goes over JSON, and
+        // the other languages read it as a JSON number, so it stays `number`.
         PlannedType::Int(IntSpec::I32 | IntSpec::S64 | IntSpec::U32 | IntSpec::U64) => {
             ResolvedFieldType {
                 annotation: "number".to_string(),

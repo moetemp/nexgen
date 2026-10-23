@@ -14,4 +14,4 @@ languages = ["python", "dotnet", "typescript"]
 languages = ["python", "dotnet", "typescript"]
 
 [stream-service]
-languages = ["python", "typescript"]
+languages = ["python", "typescript", "dotnet"]

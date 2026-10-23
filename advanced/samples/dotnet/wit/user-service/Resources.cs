@@ -52,46 +52,6 @@ namespace Nexgen.UserService
             await RequireNexgenClient().ExecuteNexusOperationAsync(svc => svc.Notify(request)).ConfigureAwait(true);
         }
 
-        [GeneratedCode("nexgen", null)]
-        public async Task<UserProfile> GetProfileAsync()
-        {
-            var request = new GetProfileRequest(UserId);
-            var result = await RequireNexgenClient().ExecuteNexusOperationAsync<UserProfile>(svc => svc.GetProfile(request)).ConfigureAwait(true);
-            return result;
-        }
-
-    }
-
-    [GeneratedCode("nexgen", null)]
-    public class Session
-    {
-        public Session(string sessionValue)
-        {
-            SessionValue = sessionValue;
-        }
-
-        public string SessionValue { get; }
-
-        internal NexusWorkflowClient<IUserService>? NexgenClient { get; set; }
-
-        internal static Session BindClient(Session resource, NexusWorkflowClient<IUserService> client)
-        {
-            resource.NexgenClient = client;
-            return resource;
-        }
-
-        private NexusWorkflowClient<IUserService> RequireNexgenClient()
-        {
-            return NexgenClient ?? throw new InvalidOperationException("Session methods require a service endpoint.");
-        }
-
-        [GeneratedCode("nexgen", null)]
-        public async Task EndAsync()
-        {
-            var request = new EndSessionRequest(SessionValue);
-            await RequireNexgenClient().ExecuteNexusOperationAsync(svc => svc.EndSession(request)).ConfigureAwait(true);
-        }
-
     }
 
 }

@@ -6753,9 +6753,8 @@ fn is_typescript_keyword(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        TypeScriptRequirements, collect_typescript_value_requirements, render_support_import,
-        render_support_import_if, render_typescript_requirement_imports, sourced_support_call,
-        support_reference,
+        TypeScriptRequirements, render_support_import, render_support_import_if,
+        render_typescript_requirement_imports, sourced_support_call, support_reference,
     };
     use std::path::Path;
     use std::path::PathBuf;
@@ -6764,8 +6763,6 @@ mod tests {
     use crate::generator::generate_source;
     use crate::language::Language;
     use crate::nexgen_config::{NexgenConfig, current, scope};
-    use crate::planning::PlannedType;
-    use crate::spec::IntSpec;
 
     #[test]
     fn helper_calls_ignore_prose_literals_and_qualified_calls() {

@@ -36,9 +36,9 @@ pub(crate) use operation_lowering::{OperationLoweredFamily, OperationLoweringPas
 pub(crate) use proto::{message_model_name, relative_descriptor_name};
 pub(crate) use reachability::ReachabilityPass;
 pub(crate) use resource_resolution::{
-    RequestPlan, RequestPlanSource, ResolvedResourceBindingSource, ResolvedResourceMethodBinding,
-    ResolvedResourceReturnSpec, ResolvedResourceSpec, ResourceBoundData, ResourceBoundFamily,
-    ResourceResolutionPass,
+    RequestPlan, RequestPlanField, RequestPlanSource, ResolvedResourceBindingSource,
+    ResolvedResourceMethodBinding, ResolvedResourceReturnSpec, ResolvedResourceSpec,
+    ResourceBoundData, ResourceBoundFamily, ResourceResolutionPass,
 };
 pub(crate) use selected_validation::SelectedValidationPass;
 pub(crate) use selection::LanguageSelectionPass;

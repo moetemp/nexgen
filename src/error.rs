@@ -305,6 +305,9 @@ pub enum Error {
         property: &'static str,
     },
 
+    #[error("invalid binding for protobuf enum `{enumeration}`: {reason}")]
+    InvalidProtoEnumBinding { enumeration: String, reason: String },
+
     #[error("Go code generation does not support {context}: {reason}")]
     UnsupportedGoType { context: String, reason: String },
 

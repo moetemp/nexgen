@@ -1,17 +1,30 @@
 [workflow-service]
 system_nexus = true
+descriptors = "temporal"
 
 [multi-operation-service]
 system_nexus = true
 
+[generic-models]
+descriptors = "temporal"
+
+[start-workflow]
+descriptors = "temporal"
+
+[type-roundtrip]
+descriptors = "temporal"
+
 [proto-generic]
 languages = ["python", "dotnet", "typescript"]
+descriptors = "temporal"
 
 [proto-oneof]
 languages = ["python", "dotnet", "typescript"]
+descriptors = "temporal"
 
 [notification-service]
 languages = ["python", "dotnet", "typescript"]
+descriptors = "temporal"
 
 [stream-service]
 languages = ["python", "typescript"]

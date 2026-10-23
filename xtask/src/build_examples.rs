@@ -28,8 +28,7 @@ struct ExampleConfig {
     descriptors: Option<ExampleDescriptors>,
 }
 
-/// The same shape as the compiler rejection fixtures. An example with no `descriptors` gets the
-/// Temporal set, since every proto-backed sample builds on the Temporal API.
+/// Opt-in, as in the compiler rejection fixtures. An example with no `descriptors` gets none.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum ExampleDescriptors {
@@ -297,7 +296,8 @@ fn example_descriptor_paths(
 ) -> Result<Vec<PathBuf>> {
     let root = repo_root.join("advanced/samples/descriptors");
     let names = match example.and_then(|example| example.descriptors.as_ref()) {
-        None | Some(ExampleDescriptors::Preset(DescriptorPreset::Temporal)) => {
+        None => Vec::new(),
+        Some(ExampleDescriptors::Preset(DescriptorPreset::Temporal)) => {
             vec![PathBuf::from("temporal_api.bin")]
         }
         Some(ExampleDescriptors::Paths(paths)) => paths.clone(),

@@ -23,3 +23,11 @@ export interface UserProfile {
 export interface GetProfileRequest {
   userId: string;
 }
+
+export interface OpenSessionRequest {
+  userId: string;
+}
+
+export interface EndSessionRequest {
+  session: string;
+}

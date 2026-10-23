@@ -752,6 +752,86 @@ temporalio.converter.transfer_type_convertible(
 
 
 @dataclasses.dataclass(slots=True)
+class CloseWriterRequest:
+    writer_id: int | None = None
+
+
+class _CloseWriterRequestTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        CloseWriterRequest, streamsample.v1.stream_service_pb2.CloseWriterRequest
+    ]
+):
+    transfer_type: (
+        type[streamsample.v1.stream_service_pb2.CloseWriterRequest] | None
+    ) = streamsample.v1.stream_service_pb2.CloseWriterRequest
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: streamsample.v1.stream_service_pb2.CloseWriterRequest,
+        type_hint: type[CloseWriterRequest],
+    ) -> CloseWriterRequest:
+        return CloseWriterRequest(
+            writer_id=value.writer_id if value.writer_id != 0 else None,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: CloseWriterRequest,
+    ) -> streamsample.v1.stream_service_pb2.CloseWriterRequest:
+        message = streamsample.v1.stream_service_pb2.CloseWriterRequest()
+        if value.writer_id is not None:
+            message.writer_id = value.writer_id
+        return message
+
+
+temporalio.converter.transfer_type_convertible(
+    _CloseWriterRequestTransferTypeConverter
+)(CloseWriterRequest)  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True)
+class CloseWriterResponse:
+    last_offset: int | None = None
+
+
+class _CloseWriterResponseTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        CloseWriterResponse, streamsample.v1.stream_service_pb2.CloseWriterResponse
+    ]
+):
+    transfer_type: (
+        type[streamsample.v1.stream_service_pb2.CloseWriterResponse] | None
+    ) = streamsample.v1.stream_service_pb2.CloseWriterResponse
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: streamsample.v1.stream_service_pb2.CloseWriterResponse,
+        type_hint: type[CloseWriterResponse],
+    ) -> CloseWriterResponse:
+        return CloseWriterResponse(
+            last_offset=value.last_offset if value.last_offset != 0 else None,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: CloseWriterResponse,
+    ) -> streamsample.v1.stream_service_pb2.CloseWriterResponse:
+        message = streamsample.v1.stream_service_pb2.CloseWriterResponse()
+        if value.last_offset is not None:
+            message.last_offset = value.last_offset
+        return message
+
+
+temporalio.converter.transfer_type_convertible(
+    _CloseWriterResponseTransferTypeConverter
+)(CloseWriterResponse)  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True)
 class CloseWritersRequest:
     pass
 

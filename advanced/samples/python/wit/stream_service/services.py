@@ -11,6 +11,8 @@ from .models import (
     AppendRecordsResponse,
     CloseStreamRequest,
     CloseStreamResponse,
+    CloseWriterRequest,
+    CloseWriterResponse,
     CloseWritersRequest,
     CloseWritersResponse,
     CreateStreamRequest,
@@ -62,6 +64,11 @@ class StreamWriter:
         OpenWriterResponse,
     ] = Operation(name="OpenWriter")
 
+    close_writer: Operation[
+        CloseWriterRequest,
+        CloseWriterResponse,
+    ] = Operation(name="CloseWriter")
+
     close_writers: Operation[
         CloseWritersRequest,
         CloseWritersResponse,
@@ -87,6 +94,20 @@ class StreamWriterClient:
             operation="OpenWriter",
             input=request,
             output_type=OpenWriterResponse,
+        )
+
+    async def close_writer(
+        self,
+        *,
+        writer_id: int | None = None,
+    ) -> temporalio.workflow.NexusOperationHandle[CloseWriterResponse]:
+        request = CloseWriterRequest(
+            writer_id=writer_id,
+        )
+        return await self._nexus_client.start_operation(
+            operation="CloseWriter",
+            input=request,
+            output_type=CloseWriterResponse,
         )
 
     async def close_writers(

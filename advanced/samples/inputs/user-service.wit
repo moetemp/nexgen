@@ -15,6 +15,15 @@ interface user-service {
 
   type user-result = own<user>;
 
+  resource session {
+    constructor(session: string);
+
+    /// @nexus.operation "end-session"
+    end: func();
+  }
+
+  type session-result = own<session>;
+
   record get-user-request {
     user-id: string,
   }
@@ -39,8 +48,18 @@ interface user-service {
     display-name: string,
   }
 
+  record open-session-request {
+    user-id: string,
+  }
+
+  record end-session-request {
+    session: string,
+  }
+
   get-user: func(request: get-user-request) -> user-result;
   update-email: func(request: update-email-request) -> user-result;
   notify: func(request: notify-request);
   get-profile: func(request: get-profile-request) -> user-profile;
+  open-session: func(request: open-session-request) -> session-result;
+  end-session: func(request: end-session-request);
 }

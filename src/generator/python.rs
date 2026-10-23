@@ -1086,51 +1086,34 @@ impl<'a> ApiPlanner<'a> {
         keyword_param: Option<&str>,
     ) {
         output.push_str("        self,\n");
-        for param in &method.params {
-            output.push_str("        ");
-            output.push_str(&python_field_name(&param.name));
-            output.push_str(": ");
-            output.push_str(&self.python_resource_field_annotation(
-                &param.kind,
-                param.optional,
-                param.function.as_ref(),
-            ));
-            if param.optional {
-                output.push_str(" = None");
-            }
-            output.push_str(",\n");
-        }
+        let keyword_only = self.render_resource_method_params(output, method);
         if let Some(keyword_param) = keyword_param {
-            output.push_str("        *,\n        ");
+            if !keyword_only {
+                output.push_str("        *,\n");
+            }
+            output.push_str("        ");
             output.push_str(keyword_param);
             output.push_str(",\n");
         }
     }
 
-    fn render_resource_class_method(
+    /// Renders the parameters after `self`, and says whether they are keyword-only.
+    fn render_resource_method_params(
         &self,
         output: &mut String,
-        service: &RenderedService<'_>,
-        resource: &PlannedResource,
         method: &PlannedResourceMethod,
-        bound_operations: &[ResourceBoundOperation<'_>],
-    ) {
-        let result_annotation = self.python_resource_method_result_annotation(method);
-        output.push_str("    async def ");
-        output.push_str(&python_field_name(&method.name));
-        output.push_str("(\n");
-        output.push_str("        self,\n");
+    ) -> bool {
         // Python refuses a parameter without a default after one with a default, and WIT
         // allows any order, so such a method takes keyword arguments only.
         let has_default = |param: &PlannedResourceField| {
             param.optional || resource_method_list_param(param).is_some()
         };
-        if method
+        let keyword_only = method
             .params
             .iter()
             .skip_while(|param| !has_default(param))
-            .any(|param| !has_default(param))
-        {
+            .any(|param| !has_default(param));
+        if keyword_only {
             output.push_str("        *,\n");
         }
         for param in &method.params {
@@ -1154,6 +1137,23 @@ impl<'a> ApiPlanner<'a> {
             }
             output.push_str(",\n");
         }
+        keyword_only
+    }
+
+    fn render_resource_class_method(
+        &self,
+        output: &mut String,
+        service: &RenderedService<'_>,
+        resource: &PlannedResource,
+        method: &PlannedResourceMethod,
+        bound_operations: &[ResourceBoundOperation<'_>],
+    ) {
+        let result_annotation = self.python_resource_method_result_annotation(method);
+        output.push_str("    async def ");
+        output.push_str(&python_field_name(&method.name));
+        output.push_str("(\n");
+        output.push_str("        self,\n");
+        self.render_resource_method_params(output, method);
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");

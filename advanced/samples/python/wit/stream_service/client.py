@@ -14,6 +14,7 @@ import temporalio.converter
 import temporalio.nexus.system
 
 from .models import (
+    AppendRecord,
     AppendRecordsRequest,
     AppendRecordsResponse,
     CloseStreamRequest,
@@ -24,6 +25,7 @@ from .models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamRecord,
+    StreamRef,
 )
 from ._resources import CreateStreamResult
 
@@ -226,3 +228,87 @@ class StreamServiceClient:
         answer = await self._call("DescribeStream", payload)
         [value] = await self._data_converter.decode([answer], [DescribeStreamResponse])
         return typing.cast(DescribeStreamResponse, value)
+
+
+class Stream:
+    def __init__(
+        self,
+        client: StreamServiceClient,
+        stream: StreamRef,
+    ) -> None:
+        """Bind the handle to a caller."""
+        self._client: StreamServiceClient = client
+        self.stream: StreamRef = stream
+
+    async def append_records(
+        self,
+        records: list[AppendRecord] | None = None,
+        sequence: int | None = None,
+    ) -> AppendRecordsResponse:
+        request = AppendRecordsRequest(
+            stream=self.stream,
+            records=records or [],
+            sequence=sequence,
+        )
+        return await self._client.append_records(request)
+
+    async def close(
+        self,
+        result: typing.Any | None = None,
+    ) -> None:
+        request = CloseStreamRequest(
+            stream=self.stream,
+            result=result,
+        )
+        _ = await self._client.close_stream(request)
+
+    async def read_records(
+        self,
+        from_offset: int | None = None,
+        topics: list[str] | None = None,
+        max_records: int | None = None,
+        wait_ms: int | None = None,
+    ) -> ReadRecordsResponse:
+        request = ReadRecordsRequest(
+            stream=self.stream,
+            from_offset=from_offset,
+            topics=topics or [],
+            max_records=max_records,
+            wait_ms=wait_ms,
+        )
+        return await self._client.read_records(request)
+
+    async def iter_read_records(
+        self,
+        from_offset: int | None = None,
+        topics: list[str] | None = None,
+        max_records: int | None = None,
+        wait_ms: int | None = None,
+        *,
+        deadline: datetime.timedelta | None = None,
+    ) -> collections.abc.AsyncIterator[StreamRecord]:
+        """Yield each item of ``records``, page after page, as one sequence.
+
+        Each page is one ``read_records_until_records`` call, which sets ``wait_ms`` to
+        what is left of the deadline. The next page starts at the answer's
+        ``next_offset``.
+        The iterator ends after an answer with ``done`` set, or when the deadline
+        passes. With no deadline, it ends only on ``done``.
+        """
+        request = ReadRecordsRequest(
+            stream=self.stream,
+            from_offset=from_offset,
+            topics=topics or [],
+            max_records=max_records,
+            wait_ms=wait_ms,
+        )
+        async for item in self._client.iter_read_records(request, deadline=deadline):
+            yield item
+
+    async def describe(
+        self,
+    ) -> DescribeStreamResponse:
+        request = DescribeStreamRequest(
+            stream=self.stream,
+        )
+        return await self._client.describe_stream(request)

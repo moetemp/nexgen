@@ -52,4 +52,37 @@ namespace Nexgen.StreamService
 
     }
 
+    [GeneratedCode("nexgen", null)]
+    public class Writer
+    {
+        public Writer(ulong writerId)
+        {
+            WriterId = writerId;
+        }
+
+        public ulong WriterId { get; }
+
+        internal NexusWorkflowClient<IStreamWriter>? NexgenClient { get; set; }
+
+        internal static Writer BindClient(Writer resource, NexusWorkflowClient<IStreamWriter> client)
+        {
+            resource.NexgenClient = client;
+            return resource;
+        }
+
+        private NexusWorkflowClient<IStreamWriter> RequireNexgenClient()
+        {
+            return NexgenClient ?? throw new InvalidOperationException("Writer methods require a service endpoint.");
+        }
+
+        [GeneratedCode("nexgen", null)]
+        public async Task<CloseWriterResponse> CloseAsync()
+        {
+            var request = new CloseWriterRequest() { WriterId = WriterId };
+            var result = await RequireNexgenClient().ExecuteNexusOperationAsync<CloseWriterResponse>(svc => svc.CloseWriter(request)).ConfigureAwait(true);
+            return result;
+        }
+
+    }
+
 }

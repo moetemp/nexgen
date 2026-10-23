@@ -13,7 +13,7 @@ import {
   readRecordsRequestTransferTypeConverter,
   describeStreamResponseTransferTypeConverter,
   describeStreamRequestTransferTypeConverter,
-  openWriterResponseTransferTypeConverter,
+  writerResultTransferTypeConverter,
   openWriterRequestTransferTypeConverter,
   closeWriterResponseTransferTypeConverter,
   closeWriterRequestTransferTypeConverter,
@@ -31,13 +31,15 @@ import type {
   ReadRecordsRequest,
   DescribeStreamResponse,
   DescribeStreamRequest,
-  OpenWriterResponse,
+  WriterResult,
   OpenWriterRequest,
   CloseWriterResponse,
   CloseWriterRequest,
   CloseWritersResponse,
   CloseWritersRequest,
 } from "./models";
+import type { Writer } from "./resources";
+import { bindWriterClient } from "./resources";
 
 export const streamService = nexus.service("streamsample.v1.StreamService", {
   createStream: nexus.operation<CreateStreamRequest, CreateStreamResponse>({
@@ -68,10 +70,10 @@ export const streamService = nexus.service("streamsample.v1.StreamService", {
 });
 
 export const streamWriter = nexus.service("streamsample.v1.StreamWriter", {
-  openWriter: nexus.operation<OpenWriterRequest, OpenWriterResponse>({
+  openWriter: nexus.operation<OpenWriterRequest, WriterResult>({
     name: "OpenWriter",
     inputType: { transferTypeConverter: openWriterRequestTransferTypeConverter },
-    outputType: { transferTypeConverter: openWriterResponseTransferTypeConverter },
+    outputType: { transferTypeConverter: writerResultTransferTypeConverter },
   }),
   closeWriter: nexus.operation<CloseWriterRequest, CloseWriterResponse>({
     name: "CloseWriter",
@@ -101,12 +103,15 @@ export class StreamWriterClient {
   /**
    * @param request - Request for the operation.
    */
-  public async openWriter(
-    request: OpenWriterRequest,
-  ): Promise<workflow.NexusOperationHandle<OpenWriterResponse>> {
-    return await this.client.startOperation(
+  public async openWriter(request: OpenWriterRequest): Promise<Writer> {
+    const handle = await this.client.startOperation(
       streamWriter.operations.openWriter,
       request,
+    );
+    const result = await handle.result();
+    return bindWriterClient(
+      new Writer(requiredField(result.writerId, "resource", "writerId")),
+      this.client,
     );
   }
 

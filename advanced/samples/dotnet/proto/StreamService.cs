@@ -58,10 +58,10 @@ namespace StreamSample.V1 {
             "dG9idWYuRHVyYXRpb24iFQoTQ2xvc2VXcml0ZXJzUmVxdWVzdCImChRDbG9z",
             "ZVdyaXRlcnNSZXNwb25zZRIOCgZmYWlsZWQYASABKAUiPwoRT3BlbldyaXRl",
             "clJlcXVlc3QSKgoGc3RyZWFtGAEgASgLMhouc3RyZWFtc2FtcGxlLnYxLlN0",
-            "cmVhbVJlZiIUChJPcGVuV3JpdGVyUmVzcG9uc2UiJwoSQ2xvc2VXcml0ZXJS",
-            "ZXF1ZXN0EhEKCXdyaXRlcl9pZBgBIAEoBCIqChNDbG9zZVdyaXRlclJlc3Bv",
-            "bnNlEhMKC2xhc3Rfb2Zmc2V0GAEgASgDQhKqAg9TdHJlYW1TYW1wbGUuVjFi",
-            "BnByb3RvMw=="));
+            "cmVhbVJlZiInChJPcGVuV3JpdGVyUmVzcG9uc2USEQoJd3JpdGVyX2lkGAEg",
+            "ASgEIicKEkNsb3NlV3JpdGVyUmVxdWVzdBIRCgl3cml0ZXJfaWQYASABKAQi",
+            "KgoTQ2xvc2VXcml0ZXJSZXNwb25zZRITCgtsYXN0X29mZnNldBgBIAEoA0IS",
+            "qgIPU3RyZWFtU2FtcGxlLlYxYgZwcm90bzM="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { global::Google.Protobuf.WellKnownTypes.DurationReflection.Descriptor, global::Temporalio.Api.Common.V1.MessageReflection.Descriptor, },
           new pbr::GeneratedClrTypeInfo(null, null, new pbr::GeneratedClrTypeInfo[] {
@@ -81,7 +81,7 @@ namespace StreamSample.V1 {
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseWritersRequest), global::StreamSample.V1.CloseWritersRequest.Parser, null, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseWritersResponse), global::StreamSample.V1.CloseWritersResponse.Parser, new[]{ "Failed" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.OpenWriterRequest), global::StreamSample.V1.OpenWriterRequest.Parser, new[]{ "Stream" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.OpenWriterResponse), global::StreamSample.V1.OpenWriterResponse.Parser, null, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.OpenWriterResponse), global::StreamSample.V1.OpenWriterResponse.Parser, new[]{ "WriterId" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseWriterRequest), global::StreamSample.V1.CloseWriterRequest.Parser, new[]{ "WriterId" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseWriterResponse), global::StreamSample.V1.CloseWriterResponse.Parser, new[]{ "LastOffset" }, null, null, null, null)
           }));
@@ -4117,6 +4117,7 @@ namespace StreamSample.V1 {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public OpenWriterResponse(OpenWriterResponse other) : this() {
+      writerId_ = other.writerId_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -4124,6 +4125,18 @@ namespace StreamSample.V1 {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public OpenWriterResponse Clone() {
       return new OpenWriterResponse(this);
+    }
+
+    /// <summary>Field number for the "writer_id" field.</summary>
+    public const int WriterIdFieldNumber = 1;
+    private ulong writerId_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public ulong WriterId {
+      get { return writerId_; }
+      set {
+        writerId_ = value;
+      }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -4141,6 +4154,7 @@ namespace StreamSample.V1 {
       if (ReferenceEquals(other, this)) {
         return true;
       }
+      if (WriterId != other.WriterId) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -4148,6 +4162,7 @@ namespace StreamSample.V1 {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override int GetHashCode() {
       int hash = 1;
+      if (WriterId != 0UL) hash ^= WriterId.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -4166,6 +4181,10 @@ namespace StreamSample.V1 {
     #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       output.WriteRawMessage(this);
     #else
+      if (WriterId != 0UL) {
+        output.WriteRawTag(8);
+        output.WriteUInt64(WriterId);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -4176,6 +4195,10 @@ namespace StreamSample.V1 {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (WriterId != 0UL) {
+        output.WriteRawTag(8);
+        output.WriteUInt64(WriterId);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -4186,6 +4209,9 @@ namespace StreamSample.V1 {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public int CalculateSize() {
       int size = 0;
+      if (WriterId != 0UL) {
+        size += 1 + pb::CodedOutputStream.ComputeUInt64Size(WriterId);
+      }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
       }
@@ -4197,6 +4223,9 @@ namespace StreamSample.V1 {
     public void MergeFrom(OpenWriterResponse other) {
       if (other == null) {
         return;
+      }
+      if (other.WriterId != 0UL) {
+        WriterId = other.WriterId;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -4217,6 +4246,10 @@ namespace StreamSample.V1 {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
+          case 8: {
+            WriterId = input.ReadUInt64();
+            break;
+          }
         }
       }
     #endif
@@ -4236,6 +4269,10 @@ namespace StreamSample.V1 {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
+          case 8: {
+            WriterId = input.ReadUInt64();
+            break;
+          }
         }
       }
     }

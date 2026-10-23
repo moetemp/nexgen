@@ -87,7 +87,9 @@ export namespace streamsample {
       stream?: IStreamRef | null;
     }
 
-    interface IOpenWriterResponse {}
+    interface IOpenWriterResponse {
+      writerId?: Long | null;
+    }
 
     interface ICloseWriterRequest {
       writerId?: Long | null;

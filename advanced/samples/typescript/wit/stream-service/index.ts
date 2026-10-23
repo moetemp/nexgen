@@ -16,6 +16,6 @@ export type {
   CreateStreamRequest,
   DescribeStreamRequest,
   OpenWriterRequest,
-  OpenWriterResponse,
   ReadRecordsRequest,
+  WriterResult,
 } from "./models";

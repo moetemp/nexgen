@@ -93,6 +93,7 @@ message OpenWriterRequest {
 }
 
 message OpenWriterResponse {
+    uint64 writer_id = 1;
 }
 
 message CloseWriterRequest {

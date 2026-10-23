@@ -866,18 +866,27 @@ namespace Nexgen.StreamService
 
     }
 
-    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(OpenWriterResponse.TransferTypeConverter))]
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(WriterResult.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record OpenWriterResponse
+    public record WriterResult
     {
-        internal static OpenWriterResponse FromTransferType(StreamSample.V1.OpenWriterResponse wire)
+        public ulong? WriterId { get; init; }
+
+        internal static WriterResult FromTransferType(StreamSample.V1.OpenWriterResponse wire)
         {
-            return new OpenWriterResponse();
+            return new WriterResult()
+            {
+                WriterId = wire.WriterId == 0 ? null : wire.WriterId,
+            };
         }
 
         internal StreamSample.V1.OpenWriterResponse ToTransferType()
         {
             var proto = new StreamSample.V1.OpenWriterResponse();
+            if (WriterId is { } writerId)
+            {
+                proto.WriterId = writerId;
+            }
             return proto;
         }
 
@@ -890,10 +899,10 @@ namespace Nexgen.StreamService
             public System.Type TransferType => typeof(StreamSample.V1.OpenWriterResponse);
 
             /// <summary>Converts a model value to its transfer type.</summary>
-            public object? ToTransferType(object? value) => value is null ? null : ((OpenWriterResponse)value).ToTransferType();
+            public object? ToTransferType(object? value) => value is null ? null : ((WriterResult)value).ToTransferType();
 
             /// <summary>Converts a transfer-type value to this model.</summary>
-            public object? FromTransferType(object? transferType) => transferType is null ? null : OpenWriterResponse.FromTransferType((StreamSample.V1.OpenWriterResponse)transferType);
+            public object? FromTransferType(object? transferType) => transferType is null ? null : WriterResult.FromTransferType((StreamSample.V1.OpenWriterResponse)transferType);
         }
 
     }

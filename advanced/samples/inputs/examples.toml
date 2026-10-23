@@ -20,11 +20,11 @@ client = true
 system_nexus = true
 languages = ["python", "typescript", "dotnet", "go"]
 
-# A System Nexus operation that returns a resource. TypeScript only for now.
-[workflow-handle]
-languages = ["typescript"]
-system_nexus = true
-
 [stream-service]
 languages = ["python", "typescript", "dotnet"]
 client = true
+
+# A System Nexus operation that returns a resource.
+[workflow-handle]
+languages = ["python", "dotnet", "typescript"]
+system_nexus = true

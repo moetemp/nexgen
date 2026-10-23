@@ -2,9 +2,11 @@
 
 export { userService, UserServiceClient } from "./services";
 export type {
+  EndSessionRequest,
   GetProfileRequest,
   GetUserRequest,
   NotifyRequest,
+  OpenSessionRequest,
   UpdateEmailRequest,
   UserProfile,
 } from "./models";

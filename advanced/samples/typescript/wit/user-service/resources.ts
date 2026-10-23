@@ -71,3 +71,39 @@ function requireUserClient(
   }
   return client;
 }
+
+const sessionClient = Symbol("nexgen.Session.client");
+
+export class Session {
+  [sessionClient]: workflow.NexusServiceClient<typeof userService> | undefined;
+
+  public constructor(public readonly session: string) {}
+
+  public async end(): Promise<void> {
+    const request = { session: this.session };
+    const handle = await requireSessionClient(this).startOperation(
+      userService.operations.endSession,
+      request,
+    );
+    await handle.result();
+  }
+}
+
+export function bindSessionClient(
+  resource: Session | { readonly session: string },
+  client: workflow.NexusServiceClient<typeof userService>,
+): Session {
+  const bound = resource instanceof Session ? resource : new Session(resource.session);
+  bound[sessionClient] = client;
+  return bound;
+}
+
+function requireSessionClient(
+  resource: Session,
+): workflow.NexusServiceClient<typeof userService> {
+  const client = resource[sessionClient];
+  if (client == null) {
+    throw new Error("Session methods require a service endpoint.");
+  }
+  return client;
+}

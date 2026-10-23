@@ -9,6 +9,8 @@ export { streamWriter, StreamWriterClient } from "./services";
 export type {
   AppendRecordsRequest,
   CloseStreamRequest,
+  CloseWriterRequest,
+  CloseWriterResponse,
   CloseWritersRequest,
   CloseWritersResponse,
   CreateStreamRequest,

@@ -29,6 +29,10 @@ namespace Nexgen.UserService
         [NexusOperation("Notify")]
         void Notify(NotifyRequest request);
 
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("OpenSession")]
+        Session OpenSession(OpenSessionRequest request);
+
     }
 
     [GeneratedCode("nexgen", null)]
@@ -78,6 +82,20 @@ namespace Nexgen.UserService
         public string? Reason { get; set; }
         public IReadOnlyList<string> Channels { get; set; }
         public string Sender { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class OpenSessionOptions
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="OpenSessionOptions"/> class.
+        /// </summary>
+        public OpenSessionOptions(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -135,6 +153,21 @@ namespace Nexgen.UserService
                 Reason = options.Reason,
             };
             return NotifyAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task<Session> OpenSessionAsync(OpenSessionRequest request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<Session>(svc => svc.OpenSession(request)).ConfigureAwait(true);
+            return Session.BindClient(result, _client);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task<Session> OpenSessionAsync(OpenSessionOptions options)
+        {
+            var request = new OpenSessionRequest(options.UserId);
+            return OpenSessionAsync(request);
         }
 
     }

@@ -43,6 +43,20 @@ namespace Nexgen.UserService
     }
 
     [GeneratedCode("nexgen", null)]
+    public record OpenSessionRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="OpenSessionRequest"/> class.
+        /// </summary>
+        public OpenSessionRequest(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
     public record UpdateEmailRequest
     {
         /// <summary>

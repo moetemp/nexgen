@@ -14,6 +14,13 @@ interface user-service {
 
   type user-result = own<user>;
 
+  /// A login session. It has no methods, so a caller only holds its id.
+  resource session {
+    constructor(session-id: string);
+  }
+
+  type session-result = own<session>;
+
   record get-user-request {
     user-id: string,
   }
@@ -30,7 +37,12 @@ interface user-service {
     sender: string,
   }
 
+  record open-session-request {
+    user-id: string,
+  }
+
   get-user: func(request: get-user-request) -> user-result;
   update-email: func(request: update-email-request) -> user-result;
   notify: func(request: notify-request);
+  open-session: func(request: open-session-request) -> session-result;
 }

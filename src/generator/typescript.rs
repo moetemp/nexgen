@@ -5530,6 +5530,36 @@ fn resource_client_require_function_name(resource: &PlannedResource) -> String {
     format!("require{}Client", resource.type_name)
 }
 
+fn render_resource_client_binder(
+    output: &mut String,
+    resource: &PlannedResource,
+    service: &RenderedService<'_>,
+    client_symbol_name: &str,
+) {
+    output.push('\n');
+    output.push_str("export function ");
+    output.push_str(&resource_client_bind_function_name(resource));
+    output.push_str("(resource: ");
+    output.push_str(&resource.type_name);
+    output.push_str(" | ");
+    render_resource_structural_type(output, resource);
+    output.push_str(", client: workflow.NexusServiceClient<typeof ");
+    output.push_str(&service.attr_name);
+    output.push_str(">): ");
+    output.push_str(&resource.type_name);
+    output.push_str(" {\n");
+    output.push_str("  const bound = resource instanceof ");
+    output.push_str(&resource.type_name);
+    output.push_str(" ? resource : ");
+    render_resource_constructor(output, resource, "resource", "  ");
+    output.push_str(";\n");
+    output.push_str("  bound[");
+    output.push_str(client_symbol_name);
+    output.push_str("] = client;\n");
+    output.push_str("  return bound;\n");
+    output.push_str("}\n\n");
+}
+
 fn render_resource(output: &mut String, resource: &PlannedResource, service: &RenderedService<'_>) {
     let client_symbol_name = resource_client_symbol_name(resource);
     if service.endpoint.is_none() {
@@ -5569,6 +5599,11 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
 
     if resource.methods.is_empty() {
         output.push_str("}\n");
+        // An operation that returns the resource still binds it, though no method needs the
+        // client.
+        if service.endpoint.is_none() {
+            render_resource_client_binder(output, resource, service, &client_symbol_name);
+        }
         return;
     }
 
@@ -5663,28 +5698,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
 
     output.push_str("}\n");
     if service.endpoint.is_none() {
-        output.push('\n');
-        output.push_str("export function ");
-        output.push_str(&resource_client_bind_function_name(resource));
-        output.push_str("(resource: ");
-        output.push_str(&resource.type_name);
-        output.push_str(" | ");
-        render_resource_structural_type(output, resource);
-        output.push_str(", client: workflow.NexusServiceClient<typeof ");
-        output.push_str(&service.attr_name);
-        output.push_str(">): ");
-        output.push_str(&resource.type_name);
-        output.push_str(" {\n");
-        output.push_str("  const bound = resource instanceof ");
-        output.push_str(&resource.type_name);
-        output.push_str(" ? resource : ");
-        render_resource_constructor(output, resource, "resource", "  ");
-        output.push_str(";\n");
-        output.push_str("  bound[");
-        output.push_str(&client_symbol_name);
-        output.push_str("] = client;\n");
-        output.push_str("  return bound;\n");
-        output.push_str("}\n\n");
+        render_resource_client_binder(output, resource, service, &client_symbol_name);
         output.push_str("function ");
         output.push_str(&resource_client_require_function_name(resource));
         output.push_str("(resource: ");

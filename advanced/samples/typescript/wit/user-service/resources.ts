@@ -61,3 +61,21 @@ function requireUserClient(
   }
   return client;
 }
+
+const sessionClient = Symbol("nexgen.Session.client");
+
+export class Session {
+  [sessionClient]: workflow.NexusServiceClient<typeof userService> | undefined;
+
+  public constructor(public readonly sessionId: string) {}
+}
+
+export function bindSessionClient(
+  resource: Session | { readonly sessionId: string },
+  client: workflow.NexusServiceClient<typeof userService>,
+): Session {
+  const bound =
+    resource instanceof Session ? resource : new Session(resource.sessionId);
+  bound[sessionClient] = client;
+  return bound;
+}

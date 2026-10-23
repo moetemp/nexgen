@@ -54,4 +54,28 @@ namespace Nexgen.UserService
 
     }
 
+    [GeneratedCode("nexgen", null)]
+    public class Session
+    {
+        public Session(string sessionId)
+        {
+            SessionId = sessionId;
+        }
+
+        public string SessionId { get; }
+
+        internal NexusWorkflowClient<IUserService>? NexgenClient { get; set; }
+
+        internal static Session BindClient(Session resource, NexusWorkflowClient<IUserService> client)
+        {
+            resource.NexgenClient = client;
+            return resource;
+        }
+
+        private NexusWorkflowClient<IUserService> RequireNexgenClient()
+        {
+            return NexgenClient ?? throw new InvalidOperationException("Session methods require a service endpoint.");
+        }
+    }
+
 }

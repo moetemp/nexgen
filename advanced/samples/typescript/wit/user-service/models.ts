@@ -15,3 +15,7 @@ export interface NotifyRequest {
   channels?: string[];
   sender: string;
 }
+
+export interface OpenSessionRequest {
+  userId: string;
+}

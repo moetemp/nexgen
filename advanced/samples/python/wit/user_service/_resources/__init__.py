@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from .user import User
+from .session import Session
 
 __all__ = [
     "User",
+    "Session",
 ]

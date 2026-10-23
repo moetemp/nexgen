@@ -12,7 +12,7 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 import wit.user_service as user_service
 import wit.user_service.models as user_service_models
 import wit.user_service.services as user_service_services
-from wit.user_service._resources import User
+from wit.user_service._resources import Session, User
 
 APP_ROOT = Path(__file__).resolve().parent
 OUTPUT_PATH = APP_ROOT.parent / "wit" / "user_service"
@@ -70,6 +70,14 @@ class UserServiceHandler:
         input: user_service_models.NotifyRequest,
     ) -> None:
         self.calls.append(("Notify", input))
+
+    @sync_operation
+    async def open_session(
+        self,
+        _ctx: StartOperationContext,
+        input: user_service_models.OpenSessionRequest,
+    ) -> Session:
+        return Session(session_id=input.user_id)
 
 
 @workflow.defn

@@ -9,7 +9,12 @@ import temporalio.workflow
 from .models import (
     GetUserRequest,
     NotifyRequest,
+    OpenSessionRequest,
     UpdateEmailRequest,
+)
+from ._resources.session import (
+    Session,
+    bind_session_client,
 )
 from ._resources.user import (
     User,
@@ -17,7 +22,10 @@ from ._resources.user import (
 )
 
 if typing.TYPE_CHECKING:
-    from ._resources import User
+    from ._resources import (
+        Session,
+        User,
+    )
 
 
 @service
@@ -36,6 +44,11 @@ class UserService:
         NotifyRequest,
         None,
     ] = Operation(name="Notify")
+
+    open_session: Operation[
+        OpenSessionRequest,
+        Session,
+    ] = Operation(name="OpenSession")
 
 
 class UserServiceClient:
@@ -97,3 +110,19 @@ class UserServiceClient:
             operation="Notify",
             input=request,
         )
+
+    async def open_session(
+        self,
+        *,
+        user_id: str,
+    ) -> Session:
+        request = OpenSessionRequest(
+            user_id=user_id,
+        )
+        handle = await self._nexus_client.start_operation(
+            operation="OpenSession",
+            input=request,
+            output_type=Session,
+        )
+        resource = await handle
+        return bind_session_client(resource, self._nexus_client)

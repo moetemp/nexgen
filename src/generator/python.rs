@@ -1239,17 +1239,7 @@ impl<'a> ApiPlanner<'a> {
                     self.resolve_message_value_conversion(output_model)?;
                 }
                 let annotation = self.resolve_output_annotation(output_model)?;
-                match output_model {
-                    PlannedType::Record(record) => {
-                        match resource_holders(self.api_plan).remove(&record.full_name) {
-                            Some((model_name, _)) => {
-                                (model_name, Some("._resources".to_string()), annotation)
-                            }
-                            None => (output_ref, output_module_path, annotation),
-                        }
-                    }
-                    _ => (output_ref, output_module_path, annotation),
-                }
+                (output_ref, output_module_path, annotation)
             }
             Some(PlannedType::Resource(resource)) => {
                 if let Some(output) = &resource.wire_type {
@@ -4907,23 +4897,6 @@ fn resource_holders(api_plan: &PlannedSpec) -> BTreeMap<String, (String, String)
                 )
             })
         })
-        .chain(api_plan.records().filter_map(|(_, record)| {
-            // A WIT-only record that holds a resource has no resource return, and lives there
-            // too.
-            record
-                .fields
-                .values()
-                .find_map(|field| match field.field_type.without_option() {
-                    TypeSpec::Resource(resource) => Some(resource.type_name.to_upper_camel_case()),
-                    _ => None,
-                })
-                .map(|resource_type| {
-                    (
-                        record.full_name.clone(),
-                        (record.name.clone(), resource_type),
-                    )
-                })
-        }))
         .collect()
 }
 
@@ -5002,13 +4975,6 @@ fn render_service_module(
         .iter()
         .flat_map(|service| service.resources.iter())
         .map(|resource| (resource.type_name.clone(), resource_module_name(resource)))
-        .collect::<BTreeMap<_, _>>();
-    let resource_modules = resource_holders(api_plan)
-        .into_values()
-        .filter_map(|(model_name, resource_type)| {
-            Some((model_name, resource_modules.get(&resource_type)?.clone()))
-        })
-        .chain(resource_modules.clone())
         .collect::<BTreeMap<_, _>>();
     let mut resource_type_imports = BTreeMap::new();
     for service in services {

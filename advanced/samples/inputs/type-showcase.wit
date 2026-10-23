@@ -74,6 +74,9 @@ interface type-showcase {
     route: list<tuple<f64, f64>>,
     attempts: list<result<string, string>>,
     region-status: map<string, result<string, string>>,
+    item-count: u32,
+    byte-count: u64,
+    clock-skew-ms: s64,
   }
 
   record record-sync-request {

@@ -1514,6 +1514,8 @@ pub enum TypeSpec<F: TypeFamily = AuthoredFamily> {
 pub enum IntSpec {
     I32,
     I64,
+    U32,
+    U64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1613,6 +1615,8 @@ where
             TypeSpec::Bool => "bool".to_string(),
             TypeSpec::Int(IntSpec::I32) => "s32".to_string(),
             TypeSpec::Int(IntSpec::I64) => "s64".to_string(),
+            TypeSpec::Int(IntSpec::U32) => "u32".to_string(),
+            TypeSpec::Int(IntSpec::U64) => "u64".to_string(),
             TypeSpec::Float => "float64".to_string(),
             TypeSpec::String => "string".to_string(),
             TypeSpec::Bytes => "bytes".to_string(),

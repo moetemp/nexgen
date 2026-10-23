@@ -30,7 +30,17 @@ interface user-service {
     sender: string,
   }
 
+  record user-tag {
+    name: string,
+  }
+
+  record tag-user-request {
+    user-id: string,
+    tag: user-tag,
+  }
+
   get-user: func(request: get-user-request) -> user-result;
   update-email: func(request: update-email-request) -> user-result;
   notify: func(request: notify-request);
+  tag-user: func(request: tag-user-request);
 }

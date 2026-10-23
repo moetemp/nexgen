@@ -52,6 +52,19 @@ func (m notifyRequest) GetSender() string {
 	return m.Sender
 }
 
+type tagUserRequest struct {
+	UserID string
+	Tag    UserTag
+}
+
+func (m tagUserRequest) GetUserID() string {
+	return m.UserID
+}
+
+func (m tagUserRequest) GetTag() UserTag {
+	return m.Tag
+}
+
 // --- Resources ---
 
 type User struct {
@@ -100,7 +113,22 @@ func notify(ctx workflow.Context, request notifyRequest) workflow.Future {
 	return fut
 }
 
+func tagUser(ctx workflow.Context, request tagUserRequest) workflow.Future {
+	c := workflow.NewNexusClient("user-service", "UserService")
+	fut := c.ExecuteOperation(ctx, "TagUser", request, workflow.NexusOperationOptions{})
+	return fut
+}
+
 // --- Operations (public API) ---
+
+type UserTag struct {
+	// Name - Required.
+	Name string
+}
+
+func (m UserTag) GetName() string {
+	return m.Name
+}
 
 type GetUserOptions struct {
 	// UserID - Required.
@@ -148,5 +176,19 @@ func Notify(ctx workflow.Context, opts NotifyOptions) workflow.Future {
 		Reason:   reason,
 		Channels: opts.Channels,
 		Sender:   opts.Sender,
+	})
+}
+
+type TagUserOptions struct {
+	// UserID - Required.
+	UserID string
+	// Tag - Required.
+	Tag UserTag
+}
+
+func TagUser(ctx workflow.Context, opts TagUserOptions) workflow.Future {
+	return tagUser(ctx, tagUserRequest{
+		UserID: opts.UserID,
+		Tag:    opts.Tag,
 	})
 }

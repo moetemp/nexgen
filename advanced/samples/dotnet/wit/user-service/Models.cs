@@ -43,6 +43,22 @@ namespace Nexgen.UserService
     }
 
     [GeneratedCode("nexgen", null)]
+    public record TagUserRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="TagUserRequest"/> class.
+        /// </summary>
+        public TagUserRequest(string userId, UserTag tag)
+        {
+            UserId = userId;
+            Tag = tag;
+        }
+
+        public string UserId { get; init; }
+        public UserTag Tag { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
     public record UpdateEmailRequest
     {
         /// <summary>
@@ -56,6 +72,20 @@ namespace Nexgen.UserService
 
         public string UserId { get; init; }
         public string Email { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public record UserTag
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="UserTag"/> class.
+        /// </summary>
+        public UserTag(string name)
+        {
+            Name = name;
+        }
+
+        public string Name { get; init; }
     }
 
 }

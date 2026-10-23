@@ -9,6 +9,7 @@ import temporalio.workflow
 from .models import (
     GetUserRequest,
     NotifyRequest,
+    TagUserRequest,
     UpdateEmailRequest,
 )
 from ._resources.user import (
@@ -17,6 +18,7 @@ from ._resources.user import (
 )
 
 if typing.TYPE_CHECKING:
+    from .models import UserTag
     from ._resources import User
 
 
@@ -36,6 +38,11 @@ class UserService:
         NotifyRequest,
         None,
     ] = Operation(name="Notify")
+
+    tag_user: Operation[
+        TagUserRequest,
+        None,
+    ] = Operation(name="TagUser")
 
 
 class UserServiceClient:
@@ -95,5 +102,20 @@ class UserServiceClient:
         )
         return await self._nexus_client.start_operation(
             operation="Notify",
+            input=request,
+        )
+
+    async def tag_user(
+        self,
+        *,
+        user_id: str,
+        tag: UserTag,
+    ) -> temporalio.workflow.NexusOperationHandle[None]:
+        request = TagUserRequest(
+            user_id=user_id,
+            tag=tag,
+        )
+        return await self._nexus_client.start_operation(
+            operation="TagUser",
             input=request,
         )

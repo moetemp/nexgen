@@ -22,3 +22,14 @@ class NotifyRequest:
     reason: str | None = None
     channels: list[str] | None = dataclasses.field(default_factory=list)
     sender: str
+
+
+@dataclasses.dataclass(slots=True)
+class TagUserRequest:
+    user_id: str
+    tag: UserTag
+
+
+@dataclasses.dataclass(slots=True)
+class UserTag:
+    name: str

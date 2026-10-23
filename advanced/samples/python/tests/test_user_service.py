@@ -71,6 +71,14 @@ class UserServiceHandler:
     ) -> None:
         self.calls.append(("Notify", input))
 
+    @sync_operation
+    async def tag_user(
+        self,
+        _ctx: StartOperationContext,
+        input: user_service_models.TagUserRequest,
+    ) -> None:
+        self.calls.append(("TagUser", input))
+
 
 @workflow.defn
 class UserServiceCallerWorkflow:

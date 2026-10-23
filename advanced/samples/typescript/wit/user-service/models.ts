@@ -15,3 +15,12 @@ export interface NotifyRequest {
   channels?: string[];
   sender: string;
 }
+
+export interface TagUserRequest {
+  userId: string;
+  tag: UserTag;
+}
+
+export interface UserTag {
+  name: string;
+}

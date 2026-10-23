@@ -30,6 +30,7 @@ describe("user-service generated output", () => {
           return new User(input.userId, input.email);
         },
         async notify() {},
+        async tagUser() {},
       });
 
       const result = await executeWorkflowWithNexus<{

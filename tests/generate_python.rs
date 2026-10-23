@@ -1469,3 +1469,54 @@ interface collections {
         "{models}"
     );
 }
+
+#[test]
+fn python_imports_no_model_that_only_a_docstring_names() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-docstring-names");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("docstring-names.wit");
+    let wit = r#"
+package temporal:docstring-names@1.0.0;
+
+world system { export api; }
+
+/// @nexus.endpoint "api"
+interface api {
+  record ping-request {
+    text: string,
+  }
+
+  record pong-request {
+    text: string,
+  }
+
+  /// @nexus.doc "Send a ping. A PongRequest answers it."
+  ping: func(request: ping-request);
+
+  pong: func(request: pong-request);
+}
+"#;
+    fs::write(&wit_path, wit).unwrap();
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            ..Default::default()
+        },
+        language: nexgen::language::Language::Python,
+        input_paths: vec![wit_path, linked_inputs_path(&root)],
+        support_package: Some("temporal_support".into()),
+        descriptor_paths: vec![descriptor_path(&root)],
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let ping = fs::read_to_string(output_path.join("operations/ping.py")).unwrap();
+    assert!(ping.contains("A PongRequest answers it."), "{ping}");
+    assert!(!ping.contains("    PongRequest,\n"), "{ping}");
+    assert!(!ping.contains("import PongRequest\n"), "{ping}");
+    fs::remove_dir_all(temp_dir).unwrap();
+}

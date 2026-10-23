@@ -1454,14 +1454,10 @@ fn resolve_authored_field_type_spec(
 ) -> Result<TypeSpec> {
     match ty {
         Type::Bool => Ok(TypeSpec::Bool),
-        Type::U8
-        | Type::U16
-        | Type::U32
-        | Type::U64
-        | Type::S8
-        | Type::S16
-        | Type::S32
-        | Type::S64 => Ok(TypeSpec::Int(IntSpec::I32)),
+        Type::S8 | Type::S16 | Type::S32 => Ok(TypeSpec::Int(IntSpec::I32)),
+        Type::S64 => Ok(TypeSpec::Int(IntSpec::I64)),
+        Type::U8 | Type::U16 | Type::U32 => Ok(TypeSpec::Int(IntSpec::U32)),
+        Type::U64 => Ok(TypeSpec::Int(IntSpec::U64)),
         Type::F32 | Type::F64 => Ok(TypeSpec::Float),
         Type::Char | Type::String => Ok(TypeSpec::String),
         Type::Id(id) => {
@@ -2420,9 +2416,10 @@ fn resolve_named_wit_type(
 fn primitive_wit_type(type_name: &str) -> Option<TypeSpec> {
     match type_name {
         "bool" => Some(TypeSpec::Bool),
-        "u8" | "u16" | "u32" | "u64" | "s8" | "s16" | "s32" | "s64" => {
-            Some(TypeSpec::Int(IntSpec::I32))
-        }
+        "s8" | "s16" | "s32" => Some(TypeSpec::Int(IntSpec::I32)),
+        "s64" => Some(TypeSpec::Int(IntSpec::I64)),
+        "u8" | "u16" | "u32" => Some(TypeSpec::Int(IntSpec::U32)),
+        "u64" => Some(TypeSpec::Int(IntSpec::U64)),
         "f32" | "f64" => Some(TypeSpec::Float),
         "char" | "string" => Some(TypeSpec::String),
         "bytes" => Some(TypeSpec::Bytes),
@@ -2770,6 +2767,10 @@ fn build_resource(
         "{service_context} resource `{}`",
         resource_name.to_upper_camel_case()
     );
+    let resource_directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
+    let doc = directive(&resource_directives, "doc", path, &context)?
+        .map(directive_language_string)
+        .unwrap_or_default();
 
     let constructor = interface.functions.values().find(
         |function| matches!(function.kind, FunctionKind::Constructor(id) if id == resource_id),
@@ -2831,6 +2832,7 @@ fn build_resource(
 
     Ok(ResourceSpec {
         name: resource_name,
+        doc,
         fields,
         methods,
         data: (),
@@ -2880,6 +2882,9 @@ fn build_resource_method(
 
     Ok(ResourceMethodSpec {
         name: method_name,
+        doc: directive(&directives, "doc", path, &context)?
+            .map(directive_language_string)
+            .unwrap_or_default(),
         params,
         result,
         operation_name: build_resource_method_operation_name(&directives, path, &context)?,

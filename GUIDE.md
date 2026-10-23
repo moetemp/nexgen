@@ -708,6 +708,27 @@ return StartedWorkflow(
 If a resource constructor field name cannot be found in either, the generator
 raises `InvalidResource`.
 
+**A result record that holds the resource.** An operation can also return a
+proto-backed record with one `own<T>` field and other fields. The resource binds
+from the record's message as above, and the other fields come from the fields of
+the same name. The record is the API model only, and it declares only the fields
+that its caller sees. Its message travels as a wire record that takes the proto
+message's name. Python, TypeScript, .NET and Go generate it. In Python, the
+record lives in its resource's module.
+
+```wit
+/// @nexus.proto "acme.jobs.v1.CreateJobResponse"
+record create-job-result {
+  job: own<job>,
+  created: option<bool>,
+}
+```
+
+```python
+result = await handle  # CreateJobResponse
+return CreateJobResult(job=Job(job_id=result.job_id), created=result.created)
+```
+
 ### Edge Cases and Error Conditions
 
 #### Same field name in constructor and method parameter
@@ -1767,10 +1788,11 @@ variant outcome {
 
 ### @nexus.doc
 
-**Placement:** Record, record field, variant, variant case, or operation
-(function) **Syntax:** `@nexus.doc "<text>" [returns="<text>"]` Per-language
-overrides: `python="<text>"` `typescript="<text>"` `go="<text>"`
-`dotnet="<text>"` `java="<text>"` Return docs: `python-returns="<text>"`
+**Placement:** Record, record field, variant, variant case, operation
+(function), resource, or resource method **Syntax:**
+`@nexus.doc "<text>" [returns="<text>"]` Per-language overrides:
+`python="<text>"` `typescript="<text>"` `go="<text>"` `dotnet="<text>"`
+`java="<text>"` Return docs: `python-returns="<text>"`
 `typescript-returns="<text>"` `go-returns="<text>"` `dotnet-returns="<text>"`
 `java-returns="<text>"`
 
@@ -1786,6 +1808,9 @@ Javadoc text) so authored content cannot break the generated source.
 ///   returns="A workflow handle to the started workflow."
 signal-with-start-workflow: func(...) -> ...;
 ```
+
+Python emits the docs of a resource and its methods as docstrings. The other
+targets don't emit them yet.
 
 Variant documentation is emitted by Python, TypeScript, Go, and .NET; Java does
 not currently generate WIT variants. Python emits an attribute docstring after

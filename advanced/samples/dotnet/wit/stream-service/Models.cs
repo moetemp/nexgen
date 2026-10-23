@@ -105,6 +105,7 @@ namespace Nexgen.StreamService
         }
 
         public StreamRef Ref { get; init; }
+        [System.Text.Json.Serialization.JsonConverter(typeof(NullableProtoJsonDurationConverter))]
         public System.TimeSpan? Retention { get; init; }
     }
 
@@ -169,6 +170,7 @@ namespace Nexgen.StreamService
         public int? FromOffset { get; init; }
         public IReadOnlyList<string> Topics { get; init; }
         public int? MaxRecords { get; init; }
+        [System.Text.Json.Serialization.JsonConverter(typeof(NullableProtoJsonDurationConverter))]
         public System.TimeSpan? Wait { get; init; }
     }
 
@@ -223,5 +225,46 @@ namespace Nexgen.StreamService
         public string Id { get; init; }
         public string? OwnerId { get; init; }
     }
+
+        [GeneratedCode("nexgen", null)]
+        internal sealed class ProtoJsonDurationConverter : System.Text.Json.Serialization.JsonConverter<System.TimeSpan>
+        {
+            public override System.TimeSpan Read(ref System.Text.Json.Utf8JsonReader reader, System.Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
+            {
+                var text = reader.GetString();
+                if (text is null || !text.EndsWith('s') || !decimal.TryParse(text.AsSpan(0, text.Length - 1), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds))
+                {
+                    throw new System.Text.Json.JsonException($"Expected a duration such as '1.5s', got '{text}'.");
+                }
+                return System.TimeSpan.FromTicks((long)(seconds * System.TimeSpan.TicksPerSecond));
+            }
+
+            public override void Write(System.Text.Json.Utf8JsonWriter writer, System.TimeSpan value, System.Text.Json.JsonSerializerOptions options)
+            {
+                var seconds = (decimal)value.Ticks / System.TimeSpan.TicksPerSecond;
+                writer.WriteStringValue(seconds.ToString("0.#########", System.Globalization.CultureInfo.InvariantCulture) + "s");
+            }
+        }
+
+        [GeneratedCode("nexgen", null)]
+        internal sealed class NullableProtoJsonDurationConverter : System.Text.Json.Serialization.JsonConverter<System.TimeSpan?>
+        {
+            public override bool HandleNull => false;
+
+            public override System.TimeSpan? Read(ref System.Text.Json.Utf8JsonReader reader, System.Type typeToConvert, System.Text.Json.JsonSerializerOptions options) =>
+                new ProtoJsonDurationConverter().Read(ref reader, typeof(System.TimeSpan), options);
+
+            public override void Write(System.Text.Json.Utf8JsonWriter writer, System.TimeSpan? value, System.Text.Json.JsonSerializerOptions options)
+            {
+                if (value is { } duration)
+                {
+                    new ProtoJsonDurationConverter().Write(writer, duration, options);
+                }
+                else
+                {
+                    writer.WriteNullValue();
+                }
+            }
+        }
 
 }

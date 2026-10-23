@@ -454,7 +454,8 @@ impl<'a> ApiPlanner<'a> {
                                 .to_lower_camel_case()
                         )
                     })
-                    .or_else(|| self.external_models.transfer_type_converter(input)),
+                    .or_else(|| self.external_models.transfer_type_converter(input))
+                    .or_else(|| json_duration_converter_name(self.api_plan, input)),
             }
         });
 
@@ -530,8 +531,8 @@ impl<'a> ApiPlanner<'a> {
             output_model_name: operation
                 .output_type()
                 .and_then(|output| self.locally_defined_model_name(output)),
-            output_transfer_type_converter: operation.output_type().and_then(
-                |output| match output {
+            output_transfer_type_converter: operation.output_type().and_then(|output| {
+                match output {
                     PlannedType::Record(_) => self
                         .resolve_message_value_conversion(output)
                         .wire_function_names
@@ -546,8 +547,9 @@ impl<'a> ApiPlanner<'a> {
                             )
                         }),
                     _ => self.external_models.transfer_type_converter(output),
-                },
-            ),
+                }
+                .or_else(|| json_duration_converter_name(self.api_plan, output))
+            }),
             serialization_context_expr: operation
                 .serialization_context
                 .value()
@@ -4175,6 +4177,7 @@ fn render_models_module(
         body.push('\n');
         body.push_str(&model_fragments.body);
     }
+    render_json_duration_converters(&mut body, models, api_plan);
     let body = with_private_required_field(body);
     let mut imports = String::new();
     let mut generated_value_imports = Vec::new();
@@ -4217,6 +4220,9 @@ fn render_models_module(
         &generated_value_imports,
     );
     render_typescript_requirement_imports(&mut imports, requirements);
+    if body.contains("msToNumber(") {
+        imports.push_str("import { msToNumber } from \"@temporalio/common/lib/time\";\n");
+    }
     render_support_import_if(
         &mut imports,
         support_package,
@@ -4269,6 +4275,141 @@ fn render_models_module(
     }
     render_generated_module(imports, body)
 }
+
+/// Whether a WIT-only record holds a `duration` at any depth. It travels as JSON, so its
+/// durations need the proto3 form, such as `"1.5s"`, that the other languages use.
+fn record_needs_json_duration(api_plan: &PlannedSpec, full_name: &str) -> bool {
+    fn needs(api_plan: &PlannedSpec, full_name: &str, seen: &mut BTreeSet<String>) -> bool {
+        if !seen.insert(full_name.to_string()) {
+            return false;
+        }
+        let Some(record) = api_plan.record(full_name) else {
+            return false;
+        };
+        record.source.is_none()
+            && record.fields.values().any(|field| {
+                let value = match field.field_type.without_option() {
+                    PlannedType::List(value) => value.without_option(),
+                    value => value,
+                };
+                is_proto_duration(value)
+                    || matches!(value, PlannedType::Record(nested)
+                        if needs(api_plan, &nested.full_name, seen))
+            })
+    }
+    needs(api_plan, full_name, &mut BTreeSet::new())
+}
+
+fn is_proto_duration(value: &PlannedType) -> bool {
+    match value {
+        PlannedType::External(ExternalTypeSpec::Alias(alias)) => is_proto_duration(&alias.target),
+        PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) => {
+            message.proto.full_name.trim_start_matches('.') == "google.protobuf.Duration"
+        }
+        _ => false,
+    }
+}
+
+fn json_duration_converter_name(
+    api_plan: &PlannedSpec,
+    model_type: &PlannedType,
+) -> Option<String> {
+    let PlannedType::Record(record) = model_type else {
+        return None;
+    };
+    let name = &api_plan.record(&record.full_name)?.name;
+    record_needs_json_duration(api_plan, &record.full_name)
+        .then(|| format!("{}TransferTypeConverter", name.to_lower_camel_case()))
+}
+
+/// Writes each duration of a WIT-only model in the proto3 JSON form, and reads both that form
+/// and a number of milliseconds.
+fn render_json_duration_converters(
+    body: &mut String,
+    models: &[&RenderedModel],
+    api_plan: &PlannedSpec,
+) {
+    let models = models
+        .iter()
+        .filter(|model| {
+            model.wire_function_names.is_none()
+                && record_needs_json_duration(api_plan, &model.full_name)
+        })
+        .collect::<Vec<_>>();
+    if models.is_empty() {
+        return;
+    }
+    body.push_str(JSON_DURATION_HELPERS);
+    for model in models {
+        let record = api_plan
+            .record(&model.full_name)
+            .expect("a rendered model is planned");
+        let converter = format!("{}TransferTypeConverter", model.name.to_lower_camel_case());
+        let mut to_fields = Vec::new();
+        let mut from_fields = Vec::new();
+        for (field, rendered) in record
+            .model_fields()
+            .map(|(_, field)| field)
+            .zip(&model.fields)
+        {
+            let name = &rendered.name;
+            let (list, value) = match field.field_type.without_option() {
+                PlannedType::List(value) => (true, value.without_option()),
+                value => (false, value),
+            };
+            let (to, from) = if is_proto_duration(value) {
+                (
+                    "durationToProtoJson".to_string(),
+                    "durationFromProtoJson".to_string(),
+                )
+            } else if let PlannedType::Record(nested) = value
+                && record_needs_json_duration(api_plan, &nested.full_name)
+            {
+                let nested = api_plan
+                    .record(&nested.full_name)
+                    .expect("a nested record is planned");
+                let nested = format!("{}TransferTypeConverter", nested.name.to_lower_camel_case());
+                (
+                    format!("{nested}.toTransferType"),
+                    format!("{nested}.fromTransferType"),
+                )
+            } else {
+                continue;
+            };
+            let convert = |function: &str| {
+                if list {
+                    format!("value.{name}?.map((item: any) => {function}(item))")
+                } else {
+                    format!("value.{name} == null ? undefined : {function}(value.{name})")
+                }
+            };
+            to_fields.push(format!("{name}: {}", convert(&to)));
+            from_fields.push(format!("{name}: {}", convert(&from)));
+        }
+        body.push_str(&format!(
+            "\nexport const {converter} = {{\n  fromTransferType(value: any): {model} {{\n    return {{ ...value, {from} }};\n  }},\n\n  toTransferType(value: {model}): unknown {{\n    return {{ ...value, {to} }};\n  }},\n}};\n",
+            model = model.name,
+            from = from_fields.join(", "),
+            to = to_fields.join(", "),
+        ));
+    }
+}
+
+const JSON_DURATION_HELPERS: &str = r#"
+function durationToProtoJson(value: common.Duration): string {
+  return `${msToNumber(value) / 1000}s`;
+}
+
+function durationFromProtoJson(value: string | number): common.Duration {
+  if (typeof value === "number") {
+    return value;
+  }
+  if (!/^-?\d+(\.\d+)?s$/.test(value)) {
+    throw new TypeError(`expected a duration such as "1.5s", got ${JSON.stringify(value)}`);
+  }
+  return Number(value.slice(0, -1)) * 1000;
+}
+"#;
 
 fn typescript_relative_models_module_from_dir(from_dir: &Path, to: &ModulePath) -> String {
     let target = to.to_path_buf().join("models");
@@ -4388,9 +4529,9 @@ fn render_service_module(
             &models
                 .iter()
                 .filter_map(|model| {
-                    model.wire_function_names.as_ref().map(|_| {
-                        format!("{}TransferTypeConverter", model.name.to_lower_camel_case())
-                    })
+                    (model.wire_function_names.is_some()
+                        || record_needs_json_duration(api_plan, &model.full_name))
+                    .then(|| format!("{}TransferTypeConverter", model.name.to_lower_camel_case()))
                 })
                 .chain(
                     external_model_names

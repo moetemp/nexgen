@@ -120,8 +120,14 @@ impl<'a> ApiPlanner<'a> {
         for variant in self.api_plan.variants().map(|(_, variant)| variant) {
             self.render_variant(&mut output, variant);
         }
-        for model in models {
+        for model in &models {
             self.render_model(&mut output, model);
+        }
+        if models
+            .iter()
+            .any(|model| self.model_has_json_duration(model))
+        {
+            output.push_str(JSON_DURATION_CONVERTERS);
         }
         output.push_str(&self.external_model_fragments.body);
         close_namespace(&mut output);
@@ -650,8 +656,14 @@ impl<'a> ApiPlanner<'a> {
         self.render_model_constructor(output, "public", &type_name, model);
         for (field_name, field) in model.model_fields() {
             render_field_xml_doc(output, "    ", field);
+            let field_type = self.model_field_type(model, field_name, field);
+            if let Some(converter) = json_duration_converter(model, &field_type) {
+                output.push_str("    [System.Text.Json.Serialization.JsonConverter(typeof(");
+                output.push_str(converter);
+                output.push_str("))]\n");
+            }
             output.push_str("    public ");
-            output.push_str(&self.model_field_type(model, field_name, field));
+            output.push_str(&field_type);
             output.push(' ');
             output.push_str(&field_property_name(field));
             output.push_str(" { get; init; }\n");
@@ -677,6 +689,13 @@ impl<'a> ApiPlanner<'a> {
             );
         }
         output.push_str("}\n\n");
+    }
+
+    fn model_has_json_duration(&self, model: &PlannedModel) -> bool {
+        model.model_fields().any(|(field_name, field)| {
+            json_duration_converter(model, &self.model_field_type(model, field_name, field))
+                .is_some()
+        })
     }
 
     fn render_operation_extension(
@@ -3997,6 +4016,63 @@ fn resource_property_name(type_name: &str, field_name: &str) -> String {
         name
     }
 }
+
+/// The converter for a `duration` field of a WIT-only model, which travels as JSON. A
+/// proto-backed model converts through its proto message.
+fn json_duration_converter(model: &PlannedModel, field_type: &str) -> Option<&'static str> {
+    if model.source.is_some() {
+        return None;
+    }
+    match field_type {
+        "System.TimeSpan" => Some("ProtoJsonDurationConverter"),
+        "System.TimeSpan?" => Some("NullableProtoJsonDurationConverter"),
+        _ => None,
+    }
+}
+
+/// Writes a `TimeSpan` in the proto3 JSON form, such as `"1.5s"`, as the other languages do.
+const JSON_DURATION_CONVERTERS: &str = r#"    [GeneratedCode("nexgen", null)]
+    internal sealed class ProtoJsonDurationConverter : System.Text.Json.Serialization.JsonConverter<System.TimeSpan>
+    {
+        public override System.TimeSpan Read(ref System.Text.Json.Utf8JsonReader reader, System.Type typeToConvert, System.Text.Json.JsonSerializerOptions options)
+        {
+            var text = reader.GetString();
+            if (text is null || !text.EndsWith('s') || !decimal.TryParse(text.AsSpan(0, text.Length - 1), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds))
+            {
+                throw new System.Text.Json.JsonException($"Expected a duration such as '1.5s', got '{text}'.");
+            }
+            return System.TimeSpan.FromTicks((long)(seconds * System.TimeSpan.TicksPerSecond));
+        }
+
+        public override void Write(System.Text.Json.Utf8JsonWriter writer, System.TimeSpan value, System.Text.Json.JsonSerializerOptions options)
+        {
+            var seconds = (decimal)value.Ticks / System.TimeSpan.TicksPerSecond;
+            writer.WriteStringValue(seconds.ToString("0.#########", System.Globalization.CultureInfo.InvariantCulture) + "s");
+        }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    internal sealed class NullableProtoJsonDurationConverter : System.Text.Json.Serialization.JsonConverter<System.TimeSpan?>
+    {
+        public override bool HandleNull => false;
+
+        public override System.TimeSpan? Read(ref System.Text.Json.Utf8JsonReader reader, System.Type typeToConvert, System.Text.Json.JsonSerializerOptions options) =>
+            new ProtoJsonDurationConverter().Read(ref reader, typeof(System.TimeSpan), options);
+
+        public override void Write(System.Text.Json.Utf8JsonWriter writer, System.TimeSpan? value, System.Text.Json.JsonSerializerOptions options)
+        {
+            if (value is { } duration)
+            {
+                new ProtoJsonDurationConverter().Write(writer, duration, options);
+            }
+            else
+            {
+                writer.WriteNullValue();
+            }
+        }
+    }
+
+"#;
 
 // System.Text.Json binds each constructor parameter to the property of the same name.
 fn resource_parameter_name(type_name: &str, field_name: &str) -> String {

@@ -1,5 +1,5 @@
 
-œ
+û
 $streamsample/v1/stream_service.protostreamsample.v1google/protobuf/duration.proto$temporal/api/common/v1/message.proto"<
 	StreamRef
 id (	Rid
@@ -56,4 +56,7 @@ lastOffset7
 	retention (2.google.protobuf.DurationR	retention"
 CloseWritersRequest".
 CloseWritersResponse
-failed (RfailedBªStreamSample.V1bproto3
+failed (Rfailed"G
+OpenWriterRequest2
+stream (2.streamsample.v1.StreamRefRstream"
+OpenWriterResponseBªStreamSample.V1bproto3

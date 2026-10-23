@@ -17,6 +17,8 @@ from .models import (
     CreateStreamResponse,
     DescribeStreamRequest,
     DescribeStreamResponse,
+    OpenWriterRequest,
+    OpenWriterResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
 )
@@ -52,6 +54,11 @@ class StreamService:
 
 @service(name="streamsample.v1.StreamWriter")
 class StreamWriter:
+    open_writer: Operation[
+        OpenWriterRequest,
+        OpenWriterResponse,
+    ] = Operation(name="OpenWriter")
+
     close_writers: Operation[
         CloseWritersRequest,
         CloseWritersResponse,
@@ -63,6 +70,20 @@ class StreamWriterClient:
         self._nexus_client: typing.Any = temporalio.workflow.create_nexus_client(
             service="streamsample.v1.StreamWriter",
             endpoint=endpoint,
+        )
+
+    async def open_writer(
+        self,
+        *,
+        stream: StreamRef | None = None,
+    ) -> temporalio.workflow.NexusOperationHandle[OpenWriterResponse]:
+        request = OpenWriterRequest(
+            stream=stream,
+        )
+        return await self._nexus_client.start_operation(
+            operation="OpenWriter",
+            input=request,
+            output_type=OpenWriterResponse,
         )
 
     async def close_writers(

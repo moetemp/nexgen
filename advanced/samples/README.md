@@ -120,6 +120,17 @@ sample-project instructions for [Go](go/README.md), [Python](python/README.md),
 - TypeScript: [`typescript/wit/proto-generic/`](typescript/wit/proto-generic/),
   [`typescript/tests/proto-generic.test.ts`](typescript/tests/proto-generic.test.ts)
 
+### `stream-service`
+
+A stream API shape: a resource built from a ref, a long-poll read and 64-bit
+offsets.
+
+- WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
+- .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/)
+- Go: [`go/streamservice/`](go/streamservice/)
+- Python: [`python/wit/stream_service/`](python/wit/stream_service/)
+- TypeScript: [`typescript/wit/stream-service/`](typescript/wit/stream-service/)
+
 ## Supporting files
 
 - [`inputs/deps/`](inputs/deps/): reusable Temporal semantic/common type WIT

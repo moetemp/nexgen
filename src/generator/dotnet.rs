@@ -14,7 +14,10 @@ use crate::planning::{
     PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
     PlannedSpec, PlannedType, operation_input_model,
 };
-use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
+use crate::planning::{
+    PlannedResourceHolderField, RequestPlan, RequestPlanField, RequestPlanSource,
+    ResolvedResourceBindingSource,
+};
 use crate::spec::{
     AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec,
     FunctionFieldSpec, IntSpec, OperationSpec, RecordFieldSpec, RecordSpec, ServiceSpec, TypeSpec,
@@ -439,14 +442,14 @@ impl<'a> ApiPlanner<'a> {
             }
             output.push_str(&self.resource_field_type(&field.kind, field.optional));
             output.push(' ');
-            output.push_str(&csharp_parameter_name(&field.name));
+            output.push_str(&resource_parameter_name(&type_name, &field.name));
         }
         output.push_str(")\n    {\n");
         for field in &resource.fields {
             output.push_str("        ");
-            output.push_str(&csharp_type_name(&field.name));
+            output.push_str(&resource_property_name(&type_name, &field.name));
             output.push_str(" = ");
-            output.push_str(&csharp_parameter_name(&field.name));
+            output.push_str(&resource_parameter_name(&type_name, &field.name));
             output.push_str(";\n");
         }
         output.push_str("    }\n\n");
@@ -454,7 +457,7 @@ impl<'a> ApiPlanner<'a> {
             output.push_str("    public ");
             output.push_str(&self.resource_field_type(&field.kind, field.optional));
             output.push(' ');
-            output.push_str(&csharp_type_name(&field.name));
+            output.push_str(&resource_property_name(&type_name, &field.name));
             output.push_str(" { get; }\n");
         }
         if service.endpoint.is_none() {
@@ -484,7 +487,7 @@ impl<'a> ApiPlanner<'a> {
             output.push('\n');
         }
         for method in &resource.methods {
-            self.render_resource_method(output, service, method);
+            self.render_resource_method(output, service, &type_name, method);
         }
         output.push_str("}\n\n");
     }
@@ -493,6 +496,7 @@ impl<'a> ApiPlanner<'a> {
         &self,
         output: &mut String,
         service: &PlannedService,
+        type_name: &str,
         method: &PlannedResourceMethod,
     ) {
         let operation = match &method.binding {
@@ -537,6 +541,7 @@ impl<'a> ApiPlanner<'a> {
             } => {
                 let operation =
                     operation.expect("bound resource operation should exist on the service");
+                let request_plan = &with_resource_property_names(request_plan, type_name);
                 output.push_str("\n    {\n");
                 if service.endpoint.is_none() {
                     self.render_resource_method_inline_operation_body(
@@ -907,11 +912,14 @@ impl<'a> ApiPlanner<'a> {
             let expression =
                 operation_transform_expression(operation, "request", "result", self.api_plan);
             output.push_str("        return ");
-            if let Some(resource) = &operation.data.output_resource_return {
-                output.push_str(&csharp_type_name(&resource.resource_type_name));
-                output.push_str(".BindClient(");
-                output.push_str(&expression);
-                output.push_str(", _client)");
+            if operation.data.output_resource_return.is_some() {
+                output.push_str(&resource_return_expression(
+                    operation,
+                    "request",
+                    "result",
+                    self.api_plan,
+                    Some("_client"),
+                ));
             } else {
                 output.push_str(&expression);
             }
@@ -1111,11 +1119,14 @@ impl<'a> ApiPlanner<'a> {
             let expression =
                 operation_transform_expression(operation, "request", "result", self.api_plan);
             output.push_str("        return ");
-            if endpoint_parameter && let Some(resource) = &operation.data.output_resource_return {
-                output.push_str(&csharp_type_name(&resource.resource_type_name));
-                output.push_str(".BindClient(");
-                output.push_str(&expression);
-                output.push_str(", client)");
+            if endpoint_parameter && operation.data.output_resource_return.is_some() {
+                output.push_str(&resource_return_expression(
+                    operation,
+                    "request",
+                    "result",
+                    self.api_plan,
+                    Some("client"),
+                ));
             } else {
                 output.push_str(&expression);
             }
@@ -1199,11 +1210,14 @@ impl<'a> ApiPlanner<'a> {
             let expression =
                 operation_transform_expression(operation, "request", "result", self.api_plan);
             output.push_str("        return ");
-            if let Some(resource) = &operation.data.output_resource_return {
-                output.push_str(&csharp_type_name(&resource.resource_type_name));
-                output.push_str(".BindClient(");
-                output.push_str(&expression);
-                output.push_str(", RequireNexgenClient())");
+            if operation.data.output_resource_return.is_some() {
+                output.push_str(&resource_return_expression(
+                    operation,
+                    "request",
+                    "result",
+                    self.api_plan,
+                    Some("RequireNexgenClient()"),
+                ));
             } else {
                 output.push_str(&expression);
             }
@@ -1309,7 +1323,12 @@ impl<'a> ApiPlanner<'a> {
             return type_name.to_string();
         }
         if let Some(resource) = &operation.data.output_resource_return {
-            return csharp_type_name(&resource.resource_type_name);
+            return csharp_type_name(
+                resource
+                    .holder
+                    .as_ref()
+                    .map_or(&resource.resource_type_name, |holder| &holder.model_name),
+            );
         }
         self.operation_output_type(operation)
     }
@@ -3643,21 +3662,72 @@ fn operation_transform_expression(
             .replace("request", request_expr)
             .replace("result", result_expr);
     }
-    if let Some(resource) = &operation.data.output_resource_return {
-        let args = resource
-            .bindings
-            .iter()
-            .map(|binding| {
-                resource_return_binding_expr(resource, binding, request_expr, result_expr, api_plan)
-            })
-            .collect::<Vec<_>>();
-        return format!(
-            "new {}({})",
-            csharp_type_name(&resource.resource_type_name),
-            args.join(", ")
-        );
+    if operation.data.output_resource_return.is_some() {
+        return resource_return_expression(operation, request_expr, result_expr, api_plan, None);
     }
     result_expr.to_string()
+}
+
+/// The resource that an operation returns, bound to `client` when one is given. A result
+/// record that holds the resource gets it in its resource field, and each other field from
+/// the field of the same name in the wire record.
+fn resource_return_expression(
+    operation: &PlannedOperation,
+    request_expr: &str,
+    result_expr: &str,
+    api_plan: &PlannedSpec,
+    client: Option<&str>,
+) -> String {
+    let resource = operation
+        .data
+        .output_resource_return
+        .as_ref()
+        .expect("the operation returns a resource");
+    let type_name = csharp_type_name(&resource.resource_type_name);
+    let args = resource
+        .bindings
+        .iter()
+        .map(|binding| {
+            resource_return_binding_expr(resource, binding, request_expr, result_expr, api_plan)
+        })
+        .collect::<Vec<_>>();
+    let mut value = format!("new {type_name}({})", args.join(", "));
+    if let Some(client) = client {
+        value = format!("{type_name}.BindClient({value}, {client})");
+    }
+    let Some(holder) = &resource.holder else {
+        return value;
+    };
+    let field_value = |field: &PlannedResourceHolderField| {
+        if field.resource {
+            value.clone()
+        } else {
+            format!("{result_expr}.{}", csharp_type_name(&field.name))
+        }
+    };
+    let required = holder
+        .fields
+        .iter()
+        .filter(|field| field.required)
+        .map(field_value)
+        .collect::<Vec<_>>();
+    let optional = holder
+        .fields
+        .iter()
+        .filter(|field| !field.required)
+        .map(|field| format!("{} = {}", csharp_type_name(&field.name), field_value(field)))
+        .collect::<Vec<_>>();
+    let mut expression = format!(
+        "new {}({})",
+        csharp_type_name(&holder.model_name),
+        required.join(", ")
+    );
+    if !optional.is_empty() {
+        expression.push_str(" { ");
+        expression.push_str(&optional.join(", "));
+        expression.push_str(" }");
+    }
+    expression
 }
 
 fn resource_return_binding_expr(
@@ -3916,6 +3986,45 @@ fn dotnet_endpoint_service_class_name(service: &PlannedService) -> String {
 
 fn service_endpoint_constant_name(service: &PlannedService) -> String {
     csharp_type_name(&format!("{}-endpoint", service.name))
+}
+
+// C# refuses a member with the name of its class, as a `stream` field on a `stream` resource.
+fn resource_property_name(type_name: &str, field_name: &str) -> String {
+    let name = csharp_type_name(field_name);
+    if name == type_name {
+        format!("{name}Value")
+    } else {
+        name
+    }
+}
+
+// System.Text.Json binds each constructor parameter to the property of the same name.
+fn resource_parameter_name(type_name: &str, field_name: &str) -> String {
+    csharp_parameter_name(&resource_property_name(type_name, field_name))
+}
+
+fn with_resource_property_names(plan: &RequestPlan, type_name: &str) -> RequestPlan {
+    match plan {
+        RequestPlan::Source(RequestPlanSource::ResourceField(name))
+            if csharp_type_name(name) == type_name =>
+        {
+            RequestPlan::Source(RequestPlanSource::ResourceField(format!("{name}-value")))
+        }
+        RequestPlan::Construct {
+            message_name,
+            fields,
+        } => RequestPlan::Construct {
+            message_name: message_name.clone(),
+            fields: fields
+                .iter()
+                .map(|field| RequestPlanField {
+                    value: with_resource_property_names(&field.value, type_name),
+                    ..field.clone()
+                })
+                .collect(),
+        },
+        RequestPlan::Source(_) => plan.clone(),
+    }
 }
 
 pub(in crate::generator) fn field_property_name(field: &RecordFieldSpec<PlannedFamily>) -> String {

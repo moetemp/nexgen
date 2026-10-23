@@ -8,3 +8,18 @@ export interface UpdateEmailRequest {
   userId: string;
   email: string;
 }
+
+export interface NotifyRequest {
+  userId: string;
+  reason?: string;
+  channels?: string[];
+  sender: string;
+}
+
+export interface UserProfile {
+  displayName: string;
+}
+
+export interface GetProfileRequest {
+  userId: string;
+}

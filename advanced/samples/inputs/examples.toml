@@ -16,6 +16,15 @@ languages = ["python", "dotnet", "typescript"]
 [start-workflow]
 client = true
 
-[log-service]
-languages = ["python"]
+[workflow-run]
+system_nexus = true
+languages = ["python", "typescript", "dotnet", "go"]
+
+# A System Nexus operation that returns a resource. TypeScript only for now.
+[workflow-handle]
+languages = ["typescript"]
+system_nexus = true
+
+[stream-service]
+languages = ["python", "typescript", "dotnet"]
 client = true

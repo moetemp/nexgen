@@ -511,15 +511,20 @@ impl<'a> ApiPlanner<'a> {
             output_annotation: output_transform
                 .and_then(|transform| transform.type_name.value().map(str::to_string))
                 .or_else(|| {
-                    output_resource_return
-                        .as_ref()
-                        .map(|resource| resource.resource_type_name.clone())
+                    output_resource_return.as_ref().map(|resource| {
+                        resource
+                            .holder
+                            .as_ref()
+                            .map_or(&resource.resource_type_name, |holder| &holder.model_name)
+                            .clone()
+                    })
                 })
                 .unwrap_or(output_annotation_default),
             output_transform_type_import: output_transform
                 .and_then(|transform| transform.type_import.value().map(str::to_string)),
             output_transform_expr: output_transform
-                .and_then(|transform| transform.transform.value().map(str::to_string)),
+                .and_then(|transform| transform.transform.value().map(str::to_string))
+                .or_else(|| held_resource_transform(self.api_plan, operation.output_type()?)),
             output_resource_return,
             output_direct_result: operation.output_direct_result(),
             output_model_name: operation
@@ -3850,6 +3855,16 @@ fn render_endpoint_service_operation_body(
         output.push_str("    return ");
         output.push_str(transform_expr);
         output.push_str(";\n");
+    } else if let Some(resource_return) = &operation.output_resource_return
+        && resource_return.holder.is_some()
+    {
+        output.push_str("    const result = await handle.result();\n");
+        output.push_str("    return ");
+        output.push_str(&typescript_resource_return_value(
+            resource_return,
+            Some("this.client"),
+        ));
+        output.push_str(";\n");
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("    const result = await handle.result();\n");
         output.push_str("    return ");
@@ -4229,6 +4244,29 @@ fn render_models_module(
         api_plan,
         &body,
     );
+    // A result record that holds a resource uses its class.
+    let held_resources = api_plan
+        .services
+        .iter()
+        .flat_map(|service| service.operations.iter())
+        .filter_map(|operation| operation.data.output_resource_return.as_ref())
+        .filter(|resource_return| resource_return.holder.is_some())
+        .map(|resource_return| resource_return.resource_type_name.clone())
+        .chain(api_plan.records().filter_map(|(_, record)| {
+            record
+                .fields
+                .values()
+                .find_map(|field| match field.field_type.without_option() {
+                    TypeSpec::Resource(resource) => Some(resource.type_name.clone()),
+                    _ => None,
+                })
+        }))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if !held_resources.is_empty() {
+        render_type_imports(&mut imports, "./resources", &held_resources);
+    }
     render_generated_module(imports, body)
 }
 
@@ -5578,10 +5616,14 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
         output.push_str("  public async ");
         output.push_str(&typescript_generated_field_name(&method.name));
         output.push_str("(\n");
-        for param in &method.params {
+        // TypeScript refuses an optional parameter before a required one, and WIT allows
+        // any order, so such a parameter takes `undefined` explicitly.
+        let last_required = method.params.iter().rposition(|param| !param.optional);
+        for (index, param) in method.params.iter().enumerate() {
+            let before_required = last_required.is_some_and(|last| index < last);
             output.push_str("    ");
             output.push_str(&typescript_generated_field_name(&param.name));
-            if param.optional {
+            if param.optional && !before_required {
                 output.push('?');
             }
             output.push_str(": ");
@@ -5590,6 +5632,9 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                 false,
                 param.function.as_ref(),
             ));
+            if param.optional && before_required {
+                output.push_str(" | undefined");
+            }
             output.push_str(",\n");
         }
         output.push_str("  ): Promise<");
@@ -6133,6 +6178,44 @@ fn render_request_plan_typescript(plan: &RequestPlan) -> String {
     )
 }
 
+/// The resource that an operation returns, bound to `client` when one is given, or the
+/// result record that holds it. The record takes each other field from the field of the
+/// same name in the wire record.
+fn typescript_resource_return_value(
+    resource_return: &PlannedOperationResourceReturn,
+    client: Option<&str>,
+) -> String {
+    let args = resource_return
+        .bindings
+        .iter()
+        .map(resource_return_binding_expr_typescript)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut value = format!("new {}({args})", resource_return.resource_type_name);
+    if let Some(client) = client {
+        value = format!(
+            "{}({value}, {client})",
+            resource_client_bind_function_name_for_type(&resource_return.resource_type_name)
+        );
+    }
+    let Some(holder) = &resource_return.holder else {
+        return value;
+    };
+    let fields = holder
+        .fields
+        .iter()
+        .map(|field| {
+            let name = typescript_generated_field_name(&field.name);
+            if field.resource {
+                format!("{name}: {value}")
+            } else {
+                format!("{name}: result.{name}")
+            }
+        })
+        .collect::<Vec<_>>();
+    format!("{{ {} }}", fields.join(", "))
+}
+
 fn resource_return_binding_expr_typescript(
     binding: &PlannedOperationResourceFieldBinding,
 ) -> String {
@@ -6328,6 +6411,10 @@ fn render_operation_function(
             output.push_str("  return ");
             output.push_str(transform_expr);
             output.push_str(";\n");
+        } else if let Some(resource_return) = &operation.output_resource_return {
+            output.push_str("  return ");
+            output.push_str(&typescript_resource_return_value(resource_return, None));
+            output.push_str(";\n");
         } else {
             output.push_str("  return result as ");
             output.push_str(&operation.output_annotation);
@@ -6358,6 +6445,16 @@ fn render_operation_function(
         output.push_str("  const result = await handle.result();\n");
         output.push_str("  return ");
         output.push_str(transform_expr);
+        output.push_str(";\n");
+    } else if let Some(resource_return) = &operation.output_resource_return
+        && resource_return.holder.is_some()
+    {
+        output.push_str("  const result = await handle.result();\n");
+        output.push_str("  return ");
+        output.push_str(&typescript_resource_return_value(
+            resource_return,
+            service.endpoint.is_none().then_some("endpoint"),
+        ));
         output.push_str(";\n");
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("  const result = await handle.result();\n");
@@ -6470,6 +6567,36 @@ fn render_operation_input_alias(
         output.push_str("?: never");
     }
     output.push_str(" }\n    : never\n  : never;\n\n");
+}
+
+/// A WIT-only result record that holds a resource gets the resource as a plain object, so the
+/// operation builds the class from it.
+fn held_resource_transform(api_plan: &PlannedSpec, output: &PlannedType) -> Option<String> {
+    let PlannedType::Record(record) = output else {
+        return None;
+    };
+    let record = api_plan.record(&record.full_name)?;
+    if record.source.is_some() {
+        return None;
+    }
+    let (field_name, resource_name) =
+        record
+            .fields
+            .values()
+            .find_map(|field| match field.field_type.without_option() {
+                TypeSpec::Resource(resource) => Some((&field.name, &resource.type_name)),
+                _ => None,
+            })?;
+    let resource = api_plan
+        .services
+        .iter()
+        .flat_map(|service| service.resources.iter())
+        .map(|resource| &resource.data)
+        .find(|resource| resource.type_name == *resource_name)?;
+    let field = typescript_generated_field_name(field_name);
+    let mut value = String::new();
+    render_resource_constructor(&mut value, resource, &format!("result.{field}"), "  ");
+    Some(format!("{{ ...result, {field}: {value} }}"))
 }
 
 fn render_resource_constructor(

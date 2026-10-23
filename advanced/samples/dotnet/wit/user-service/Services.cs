@@ -25,6 +25,14 @@ namespace Nexgen.UserService
         [NexusOperation("UpdateEmail")]
         User UpdateEmail(UpdateEmailRequest request);
 
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("Notify")]
+        void Notify(NotifyRequest request);
+
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("GetProfile")]
+        UserProfile GetProfile(GetProfileRequest request);
+
     }
 
     [GeneratedCode("nexgen", null)]
@@ -55,6 +63,39 @@ namespace Nexgen.UserService
 
         public string UserId { get; set; }
         public string Email { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class NotifyOptions
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="NotifyOptions"/> class.
+        /// </summary>
+        public NotifyOptions(string userId, IReadOnlyList<string> channels, string sender)
+        {
+            UserId = userId;
+            Channels = channels;
+            Sender = sender;
+        }
+
+        public string UserId { get; set; }
+        public string? Reason { get; set; }
+        public IReadOnlyList<string> Channels { get; set; }
+        public string Sender { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class GetProfileOptions
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="GetProfileOptions"/> class.
+        /// </summary>
+        public GetProfileOptions(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -95,6 +136,38 @@ namespace Nexgen.UserService
         {
             var request = new UpdateEmailRequest(options.UserId, options.Email);
             return UpdateEmailAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task NotifyAsync(NotifyRequest request)
+        {
+            await _client.ExecuteNexusOperationAsync(svc => svc.Notify(request)).ConfigureAwait(true);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task NotifyAsync(NotifyOptions options)
+        {
+            var request = new NotifyRequest(options.UserId, options.Channels, options.Sender)
+            {
+                Reason = options.Reason,
+            };
+            return NotifyAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task<UserProfile> GetProfileAsync(GetProfileRequest request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<UserProfile>(svc => svc.GetProfile(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task<UserProfile> GetProfileAsync(GetProfileOptions options)
+        {
+            var request = new GetProfileRequest(options.UserId);
+            return GetProfileAsync(request);
         }
 
     }

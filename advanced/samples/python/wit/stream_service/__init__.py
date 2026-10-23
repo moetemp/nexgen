@@ -8,12 +8,18 @@ import typing
 import nexusrpc
 import temporalio.converter
 from . import services as _services
-from .operations.append import append
-from .operations.read import read
+from .operations.create_stream import create_stream
+from ._resources.stream import append_records
+from ._resources.stream import close_stream
+from ._resources.stream import read_records
+from ._resources.stream import describe_stream
 
 __all__ = [
-    "append",
-    "read",
+    "append_records",
+    "close_stream",
+    "create_stream",
+    "describe_stream",
+    "read_records",
 ]
 
 
@@ -43,15 +49,33 @@ __nexus_operation_registry__: dict[
     tuple[str, str], _NexusOperationInfo[typing.Any, typing.Any]
 ] = {
     (
-        "LogService",
-        "Append",
+        "StreamService",
+        "CreateStream",
     ): _NexusOperationInfo(
-        operation=_services.LogService.append,
+        operation=_services.StreamService.create_stream,
     ),
     (
-        "LogService",
-        "Read",
+        "StreamService",
+        "AppendRecords",
     ): _NexusOperationInfo(
-        operation=_services.LogService.read,
+        operation=_services.StreamService.append_records,
+    ),
+    (
+        "StreamService",
+        "CloseStream",
+    ): _NexusOperationInfo(
+        operation=_services.StreamService.close_stream,
+    ),
+    (
+        "StreamService",
+        "ReadRecords",
+    ): _NexusOperationInfo(
+        operation=_services.StreamService.read_records,
+    ),
+    (
+        "StreamService",
+        "DescribeStream",
+    ): _NexusOperationInfo(
+        operation=_services.StreamService.describe_stream,
     ),
 }

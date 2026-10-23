@@ -14,12 +14,18 @@ import temporalio.converter
 import temporalio.nexus.system
 
 from .models import (
-    AppendRequest,
-    AppendResponse,
-    Entry,
-    ReadRequest,
-    ReadResponse,
+    AppendRecordsRequest,
+    AppendRecordsResponse,
+    CloseStreamRequest,
+    CloseStreamResponse,
+    CreateStreamRequest,
+    DescribeStreamRequest,
+    DescribeStreamResponse,
+    ReadRecordsRequest,
+    ReadRecordsResponse,
+    StreamRecord,
 )
+from ._resources import CreateStreamResult
 
 
 class Transport(typing.Protocol):
@@ -64,8 +70,8 @@ _LONG_POLL_FIRST_PAUSE = 0.05
 _LONG_POLL_LAST_PAUSE = 2.0
 
 
-class LogServiceClient:
-    """Calls the `LogService` operations over a transport.
+class StreamServiceClient:
+    """Calls the `StreamService` operations over a transport.
 
     For code outside a Workflow. Workflow code uses the operation stubs.
     """
@@ -103,34 +109,47 @@ class LogServiceClient:
         self, operation: str, payload: temporalio.api.common.v1.Payload
     ) -> temporalio.api.common.v1.Payload:
         return await self._transport.call(
-            service="LogService",
+            service="StreamService",
             operation=operation,
             input=payload,
         )
 
-    async def append(self, request: AppendRequest) -> AppendResponse:
+    async def create_stream(self, request: CreateStreamRequest) -> CreateStreamResult:
         [payload] = await self._data_converter.encode([request])
-        answer = await self._call("Append", payload)
-        [value] = await self._data_converter.decode([answer], [AppendResponse])
-        return typing.cast(AppendResponse, value)
+        answer = await self._call("CreateStream", payload)
+        [value] = await self._data_converter.decode([answer], [CreateStreamResult])
+        return typing.cast(CreateStreamResult, value)
 
-    async def read(self, request: ReadRequest) -> ReadResponse:
-        """Read the entries from an offset. The service waits for new entries."""
+    async def append_records(
+        self, request: AppendRecordsRequest
+    ) -> AppendRecordsResponse:
         [payload] = await self._data_converter.encode([request])
-        answer = await self._call("Read", payload)
-        [value] = await self._data_converter.decode([answer], [ReadResponse])
-        return typing.cast(ReadResponse, value)
+        answer = await self._call("AppendRecords", payload)
+        [value] = await self._data_converter.decode([answer], [AppendRecordsResponse])
+        return typing.cast(AppendRecordsResponse, value)
 
-    async def read_until_entries(
+    async def close_stream(self, request: CloseStreamRequest) -> CloseStreamResponse:
+        [payload] = await self._data_converter.encode([request])
+        answer = await self._call("CloseStream", payload)
+        [value] = await self._data_converter.decode([answer], [CloseStreamResponse])
+        return typing.cast(CloseStreamResponse, value)
+
+    async def read_records(self, request: ReadRecordsRequest) -> ReadRecordsResponse:
+        [payload] = await self._data_converter.encode([request])
+        answer = await self._call("ReadRecords", payload)
+        [value] = await self._data_converter.decode([answer], [ReadRecordsResponse])
+        return typing.cast(ReadRecordsResponse, value)
+
+    async def read_records_until_records(
         self,
-        request: ReadRequest,
+        request: ReadRecordsRequest,
         *,
         deadline: datetime.timedelta,
-    ) -> ReadResponse:
-        """Call ``read`` until it answers with ``entries``, or with ``done`` set, or the
-        deadline passes.
+    ) -> ReadRecordsResponse:
+        """Call ``read_records`` until it answers with ``records``, or with ``done`` set,
+        or the deadline passes.
 
-        Each call sets ``wait_ms`` to what is left of the deadline, at most 30 s.
+        Each call sets ``wait_ms`` to what is left of the deadline, at most 60 s.
         After an answer with nothing, the next call sets ``from_offset`` to the answer's
         ``next_offset``.
         When the deadline passes, the last answer comes back, so the caller keeps its
@@ -141,22 +160,22 @@ class LogServiceClient:
         clock = asyncio.get_running_loop()
         started = clock.time()
         end = started + deadline.total_seconds()
-        attempt: ReadRequest = request
+        attempt: ReadRecordsRequest = request
         pause = _LONG_POLL_FIRST_PAUSE
         while True:
             wait = max(end - clock.time(), 0.001)
-            wait = min(wait, 30.0)
+            wait = min(wait, 60.0)
             attempt = dataclasses.replace(attempt, wait_ms=max(int(wait * 1000), 1))
             asked = clock.time()
             try:
-                answer = await self.read(attempt)
+                answer = await self.read_records(attempt)
             except TransportError as error:
                 if not error.retryable or clock.time() + pause >= end:
                     raise
                 await asyncio.sleep(pause)
                 pause = min(pause * 2, _LONG_POLL_LAST_PAUSE)
                 continue
-            if answer.entries or answer.done:
+            if answer.records or answer.done:
                 return answer
             if answer.next_offset is not None:
                 attempt = dataclasses.replace(attempt, from_offset=answer.next_offset)
@@ -169,16 +188,17 @@ class LogServiceClient:
             else:
                 pause = _LONG_POLL_FIRST_PAUSE
 
-    async def iter_read(
+    async def iter_read_records(
         self,
-        request: ReadRequest,
+        request: ReadRecordsRequest,
         *,
         deadline: datetime.timedelta | None = None,
-    ) -> collections.abc.AsyncIterator[Entry]:
-        """Yield each item of ``entries``, page after page, as one sequence.
+    ) -> collections.abc.AsyncIterator[StreamRecord]:
+        """Yield each item of ``records``, page after page, as one sequence.
 
-        Each page is one ``read_until_entries`` call, which sets ``wait_ms`` to what is
-        left of the deadline. The next page starts at the answer's ``next_offset``.
+        Each page is one ``read_records_until_records`` call, which sets ``wait_ms`` to
+        what is left of the deadline. The next page starts at the answer's
+        ``next_offset``.
         The iterator ends after an answer with ``done`` set, or when the deadline
         passes. With no deadline, it ends only on ``done``.
         """
@@ -189,12 +209,20 @@ class LogServiceClient:
             left = 60.0 if end is None else end - clock.time()
             if left <= 0:
                 return
-            answer = await self.read_until_entries(
+            answer = await self.read_records_until_records(
                 attempt, deadline=datetime.timedelta(seconds=left)
             )
-            for item in answer.entries or []:
+            for item in answer.records or []:
                 yield item
             if answer.done:
                 return
             if answer.next_offset is not None:
                 attempt = dataclasses.replace(attempt, from_offset=answer.next_offset)
+
+    async def describe_stream(
+        self, request: DescribeStreamRequest
+    ) -> DescribeStreamResponse:
+        [payload] = await self._data_converter.encode([request])
+        answer = await self._call("DescribeStream", payload)
+        [value] = await self._data_converter.decode([answer], [DescribeStreamResponse])
+        return typing.cast(DescribeStreamResponse, value)

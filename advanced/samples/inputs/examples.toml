@@ -22,6 +22,7 @@ languages = ["python", "typescript", "dotnet", "go"]
 
 [stream-service]
 languages = ["python", "typescript", "dotnet"]
+client = true
 
 # A System Nexus operation that returns a resource.
 [workflow-handle]

@@ -1113,6 +1113,33 @@ client = StartWorkflowServiceClient(my_transport)
 response = await client.cancel_workflow(request)
 ```
 
+An operation with `@nexus.long-poll` also gets `<operation>_until_<result>`,
+which takes the request and a `deadline` (a `datetime.timedelta`). It calls the
+operation until an answer has something in the result list, or has the done
+field set, or the deadline passes. At the deadline it returns the last answer,
+so the caller keeps its place. Each call asks the service to wait for what is
+left of the deadline, at most `max-wait-ms`. After an answer with nothing, the
+next call starts from the answer's next offset, and the idle timeout counts down
+across calls. An answer with nothing that comes back in less than half of its
+wait is followed by a pause, from 50 ms and doubling up to 2 s. A
+`TransportError` with `retryable` set is tried again while the deadline allows.
+
+```python
+answer = await client.read_until_entries(request, deadline=timedelta(seconds=30))
+```
+
+When the long poll also sets `offset-field` and `next-offset-field`, the caller
+gets `iter_<operation>`, an async iterator over the items of the result list.
+Each page is one `_until_` call, so it waits and backs off by the same rules.
+The next page starts at the answer's next offset. The iterator ends after an
+answer with the done field set, or when its optional `deadline` passes. With no
+deadline, it ends only on done. The idle timeout counts within one page.
+
+```python
+async for entry in client.iter_read(request):
+    print(entry.offset)
+```
+
 The caller supports operations whose input and output are models of the same
 module. An operation whose models take type parameters, or that returns a
 resource without a wire type, is a generation error. TypeScript and .NET do not
@@ -1762,6 +1789,49 @@ id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = (
 ```
 
 Cannot be combined with `@nexus.source`.
+
+---
+
+### @nexus.long-poll
+
+**Placement:** Operation (function) whose input and output are records
+**Syntax:**
+
+```
+@nexus.long-poll
+  wait-field="<input-field>" result-field="<output-field>"
+  [max-wait-ms="<milliseconds>"] [done-field="<output-field>"]
+  [offset-field="<input-field>" next-offset-field="<output-field>"]
+  [idle-timeout-field="<input-field>"]
+```
+
+Declares that the endpoint parks a call for up to the wait the caller sends, and
+answers early when it has something. Each member is a WIT field name. The
+directive changes no model and no wire byte. A generated client uses it to
+repeat the call until it answers with something or a deadline passes. With both
+offset fields, the client and a bound resource method also read the pages as one
+async iterator.
+
+- `wait-field` is an optional input field, a `duration` or an integer count of
+  milliseconds. The caller sets it on each call, so it is not a parameter.
+- `max-wait-ms` is the largest wait the endpoint accepts. A call never asks for
+  more.
+- `result-field` is an output list. An empty list means nothing came yet.
+- `done-field` is an output boolean that says nothing more will come.
+- `offset-field` and `next-offset-field` go together. Both are integer fields of
+  the same type. After an answer with nothing, the next call starts from the
+  offset that the answer gave, so a read that starts at the end does not skip
+  what arrives between calls.
+- `idle-timeout-field` is an optional input field, a `duration` or an integer
+  count of milliseconds. The endpoint ends a call when nothing comes for this
+  long. Each call sends what is left of it, so the idle time counts across
+  calls.
+
+```wit
+/// @nexus.long-poll wait-field="wait" max-wait-ms="60000" result-field="entries"
+///   done-field="done" offset-field="from-offset" next-offset-field="next-offset"
+read: func(request: read-request) -> read-response;
+```
 
 ---
 

@@ -78,7 +78,7 @@ namespace Nexgen.StreamService
         public int? FromOffset { get; set; }
         public IReadOnlyList<string> Topics { get; set; }
         public int? MaxRecords { get; set; }
-        public int? WaitMs { get; set; }
+        public System.TimeSpan? Wait { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -177,7 +177,7 @@ namespace Nexgen.StreamService
             {
                 FromOffset = options.FromOffset,
                 MaxRecords = options.MaxRecords,
-                WaitMs = options.WaitMs,
+                Wait = options.Wait,
             };
             return ReadRecordsAsync(request);
         }

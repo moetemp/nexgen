@@ -65,7 +65,7 @@ interface stream-service {
     from-offset: option<s64>,
     topics: list<string>,
     max-records: option<s32>,
-    wait-ms: option<s64>,
+    wait: option<duration>,
   }
 
   record read-records-response {
@@ -101,7 +101,7 @@ interface stream-service {
       from-offset: option<s64>,
       topics: list<string>,
       max-records: option<s32>,
-      wait-ms: option<s64>,
+      wait: option<duration>,
     ) -> read-records-response;
 
     /// @nexus.operation "describe-stream"
@@ -117,7 +117,7 @@ interface stream-service {
   append-records: func(request: append-records-request) -> append-records-response;
   close-stream: func(request: close-stream-request) -> close-stream-response;
   /// @nexus.long-poll
-  ///   wait-field="wait-ms"
+  ///   wait-field="wait"
   ///   max-wait-ms="60000"
   ///   result-field="records"
   ///   done-field="done"

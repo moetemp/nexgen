@@ -37,9 +37,9 @@ namespace Nexgen.StreamService
         }
 
         [GeneratedCode("nexgen", null)]
-        public Task<ReadRecordsResponse> ReadRecordsAsync(int? fromOffset, IReadOnlyList<string> topics, int? maxRecords, int? waitMs)
+        public Task<ReadRecordsResponse> ReadRecordsAsync(int? fromOffset, IReadOnlyList<string> topics, int? maxRecords, System.TimeSpan? wait)
         {
-            var request = new ReadRecordsOptions(StreamValue, topics) { FromOffset = fromOffset, MaxRecords = maxRecords, WaitMs = waitMs };
+            var request = new ReadRecordsOptions(StreamValue, topics) { FromOffset = fromOffset, MaxRecords = maxRecords, Wait = wait };
             return Operations.ReadRecordsAsync(request);
         }
 

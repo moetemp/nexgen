@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import typing
+import datetime
 import temporalio.workflow
 
 from ..models import (
@@ -53,14 +54,14 @@ class Stream:
         from_offset: int | None = None,
         topics: list[str] | None = None,
         max_records: int | None = None,
-        wait_ms: int | None = None,
+        wait: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse:
         request = ReadRecordsRequest(
             stream=self.stream,
             from_offset=from_offset,
             topics=topics or [],
             max_records=max_records,
-            wait_ms=wait_ms,
+            wait=wait,
         )
         handle = await _read_records(request)
         return await handle
@@ -155,14 +156,14 @@ async def read_records(
     from_offset: int | None = None,
     topics: list[str] | None = None,
     max_records: int | None = None,
-    wait_ms: int | None = None,
+    wait: datetime.timedelta | None = None,
 ) -> temporalio.workflow.NexusOperationHandle[ReadRecordsResponse,]:
     request = ReadRecordsRequest(
         stream=stream,
         from_offset=from_offset,
         topics=topics or [],
         max_records=max_records,
-        wait_ms=wait_ms,
+        wait=wait,
     )
     return await _read_records(request)
 

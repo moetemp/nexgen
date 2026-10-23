@@ -169,7 +169,7 @@ namespace Nexgen.StreamService
         public int? FromOffset { get; init; }
         public IReadOnlyList<string> Topics { get; init; }
         public int? MaxRecords { get; init; }
-        public int? WaitMs { get; init; }
+        public System.TimeSpan? Wait { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]

@@ -5,7 +5,10 @@ from __future__ import annotations
 import dataclasses
 import enum
 import typing
+import typing_extensions
 import datetime
+import decimal
+import temporalio.converter
 
 
 class RecordKind(enum.IntEnum):
@@ -16,6 +19,60 @@ class RecordKind(enum.IntEnum):
 class StreamStatus(enum.IntEnum):
     Open = 0
     Closed = 1
+
+
+def _json_value(value: object) -> object:
+    if isinstance(value, datetime.timedelta):
+        micros = value // datetime.timedelta(microseconds=1)
+        sign = "-" if micros < 0 else ""
+        seconds, micros = divmod(abs(micros), 1_000_000)
+        fraction = f".{micros:06d}".rstrip("0") if micros else ""
+        return f"{sign}{seconds}{fraction}s"
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _json_value(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_value(item) for item in typing.cast("list[object]", value)]
+    if isinstance(value, dict):
+        return {
+            key: _json_value(item)
+            for key, item in typing.cast("dict[object, object]", value).items()
+        }
+    return value
+
+
+class _JSONDurationTypeConverter(temporalio.converter.JSONTypeConverter):
+    @typing_extensions.override
+    def to_typed_value(self, hint: type, value: typing.Any) -> typing.Any:
+        if hint is not datetime.timedelta or not isinstance(value, str):
+            return temporalio.converter.JSONTypeConverter.Unhandled
+        try:
+            if not value.endswith("s"):
+                raise decimal.InvalidOperation
+            micros = decimal.Decimal(value[:-1]) * 1_000_000
+        except decimal.InvalidOperation:
+            raise TypeError(
+                f"expected a duration such as '1.5s', got {value!r}"
+            ) from None
+        return datetime.timedelta(microseconds=int(micros))
+
+
+class _JSONDurationTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[typing.Any, typing.Any]
+):
+    @typing_extensions.override
+    def to_transfer_type(self, value: typing.Any) -> typing.Any:
+        return _json_value(value)
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self, value: typing.Any, type_hint: type[typing.Any]
+    ) -> typing.Any:
+        return temporalio.converter.value_to_type(
+            type_hint, value, [_JSONDurationTypeConverter()]
+        )
 
 
 @dataclasses.dataclass(slots=True)
@@ -68,7 +125,7 @@ class ReadRecordsRequest:
     from_offset: int | None = None
     topics: list[str] | None = dataclasses.field(default_factory=list)
     max_records: int | None = None
-    wait_ms: int | None = None
+    wait: datetime.timedelta | None = None
 
 
 @dataclasses.dataclass(slots=True)
@@ -95,3 +152,11 @@ class DescribeStreamRequest:
 class DescribeStreamResponse:
     status: StreamStatus
     last_offset: int | None = None
+
+
+temporalio.converter.transfer_type_convertible(_JSONDurationTransferTypeConverter)(
+    CreateStreamRequest
+)  # pyright: ignore[reportUnusedCallResult]
+temporalio.converter.transfer_type_convertible(_JSONDurationTransferTypeConverter)(
+    ReadRecordsRequest
+)  # pyright: ignore[reportUnusedCallResult]

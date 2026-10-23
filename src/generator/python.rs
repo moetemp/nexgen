@@ -2539,9 +2539,32 @@ fn render_record_models(
         }
     }
 
+    let duration_models = json_duration_models(models, api_plan, &wire_blocks);
+    let mut post_model_statements = String::new();
+    if !duration_models.is_empty() {
+        body.insert_str(0, JSON_DURATION_RUNTIME);
+        for name in &duration_models {
+            post_model_statements.push_str(
+                "temporalio.converter.transfer_type_convertible(_JSONDurationTransferTypeConverter)(",
+            );
+            post_model_statements.push_str(name);
+            post_model_statements.push_str(")  # pyright: ignore[reportUnusedCallResult]\n");
+        }
+        module_imports.extend(
+            [
+                "datetime",
+                "decimal",
+                "temporalio.converter",
+                "typing",
+                "typing_extensions",
+            ]
+            .map(str::to_string),
+        );
+    }
+
     Ok(RenderedModelFragments {
         body,
-        post_model_statements: String::new(),
+        post_model_statements,
         module_imports,
         relative_imports: BTreeMap::new(),
         root_package_imports: RootPackageImports::new(),
@@ -2553,6 +2576,105 @@ fn render_record_models(
         allows_private_wire_access: false,
     })
 }
+
+/// The WIT-only models that hold a `datetime.timedelta`, at any depth. The SDK's JSON converter
+/// can't encode one, so each of these converts through `_JSONDurationTransferTypeConverter`.
+fn json_duration_models(
+    models: &[&RenderedModel],
+    api_plan: &PlannedSpec,
+    wire_blocks: &BTreeMap<String, RenderedRecordWireBlock>,
+) -> Vec<String> {
+    let candidates = models
+        .iter()
+        .filter(|model| {
+            !wire_blocks.contains_key(&model.full_name)
+                && api_plan
+                    .record(&model.full_name)
+                    .is_some_and(|record| record.source.is_none())
+        })
+        .collect::<Vec<_>>();
+    let mut found = BTreeSet::new();
+    loop {
+        let before = found.len();
+        for model in &candidates {
+            let holds_duration = model.fields.iter().any(|field| {
+                field.annotation.contains("datetime.timedelta")
+                    || python_annotation_names(&field.annotation).any(|name| found.contains(name))
+            });
+            if holds_duration {
+                found.insert(model.name.as_str());
+            }
+        }
+        if found.len() == before {
+            break;
+        }
+    }
+    candidates
+        .iter()
+        .filter(|model| found.contains(model.name.as_str()))
+        .map(|model| model.name.clone())
+        .collect()
+}
+
+fn python_annotation_names(annotation: &str) -> impl Iterator<Item = &str> {
+    annotation
+        .split(|ch: char| !(ch.is_alphanumeric() || ch == '_'))
+        .filter(|name| !name.is_empty())
+}
+
+/// Encodes a `datetime.timedelta` as a proto3 JSON duration, such as `"1.5s"`, and decodes it
+/// back, for the models that the SDK's JSON converter can't carry as is.
+const JSON_DURATION_RUNTIME: &str = r#"def _json_value(value: object) -> object:
+    if isinstance(value, datetime.timedelta):
+        micros = value // datetime.timedelta(microseconds=1)
+        sign = "-" if micros < 0 else ""
+        seconds, micros = divmod(abs(micros), 1_000_000)
+        fraction = f".{micros:06d}".rstrip("0") if micros else ""
+        return f"{sign}{seconds}{fraction}s"
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {
+            field.name: _json_value(getattr(value, field.name))
+            for field in dataclasses.fields(value)
+        }
+    if isinstance(value, (list, tuple)):
+        return [_json_value(item) for item in typing.cast("list[object]", value)]
+    if isinstance(value, dict):
+        return {
+            key: _json_value(item)
+            for key, item in typing.cast("dict[object, object]", value).items()
+        }
+    return value
+
+
+class _JSONDurationTypeConverter(temporalio.converter.JSONTypeConverter):
+    @typing_extensions.override
+    def to_typed_value(self, hint: type, value: typing.Any) -> typing.Any:
+        if hint is not datetime.timedelta or not isinstance(value, str):
+            return temporalio.converter.JSONTypeConverter.Unhandled
+        try:
+            if not value.endswith("s"):
+                raise decimal.InvalidOperation
+            micros = decimal.Decimal(value[:-1]) * 1_000_000
+        except decimal.InvalidOperation:
+            raise TypeError(f"expected a duration such as '1.5s', got {value!r}") from None
+        return datetime.timedelta(microseconds=int(micros))
+
+
+class _JSONDurationTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[typing.Any, typing.Any]
+):
+    @typing_extensions.override
+    def to_transfer_type(self, value: typing.Any) -> typing.Any:
+        return _json_value(value)
+
+    @typing_extensions.override
+    def from_transfer_type(self, value: typing.Any, type_hint: type[typing.Any]) -> typing.Any:
+        return temporalio.converter.value_to_type(
+            type_hint, value, [_JSONDurationTypeConverter()]
+        )
+
+
+"#;
 
 fn render_record_model(
     output: &mut String,

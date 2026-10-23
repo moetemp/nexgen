@@ -8,7 +8,7 @@ from temporalio.api.common.v1 import Payload
 import wit.stream_service.client as stream_service_client
 import wit.stream_service.models as stream_service_models
 
-CONVERTER = temporalio.converter.DataConverter.default.payload_converter
+CONVERTER = temporalio.converter.DataConverter.default
 
 
 async def test_client_create_stream_returns_a_bound_stream() -> None:
@@ -53,17 +53,20 @@ async def test_iterator_reads_every_page_from_the_next_offset() -> None:
 
     pages = [page([1], 2), page([], 2), page([2], 3, done=True)]
     asked: list[int | None] = []
+    waits: list[datetime.timedelta | None] = []
 
     class Transport:
         async def call(
             self, *, service: str, operation: str, input: Payload
         ) -> Payload:
             assert (service, operation) == ("StreamService", "ReadRecords")
-            request = CONVERTER.from_payload(
-                input, stream_service_models.ReadRecordsRequest
+            [request] = await CONVERTER.decode(
+                [input], [stream_service_models.ReadRecordsRequest]
             )
             asked.append(request.from_offset)
-            return CONVERTER.to_payload(pages.pop(0))
+            waits.append(request.wait)
+            [answer] = await CONVERTER.encode([pages.pop(0)])
+            return answer
 
     client = stream_service_client.StreamServiceClient(Transport())
     request = stream_service_models.ReadRecordsRequest(
@@ -78,3 +81,4 @@ async def test_iterator_reads_every_page_from_the_next_offset() -> None:
 
     assert offsets == [1, 2]
     assert asked == [None, 2, 2]
+    assert all(isinstance(wait, datetime.timedelta) for wait in waits)

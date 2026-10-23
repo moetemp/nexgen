@@ -156,7 +156,7 @@ class StreamServiceClient:
         """Call ``read_records`` until it answers with ``records``, or with ``done`` set,
         or the deadline passes.
 
-        Each call sets ``wait_ms`` to what is left of the deadline, at most 60 s.
+        Each call sets ``wait`` to what is left of the deadline, at most 60 s.
         After an answer with nothing, the next call sets ``from_offset`` to the answer's
         ``next_offset``.
         When the deadline passes, the last answer comes back, so the caller keeps its
@@ -172,7 +172,9 @@ class StreamServiceClient:
         while True:
             wait = max(end - clock.time(), 0.001)
             wait = min(wait, 60.0)
-            attempt = dataclasses.replace(attempt, wait_ms=max(int(wait * 1000), 1))
+            attempt = dataclasses.replace(
+                attempt, wait=datetime.timedelta(seconds=wait)
+            )
             asked = clock.time()
             try:
                 answer = await self.read_records(attempt)
@@ -203,7 +205,7 @@ class StreamServiceClient:
     ) -> collections.abc.AsyncIterator[StreamRecord]:
         """Yield each item of ``records``, page after page, as one sequence.
 
-        Each page is one ``read_records_until_records`` call, which sets ``wait_ms`` to
+        Each page is one ``read_records_until_records`` call, which sets ``wait`` to
         what is left of the deadline. The next page starts at the answer's
         ``next_offset``.
         The iterator ends after an answer with ``done`` set, or when the deadline
@@ -272,14 +274,14 @@ class Stream:
         from_offset: int | None = None,
         topics: list[str] | None = None,
         max_records: int | None = None,
-        wait_ms: int | None = None,
+        wait: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse:
         request = ReadRecordsRequest(
             stream=self.stream,
             from_offset=from_offset,
             topics=topics or [],
             max_records=max_records,
-            wait_ms=wait_ms,
+            wait=wait,
         )
         return await self._client.read_records(request)
 
@@ -288,13 +290,13 @@ class Stream:
         from_offset: int | None = None,
         topics: list[str] | None = None,
         max_records: int | None = None,
-        wait_ms: int | None = None,
+        wait: datetime.timedelta | None = None,
         *,
         deadline: datetime.timedelta | None = None,
     ) -> collections.abc.AsyncIterator[StreamRecord]:
         """Yield each item of ``records``, page after page, as one sequence.
 
-        Each page is one ``read_records_until_records`` call, which sets ``wait_ms`` to
+        Each page is one ``read_records_until_records`` call, which sets ``wait`` to
         what is left of the deadline. The next page starts at the answer's
         ``next_offset``.
         The iterator ends after an answer with ``done`` set, or when the deadline
@@ -305,7 +307,7 @@ class Stream:
             from_offset=from_offset,
             topics=topics or [],
             max_records=max_records,
-            wait_ms=wait_ms,
+            wait=wait,
         )
         async for item in self._client.iter_read_records(request, deadline=deadline):
             yield item

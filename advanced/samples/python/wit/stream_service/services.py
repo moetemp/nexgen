@@ -23,6 +23,9 @@ from .models import (
     ReadRecordsResponse,
 )
 
+if typing.TYPE_CHECKING:
+    from .models import StreamRef
+
 
 @service(name="streamsample.v1.StreamService")
 class StreamService:

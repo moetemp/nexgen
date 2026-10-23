@@ -241,7 +241,7 @@ impl TypeScriptExternalModels {
             model,
             planned_record,
             api_plan,
-            &|value_type| resolve_typescript_value_type(api_plan, self, value_type, false),
+            &|value_type| resolve_typescript_value_type(api_plan, self, value_type, true),
         )
     }
 
@@ -318,8 +318,9 @@ struct ApiPlanner<'a> {
     flags: IndexMap<String, RenderedFlags>,
     variants: IndexMap<String, RenderedVariant>,
     models: IndexMap<String, RenderedModel>,
-    // False only while a proto-backed record's fields resolve.
-    json_ints: bool,
+    // True only while a proto-backed record's fields resolve, since a proto 64-bit integer is a
+    // `Long`.
+    long_ints: bool,
 }
 
 impl<'a> ApiPlanner<'a> {
@@ -330,7 +331,7 @@ impl<'a> ApiPlanner<'a> {
             enums: IndexMap::new(),
             flags: IndexMap::new(),
             variants: IndexMap::new(),
-            json_ints: true,
+            long_ints: false,
             models: IndexMap::new(),
         })
     }
@@ -845,7 +846,7 @@ impl<'a> ApiPlanner<'a> {
         wire_field_expr: &str,
     ) -> RenderedField {
         let proto_backed = matches!(record.source, Some(ExternalTypeSourceSpec::Proto(_)));
-        let json_ints = std::mem::replace(&mut self.json_ints, !proto_backed);
+        let long_ints = std::mem::replace(&mut self.long_ints, proto_backed);
         let rendered = self.build_record_field(
             record,
             field_name,
@@ -854,7 +855,7 @@ impl<'a> ApiPlanner<'a> {
             wire_field_name,
             wire_field_expr,
         );
-        self.json_ints = json_ints;
+        self.long_ints = long_ints;
         rendered
     }
 
@@ -1327,7 +1328,7 @@ impl<'a> ApiPlanner<'a> {
             self.api_plan,
             &self.external_models,
             value_type,
-            self.json_ints,
+            self.long_ints,
         )
     }
 
@@ -1412,7 +1413,7 @@ fn resolve_typescript_value_type(
     api_plan: &PlannedSpec,
     external_models: &TypeScriptExternalModels,
     value_type: &PlannedType,
-    json: bool,
+    long: bool,
 ) -> ResolvedFieldType {
     match value_type {
         PlannedType::TypeParameter(parameter) => ResolvedFieldType {
@@ -1429,7 +1430,7 @@ fn resolve_typescript_value_type(
         },
         // A proto 64-bit field is the proto runtime's `Long`. Anything else goes over JSON, and
         // the other languages read it as a plain number.
-        PlannedType::Int(IntSpec::I64) if !json => ResolvedFieldType {
+        PlannedType::Int(IntSpec::I64 | IntSpec::U64) if long => ResolvedFieldType {
             annotation: "Long".to_string(),
             kind: ResolvedFieldKind::Scalar,
             requirements: TypeScriptRequirements {
@@ -1539,7 +1540,7 @@ fn resolve_typescript_value_type(
             wire_conversion: None,
         },
         PlannedType::Option(inner) => {
-            let inner = resolve_typescript_value_type(api_plan, external_models, inner, json);
+            let inner = resolve_typescript_value_type(api_plan, external_models, inner, long);
             ResolvedFieldType {
                 annotation: format!("{} | undefined", inner.annotation),
                 kind: inner.kind,
@@ -1548,7 +1549,7 @@ fn resolve_typescript_value_type(
             }
         }
         PlannedType::List(inner) => {
-            let inner = resolve_typescript_value_type(api_plan, external_models, inner, json);
+            let inner = resolve_typescript_value_type(api_plan, external_models, inner, long);
             ResolvedFieldType {
                 annotation: typescript_array_annotation(&inner.annotation),
                 kind: ResolvedFieldKind::Scalar,
@@ -1557,8 +1558,8 @@ fn resolve_typescript_value_type(
             }
         }
         PlannedType::Map(key, value) => {
-            let key = resolve_typescript_value_type(api_plan, external_models, key, json);
-            let value = resolve_typescript_value_type(api_plan, external_models, value, json);
+            let key = resolve_typescript_value_type(api_plan, external_models, key, long);
+            let value = resolve_typescript_value_type(api_plan, external_models, value, long);
             let mut requirements = key.requirements;
             requirements.merge(&value.requirements);
             ResolvedFieldType {
@@ -1571,7 +1572,7 @@ fn resolve_typescript_value_type(
         PlannedType::Tuple(items) => {
             let item_types = items
                 .iter()
-                .map(|item| resolve_typescript_value_type(api_plan, external_models, item, json))
+                .map(|item| resolve_typescript_value_type(api_plan, external_models, item, long))
                 .collect::<Vec<_>>();
             let mut requirements = TypeScriptRequirements::default();
             for item_type in &item_types {
@@ -1594,10 +1595,10 @@ fn resolve_typescript_value_type(
         PlannedType::Result { ok, err } => {
             let ok = ok
                 .as_ref()
-                .map(|ok| resolve_typescript_value_type(api_plan, external_models, ok, json));
+                .map(|ok| resolve_typescript_value_type(api_plan, external_models, ok, long));
             let err = err
                 .as_ref()
-                .map(|err| resolve_typescript_value_type(api_plan, external_models, err, json));
+                .map(|err| resolve_typescript_value_type(api_plan, external_models, err, long));
             let mut requirements = TypeScriptRequirements::default();
             if let Some(ok) = &ok {
                 requirements.merge(&ok.requirements);
@@ -1621,7 +1622,7 @@ fn resolve_typescript_value_type(
             ..
         })) => {
             let mut resolved =
-                resolve_typescript_value_type(api_plan, external_models, fallback, json);
+                resolve_typescript_value_type(api_plan, external_models, fallback, long);
             if let Some(annotation) = type_name.value() {
                 resolved.annotation = annotation.to_string();
                 resolved.requirements = TypeScriptRequirements {

@@ -703,13 +703,7 @@ impl<'a> ApiPlanner<'a> {
                 "client.py",
                 {
                     let resource_classes = self.render_client_resources(services);
-                    let wit_resource_returns = self.client_wit_resource_returns(services);
-                    render_client_module(
-                        services,
-                        &resource_classes,
-                        &wit_resource_returns,
-                        &model_names,
-                    )?
+                    render_client_module(services, &resource_classes, &model_names)?
                 },
                 module_origin.clone(),
             )?;
@@ -942,6 +936,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("class ");
         output.push_str(&resource.type_name);
         output.push_str(":\n");
+        render_python_docstring(output, "    ", resource.doc.as_deref(), &[], None, false);
         for field in &resource.fields {
             output.push_str("    ");
             output.push_str(&python_field_name(&field.name));
@@ -966,61 +961,6 @@ impl<'a> ApiPlanner<'a> {
 
     /// A resource class per resource for code outside a Workflow. It holds the caller, and
     /// each method fills in the request as the Workflow class does, then calls the caller.
-    /// The answers of a caller that come back as a WIT-only resource with a client class, or as
-    /// a record that holds one. Each maps the answer type to the expression that builds the
-    /// client value from the decoded `result`.
-    fn client_wit_resource_returns(
-        &self,
-        services: &[RenderedService<'_>],
-    ) -> BTreeMap<String, String> {
-        let client_resources = services
-            .iter()
-            .flat_map(|service| service.resources.iter())
-            .filter(|resource| !resource.methods.is_empty())
-            .map(|resource| (resource.type_name.clone(), resource))
-            .collect::<BTreeMap<_, _>>();
-        let bound = |resource: &PlannedResource, value: &str| {
-            let args = resource
-                .fields
-                .iter()
-                .map(|field| {
-                    let name = python_field_name(&field.name);
-                    format!("{name}={value}.{name}")
-                })
-                .collect::<Vec<_>>();
-            format!("{}(self, {})", resource.type_name, args.join(", "))
-        };
-        let mut returns = client_resources
-            .iter()
-            .map(|(type_name, resource)| (type_name.clone(), bound(resource, "result")))
-            .collect::<BTreeMap<_, _>>();
-        for (full_name, (model_name, resource_type)) in resource_holders(self.api_plan) {
-            let record = planned_record(self.api_plan, &full_name);
-            let Some(resource) = client_resources.get(&resource_type) else {
-                continue;
-            };
-            if record.source.is_some() {
-                continue;
-            }
-            let fields = record
-                .fields
-                .values()
-                .map(|field| {
-                    let name = python_field_name(&field.name);
-                    match field.field_type.without_option() {
-                        TypeSpec::Resource(_) => {
-                            format!("{name}={}", bound(resource, &format!("result.{name}")))
-                        }
-                        _ => format!("{name}=result.{name}"),
-                    }
-                })
-                .collect::<Vec<_>>();
-            let value = format!("{model_name}({})", fields.join(", "));
-            returns.insert(model_name, value);
-        }
-        returns
-    }
-
     fn render_client_resources(&self, services: &[RenderedService<'_>]) -> String {
         let mut output = String::new();
         for service in services {
@@ -1066,17 +1006,6 @@ impl<'a> ApiPlanner<'a> {
                 }
                 for method in &resource.methods {
                     self.render_client_resource_method(&mut output, service, method);
-                }
-                // A WIT-only record that holds the resource gets a client twin that holds the
-                // client class.
-                for (full_name, (_, resource_type)) in resource_holders(self.api_plan) {
-                    if resource_type != resource.type_name
-                        || planned_record(self.api_plan, &full_name).source.is_some()
-                    {
-                        continue;
-                    }
-                    output.push_str("\n\n");
-                    render_record_model(&mut output, &self.models[&full_name], None);
                 }
             }
         }
@@ -1229,6 +1158,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
+        render_python_docstring(output, "        ", method.doc.as_deref(), &[], None, false);
 
         match &method.binding {
             PlannedResourceMethodBindingSpec::Operation { operation_name, .. } => {
@@ -4410,11 +4340,9 @@ fn client_model_name(
 fn render_client_module(
     services: &[RenderedService<'_>],
     resource_classes: &str,
-    wit_resource_returns: &BTreeMap<String, String>,
     all_model_names: &[String],
 ) -> Result<String> {
     let mut model_names = BTreeSet::new();
-    let mut uses_resources = false;
     let mut body = String::new();
     body.push_str(CLIENT_RUNTIME);
     for service in services {
@@ -4491,11 +4419,16 @@ fn render_client_module(
                     reason: "it has no input".to_string(),
                 });
             };
-            // A resource with a wire type answers with its wire model, and the caller returns
-            // that model. A WIT-only resource, or a record that holds one, answers with its
-            // JSON, and the caller returns its class.
-            let returns_resource_class =
-                operation.output_module_path.as_deref() == Some("._resources");
+            // A resource with a wire type answers with its wire model, and the
+            // caller returns that model. A resource without one has no model.
+            if operation.output_module_path.as_deref() == Some("._resources") {
+                return Err(Error::UnsupportedClientOperation {
+                    language: Language::Python,
+                    service: service.name.to_string(),
+                    operation: operation.name.to_string(),
+                    reason: "it returns a resource".to_string(),
+                });
+            }
             let input_model = client_model_name(
                 service,
                 operation,
@@ -4507,9 +4440,6 @@ fn render_client_module(
             model_names.insert(input_model.clone());
             let output_model = if operation.output_none {
                 None
-            } else if returns_resource_class {
-                uses_resources = true;
-                Some(format!("_resources.{}", operation.output_ref))
             } else {
                 let output_model = client_model_name(
                     service,
@@ -4541,20 +4471,12 @@ fn render_client_module(
                                 && !resource.methods.is_empty()
                         })
                     });
-            let wit_resource_return = returns_resource_class
-                .then(|| {
-                    wit_resource_returns
-                        .get(&operation.output_ref)
-                        .map(|expr| (operation.output_ref.as_str(), expr.as_str()))
-                })
-                .flatten();
             render_client_method(
                 &mut body,
                 operation,
                 &input_model,
                 output_model.as_deref(),
                 client_resource,
-                wit_resource_return,
             );
             if let (Some(long_poll), Some(output_model)) =
                 (&operation.client_long_poll, output_model.as_deref())
@@ -4648,10 +4570,6 @@ fn render_client_module(
         ".models",
         &model_names.into_iter().collect::<Vec<_>>(),
     );
-    if uses_resources {
-        // By module, since the client classes have the same names.
-        output.push_str("from . import _resources\n");
-    }
     output.push_str("\n\n");
     output.push_str(&body);
     Ok(output)
@@ -4667,7 +4585,6 @@ fn render_client_method(
     input_model: &str,
     output_model: Option<&str>,
     client_resource: Option<&PlannedOperationResourceReturn>,
-    wit_resource_return: Option<(&str, &str)>,
 ) {
     output.push('\n');
     output.push_str("    async def ");
@@ -4678,7 +4595,6 @@ fn render_client_method(
     output.push_str(
         client_resource
             .map(|resource_return| resource_return.resource_type_name.as_str())
-            .or(wit_resource_return.map(|(client_type, _)| client_type))
             .or(output_model)
             .unwrap_or("None"),
     );
@@ -4751,18 +4667,9 @@ fn render_client_method(
             output.push_str("        [value] = await self._data_converter.decode([answer], [");
             output.push_str(output_model);
             output.push_str("])\n");
-            let Some((_, client_value)) = wit_resource_return else {
-                output.push_str("        return typing.cast(");
-                output.push_str(output_model);
-                output.push_str(", value)\n");
-                return;
-            };
-            output.push_str("        result = typing.cast(");
+            output.push_str("        return typing.cast(");
             output.push_str(output_model);
             output.push_str(", value)\n");
-            output.push_str("        return ");
-            output.push_str(client_value);
-            output.push('\n');
         }
     }
 }
@@ -6314,6 +6221,7 @@ fn render_endpoint_service_object_operation_body(
             output.push('\n');
         } else if let Some(resource_return) = &operation.output_resource_return {
             output.push_str("        result = await handle\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
@@ -6682,6 +6590,7 @@ fn render_resource_method_inline_operation_body(
             output.push('\n');
         } else if let Some(resource_return) = &operation.output_resource_return {
             output.push_str("        result = await handle\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
@@ -6858,6 +6767,38 @@ fn resource_method_list_param(param: &PlannedResourceField) -> Option<&PlannedTy
     match &param.kind {
         PlannedType::List(value) if !param.optional && param.function.is_none() => Some(value),
         _ => None,
+    }
+}
+
+/// A response model field is always optional, so a required resource field that the response
+/// fills in is checked before the resource is built.
+fn render_resource_return_guards(
+    output: &mut String,
+    indent: &str,
+    operation: &RenderedOperation<'_>,
+    resource_return: &PlannedOperationResourceReturn,
+) {
+    for binding in &resource_return.bindings {
+        let ResolvedResourceBindingSource::ResultField {
+            proto_field_name, ..
+        } = &binding.source
+        else {
+            continue;
+        };
+        if binding.optional {
+            continue;
+        }
+        output.push_str(indent);
+        output.push_str("if result.");
+        output.push_str(proto_field_name);
+        output.push_str(" is None:\n");
+        output.push_str(indent);
+        output.push_str("    raise RuntimeError(");
+        output.push_str(&python_string_literal(&format!(
+            "{} answered without `{}`",
+            operation.wire_name, proto_field_name
+        )));
+        output.push_str(")\n");
     }
 }
 
@@ -8123,6 +8064,7 @@ fn render_request_only_operation_function(
         output.push('\n');
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("    result = await handle\n");
+        render_resource_return_guards(output, "    ", operation, resource_return);
         if let Some(holder) = &resource_return.holder {
             render_resource_holder_return(output, resource_return, holder);
             return;

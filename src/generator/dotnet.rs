@@ -1536,6 +1536,8 @@ impl<'a> ApiPlanner<'a> {
             PlannedType::Float => "double".to_string(),
             PlannedType::Int(IntSpec::I32) => "int".to_string(),
             PlannedType::Int(IntSpec::I64) => "long".to_string(),
+            PlannedType::Int(IntSpec::U32) => "uint".to_string(),
+            PlannedType::Int(IntSpec::U64) => "ulong".to_string(),
             PlannedType::Bool => "bool".to_string(),
             PlannedType::String => "string".to_string(),
             PlannedType::Bytes => "byte[]".to_string(),
@@ -3688,7 +3690,26 @@ fn resource_return_expression(
         .bindings
         .iter()
         .map(|binding| {
-            resource_return_binding_expr(resource, binding, request_expr, result_expr, api_plan)
+            let expr = resource_return_binding_expr(
+                resource,
+                binding,
+                request_expr,
+                result_expr,
+                api_plan,
+            );
+            // A response model field is always nullable, so a required one is checked.
+            match &binding.source {
+                ResolvedResourceBindingSource::ResultField {
+                    proto_field_name, ..
+                } if !binding.optional => format!(
+                    "({expr} ?? throw new System.InvalidOperationException({}))",
+                    csharp_string_literal(&format!(
+                        "{} answered without `{proto_field_name}`",
+                        operation.wire_name
+                    ))
+                ),
+                _ => expr,
+            }
         })
         .collect::<Vec<_>>();
     let mut value = format!("new {type_name}({})", args.join(", "));
@@ -3839,6 +3860,8 @@ fn dotnet_authored_type(wit_type: &PlannedType) -> String {
         TypeSpec::Bool => "bool".to_string(),
         TypeSpec::Int(IntSpec::I32) => "int".to_string(),
         TypeSpec::Int(IntSpec::I64) => "long".to_string(),
+        TypeSpec::Int(IntSpec::U32) => "uint".to_string(),
+        TypeSpec::Int(IntSpec::U64) => "ulong".to_string(),
         TypeSpec::Float => "double".to_string(),
         TypeSpec::String => "string".to_string(),
         TypeSpec::Bytes => "byte[]".to_string(),

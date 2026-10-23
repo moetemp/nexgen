@@ -18,15 +18,7 @@ namespace Nexgen.StreamService
     [GeneratedCode("nexgen", null)]
     public class CreateStreamOptions
     {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="CreateStreamOptions"/> class.
-        /// </summary>
-        public CreateStreamOptions(StreamRef @ref)
-        {
-            Ref = @ref;
-        }
-
-        public StreamRef Ref { get; set; }
+        public StreamRef? Ref { get; set; }
         public System.TimeSpan? Retention { get; set; }
     }
 
@@ -36,29 +28,20 @@ namespace Nexgen.StreamService
         /// <summary>
         /// Initializes a new instance of the <see cref="AppendRecordsOptions"/> class.
         /// </summary>
-        public AppendRecordsOptions(StreamRef stream, IReadOnlyList<AppendRecord> records)
+        public AppendRecordsOptions(IReadOnlyList<AppendRecord> records)
         {
-            Stream = stream;
             Records = records;
         }
 
-        public StreamRef Stream { get; set; }
+        public StreamRef? Stream { get; set; }
+        public long? Sequence { get; set; }
         public IReadOnlyList<AppendRecord> Records { get; set; }
-        public int? Sequence { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
     public class CloseStreamOptions
     {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="CloseStreamOptions"/> class.
-        /// </summary>
-        public CloseStreamOptions(StreamRef stream)
-        {
-            Stream = stream;
-        }
-
-        public StreamRef Stream { get; set; }
+        public StreamRef? Stream { get; set; }
         public object? Result { get; set; }
     }
 
@@ -68,31 +51,22 @@ namespace Nexgen.StreamService
         /// <summary>
         /// Initializes a new instance of the <see cref="ReadRecordsOptions"/> class.
         /// </summary>
-        public ReadRecordsOptions(StreamRef stream, IReadOnlyList<string> topics)
+        public ReadRecordsOptions(IReadOnlyList<string> topics)
         {
-            Stream = stream;
             Topics = topics;
         }
 
-        public StreamRef Stream { get; set; }
-        public int? FromOffset { get; set; }
+        public StreamRef? Stream { get; set; }
+        public long? FromOffset { get; set; }
         public IReadOnlyList<string> Topics { get; set; }
         public int? MaxRecords { get; set; }
-        public int? WaitMs { get; set; }
+        public System.TimeSpan? Wait { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
     public class DescribeStreamOptions
     {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="DescribeStreamOptions"/> class.
-        /// </summary>
-        public DescribeStreamOptions(StreamRef stream)
-        {
-            Stream = stream;
-        }
-
-        public StreamRef Stream { get; set; }
+        public StreamRef? Stream { get; set; }
     }
 
     /// <summary>
@@ -108,17 +82,18 @@ namespace Nexgen.StreamService
         private static async Task<CreateStreamResult> CreateStreamAsync(CreateStreamRequest request)
         {
             var client = Workflow.CreateNexusWorkflowClient<IStreamService>(StreamServiceEndpoint);
-            var result = await client.ExecuteNexusOperationAsync<CreateStreamResult>(svc => svc.CreateStream(request)).ConfigureAwait(true);
-            return result;
+            var result = await client.ExecuteNexusOperationAsync<CreateStreamResponse>(svc => svc.CreateStream(request)).ConfigureAwait(true);
+            return new CreateStreamResult(new Stream((result.Stream ?? throw new System.InvalidOperationException("CreateStream answered without `stream`")))) { Created = result.Created };
         }
 
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<CreateStreamResult> CreateStreamAsync(CreateStreamOptions options)
+        public static Task<CreateStreamResult> CreateStreamAsync(CreateStreamOptions? options = null)
         {
-            var request = new CreateStreamRequest(options.Ref)
+            var request = new CreateStreamRequest()
             {
-                Retention = options.Retention,
+                Ref = options?.Ref,
+                Retention = options?.Retention,
             };
             return CreateStreamAsync(request);
         }
@@ -135,8 +110,9 @@ namespace Nexgen.StreamService
         [GeneratedCode("nexgen", null)]
         public static Task<AppendRecordsResponse> AppendRecordsAsync(AppendRecordsOptions options)
         {
-            var request = new AppendRecordsRequest(options.Stream, options.Records)
+            var request = new AppendRecordsRequest(options.Records)
             {
+                Stream = options.Stream,
                 Sequence = options.Sequence,
             };
             return AppendRecordsAsync(request);
@@ -152,11 +128,12 @@ namespace Nexgen.StreamService
 
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<CloseStreamResponse> CloseStreamAsync(CloseStreamOptions options)
+        public static Task<CloseStreamResponse> CloseStreamAsync(CloseStreamOptions? options = null)
         {
-            var request = new CloseStreamRequest(options.Stream)
+            var request = new CloseStreamRequest()
             {
-                Result = options.Result,
+                Stream = options?.Stream,
+                Result = options?.Result,
             };
             return CloseStreamAsync(request);
         }
@@ -173,11 +150,12 @@ namespace Nexgen.StreamService
         [GeneratedCode("nexgen", null)]
         public static Task<ReadRecordsResponse> ReadRecordsAsync(ReadRecordsOptions options)
         {
-            var request = new ReadRecordsRequest(options.Stream, options.Topics)
+            var request = new ReadRecordsRequest(options.Topics)
             {
+                Stream = options.Stream,
                 FromOffset = options.FromOffset,
                 MaxRecords = options.MaxRecords,
-                WaitMs = options.WaitMs,
+                Wait = options.Wait,
             };
             return ReadRecordsAsync(request);
         }
@@ -192,9 +170,12 @@ namespace Nexgen.StreamService
 
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<DescribeStreamResponse> DescribeStreamAsync(DescribeStreamOptions options)
+        public static Task<DescribeStreamResponse> DescribeStreamAsync(DescribeStreamOptions? options = null)
         {
-            var request = new DescribeStreamRequest(options.Stream);
+            var request = new DescribeStreamRequest()
+            {
+                Stream = options?.Stream,
+            };
             return DescribeStreamAsync(request);
         }
 

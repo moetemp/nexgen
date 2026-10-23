@@ -2,68 +2,47 @@ from __future__ import annotations
 
 import datetime
 
-import temporalio.converter
+from streamsample.v1 import stream_service_pb2
 from temporalio.api.common.v1 import Payload
 
 import wit.stream_service.client as stream_service_client
 import wit.stream_service.models as stream_service_models
 
-CONVERTER = temporalio.converter.DataConverter.default.payload_converter
 
-
-async def test_client_create_stream_returns_a_bound_stream() -> None:
-    class Transport:
-        async def call(
-            self, *, service: str, operation: str, input: Payload
-        ) -> Payload:
-            assert (service, operation) == ("StreamService", "CreateStream")
-            assert b"stream-1" in input.data
-            return Payload(
-                metadata={"encoding": b"json/plain"},
-                data=b'{"stream": {"stream": {"id": "stream-1"}}, "created": true}',
-            )
-
-    client = stream_service_client.StreamServiceClient(Transport())
-    result = await client.create_stream(
-        stream_service_models.CreateStreamRequest(
-            ref=stream_service_models.StreamRef(id="stream-1")
-        )
+def _proto_payload(message: stream_service_pb2.ReadRecordsResponse) -> Payload:
+    return Payload(
+        metadata={"encoding": b"binary/protobuf"},
+        data=message.SerializeToString(),
     )
-
-    assert isinstance(result.stream, stream_service_client.Stream)
-    assert result.stream.stream.id == "stream-1"
-    assert result.created
-    assert result.stream._client is client
 
 
 async def test_iterator_reads_every_page_from_the_next_offset() -> None:
-    def page(
-        offsets: list[int], next_offset: int, done: bool | None = None
-    ) -> stream_service_models.ReadRecordsResponse:
-        return stream_service_models.ReadRecordsResponse(
-            records=[
-                stream_service_models.StreamRecord(
-                    kind=stream_service_models.RecordKind.Data, offset=offset
-                )
-                for offset in offsets
-            ],
-            next_offset=next_offset,
-            done=done,
-        )
-
-    pages = [page([1], 2), page([], 2), page([2], 3, done=True)]
-    asked: list[int | None] = []
+    pages = [
+        stream_service_pb2.ReadRecordsResponse(
+            records=[stream_service_pb2.StreamRecord(offset=1)], next_offset=2
+        ),
+        stream_service_pb2.ReadRecordsResponse(next_offset=2),
+        stream_service_pb2.ReadRecordsResponse(
+            records=[stream_service_pb2.StreamRecord(offset=2)],
+            next_offset=3,
+            done=True,
+        ),
+    ]
+    asked: list[int] = []
+    waits: list[bool] = []
 
     class Transport:
         async def call(
             self, *, service: str, operation: str, input: Payload
         ) -> Payload:
-            assert (service, operation) == ("StreamService", "ReadRecords")
-            request = CONVERTER.from_payload(
-                input, stream_service_models.ReadRecordsRequest
+            assert (service, operation) == (
+                "streamsample.v1.StreamService",
+                "ReadRecords",
             )
+            request = stream_service_pb2.ReadRecordsRequest.FromString(input.data)
             asked.append(request.from_offset)
-            return CONVERTER.to_payload(pages.pop(0))
+            waits.append(request.HasField("wait"))
+            return _proto_payload(pages.pop(0))
 
     client = stream_service_client.StreamServiceClient(Transport())
     request = stream_service_models.ReadRecordsRequest(
@@ -77,4 +56,5 @@ async def test_iterator_reads_every_page_from_the_next_offset() -> None:
     ]
 
     assert offsets == [1, 2]
-    assert asked == [None, 2, 2]
+    assert asked == [0, 2, 2]
+    assert all(waits)

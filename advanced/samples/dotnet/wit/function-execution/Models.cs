@@ -15,7 +15,7 @@ namespace Nexgen.FunctionExecution
         /// <summary>
         /// Initializes a new instance of the <see cref="ExecuteCountedFunctionRequest"/> class.
         /// </summary>
-        public ExecuteCountedFunctionRequest(string function, string name, int count)
+        public ExecuteCountedFunctionRequest(string function, string name, uint count)
         {
             Function = function;
             Name = name;
@@ -30,7 +30,7 @@ namespace Nexgen.FunctionExecution
         /// <summary>
         /// The count argument for the function.
         /// </summary>
-        public int Count { get; init; }
+        public uint Count { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]

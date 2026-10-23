@@ -65,6 +65,9 @@ export interface SyncReport {
     string,
     { tag: "ok"; value: string } | { tag: "err"; value: string }
   >;
+  itemCount: number;
+  byteCount: number;
+  clockSkewMs: number;
 }
 
 export interface DeactivateRequest {

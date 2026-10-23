@@ -53,7 +53,12 @@ namespace Nexgen.UserService
         }
 
         [GeneratedCode("nexgen", null)]
-        public Task<UserProfile> GetProfileAsync() => throw new NotSupportedException("Resource method is not bound to a Nexus operation.");
+        public async Task<UserProfile> GetProfileAsync()
+        {
+            var request = new GetProfileRequest(UserId);
+            var result = await RequireNexgenClient().ExecuteNexusOperationAsync<UserProfile>(svc => svc.GetProfile(request)).ConfigureAwait(true);
+            return result;
+        }
 
     }
 

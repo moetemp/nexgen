@@ -89,7 +89,7 @@ func (u *User) Notify(ctx workflow.Context, reason string, channels []string, se
 }
 
 func (u *User) GetProfile(ctx workflow.Context) workflow.Future {
-	panic("User.GetProfile is not yet implemented")
+	return getProfile(ctx, getProfileRequest{UserID: u.UserID})
 }
 
 // --- Operations (internal) ---

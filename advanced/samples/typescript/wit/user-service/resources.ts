@@ -43,7 +43,12 @@ export class User {
   }
 
   public async getProfile(): Promise<UserProfile> {
-    throw new Error("user.getProfile is not yet implemented");
+    const request = { userId: this.userId };
+    const handle = await requireUserClient(this).startOperation(
+      userService.operations.getProfile,
+      request,
+    );
+    return await handle.result();
   }
 }
 

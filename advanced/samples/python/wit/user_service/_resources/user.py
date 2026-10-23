@@ -6,6 +6,7 @@ import dataclasses
 import typing
 
 from ..models import (
+    GetProfileRequest,
     NotifyRequest,
     UpdateEmailRequest,
     UserProfile,
@@ -60,7 +61,16 @@ class User:
     async def get_profile(
         self,
     ) -> UserProfile:
-        raise NotImplementedError("user.get_profile is not yet implemented")
+        request = GetProfileRequest(
+            user_id=self.user_id,
+        )
+        nexus_client = getattr(self, "_nexus_client")
+        handle = await nexus_client.start_operation(
+            operation="GetProfile",
+            input=request,
+            output_type=UserProfile,
+        )
+        return await handle
 
 
 def bind_user_client(

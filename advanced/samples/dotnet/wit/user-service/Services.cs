@@ -17,6 +17,9 @@ namespace Nexgen.UserService
     [NexusService("UserService")]
     internal interface IUserService
     {
+        /// <summary>
+        /// Get a user by id.
+        /// </summary>
         [GeneratedCode("nexgen", null)]
         [NexusOperation("GetUser")]
         User GetUser(GetUserRequest request);
@@ -30,11 +33,22 @@ namespace Nexgen.UserService
         void Notify(NotifyRequest request);
 
         [GeneratedCode("nexgen", null)]
-        [NexusOperation("TagUser")]
-        void TagUser(TagUserRequest request);
+        [NexusOperation("GetProfile")]
+        UserProfile GetProfile(GetProfileRequest request);
+
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("OpenSession")]
+        Session OpenSession(OpenSessionRequest request);
+
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("EndSession")]
+        void EndSession(EndSessionRequest request);
 
     }
 
+    /// <summary>
+    /// Get a user by id.
+    /// </summary>
     [GeneratedCode("nexgen", null)]
     public class GetUserOptions
     {
@@ -85,19 +99,45 @@ namespace Nexgen.UserService
     }
 
     [GeneratedCode("nexgen", null)]
-    public class TagUserOptions
+    public class GetProfileOptions
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="TagUserOptions"/> class.
+        /// Initializes a new instance of the <see cref="GetProfileOptions"/> class.
         /// </summary>
-        public TagUserOptions(string userId, UserTag tag)
+        public GetProfileOptions(string userId)
         {
             UserId = userId;
-            Tag = tag;
         }
 
         public string UserId { get; set; }
-        public UserTag Tag { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class OpenSessionOptions
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="OpenSessionOptions"/> class.
+        /// </summary>
+        public OpenSessionOptions(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class EndSessionOptions
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EndSessionOptions"/> class.
+        /// </summary>
+        public EndSessionOptions(string session)
+        {
+            Session = session;
+        }
+
+        public string Session { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -110,6 +150,9 @@ namespace Nexgen.UserService
             _client = Workflow.CreateNexusWorkflowClient<IUserService>(endpoint);
         }
 
+        /// <summary>
+        /// Get a user by id.
+        /// </summary>
         [GeneratedCode("nexgen", null)]
         private async Task<User> GetUserAsync(GetUserRequest request)
         {
@@ -117,6 +160,9 @@ namespace Nexgen.UserService
             return User.BindClient(result, _client);
         }
 
+        /// <summary>
+        /// Get a user by id.
+        /// </summary>
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nexgen", null)]
         public Task<User> GetUserAsync(GetUserOptions options)
@@ -158,17 +204,47 @@ namespace Nexgen.UserService
         }
 
         [GeneratedCode("nexgen", null)]
-        private async Task TagUserAsync(TagUserRequest request)
+        private async Task<UserProfile> GetProfileAsync(GetProfileRequest request)
         {
-            await _client.ExecuteNexusOperationAsync(svc => svc.TagUser(request)).ConfigureAwait(true);
+            var result = await _client.ExecuteNexusOperationAsync<UserProfile>(svc => svc.GetProfile(request)).ConfigureAwait(true);
+            return result;
         }
 
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nexgen", null)]
-        public Task TagUserAsync(TagUserOptions options)
+        public Task<UserProfile> GetProfileAsync(GetProfileOptions options)
         {
-            var request = new TagUserRequest(options.UserId, options.Tag);
-            return TagUserAsync(request);
+            var request = new GetProfileRequest(options.UserId);
+            return GetProfileAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task<Session> OpenSessionAsync(OpenSessionRequest request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<Session>(svc => svc.OpenSession(request)).ConfigureAwait(true);
+            return Session.BindClient(result, _client);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task<Session> OpenSessionAsync(OpenSessionOptions options)
+        {
+            var request = new OpenSessionRequest(options.UserId);
+            return OpenSessionAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task EndSessionAsync(EndSessionRequest request)
+        {
+            await _client.ExecuteNexusOperationAsync(svc => svc.EndSession(request)).ConfigureAwait(true);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task EndSessionAsync(EndSessionOptions options)
+        {
+            var request = new EndSessionRequest(options.Session);
+            return EndSessionAsync(request);
         }
 
     }

@@ -10,6 +10,34 @@ namespace Nexgen.UserService
 {
 
     [GeneratedCode("nexgen", null)]
+    public record EndSessionRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EndSessionRequest"/> class.
+        /// </summary>
+        public EndSessionRequest(string session)
+        {
+            Session = session;
+        }
+
+        public string Session { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public record GetProfileRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="GetProfileRequest"/> class.
+        /// </summary>
+        public GetProfileRequest(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
     public record GetUserRequest
     {
         /// <summary>
@@ -43,19 +71,17 @@ namespace Nexgen.UserService
     }
 
     [GeneratedCode("nexgen", null)]
-    public record TagUserRequest
+    public record OpenSessionRequest
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="TagUserRequest"/> class.
+        /// Initializes a new instance of the <see cref="OpenSessionRequest"/> class.
         /// </summary>
-        public TagUserRequest(string userId, UserTag tag)
+        public OpenSessionRequest(string userId)
         {
             UserId = userId;
-            Tag = tag;
         }
 
         public string UserId { get; init; }
-        public UserTag Tag { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -75,17 +101,17 @@ namespace Nexgen.UserService
     }
 
     [GeneratedCode("nexgen", null)]
-    public record UserTag
+    public record UserProfile
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="UserTag"/> class.
+        /// Initializes a new instance of the <see cref="UserProfile"/> class.
         /// </summary>
-        public UserTag(string name)
+        public UserProfile(string displayName)
         {
-            Name = name;
+            DisplayName = displayName;
         }
 
-        public string Name { get; init; }
+        public string DisplayName { get; init; }
     }
 
 }

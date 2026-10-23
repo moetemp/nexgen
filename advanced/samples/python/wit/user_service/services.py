@@ -7,10 +7,17 @@ import typing
 import temporalio.workflow
 
 from .models import (
+    EndSessionRequest,
+    GetProfileRequest,
     GetUserRequest,
     NotifyRequest,
-    TagUserRequest,
+    OpenSessionRequest,
     UpdateEmailRequest,
+    UserProfile,
+)
+from ._resources.session import (
+    Session,
+    bind_session_client,
 )
 from ._resources.user import (
     User,
@@ -18,8 +25,10 @@ from ._resources.user import (
 )
 
 if typing.TYPE_CHECKING:
-    from .models import UserTag
-    from ._resources import User
+    from ._resources import (
+        Session,
+        User,
+    )
 
 
 @service
@@ -39,10 +48,20 @@ class UserService:
         None,
     ] = Operation(name="Notify")
 
-    tag_user: Operation[
-        TagUserRequest,
+    get_profile: Operation[
+        GetProfileRequest,
+        UserProfile,
+    ] = Operation(name="GetProfile")
+
+    open_session: Operation[
+        OpenSessionRequest,
+        Session,
+    ] = Operation(name="OpenSession")
+
+    end_session: Operation[
+        EndSessionRequest,
         None,
-    ] = Operation(name="TagUser")
+    ] = Operation(name="EndSession")
 
 
 class UserServiceClient:
@@ -57,6 +76,7 @@ class UserServiceClient:
         *,
         user_id: str,
     ) -> User:
+        """Get a user by id."""
         request = GetUserRequest(
             user_id=user_id,
         )
@@ -105,17 +125,45 @@ class UserServiceClient:
             input=request,
         )
 
-    async def tag_user(
+    async def get_profile(
         self,
         *,
         user_id: str,
-        tag: UserTag,
-    ) -> temporalio.workflow.NexusOperationHandle[None]:
-        request = TagUserRequest(
+    ) -> temporalio.workflow.NexusOperationHandle[UserProfile]:
+        request = GetProfileRequest(
             user_id=user_id,
-            tag=tag,
         )
         return await self._nexus_client.start_operation(
-            operation="TagUser",
+            operation="GetProfile",
+            input=request,
+            output_type=UserProfile,
+        )
+
+    async def open_session(
+        self,
+        *,
+        user_id: str,
+    ) -> Session:
+        request = OpenSessionRequest(
+            user_id=user_id,
+        )
+        handle = await self._nexus_client.start_operation(
+            operation="OpenSession",
+            input=request,
+            output_type=Session,
+        )
+        resource = await handle
+        return bind_session_client(resource, self._nexus_client)
+
+    async def end_session(
+        self,
+        *,
+        session: str,
+    ) -> temporalio.workflow.NexusOperationHandle[None]:
+        request = EndSessionRequest(
+            session=session,
+        )
+        return await self._nexus_client.start_operation(
+            operation="EndSession",
             input=request,
         )

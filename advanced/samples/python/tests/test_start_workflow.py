@@ -206,3 +206,67 @@ async def test_start_workflow_returns_wrapper_handle(
         result_error.value.args[0]
         == "started-workflow.get_result is not yet implemented"
     )
+
+
+async def test_client_calls_an_operation_over_a_transport() -> None:
+    from temporalio.api.common.v1 import Payload
+    from temporalio.api.workflowservice.v1 import (
+        RequestCancelWorkflowExecutionRequest,
+        RequestCancelWorkflowExecutionResponse,
+    )
+    import wit.start_workflow.client as start_workflow_client
+
+    sent: list[RequestCancelWorkflowExecutionRequest] = []
+
+    class Transport:
+        async def call(
+            self, *, service: str, operation: str, input: Payload
+        ) -> Payload:
+            assert (service, operation) == ("StartWorkflowService", "CancelWorkflow")
+            sent.append(RequestCancelWorkflowExecutionRequest.FromString(input.data))
+            answer = RequestCancelWorkflowExecutionResponse()
+            return Payload(
+                metadata={"encoding": b"binary/protobuf"},
+                data=answer.SerializeToString(),
+            )
+
+    client = start_workflow_client.StartWorkflowServiceClient(Transport())
+    request = start_workflow_models.CancelWorkflowRequest(
+        namespace="default",
+        workflow_execution=start_workflow_models.WorkflowExecution(workflow_id="wf"),
+        reason="done",
+    )
+    response = await client.cancel_workflow(request)
+
+    assert isinstance(response, start_workflow_models.CancelWorkflowResponse)
+    assert sent[0].workflow_execution.workflow_id == "wf"
+    assert sent[0].reason == "done"
+
+
+async def test_client_returns_a_resource_bound_to_the_caller() -> None:
+    from temporalio.api.common.v1 import Payload
+    from temporalio.api.workflowservice.v1 import StartWorkflowExecutionResponse
+
+    import wit.start_workflow.client as start_workflow_client
+
+    class Transport:
+        async def call(
+            self, *, service: str, operation: str, input: Payload
+        ) -> Payload:
+            assert (service, operation) == ("StartWorkflowService", "StartWorkflow")
+            assert input.metadata["encoding"] == b"binary/protobuf"
+            answer = StartWorkflowExecutionResponse(run_id="run")
+            return Payload(
+                metadata={"encoding": b"binary/protobuf"},
+                data=answer.SerializeToString(),
+            )
+
+    client = start_workflow_client.StartWorkflowServiceClient(Transport())
+    started = await client.start_workflow(
+        start_workflow_models.StartWorkflowRequest(
+            workflow="Greet", workflow_id="wf", task_queue="q", namespace="default"
+        )
+    )
+
+    assert isinstance(started, start_workflow_client.StartedWorkflow)
+    assert (started.workflow_id, started.run_id) == ("wf", "run")

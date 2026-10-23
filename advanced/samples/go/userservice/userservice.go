@@ -52,17 +52,28 @@ func (m notifyRequest) GetSender() string {
 	return m.Sender
 }
 
-type tagUserRequest struct {
+type getProfileRequest struct {
 	UserID string
-	Tag    UserTag
 }
 
-func (m tagUserRequest) GetUserID() string {
+func (m getProfileRequest) GetUserID() string {
 	return m.UserID
 }
 
-func (m tagUserRequest) GetTag() UserTag {
-	return m.Tag
+type openSessionRequest struct {
+	UserID string
+}
+
+func (m openSessionRequest) GetUserID() string {
+	return m.UserID
+}
+
+type endSessionRequest struct {
+	Session string
+}
+
+func (m endSessionRequest) GetSession() string {
+	return m.Session
 }
 
 // --- Resources ---
@@ -93,6 +104,25 @@ func (u *User) Notify(ctx workflow.Context, reason string, channels []string, se
 	return notify(ctx, notifyRequest{UserID: u.UserID, Reason: reasonPtr, Channels: channels, Sender: sender})
 }
 
+func (u *User) GetProfile(ctx workflow.Context) workflow.Future {
+	return getProfile(ctx, getProfileRequest{UserID: u.UserID})
+}
+
+type Session struct {
+	// Session - Required.
+	Session string
+}
+
+func NewSession(session string) *Session {
+	return &Session{
+		Session: session,
+	}
+}
+
+func (u *Session) End(ctx workflow.Context) workflow.Future {
+	return endSession(ctx, endSessionRequest{Session: u.Session})
+}
+
 // --- Operations (internal) ---
 
 func getUser(ctx workflow.Context, request getUserRequest) workflow.Future {
@@ -113,21 +143,33 @@ func notify(ctx workflow.Context, request notifyRequest) workflow.Future {
 	return fut
 }
 
-func tagUser(ctx workflow.Context, request tagUserRequest) workflow.Future {
+func getProfile(ctx workflow.Context, request getProfileRequest) workflow.Future {
 	c := workflow.NewNexusClient("user-service", "UserService")
-	fut := c.ExecuteOperation(ctx, "TagUser", request, workflow.NexusOperationOptions{})
+	fut := c.ExecuteOperation(ctx, "GetProfile", request, workflow.NexusOperationOptions{})
+	return fut
+}
+
+func openSession(ctx workflow.Context, request openSessionRequest) workflow.Future {
+	c := workflow.NewNexusClient("user-service", "UserService")
+	fut := c.ExecuteOperation(ctx, "OpenSession", request, workflow.NexusOperationOptions{})
+	return fut
+}
+
+func endSession(ctx workflow.Context, request endSessionRequest) workflow.Future {
+	c := workflow.NewNexusClient("user-service", "UserService")
+	fut := c.ExecuteOperation(ctx, "EndSession", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
 // --- Operations (public API) ---
 
-type UserTag struct {
-	// Name - Required.
-	Name string
+type UserProfile struct {
+	// DisplayName - Required.
+	DisplayName string
 }
 
-func (m UserTag) GetName() string {
-	return m.Name
+func (m UserProfile) GetDisplayName() string {
+	return m.DisplayName
 }
 
 type GetUserOptions struct {
@@ -135,6 +177,7 @@ type GetUserOptions struct {
 	UserID string
 }
 
+// Get a user by id.
 func GetUser(ctx workflow.Context, opts GetUserOptions) workflow.Future {
 	return getUser(ctx, getUserRequest{
 		UserID: opts.UserID,
@@ -179,16 +222,35 @@ func Notify(ctx workflow.Context, opts NotifyOptions) workflow.Future {
 	})
 }
 
-type TagUserOptions struct {
+type GetProfileOptions struct {
 	// UserID - Required.
 	UserID string
-	// Tag - Required.
-	Tag UserTag
 }
 
-func TagUser(ctx workflow.Context, opts TagUserOptions) workflow.Future {
-	return tagUser(ctx, tagUserRequest{
+func GetProfile(ctx workflow.Context, opts GetProfileOptions) workflow.Future {
+	return getProfile(ctx, getProfileRequest{
 		UserID: opts.UserID,
-		Tag:    opts.Tag,
+	})
+}
+
+type OpenSessionOptions struct {
+	// UserID - Required.
+	UserID string
+}
+
+func OpenSession(ctx workflow.Context, opts OpenSessionOptions) workflow.Future {
+	return openSession(ctx, openSessionRequest{
+		UserID: opts.UserID,
+	})
+}
+
+type EndSessionOptions struct {
+	// Session - Required.
+	Session string
+}
+
+func EndSession(ctx workflow.Context, opts EndSessionOptions) workflow.Future {
+	return endSession(ctx, endSessionRequest{
+		Session: opts.Session,
 	})
 }

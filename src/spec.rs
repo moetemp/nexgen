@@ -637,6 +637,53 @@ impl<F: TypeFamily> ServiceSpec<F> {
     }
 }
 
+/// How a long-poll duration field holds its value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LongPollDurationKind {
+    /// A duration model type, such as one backed by `google.protobuf.Duration`.
+    Duration,
+    /// An integer count of milliseconds.
+    Milliseconds,
+}
+
+/// A duration member of a long-poll input, by its record field key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LongPollDurationField {
+    pub field: String,
+    pub kind: LongPollDurationKind,
+}
+
+/// The long-poll contract of an operation (`@nexus.long-poll` on WIT).
+///
+/// Each member refers to a field of the input or output record by its record
+/// field key. The contract changes no model and no wire byte. It tells a
+/// generated caller how to repeat the call until it answers with something.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationLongPollSpec {
+    /// The input member that asks the endpoint to park for up to this long.
+    pub wait_field: LongPollDurationField,
+    /// The largest wait the endpoint accepts, in milliseconds.
+    pub max_wait_ms: Option<u64>,
+    /// The output list whose emptiness means the call collected nothing.
+    pub result_field: String,
+    /// The output boolean that says nothing more will arrive.
+    pub done_field: Option<String>,
+    /// The input offset a call starts from, and the output offset where the
+    /// next call starts. A caller carries the second into the first after an
+    /// answer with nothing, so a read that starts at the end does not skip.
+    pub offset: Option<LongPollOffsetFields>,
+    /// The input member that ends a call when nothing comes for this long. A
+    /// caller sends what is left of it, so the idle time counts across calls.
+    pub idle_timeout_field: Option<LongPollDurationField>,
+}
+
+/// The offset members of a long-poll operation, by their record field keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LongPollOffsetFields {
+    pub input_field: String,
+    pub output_field: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
@@ -656,6 +703,8 @@ pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub output: Option<TypeSpec<F>>,
     pub output_transform: Option<OperationOutputTransformSpec<F>>,
     pub serialization_context: F::Text,
+    /// The long-poll contract, when the operation declares one.
+    pub long_poll: Option<OperationLongPollSpec>,
     pub data: F::OperationData,
 }
 
@@ -692,6 +741,7 @@ impl<F: TypeFamily> OperationSpec<F> {
                 .output_transform
                 .map(|transform| transform.map_names_with(map)),
             serialization_context: map.map_text(self.serialization_context),
+            long_poll: self.long_poll,
             data,
         }
     }
@@ -700,6 +750,7 @@ impl<F: TypeFamily> OperationSpec<F> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourceSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
+    pub doc: F::Text,
     pub fields: Vec<ResourceFieldSpec<F>>,
     pub methods: Vec<ResourceMethodSpec<F>>,
     pub data: F::ResourceData,
@@ -716,6 +767,7 @@ pub struct ResourceFieldSpec<F: TypeFamily = AuthoredFamily> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourceMethodSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
+    pub doc: F::Text,
     pub params: Vec<ResourceFieldSpec<F>>,
     pub result: Option<ResourceResultSpec<F>>,
     pub operation_name: Option<String>,
@@ -735,6 +787,7 @@ impl<F: TypeFamily> ResourceSpec<F> {
         let data = map.map_resource_data(&self.name, self.data);
         ResourceSpec {
             name: self.name,
+            doc: map.map_text(self.doc),
             fields: self
                 .fields
                 .into_iter()
@@ -773,6 +826,7 @@ impl<F: TypeFamily> ResourceMethodSpec<F> {
     {
         ResourceMethodSpec {
             name: self.name,
+            doc: map.map_text(self.doc),
             params: self
                 .params
                 .into_iter()
@@ -1510,6 +1564,8 @@ pub enum TypeSpec<F: TypeFamily = AuthoredFamily> {
 pub enum IntSpec {
     I32,
     I64,
+    U32,
+    U64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1609,6 +1665,8 @@ where
             TypeSpec::Bool => "bool".to_string(),
             TypeSpec::Int(IntSpec::I32) => "s32".to_string(),
             TypeSpec::Int(IntSpec::I64) => "s64".to_string(),
+            TypeSpec::Int(IntSpec::U32) => "u32".to_string(),
+            TypeSpec::Int(IntSpec::U64) => "u64".to_string(),
             TypeSpec::Float => "float64".to_string(),
             TypeSpec::String => "string".to_string(),
             TypeSpec::Bytes => "bytes".to_string(),

@@ -1,0 +1,1 @@
+An operation can return a record that holds a resource in one `own<T>` field, in Python, TypeScript, .NET and Go. A proto-backed record binds the resource from its message, and the message travels as a wire record with the same name. A WIT-only record travels as JSON, with the resource as the object of its fields.

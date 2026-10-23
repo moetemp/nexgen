@@ -60,8 +60,20 @@ __nexus_operation_registry__: dict[
     ),
     (
         "UserService",
-        "TagUser",
+        "GetProfile",
     ): _NexusOperationInfo(
-        operation=_services.UserService.tag_user,
+        operation=_services.UserService.get_profile,
+    ),
+    (
+        "UserService",
+        "OpenSession",
+    ): _NexusOperationInfo(
+        operation=_services.UserService.open_session,
+    ),
+    (
+        "UserService",
+        "EndSession",
+    ): _NexusOperationInfo(
+        operation=_services.UserService.end_session,
     ),
 }

@@ -16,11 +16,18 @@ export interface NotifyRequest {
   sender: string;
 }
 
-export interface TagUserRequest {
-  userId: string;
-  tag: UserTag;
+export interface UserProfile {
+  displayName: string;
 }
 
-export interface UserTag {
-  name: string;
+export interface GetProfileRequest {
+  userId: string;
+}
+
+export interface OpenSessionRequest {
+  userId: string;
+}
+
+export interface EndSessionRequest {
+  session: string;
 }

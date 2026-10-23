@@ -6,16 +6,24 @@ import type {
   GetUserRequest,
   UpdateEmailRequest,
   NotifyRequest,
-  TagUserRequest,
+  UserProfile,
+  GetProfileRequest,
+  OpenSessionRequest,
+  EndSessionRequest,
 } from "./models";
-import type { User } from "./resources";
-import { bindUserClient } from "./resources";
+import type { User, Session } from "./resources";
+import { bindUserClient, bindSessionClient } from "./resources";
 
 export const userService = nexus.service("UserService", {
+  /**
+   * Get a user by id.
+   */
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
   updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
   notify: nexus.operation<NotifyRequest, void>({ name: "Notify" }),
-  tagUser: nexus.operation<TagUserRequest, void>({ name: "TagUser" }),
+  getProfile: nexus.operation<GetProfileRequest, UserProfile>({ name: "GetProfile" }),
+  openSession: nexus.operation<OpenSessionRequest, Session>({ name: "OpenSession" }),
+  endSession: nexus.operation<EndSessionRequest, void>({ name: "EndSession" }),
 });
 
 export class UserServiceClient {
@@ -29,6 +37,8 @@ export class UserServiceClient {
   }
 
   /**
+   * Get a user by id.
+   *
    * @param request - Request for the operation.
    */
   public async getUser(request: GetUserRequest): Promise<User> {
@@ -64,9 +74,30 @@ export class UserServiceClient {
   /**
    * @param request - Request for the operation.
    */
-  public async tagUser(
-    request: TagUserRequest,
+  public async getProfile(
+    request: GetProfileRequest,
+  ): Promise<workflow.NexusOperationHandle<UserProfile>> {
+    return await this.client.startOperation(userService.operations.getProfile, request);
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async openSession(request: OpenSessionRequest): Promise<Session> {
+    const handle = await this.client.startOperation(
+      userService.operations.openSession,
+      request,
+    );
+    const resource = await handle.result();
+    return bindSessionClient(resource, this.client);
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async endSession(
+    request: EndSessionRequest,
   ): Promise<workflow.NexusOperationHandle<void>> {
-    return await this.client.startOperation(userService.operations.tagUser, request);
+    return await this.client.startOperation(userService.operations.endSession, request);
   }
 }

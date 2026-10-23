@@ -12,7 +12,7 @@ from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 import wit.user_service as user_service
 import wit.user_service.models as user_service_models
 import wit.user_service.services as user_service_services
-from wit.user_service._resources import User
+from wit.user_service._resources import Session, User
 
 APP_ROOT = Path(__file__).resolve().parent
 OUTPUT_PATH = APP_ROOT.parent / "wit" / "user_service"
@@ -72,12 +72,29 @@ class UserServiceHandler:
         self.calls.append(("Notify", input))
 
     @sync_operation
-    async def tag_user(
+    async def get_profile(
         self,
         _ctx: StartOperationContext,
-        input: user_service_models.TagUserRequest,
+        input: user_service_models.GetProfileRequest,
+    ) -> user_service_models.UserProfile:
+        self.calls.append(("GetProfile", input))
+        return user_service_models.UserProfile(display_name="Alice")
+
+    @sync_operation
+    async def open_session(
+        self,
+        _ctx: StartOperationContext,
+        input: user_service_models.OpenSessionRequest,
+    ) -> Session:
+        return Session(session=input.user_id)
+
+    @sync_operation
+    async def end_session(
+        self,
+        _ctx: StartOperationContext,
+        input: user_service_models.EndSessionRequest,
     ) -> None:
-        self.calls.append(("TagUser", input))
+        self.calls.append(("EndSession", input))
 
 
 @workflow.defn
@@ -87,6 +104,7 @@ class UserServiceCallerWorkflow:
         service = user_service.UserServiceClient("user-service")
         user = await service.get_user(user_id="user-123")
         await user.notify(sender="ops")
+        assert (await user.get_profile()).display_name == "Alice"
         return await user.update_email("new@example.com")
 
 
@@ -134,7 +152,7 @@ async def test_get_user_returns_user_resource(env: WorkflowEnvironment) -> None:
     assert user.user_id == "user-123"
     assert user.email == "new@example.com"
 
-    assert len(service_handler.calls) == 3
+    assert len(service_handler.calls) == 4
     get_user_operation, get_user_request = service_handler.calls[0]
     assert get_user_operation == "GetUser"
     assert isinstance(get_user_request, user_service_models.GetUserRequest)
@@ -146,7 +164,12 @@ async def test_get_user_returns_user_resource(env: WorkflowEnvironment) -> None:
         user_id="user-123", reason=None, channels=[], sender="ops"
     )
 
-    update_operation, update_request = service_handler.calls[2]
+    assert service_handler.calls[2] == (
+        "GetProfile",
+        user_service_models.GetProfileRequest(user_id="user-123"),
+    )
+
+    update_operation, update_request = service_handler.calls[3]
     assert update_operation == "UpdateEmail"
     assert isinstance(update_request, user_service_models.UpdateEmailRequest)
     assert update_request.user_id == "user-123"

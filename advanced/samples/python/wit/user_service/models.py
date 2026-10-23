@@ -25,11 +25,20 @@ class NotifyRequest:
 
 
 @dataclasses.dataclass(slots=True)
-class TagUserRequest:
+class GetProfileRequest:
     user_id: str
-    tag: UserTag
 
 
 @dataclasses.dataclass(slots=True)
-class UserTag:
-    name: str
+class UserProfile:
+    display_name: str
+
+
+@dataclasses.dataclass(slots=True)
+class OpenSessionRequest:
+    user_id: str
+
+
+@dataclasses.dataclass(slots=True)
+class EndSessionRequest:
+    session: str

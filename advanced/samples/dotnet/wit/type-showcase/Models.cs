@@ -163,16 +163,22 @@ namespace Nexgen.TypeShowcase
         /// <summary>
         /// Initializes a new instance of the <see cref="SyncReport"/> class.
         /// </summary>
-        public SyncReport(IReadOnlyList<(double, double)> route, IReadOnlyList<NexusResult<string, string>> attempts, IReadOnlyDictionary<string, NexusResult<string, string>> regionStatus)
+        public SyncReport(IReadOnlyList<(double, double)> route, IReadOnlyList<NexusResult<string, string>> attempts, IReadOnlyDictionary<string, NexusResult<string, string>> regionStatus, uint itemCount, ulong byteCount, long clockSkewMs)
         {
             Route = route;
             Attempts = attempts;
             RegionStatus = regionStatus;
+            ItemCount = itemCount;
+            ByteCount = byteCount;
+            ClockSkewMs = clockSkewMs;
         }
 
         public IReadOnlyList<(double, double)> Route { get; init; }
         public IReadOnlyList<NexusResult<string, string>> Attempts { get; init; }
         public IReadOnlyDictionary<string, NexusResult<string, string>> RegionStatus { get; init; }
+        public uint ItemCount { get; init; }
+        public ulong ByteCount { get; init; }
+        public long ClockSkewMs { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]

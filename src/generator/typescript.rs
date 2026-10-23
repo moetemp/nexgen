@@ -26,10 +26,10 @@ use crate::planning::{
 };
 use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{
-    AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec,
-    FunctionFieldSpec, FunctionResultSpec, IntSpec, LanguageImportSpec, LanguageImportStyle,
-    ModulePath, OperationSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec,
-    SelectedTextSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
+    AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec,
+    FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, IntSpec, LanguageImportSpec,
+    LanguageImportStyle, ModulePath, OperationSpec, RecordFieldSpec, RecordFieldVisibility,
+    RecordSpec, SelectedTextSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 
@@ -241,7 +241,7 @@ impl TypeScriptExternalModels {
             model,
             planned_record,
             api_plan,
-            &|value_type| resolve_typescript_value_type(api_plan, self, value_type),
+            &|value_type| resolve_typescript_value_type(api_plan, self, value_type, false),
         )
     }
 
@@ -318,6 +318,8 @@ struct ApiPlanner<'a> {
     flags: IndexMap<String, RenderedFlags>,
     variants: IndexMap<String, RenderedVariant>,
     models: IndexMap<String, RenderedModel>,
+    // False only while a proto-backed record's fields resolve.
+    json_ints: bool,
 }
 
 impl<'a> ApiPlanner<'a> {
@@ -328,6 +330,7 @@ impl<'a> ApiPlanner<'a> {
             enums: IndexMap::new(),
             flags: IndexMap::new(),
             variants: IndexMap::new(),
+            json_ints: true,
             models: IndexMap::new(),
         })
     }
@@ -846,6 +849,29 @@ impl<'a> ApiPlanner<'a> {
         wire_field_name: &str,
         wire_field_expr: &str,
     ) -> RenderedField {
+        let proto_backed = matches!(record.source, Some(ExternalTypeSourceSpec::Proto(_)));
+        let json_ints = std::mem::replace(&mut self.json_ints, !proto_backed);
+        let rendered = self.build_record_field(
+            record,
+            field_name,
+            field,
+            generated_field_name,
+            wire_field_name,
+            wire_field_expr,
+        );
+        self.json_ints = json_ints;
+        rendered
+    }
+
+    fn build_record_field(
+        &mut self,
+        record: &RecordSpec<PlannedFamily>,
+        field_name: &str,
+        field: &RecordFieldSpec<PlannedFamily>,
+        generated_field_name: &str,
+        wire_field_name: &str,
+        wire_field_expr: &str,
+    ) -> RenderedField {
         let doc = field
             .doc
             .as_ref()
@@ -1302,7 +1328,12 @@ impl<'a> ApiPlanner<'a> {
 
     fn resolve_planned_value_type(&mut self, value_type: &PlannedType) -> ResolvedFieldType {
         self.ensure_rendered_value_type(value_type);
-        resolve_typescript_value_type(self.api_plan, &self.external_models, value_type)
+        resolve_typescript_value_type(
+            self.api_plan,
+            &self.external_models,
+            value_type,
+            self.json_ints,
+        )
     }
 
     /// Register declarations separately from pure type resolution so emission
@@ -1386,6 +1417,7 @@ fn resolve_typescript_value_type(
     api_plan: &PlannedSpec,
     external_models: &TypeScriptExternalModels,
     value_type: &PlannedType,
+    json: bool,
 ) -> ResolvedFieldType {
     match value_type {
         PlannedType::TypeParameter(parameter) => ResolvedFieldType {
@@ -1400,19 +1432,21 @@ fn resolve_typescript_value_type(
             requirements: TypeScriptRequirements::default(),
             wire_conversion: None,
         },
-        PlannedType::Int(IntSpec::I32) => ResolvedFieldType {
-            annotation: "number".to_string(),
-            kind: ResolvedFieldKind::Scalar,
-            requirements: TypeScriptRequirements::default(),
-            wire_conversion: None,
-        },
-        PlannedType::Int(IntSpec::I64) => ResolvedFieldType {
+        // A proto 64-bit field is the proto runtime's `Long`. Anything else goes over JSON, and
+        // the other languages read it as a plain number.
+        PlannedType::Int(IntSpec::I64) if !json => ResolvedFieldType {
             annotation: "Long".to_string(),
             kind: ResolvedFieldKind::Scalar,
             requirements: TypeScriptRequirements {
                 long: true,
                 ..Default::default()
             },
+            wire_conversion: None,
+        },
+        PlannedType::Int(_) => ResolvedFieldType {
+            annotation: "number".to_string(),
+            kind: ResolvedFieldKind::Scalar,
+            requirements: TypeScriptRequirements::default(),
             wire_conversion: None,
         },
         PlannedType::Bool => ResolvedFieldType {
@@ -1510,7 +1544,7 @@ fn resolve_typescript_value_type(
             wire_conversion: None,
         },
         PlannedType::Option(inner) => {
-            let inner = resolve_typescript_value_type(api_plan, external_models, inner);
+            let inner = resolve_typescript_value_type(api_plan, external_models, inner, json);
             ResolvedFieldType {
                 annotation: format!("{} | undefined", inner.annotation),
                 kind: inner.kind,
@@ -1519,7 +1553,7 @@ fn resolve_typescript_value_type(
             }
         }
         PlannedType::List(inner) => {
-            let inner = resolve_typescript_value_type(api_plan, external_models, inner);
+            let inner = resolve_typescript_value_type(api_plan, external_models, inner, json);
             ResolvedFieldType {
                 annotation: typescript_array_annotation(&inner.annotation),
                 kind: ResolvedFieldKind::Scalar,
@@ -1528,8 +1562,8 @@ fn resolve_typescript_value_type(
             }
         }
         PlannedType::Map(key, value) => {
-            let key = resolve_typescript_value_type(api_plan, external_models, key);
-            let value = resolve_typescript_value_type(api_plan, external_models, value);
+            let key = resolve_typescript_value_type(api_plan, external_models, key, json);
+            let value = resolve_typescript_value_type(api_plan, external_models, value, json);
             let mut requirements = key.requirements;
             requirements.merge(&value.requirements);
             ResolvedFieldType {
@@ -1542,7 +1576,7 @@ fn resolve_typescript_value_type(
         PlannedType::Tuple(items) => {
             let item_types = items
                 .iter()
-                .map(|item| resolve_typescript_value_type(api_plan, external_models, item))
+                .map(|item| resolve_typescript_value_type(api_plan, external_models, item, json))
                 .collect::<Vec<_>>();
             let mut requirements = TypeScriptRequirements::default();
             for item_type in &item_types {
@@ -1565,10 +1599,10 @@ fn resolve_typescript_value_type(
         PlannedType::Result { ok, err } => {
             let ok = ok
                 .as_ref()
-                .map(|ok| resolve_typescript_value_type(api_plan, external_models, ok));
+                .map(|ok| resolve_typescript_value_type(api_plan, external_models, ok, json));
             let err = err
                 .as_ref()
-                .map(|err| resolve_typescript_value_type(api_plan, external_models, err));
+                .map(|err| resolve_typescript_value_type(api_plan, external_models, err, json));
             let mut requirements = TypeScriptRequirements::default();
             if let Some(ok) = &ok {
                 requirements.merge(&ok.requirements);
@@ -1591,7 +1625,8 @@ fn resolve_typescript_value_type(
             target: fallback,
             ..
         })) => {
-            let mut resolved = resolve_typescript_value_type(api_plan, external_models, fallback);
+            let mut resolved =
+                resolve_typescript_value_type(api_plan, external_models, fallback, json);
             if let Some(annotation) = type_name.value() {
                 resolved.annotation = annotation.to_string();
                 resolved.requirements = TypeScriptRequirements {
@@ -2577,8 +2612,7 @@ pub(in crate::generator) fn typescript_authored_type_annotation(
 ) -> String {
     match authored_type {
         TypeSpec::Bool => "boolean".to_string(),
-        TypeSpec::Int(IntSpec::I32) | TypeSpec::Float => "number".to_string(),
-        TypeSpec::Int(IntSpec::I64) => "Long".to_string(),
+        TypeSpec::Int(_) | TypeSpec::Float => "number".to_string(),
         TypeSpec::String => "string".to_string(),
         TypeSpec::Bytes => "Uint8Array".to_string(),
         TypeSpec::TypeParameter(parameter) => parameter.name.clone(),
@@ -4467,6 +4501,9 @@ fn render_resources_module(
         &[("workflow", typescript_workflow_module(), false)],
     );
     render_typescript_requirement_imports(&mut imports, requirements);
+    if body.contains("Long.fromNumber(") {
+        imports.push_str("import Long from \"long\";\n");
+    }
     render_type_imports(
         &mut imports,
         "./models",
@@ -5653,6 +5690,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                     .expect("bound operation should exist on the resource service");
                 let branchable_params =
                     branchable_request_method_params(method, request_plan, operation);
+                let long_sources = typescript_long_sources(resource, method, operation);
                 let endpoint_expr = None;
                 let client_expr = service
                     .endpoint
@@ -5670,6 +5708,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                         request_plan,
                         &branchable_params,
                         true,
+                        &long_sources,
                     ));
                 } else {
                     output.push_str(&render_resource_method_operation_body(
@@ -5683,6 +5722,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                         request_plan,
                         &branchable_params,
                         false,
+                        &long_sources,
                     ));
                 }
             }
@@ -5799,8 +5839,7 @@ fn typescript_resource_field_annotation(
 
 fn typescript_resource_value_annotation(value: &PlannedType) -> String {
     match value {
-        PlannedType::Int(IntSpec::I32) => "number".to_string(),
-        PlannedType::Int(IntSpec::I64) => "Long".to_string(),
+        PlannedType::Int(_) => "number".to_string(),
         PlannedType::Float => "number".to_string(),
         PlannedType::Bool => "boolean".to_string(),
         PlannedType::String => "string".to_string(),
@@ -5880,9 +5919,6 @@ fn collect_typescript_value_requirements(
     requirements: &mut TypeScriptRequirements,
 ) {
     match value {
-        PlannedType::Int(IntSpec::I64) => {
-            requirements.long = true;
-        }
         PlannedType::Option(inner) | PlannedType::List(inner) => {
             collect_typescript_value_requirements(inner, requirements);
         }
@@ -5973,6 +6009,7 @@ fn render_resource_method_operation_body(
     request_plan: &RequestPlan,
     branchable_params: &[String],
     direct_return: bool,
+    long_sources: &BTreeMap<String, bool>,
 ) -> String {
     let indent_str = " ".repeat(indent);
     if let Some((param_name, remaining)) = branchable_params.split_first() {
@@ -5993,6 +6030,7 @@ fn render_resource_method_operation_body(
             request_plan,
             remaining,
             direct_return,
+            long_sources,
         ));
         output.push_str(&indent_str);
         output.push_str("} else {\n");
@@ -6007,13 +6045,14 @@ fn render_resource_method_operation_body(
             request_plan,
             remaining,
             direct_return,
+            long_sources,
         ));
         output.push_str(&indent_str);
         output.push_str("}\n");
         return output;
     }
 
-    let request_expr = render_request_plan_typescript(request_plan);
+    let request_expr = render_request_plan_typescript(request_plan, long_sources);
     let mut output = String::new();
     output.push_str(&indent_str);
     output.push_str("const request = ");
@@ -6161,7 +6200,15 @@ fn render_resource_start_operation(
     output.push_str("    );\n");
 }
 
-fn render_request_plan_typescript(plan: &RequestPlan) -> String {
+fn render_request_plan_typescript(
+    plan: &RequestPlan,
+    long_sources: &BTreeMap<String, bool>,
+) -> String {
+    let long_value = |name: &str, value: String| match long_sources.get(name) {
+        Some(true) => format!("{value} == null ? undefined : Long.fromNumber({value})"),
+        Some(false) => format!("Long.fromNumber({value})"),
+        None => value,
+    };
     render_request_plan(
         plan,
         typescript_generated_field_name,
@@ -6173,9 +6220,37 @@ fn render_request_plan_typescript(plan: &RequestPlan) -> String {
                 format!("{{ {} }}", fields.join(", "))
             }
         },
-        |name| format!("this.{}", typescript_generated_field_name(name)),
-        typescript_generated_field_name,
+        |name| {
+            long_value(
+                name,
+                format!("this.{}", typescript_generated_field_name(name)),
+            )
+        },
+        |name| long_value(name, typescript_generated_field_name(name)),
     )
+}
+
+/// The 64-bit resource fields and method params of a method whose request is proto-backed, with
+/// whether each is optional. They are numbers, and the proto-backed request has `Long` fields.
+fn typescript_long_sources(
+    resource: &PlannedResource,
+    method: &PlannedResourceMethod,
+    operation: &RenderedOperation<'_>,
+) -> BTreeMap<String, bool> {
+    if !operation
+        .input
+        .as_ref()
+        .is_some_and(|input| input.transfer_type_converter.is_some())
+    {
+        return BTreeMap::new();
+    }
+    resource
+        .fields
+        .iter()
+        .chain(&method.params)
+        .filter(|field| matches!(field.kind, PlannedType::Int(IntSpec::I64)))
+        .map(|field| (field.name.clone(), field.optional))
+        .collect()
 }
 
 /// The resource that an operation returns, bound to `client` when one is given, or the
@@ -6763,9 +6838,8 @@ fn is_typescript_keyword(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        TypeScriptRequirements, collect_typescript_value_requirements, render_support_import,
-        render_support_import_if, render_typescript_requirement_imports, sourced_support_call,
-        support_reference,
+        TypeScriptRequirements, render_support_import, render_support_import_if,
+        render_typescript_requirement_imports, sourced_support_call, support_reference,
     };
     use std::path::Path;
     use std::path::PathBuf;
@@ -6774,8 +6848,6 @@ mod tests {
     use crate::generator::generate_source;
     use crate::language::Language;
     use crate::nexgen_config::{NexgenConfig, current, scope};
-    use crate::planning::PlannedType;
-    use crate::spec::IntSpec;
 
     #[test]
     fn helper_calls_ignore_prose_literals_and_qualified_calls() {
@@ -6798,11 +6870,10 @@ mod tests {
 
     #[test]
     fn requirement_imports_are_structural() {
-        let nested_long = PlannedType::List(Box::new(PlannedType::Option(Box::new(
-            PlannedType::Int(IntSpec::I64),
-        ))));
-        let mut requirements = TypeScriptRequirements::default();
-        collect_typescript_value_requirements(&nested_long, &mut requirements);
+        let requirements = TypeScriptRequirements {
+            long: true,
+            ..Default::default()
+        };
 
         let mut imports = String::new();
         render_typescript_requirement_imports(&mut imports, &requirements);

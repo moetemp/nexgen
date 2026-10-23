@@ -933,6 +933,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("class ");
         output.push_str(&resource.type_name);
         output.push_str(":\n");
+        render_python_docstring(output, "    ", resource.doc.as_deref(), &[], None, false);
         for field in &resource.fields {
             output.push_str("    ");
             output.push_str(&python_field_name(&field.name));
@@ -1005,6 +1006,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
+        render_python_docstring(output, "        ", method.doc.as_deref(), &[], None, false);
 
         match &method.binding {
             PlannedResourceMethodBindingSpec::Operation { operation_name, .. } => {
@@ -4185,7 +4187,6 @@ fn client_model_name(
 /// converter, so the transport moves proto bytes and needs no message type.
 fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
     let mut model_names = BTreeSet::new();
-    let mut resource_names = BTreeSet::new();
     let mut body = String::new();
     body.push_str(CLIENT_RUNTIME);
     for service in services {
@@ -4262,11 +4263,16 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
                     reason: "it has no input".to_string(),
                 });
             };
-            // A resource with a wire type answers with its wire model, and the caller returns
-            // that model. A WIT-only resource, or a record that holds one, answers with its
-            // JSON, and the caller returns its class.
-            let returns_resource_class =
-                operation.output_module_path.as_deref() == Some("._resources");
+            // A resource with a wire type answers with its wire model, and the
+            // caller returns that model. A resource without one has no model.
+            if operation.output_module_path.as_deref() == Some("._resources") {
+                return Err(Error::UnsupportedClientOperation {
+                    language: Language::Python,
+                    service: service.name.to_string(),
+                    operation: operation.name.to_string(),
+                    reason: "it returns a resource".to_string(),
+                });
+            }
             let input_model = client_model_name(
                 service,
                 operation,
@@ -4278,9 +4284,6 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
             model_names.insert(input_model.clone());
             let output_model = if operation.output_none {
                 None
-            } else if returns_resource_class {
-                resource_names.insert(operation.output_ref.clone());
-                Some(operation.output_ref.clone())
             } else {
                 let output_model = client_model_name(
                     service,
@@ -4387,13 +4390,6 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
         ".models",
         &model_names.into_iter().collect::<Vec<_>>(),
     );
-    if !resource_names.is_empty() {
-        render_named_python_import(
-            &mut output,
-            "._resources",
-            &resource_names.into_iter().collect::<Vec<_>>(),
-        );
-    }
     output.push_str("\n\n");
     output.push_str(&body);
     Ok(output)
@@ -6022,6 +6018,7 @@ fn render_endpoint_service_object_operation_body(
             output.push('\n');
         } else if let Some(resource_return) = &operation.output_resource_return {
             output.push_str("        result = await handle\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
@@ -6390,6 +6387,7 @@ fn render_resource_method_inline_operation_body(
             output.push('\n');
         } else if let Some(resource_return) = &operation.output_resource_return {
             output.push_str("        result = await handle\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
@@ -6566,6 +6564,38 @@ fn resource_method_list_param(param: &PlannedResourceField) -> Option<&PlannedTy
     match &param.kind {
         PlannedType::List(value) if !param.optional && param.function.is_none() => Some(value),
         _ => None,
+    }
+}
+
+/// A response model field is always optional, so a required resource field that the response
+/// fills in is checked before the resource is built.
+fn render_resource_return_guards(
+    output: &mut String,
+    indent: &str,
+    operation: &RenderedOperation<'_>,
+    resource_return: &PlannedOperationResourceReturn,
+) {
+    for binding in &resource_return.bindings {
+        let ResolvedResourceBindingSource::ResultField {
+            proto_field_name, ..
+        } = &binding.source
+        else {
+            continue;
+        };
+        if binding.optional {
+            continue;
+        }
+        output.push_str(indent);
+        output.push_str("if result.");
+        output.push_str(proto_field_name);
+        output.push_str(" is None:\n");
+        output.push_str(indent);
+        output.push_str("    raise RuntimeError(");
+        output.push_str(&python_string_literal(&format!(
+            "{} answered without `{}`",
+            operation.wire_name, proto_field_name
+        )));
+        output.push_str(")\n");
     }
 }
 
@@ -7831,6 +7861,7 @@ fn render_request_only_operation_function(
         output.push('\n');
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("    result = await handle\n");
+        render_resource_return_guards(output, "    ", operation, resource_return);
         if let Some(holder) = &resource_return.holder {
             render_resource_holder_return(output, resource_return, holder);
             return;

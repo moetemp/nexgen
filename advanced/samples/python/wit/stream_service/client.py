@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import collections.abc
 import contextlib
-import dataclasses
-import datetime
 import typing
 
+import google.protobuf.json_format
+import google.protobuf.message
 import temporalio.api.common.v1
 import temporalio.converter
 import temporalio.nexus.system
@@ -19,13 +18,22 @@ from .models import (
     CloseStreamRequest,
     CloseStreamResponse,
     CreateStreamRequest,
+    CreateStreamResponse,
     DescribeStreamRequest,
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
-    StreamRecord,
+    _AppendRecordsRequestTransferTypeConverter,
+    _AppendRecordsResponseTransferTypeConverter,
+    _CloseStreamRequestTransferTypeConverter,
+    _CloseStreamResponseTransferTypeConverter,
+    _CreateStreamRequestTransferTypeConverter,
+    _CreateStreamResponseTransferTypeConverter,
+    _DescribeStreamRequestTransferTypeConverter,
+    _DescribeStreamResponseTransferTypeConverter,
+    _ReadRecordsRequestTransferTypeConverter,
+    _ReadRecordsResponseTransferTypeConverter,
 )
-from ._resources import CreateStreamResult
 
 
 class Transport(typing.Protocol):
@@ -63,15 +71,86 @@ class TransportError(Exception):
         self.retryable: bool = retryable
 
 
-# An answer with nothing that comes back in less than half of its wait is
-# followed by a pause, so a service that ignores the wait is not asked again
-# at once. The pause doubles up to the last one.
-_LONG_POLL_FIRST_PAUSE = 0.05
-_LONG_POLL_LAST_PAUSE = 2.0
+_MessageT = typing.TypeVar("_MessageT", bound=google.protobuf.message.Message)
+
+
+def _proto_payload(
+    message: google.protobuf.message.Message,
+) -> temporalio.api.common.v1.Payload:
+    return temporalio.api.common.v1.Payload(
+        metadata={
+            "encoding": b"binary/protobuf",
+            "messageType": message.DESCRIPTOR.full_name.encode(),
+        },
+        data=message.SerializeToString(),
+    )
+
+
+def _proto_message(
+    payload: temporalio.api.common.v1.Payload,
+    message_type: type[_MessageT] | None,
+) -> _MessageT:
+    if message_type is None:
+        raise TypeError("the answer model has no proto message type")
+    message = message_type()
+    encoding = payload.metadata.get("encoding", b"")
+    if encoding == b"binary/protobuf":
+        _ = message.ParseFromString(payload.data)
+    elif encoding in (b"json/protobuf", b"json/plain"):
+        _ = google.protobuf.json_format.Parse(payload.data, message)
+    elif encoding != b"binary/null":
+        raise ValueError(
+            f"cannot read {message.DESCRIPTOR.full_name} from a {encoding.decode()!r} payload"
+        )
+    return message
+
+
+# The codec runs on the user payloads inside a proto-backed model, failure details
+# included, and never on the model's own payload, which the service reads.
+def _payloads_in(
+    message: google.protobuf.message.Message,
+) -> list[temporalio.api.common.v1.Payload]:
+    if isinstance(message, temporalio.api.common.v1.Payload):
+        return [message]
+    found: list[temporalio.api.common.v1.Payload] = []
+    for _, value in message.ListFields():
+        if isinstance(value, google.protobuf.message.Message):
+            found.extend(_payloads_in(value))
+        elif not isinstance(value, (str, bytes, int, float, bool)):
+            items = typing.cast(
+                "collections.abc.Iterable[object]",
+                value.values() if hasattr(value, "values") else value,
+            )
+            for item in items:
+                if isinstance(item, google.protobuf.message.Message):
+                    found.extend(_payloads_in(item))
+    return found
+
+
+async def _encode_payloads(
+    message: google.protobuf.message.Message,
+    codec: temporalio.converter.PayloadCodec | None,
+) -> None:
+    if codec is None:
+        return
+    for payload in _payloads_in(message):
+        [encoded] = await codec.encode([payload])
+        payload.CopyFrom(encoded)
+
+
+async def _decode_payloads(
+    message: google.protobuf.message.Message,
+    codec: temporalio.converter.PayloadCodec | None,
+) -> None:
+    if codec is None:
+        return
+    for payload in _payloads_in(message):
+        [decoded] = await codec.decode([payload])
+        payload.CopyFrom(decoded)
 
 
 class StreamServiceClient:
-    """Calls the `StreamService` operations over a transport.
+    """Calls the `streamsample.v1.StreamService` operations over a transport.
 
     For code outside a Workflow. Workflow code uses the operation stubs.
     """
@@ -109,120 +188,81 @@ class StreamServiceClient:
         self, operation: str, payload: temporalio.api.common.v1.Payload
     ) -> temporalio.api.common.v1.Payload:
         return await self._transport.call(
-            service="StreamService",
+            service="streamsample.v1.StreamService",
             operation=operation,
             input=payload,
         )
 
-    async def create_stream(self, request: CreateStreamRequest) -> CreateStreamResult:
-        [payload] = await self._data_converter.encode([request])
+    async def create_stream(self, request: CreateStreamRequest) -> CreateStreamResponse:
+        with self._converters():
+            message = _CreateStreamRequestTransferTypeConverter().to_transfer_type(
+                request
+            )
+        await _encode_payloads(message, self._data_converter.payload_codec)
+        payload = _proto_payload(message)
         answer = await self._call("CreateStream", payload)
-        [value] = await self._data_converter.decode([answer], [CreateStreamResult])
-        return typing.cast(CreateStreamResult, value)
+        converter = _CreateStreamResponseTransferTypeConverter()
+        message = _proto_message(answer, converter.transfer_type)
+        await _decode_payloads(message, self._data_converter.payload_codec)
+        with self._converters():
+            return converter.from_transfer_type(message, CreateStreamResponse)
 
     async def append_records(
         self, request: AppendRecordsRequest
     ) -> AppendRecordsResponse:
-        [payload] = await self._data_converter.encode([request])
+        with self._converters():
+            message = _AppendRecordsRequestTransferTypeConverter().to_transfer_type(
+                request
+            )
+        await _encode_payloads(message, self._data_converter.payload_codec)
+        payload = _proto_payload(message)
         answer = await self._call("AppendRecords", payload)
-        [value] = await self._data_converter.decode([answer], [AppendRecordsResponse])
-        return typing.cast(AppendRecordsResponse, value)
+        converter = _AppendRecordsResponseTransferTypeConverter()
+        message = _proto_message(answer, converter.transfer_type)
+        await _decode_payloads(message, self._data_converter.payload_codec)
+        with self._converters():
+            return converter.from_transfer_type(message, AppendRecordsResponse)
 
     async def close_stream(self, request: CloseStreamRequest) -> CloseStreamResponse:
-        [payload] = await self._data_converter.encode([request])
+        with self._converters():
+            message = _CloseStreamRequestTransferTypeConverter().to_transfer_type(
+                request
+            )
+        await _encode_payloads(message, self._data_converter.payload_codec)
+        payload = _proto_payload(message)
         answer = await self._call("CloseStream", payload)
-        [value] = await self._data_converter.decode([answer], [CloseStreamResponse])
-        return typing.cast(CloseStreamResponse, value)
+        converter = _CloseStreamResponseTransferTypeConverter()
+        message = _proto_message(answer, converter.transfer_type)
+        await _decode_payloads(message, self._data_converter.payload_codec)
+        with self._converters():
+            return converter.from_transfer_type(message, CloseStreamResponse)
 
     async def read_records(self, request: ReadRecordsRequest) -> ReadRecordsResponse:
-        [payload] = await self._data_converter.encode([request])
-        answer = await self._call("ReadRecords", payload)
-        [value] = await self._data_converter.decode([answer], [ReadRecordsResponse])
-        return typing.cast(ReadRecordsResponse, value)
-
-    async def read_records_until_records(
-        self,
-        request: ReadRecordsRequest,
-        *,
-        deadline: datetime.timedelta,
-    ) -> ReadRecordsResponse:
-        """Call ``read_records`` until it answers with ``records``, or with ``done`` set,
-        or the deadline passes.
-
-        Each call sets ``wait_ms`` to what is left of the deadline, at most 60 s.
-        After an answer with nothing, the next call sets ``from_offset`` to the answer's
-        ``next_offset``.
-        When the deadline passes, the last answer comes back, so the caller keeps its
-        place.
-        A ``TransportError`` with ``retryable`` set is tried again while the deadline
-        allows.
-        """
-        clock = asyncio.get_running_loop()
-        started = clock.time()
-        end = started + deadline.total_seconds()
-        attempt: ReadRecordsRequest = request
-        pause = _LONG_POLL_FIRST_PAUSE
-        while True:
-            wait = max(end - clock.time(), 0.001)
-            wait = min(wait, 60.0)
-            attempt = dataclasses.replace(attempt, wait_ms=max(int(wait * 1000), 1))
-            asked = clock.time()
-            try:
-                answer = await self.read_records(attempt)
-            except TransportError as error:
-                if not error.retryable or clock.time() + pause >= end:
-                    raise
-                await asyncio.sleep(pause)
-                pause = min(pause * 2, _LONG_POLL_LAST_PAUSE)
-                continue
-            if answer.records or answer.done:
-                return answer
-            if answer.next_offset is not None:
-                attempt = dataclasses.replace(attempt, from_offset=answer.next_offset)
-            left = end - clock.time()
-            if left <= 0:
-                return answer
-            if clock.time() - asked < wait / 2:
-                await asyncio.sleep(min(pause, left))
-                pause = min(pause * 2, _LONG_POLL_LAST_PAUSE)
-            else:
-                pause = _LONG_POLL_FIRST_PAUSE
-
-    async def iter_read_records(
-        self,
-        request: ReadRecordsRequest,
-        *,
-        deadline: datetime.timedelta | None = None,
-    ) -> collections.abc.AsyncIterator[StreamRecord]:
-        """Yield each item of ``records``, page after page, as one sequence.
-
-        Each page is one ``read_records_until_records`` call, which sets ``wait_ms`` to
-        what is left of the deadline. The next page starts at the answer's
-        ``next_offset``.
-        The iterator ends after an answer with ``done`` set, or when the deadline
-        passes. With no deadline, it ends only on ``done``.
-        """
-        clock = asyncio.get_running_loop()
-        end = None if deadline is None else clock.time() + deadline.total_seconds()
-        attempt = request
-        while True:
-            left = 60.0 if end is None else end - clock.time()
-            if left <= 0:
-                return
-            answer = await self.read_records_until_records(
-                attempt, deadline=datetime.timedelta(seconds=left)
+        with self._converters():
+            message = _ReadRecordsRequestTransferTypeConverter().to_transfer_type(
+                request
             )
-            for item in answer.records or []:
-                yield item
-            if answer.done:
-                return
-            if answer.next_offset is not None:
-                attempt = dataclasses.replace(attempt, from_offset=answer.next_offset)
+        await _encode_payloads(message, self._data_converter.payload_codec)
+        payload = _proto_payload(message)
+        answer = await self._call("ReadRecords", payload)
+        converter = _ReadRecordsResponseTransferTypeConverter()
+        message = _proto_message(answer, converter.transfer_type)
+        await _decode_payloads(message, self._data_converter.payload_codec)
+        with self._converters():
+            return converter.from_transfer_type(message, ReadRecordsResponse)
 
     async def describe_stream(
         self, request: DescribeStreamRequest
     ) -> DescribeStreamResponse:
-        [payload] = await self._data_converter.encode([request])
+        with self._converters():
+            message = _DescribeStreamRequestTransferTypeConverter().to_transfer_type(
+                request
+            )
+        await _encode_payloads(message, self._data_converter.payload_codec)
+        payload = _proto_payload(message)
         answer = await self._call("DescribeStream", payload)
-        [value] = await self._data_converter.decode([answer], [DescribeStreamResponse])
-        return typing.cast(DescribeStreamResponse, value)
+        converter = _DescribeStreamResponseTransferTypeConverter()
+        message = _proto_message(answer, converter.transfer_type)
+        await _decode_payloads(message, self._data_converter.payload_codec)
+        with self._converters():
+            return converter.from_transfer_type(message, DescribeStreamResponse)

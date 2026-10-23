@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import typing
+import datetime
 import temporalio.workflow
 
 from ..models import (
@@ -22,17 +23,20 @@ from ..models import (
 
 @dataclasses.dataclass
 class Stream:
+    """A handle on one stream, built from its ref."""
+
     stream: StreamRef
 
     async def append_records(
         self,
-        records: list[AppendRecord] | None = None,
         sequence: int | None = None,
+        records: list[AppendRecord] | None = None,
     ) -> AppendRecordsResponse:
+        """Append records. The answer has the first and the last offset."""
         request = AppendRecordsRequest(
             stream=self.stream,
-            records=records or [],
             sequence=sequence,
+            records=records or [],
         )
         handle = await _append_records(request)
         return await handle
@@ -53,14 +57,15 @@ class Stream:
         from_offset: int | None = None,
         topics: list[str] | None = None,
         max_records: int | None = None,
-        wait_ms: int | None = None,
+        wait: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse:
+        """Read one page of records."""
         request = ReadRecordsRequest(
             stream=self.stream,
             from_offset=from_offset,
             topics=topics or [],
             max_records=max_records,
-            wait_ms=wait_ms,
+            wait=wait,
         )
         handle = await _read_records(request)
         return await handle
@@ -78,14 +83,14 @@ class Stream:
 @dataclasses.dataclass(slots=True)
 class CreateStreamResult:
     stream: Stream
-    created: bool
+    created: bool | None = None
 
 
 async def _append_records(
     request: AppendRecordsRequest,
 ) -> temporalio.workflow.NexusOperationHandle[AppendRecordsResponse,]:
     nexus_client = temporalio.workflow.create_nexus_client(
-        service="StreamService",
+        service="streamsample.v1.StreamService",
         endpoint="streams",
     )
     return await nexus_client.start_operation(
@@ -97,14 +102,14 @@ async def _append_records(
 
 async def append_records(
     *,
-    stream: StreamRef,
-    records: list[AppendRecord] | None = None,
+    stream: StreamRef | None = None,
     sequence: int | None = None,
+    records: list[AppendRecord] | None = None,
 ) -> temporalio.workflow.NexusOperationHandle[AppendRecordsResponse,]:
     request = AppendRecordsRequest(
         stream=stream,
-        records=records or [],
         sequence=sequence,
+        records=records or [],
     )
     return await _append_records(request)
 
@@ -113,7 +118,7 @@ async def _close_stream(
     request: CloseStreamRequest,
 ) -> temporalio.workflow.NexusOperationHandle[CloseStreamResponse,]:
     nexus_client = temporalio.workflow.create_nexus_client(
-        service="StreamService",
+        service="streamsample.v1.StreamService",
         endpoint="streams",
     )
     return await nexus_client.start_operation(
@@ -125,7 +130,7 @@ async def _close_stream(
 
 async def close_stream(
     *,
-    stream: StreamRef,
+    stream: StreamRef | None = None,
     result: typing.Any | None = None,
 ) -> temporalio.workflow.NexusOperationHandle[CloseStreamResponse,]:
     request = CloseStreamRequest(
@@ -139,7 +144,7 @@ async def _read_records(
     request: ReadRecordsRequest,
 ) -> temporalio.workflow.NexusOperationHandle[ReadRecordsResponse,]:
     nexus_client = temporalio.workflow.create_nexus_client(
-        service="StreamService",
+        service="streamsample.v1.StreamService",
         endpoint="streams",
     )
     return await nexus_client.start_operation(
@@ -151,18 +156,18 @@ async def _read_records(
 
 async def read_records(
     *,
-    stream: StreamRef,
+    stream: StreamRef | None = None,
     from_offset: int | None = None,
     topics: list[str] | None = None,
     max_records: int | None = None,
-    wait_ms: int | None = None,
+    wait: datetime.timedelta | None = None,
 ) -> temporalio.workflow.NexusOperationHandle[ReadRecordsResponse,]:
     request = ReadRecordsRequest(
         stream=stream,
         from_offset=from_offset,
         topics=topics or [],
         max_records=max_records,
-        wait_ms=wait_ms,
+        wait=wait,
     )
     return await _read_records(request)
 
@@ -171,7 +176,7 @@ async def _describe_stream(
     request: DescribeStreamRequest,
 ) -> temporalio.workflow.NexusOperationHandle[DescribeStreamResponse,]:
     nexus_client = temporalio.workflow.create_nexus_client(
-        service="StreamService",
+        service="streamsample.v1.StreamService",
         endpoint="streams",
     )
     return await nexus_client.start_operation(
@@ -183,7 +188,7 @@ async def _describe_stream(
 
 async def describe_stream(
     *,
-    stream: StreamRef,
+    stream: StreamRef | None = None,
 ) -> temporalio.workflow.NexusOperationHandle[DescribeStreamResponse,]:
     request = DescribeStreamRequest(
         stream=stream,

@@ -23,30 +23,30 @@ namespace Nexgen.StreamService
         public StreamRef StreamValue { get; }
 
         [GeneratedCode("nexgen", null)]
-        public Task<AppendRecordsResponse> AppendRecordsAsync(IReadOnlyList<AppendRecord> records, int? sequence)
+        public Task<AppendRecordsResponse> AppendRecordsAsync(long? sequence, IReadOnlyList<AppendRecord> records)
         {
-            var request = new AppendRecordsOptions(StreamValue, records) { Sequence = sequence };
+            var request = new AppendRecordsOptions(records) { Stream = StreamValue, Sequence = sequence };
             return Operations.AppendRecordsAsync(request);
         }
 
         [GeneratedCode("nexgen", null)]
         public Task CloseAsync(object? result)
         {
-            var request = new CloseStreamOptions(StreamValue) { Result = result };
+            var request = new CloseStreamOptions() { Stream = StreamValue, Result = result };
             return Operations.CloseStreamAsync(request);
         }
 
         [GeneratedCode("nexgen", null)]
-        public Task<ReadRecordsResponse> ReadRecordsAsync(int? fromOffset, IReadOnlyList<string> topics, int? maxRecords, int? waitMs)
+        public Task<ReadRecordsResponse> ReadRecordsAsync(long? fromOffset, IReadOnlyList<string> topics, int? maxRecords, System.TimeSpan? wait)
         {
-            var request = new ReadRecordsOptions(StreamValue, topics) { FromOffset = fromOffset, MaxRecords = maxRecords, WaitMs = waitMs };
+            var request = new ReadRecordsOptions(topics) { Stream = StreamValue, FromOffset = fromOffset, MaxRecords = maxRecords, Wait = wait };
             return Operations.ReadRecordsAsync(request);
         }
 
         [GeneratedCode("nexgen", null)]
         public Task<DescribeStreamResponse> DescribeAsync()
         {
-            var request = new DescribeStreamOptions(StreamValue);
+            var request = new DescribeStreamOptions() { Stream = StreamValue };
             return Operations.DescribeStreamAsync(request);
         }
 

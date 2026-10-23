@@ -76,6 +76,12 @@ class Stream:
         return await handle
 
 
+@dataclasses.dataclass(slots=True)
+class CreateStreamResult:
+    stream: Stream
+    created: bool | None = None
+
+
 async def _append_records(
     request: AppendRecordsRequest,
 ) -> temporalio.workflow.NexusOperationHandle[AppendRecordsResponse,]:

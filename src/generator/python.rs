@@ -1007,6 +1007,14 @@ impl<'a> ApiPlanner<'a> {
                 for method in &resource.methods {
                     self.render_client_resource_method(&mut output, service, method);
                 }
+                // A record that holds the resource gets a client twin that holds the client
+                // class.
+                for (full_name, (_, resource_type)) in resource_holders(self.api_plan) {
+                    if resource_type == resource.type_name {
+                        output.push_str("\n\n");
+                        render_record_model(&mut output, &self.models[&full_name], None);
+                    }
+                }
             }
         }
         output
@@ -4594,7 +4602,14 @@ fn render_client_method(
     output.push_str(") -> ");
     output.push_str(
         client_resource
-            .map(|resource_return| resource_return.resource_type_name.as_str())
+            .map(|resource_return| {
+                resource_return
+                    .holder
+                    .as_ref()
+                    .map_or(resource_return.resource_type_name.as_str(), |holder| {
+                        holder.model_name.as_str()
+                    })
+            })
             .or(output_model)
             .unwrap_or("None"),
     );
@@ -4651,14 +4666,41 @@ fn render_client_method(
             output.push_str("            result = converter.from_transfer_type(message, ");
             output.push_str(output_model);
             output.push_str(")\n");
-            output.push_str("        return ");
-            output.push_str(&resource_return.resource_type_name);
-            output.push_str("(\n            self,\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
+            let mut value = format!(
+                "{}(\n                self,\n",
+                resource_return.resource_type_name
+            );
             for binding in &resource_return.bindings {
+                value.push_str("                ");
+                value.push_str(&python_field_name(&binding.field_name));
+                value.push('=');
+                value.push_str(&resource_return_binding_expr_python(binding));
+                value.push_str(",\n");
+            }
+            value.push_str("            )");
+            let Some(holder) = &resource_return.holder else {
+                output.push_str("        return ");
+                output.push_str(&value);
+                output.push('\n');
+                return;
+            };
+            // The record that holds the resource is the client twin, which holds the class bound
+            // to this caller.
+            output.push_str("        return ");
+            output.push_str(&holder.model_name);
+            output.push_str("(\n");
+            for field in &holder.fields {
+                let name = python_field_name(&field.name);
                 output.push_str("            ");
-                output.push_str(&python_field_name(&binding.field_name));
+                output.push_str(&name);
                 output.push('=');
-                output.push_str(&resource_return_binding_expr_python(binding));
+                if field.resource {
+                    output.push_str(&value);
+                } else {
+                    output.push_str("result.");
+                    output.push_str(&name);
+                }
                 output.push_str(",\n");
             }
             output.push_str("        )\n");

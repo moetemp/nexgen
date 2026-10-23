@@ -16,6 +16,7 @@ import temporalio.converter
 import temporalio.nexus.system
 
 from .models import (
+    AppendRecord,
     AppendRecordsRequest,
     AppendRecordsResponse,
     CloseStreamRequest,
@@ -27,6 +28,7 @@ from .models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamRecord,
+    StreamRef,
     _AppendRecordsRequestTransferTypeConverter,
     _AppendRecordsResponseTransferTypeConverter,
     _CloseStreamRequestTransferTypeConverter,
@@ -203,7 +205,7 @@ class StreamServiceClient:
             input=payload,
         )
 
-    async def create_stream(self, request: CreateStreamRequest) -> CreateStreamResponse:
+    async def create_stream(self, request: CreateStreamRequest) -> CreateStreamResult:
         with self._converters():
             message = _CreateStreamRequestTransferTypeConverter().to_transfer_type(
                 request
@@ -215,7 +217,16 @@ class StreamServiceClient:
         message = _proto_message(answer, converter.transfer_type)
         await _decode_payloads(message, self._data_converter.payload_codec)
         with self._converters():
-            return converter.from_transfer_type(message, CreateStreamResponse)
+            result = converter.from_transfer_type(message, CreateStreamResponse)
+        if result.stream is None:
+            raise RuntimeError("CreateStream answered without `stream`")
+        return CreateStreamResult(
+            stream=Stream(
+                self,
+                stream=result.stream,
+            ),
+            created=result.created,
+        )
 
     async def append_records(
         self, request: AppendRecordsRequest
@@ -357,3 +368,93 @@ class StreamServiceClient:
         await _decode_payloads(message, self._data_converter.payload_codec)
         with self._converters():
             return converter.from_transfer_type(message, DescribeStreamResponse)
+
+
+class Stream:
+    def __init__(
+        self,
+        client: StreamServiceClient,
+        stream: StreamRef,
+    ) -> None:
+        """Bind the handle to a caller."""
+        self._client: StreamServiceClient = client
+        self.stream: StreamRef = stream
+
+    async def append_records(
+        self,
+        sequence: int | None = None,
+        records: list[AppendRecord] | None = None,
+    ) -> AppendRecordsResponse:
+        request = AppendRecordsRequest(
+            stream=self.stream,
+            sequence=sequence,
+            records=records or [],
+        )
+        return await self._client.append_records(request)
+
+    async def close(
+        self,
+        result: typing.Any | None = None,
+    ) -> None:
+        request = CloseStreamRequest(
+            stream=self.stream,
+            result=result,
+        )
+        _ = await self._client.close_stream(request)
+
+    async def read_records(
+        self,
+        from_offset: int | None = None,
+        topics: list[str] | None = None,
+        max_records: int | None = None,
+        wait: datetime.timedelta | None = None,
+    ) -> ReadRecordsResponse:
+        request = ReadRecordsRequest(
+            stream=self.stream,
+            from_offset=from_offset,
+            topics=topics or [],
+            max_records=max_records,
+            wait=wait,
+        )
+        return await self._client.read_records(request)
+
+    async def iter_read_records(
+        self,
+        from_offset: int | None = None,
+        topics: list[str] | None = None,
+        max_records: int | None = None,
+        wait: datetime.timedelta | None = None,
+        *,
+        deadline: datetime.timedelta | None = None,
+    ) -> collections.abc.AsyncIterator[StreamRecord]:
+        """Yield each item of ``records``, page after page, as one sequence.
+
+        Each page is one ``read_records_until_records`` call, which sets ``wait`` to
+        what is left of the deadline. The next page starts at the answer's
+        ``next_offset``.
+        The iterator ends after an answer with ``done`` set, or when the deadline
+        passes. With no deadline, it ends only on ``done``.
+        """
+        request = ReadRecordsRequest(
+            stream=self.stream,
+            from_offset=from_offset,
+            topics=topics or [],
+            max_records=max_records,
+            wait=wait,
+        )
+        async for item in self._client.iter_read_records(request, deadline=deadline):
+            yield item
+
+    async def describe(
+        self,
+    ) -> DescribeStreamResponse:
+        request = DescribeStreamRequest(
+            stream=self.stream,
+        )
+        return await self._client.describe_stream(request)
+
+
+@dataclasses.dataclass(slots=True)
+class CreateStreamResult:
+    stream: Stream
+    created: bool | None = None

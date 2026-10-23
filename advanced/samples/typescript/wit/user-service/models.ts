@@ -15,19 +15,3 @@ export interface NotifyRequest {
   channels?: string[];
   sender: string;
 }
-
-export interface UserProfile {
-  displayName: string;
-}
-
-export interface GetProfileRequest {
-  userId: string;
-}
-
-export interface OpenSessionRequest {
-  userId: string;
-}
-
-export interface EndSessionRequest {
-  session: string;
-}

@@ -27,3 +27,4 @@ system_nexus = true
 
 [stream-service]
 languages = ["python", "typescript", "dotnet"]
+client = true

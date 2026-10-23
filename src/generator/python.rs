@@ -4055,6 +4055,7 @@ fn client_model_name(
 /// converter, so the transport moves proto bytes and needs no message type.
 fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
     let mut model_names = BTreeSet::new();
+    let mut resource_names = BTreeSet::new();
     let mut body = String::new();
     body.push_str(CLIENT_RUNTIME);
     for service in services {
@@ -4131,16 +4132,11 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
                     reason: "it has no input".to_string(),
                 });
             };
-            // A resource with a wire type answers with its wire model, and the
-            // caller returns that model. A resource without one has no model.
-            if operation.output_module_path.as_deref() == Some("._resources") {
-                return Err(Error::UnsupportedClientOperation {
-                    language: Language::Python,
-                    service: service.name.to_string(),
-                    operation: operation.name.to_string(),
-                    reason: "it returns a resource".to_string(),
-                });
-            }
+            // A resource with a wire type answers with its wire model, and the caller returns
+            // that model. A WIT-only resource, or a record that holds one, answers with its
+            // JSON, and the caller returns its class.
+            let returns_resource_class =
+                operation.output_module_path.as_deref() == Some("._resources");
             let input_model = client_model_name(
                 service,
                 operation,
@@ -4152,6 +4148,9 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
             model_names.insert(input_model.clone());
             let output_model = if operation.output_none {
                 None
+            } else if returns_resource_class {
+                resource_names.insert(operation.output_ref.clone());
+                Some(operation.output_ref.clone())
             } else {
                 let output_model = client_model_name(
                     service,
@@ -4208,6 +4207,13 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
         ".models",
         &model_names.into_iter().collect::<Vec<_>>(),
     );
+    if !resource_names.is_empty() {
+        render_named_python_import(
+            &mut output,
+            "._resources",
+            &resource_names.into_iter().collect::<Vec<_>>(),
+        );
+    }
     output.push_str("\n\n");
     output.push_str(&body);
     Ok(output)

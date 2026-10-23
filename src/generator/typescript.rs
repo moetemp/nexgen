@@ -1433,7 +1433,7 @@ fn resolve_typescript_value_type(
         },
         // A proto 64-bit field is the proto runtime's `Long`. Anything else goes over JSON, and
         // the other languages read it as a plain number.
-        PlannedType::Int(IntSpec::I64) if !json => ResolvedFieldType {
+        PlannedType::Int(IntSpec::I64 | IntSpec::U64) if !json => ResolvedFieldType {
             annotation: "Long".to_string(),
             kind: ResolvedFieldKind::Scalar,
             requirements: TypeScriptRequirements {

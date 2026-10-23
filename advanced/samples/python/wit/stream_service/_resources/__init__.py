@@ -6,8 +6,10 @@ from .stream import (
     Stream,
     CreateStreamResult,
 )
+from .writer import Writer
 
 __all__ = [
     "Stream",
     "CreateStreamResult",
+    "Writer",
 ]

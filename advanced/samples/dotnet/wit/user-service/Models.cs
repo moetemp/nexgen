@@ -10,6 +10,20 @@ namespace Nexgen.UserService
 {
 
     [GeneratedCode("nexgen", null)]
+    public record EndSessionRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EndSessionRequest"/> class.
+        /// </summary>
+        public EndSessionRequest(string session)
+        {
+            Session = session;
+        }
+
+        public string Session { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
     public record GetProfileRequest
     {
         /// <summary>
@@ -54,6 +68,20 @@ namespace Nexgen.UserService
         public string? Reason { get; init; }
         public IReadOnlyList<string> Channels { get; init; }
         public string Sender { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public record OpenSessionRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="OpenSessionRequest"/> class.
+        /// </summary>
+        public OpenSessionRequest(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; init; }
     }
 
     [GeneratedCode("nexgen", null)]

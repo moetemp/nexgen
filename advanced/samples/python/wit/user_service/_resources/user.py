@@ -8,6 +8,7 @@ import typing
 from ..models import (
     NotifyRequest,
     UpdateEmailRequest,
+    UserProfile,
 )
 
 
@@ -55,6 +56,11 @@ class User:
             input=request,
         )
         await handle
+
+    async def get_profile(
+        self,
+    ) -> UserProfile:
+        raise NotImplementedError("user.get_profile is not yet implemented")
 
 
 def bind_user_client(

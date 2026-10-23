@@ -71,6 +71,15 @@ class UserServiceHandler:
     ) -> None:
         self.calls.append(("Notify", input))
 
+    @sync_operation
+    async def get_profile(
+        self,
+        _ctx: StartOperationContext,
+        input: user_service_models.GetProfileRequest,
+    ) -> user_service_models.UserProfile:
+        self.calls.append(("GetProfile", input))
+        return user_service_models.UserProfile(display_name="Alice")
+
 
 @workflow.defn
 class UserServiceCallerWorkflow:

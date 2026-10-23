@@ -13,7 +13,7 @@ languages = ["python", "dotnet", "typescript"]
 [notification-service]
 languages = ["python", "dotnet", "typescript"]
 
-# A System Nexus operation that returns a resource. TypeScript only for now.
+# A System Nexus operation that returns a resource.
 [workflow-handle]
-languages = ["typescript"]
+languages = ["python", "dotnet", "typescript"]
 system_nexus = true

@@ -14,7 +14,7 @@ namespace Nexgen.StreamService
 {
 
     [GeneratedCode("nexgen", null)]
-    [NexusService("StreamService")]
+    [NexusService("streamsample.v1.StreamService")]
     internal interface IStreamService
     {
         [GeneratedCode("nexgen", null)]
@@ -71,15 +71,15 @@ namespace Nexgen.StreamService
 
         internal static IReadOnlyDictionary<(string Service, string Operation), INexgenOperationInfo> Operations { get; } = new Dictionary<(string Service, string Operation), INexgenOperationInfo>
         {
-            [("StreamService", "CreateStream")] = new NexgenOperationInfo<CreateStreamRequest, CreateStreamResult>(
+            [("streamsample.v1.StreamService", "CreateStream")] = new NexgenOperationInfo<CreateStreamRequest, CreateStreamResult>(
                 StreamServiceServiceDefinition.Operations["CreateStream"]),
-            [("StreamService", "AppendRecords")] = new NexgenOperationInfo<AppendRecordsRequest, AppendRecordsResponse>(
+            [("streamsample.v1.StreamService", "AppendRecords")] = new NexgenOperationInfo<AppendRecordsRequest, AppendRecordsResponse>(
                 StreamServiceServiceDefinition.Operations["AppendRecords"]),
-            [("StreamService", "CloseStream")] = new NexgenOperationInfo<CloseStreamRequest, CloseStreamResponse>(
+            [("streamsample.v1.StreamService", "CloseStream")] = new NexgenOperationInfo<CloseStreamRequest, CloseStreamResponse>(
                 StreamServiceServiceDefinition.Operations["CloseStream"]),
-            [("StreamService", "ReadRecords")] = new NexgenOperationInfo<ReadRecordsRequest, ReadRecordsResponse>(
+            [("streamsample.v1.StreamService", "ReadRecords")] = new NexgenOperationInfo<ReadRecordsRequest, ReadRecordsResponse>(
                 StreamServiceServiceDefinition.Operations["ReadRecords"]),
-            [("StreamService", "DescribeStream")] = new NexgenOperationInfo<DescribeStreamRequest, DescribeStreamResponse>(
+            [("streamsample.v1.StreamService", "DescribeStream")] = new NexgenOperationInfo<DescribeStreamRequest, DescribeStreamResponse>(
                 StreamServiceServiceDefinition.Operations["DescribeStream"]),
         };
     }

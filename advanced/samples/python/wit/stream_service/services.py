@@ -9,15 +9,15 @@ from .models import (
     CloseStreamRequest,
     CloseStreamResponse,
     CreateStreamRequest,
+    CreateStreamResult,
     DescribeStreamRequest,
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
 )
-from ._resources.stream import CreateStreamResult
 
 
-@service
+@service(name="streamsample.v1.StreamService")
 class StreamService:
     create_stream: Operation[
         CreateStreamRequest,

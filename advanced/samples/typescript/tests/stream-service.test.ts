@@ -1,48 +1,28 @@
-import { fileURLToPath } from "node:url";
+import Long from "long";
 import { describe, expect, test } from "vitest";
-import * as nexus from "nexus-rpc";
 
-import { Stream } from "../wit/stream-service/resources.ts";
-import { streamService } from "../wit/stream-service/services.ts";
-import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
-
-const workflowsPath = fileURLToPath(
-  new URL("./workflows/stream-service.ts", import.meta.url),
-);
+import type { streamsample } from "#streamsample";
+import { readRecordsRequestTransferTypeConverter } from "../wit/stream-service/models.ts";
 
 describe("stream-service generated output", () => {
-  test("builds the stream class from the create result", async () => {
-    await withWorkflowEnvironment(async (env) => {
-      const handler = nexus.serviceHandler(streamService, {
-        async createStream(_ctx, input) {
-          return { stream: new Stream(input.ref), created: true };
-        },
-        async appendRecords() {
-          return { firstOffset: 0, lastOffset: 0 };
-        },
-        async closeStream() {
-          return {};
-        },
-        async readRecords() {
-          return { records: [] };
-        },
-        async describeStream() {
-          return { status: 0 };
-        },
-      });
+  // The proto interfaces are kept by hand, so this fails to compile when they drift from what
+  // the generated converters read and write.
+  test("maps every field of a read request through its proto", () => {
+    const proto: streamsample.v1.IReadRecordsRequest = {
+      stream: { id: "stream-1", workflowId: "workflow-1" },
+      fromOffset: Long.fromNumber(7),
+      topics: ["a"],
+      maxRecords: 10,
+    };
 
-      const result = await executeWorkflowWithNexus<{
-        created: boolean;
-        isStream: boolean;
-        streamId: string;
-      }>(env, {
-        endpoint: "streams",
-        nexusServices: [handler],
-        workflowType: "streamServiceCaller",
-        workflowsPath,
-      });
+    const model = readRecordsRequestTransferTypeConverter.fromTransferType(proto);
 
-      expect(result).toEqual({ created: true, isStream: true, streamId: "stream-1" });
-    });
+    expect(model.stream).toEqual({ id: "stream-1", workflowId: "workflow-1" });
+    expect(model.fromOffset?.toNumber()).toBe(7);
+    expect(model.topics).toEqual(["a"]);
+    expect(model.maxRecords).toBe(10);
+    expect(
+      readRecordsRequestTransferTypeConverter.toTransferType(model).stream,
+    ).toEqual(proto.stream);
   });
 });

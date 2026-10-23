@@ -7,8 +7,11 @@ import typing
 import temporalio.workflow
 
 from .models import (
+    GetProfileRequest,
     GetUserRequest,
+    NotifyRequest,
     UpdateEmailRequest,
+    UserProfile,
 )
 from ._resources.user import (
     User,
@@ -30,6 +33,16 @@ class UserService:
         UpdateEmailRequest,
         User,
     ] = Operation(name="UpdateEmail")
+
+    notify: Operation[
+        NotifyRequest,
+        None,
+    ] = Operation(name="Notify")
+
+    get_profile: Operation[
+        GetProfileRequest,
+        UserProfile,
+    ] = Operation(name="GetProfile")
 
 
 class UserServiceClient:
@@ -72,3 +85,36 @@ class UserServiceClient:
         )
         resource = await handle
         return bind_user_client(resource, self._nexus_client)
+
+    async def notify(
+        self,
+        *,
+        user_id: str,
+        reason: str | None = None,
+        channels: list[str] | None = None,
+        sender: str,
+    ) -> temporalio.workflow.NexusOperationHandle[None]:
+        request = NotifyRequest(
+            user_id=user_id,
+            reason=reason,
+            channels=channels or [],
+            sender=sender,
+        )
+        return await self._nexus_client.start_operation(
+            operation="Notify",
+            input=request,
+        )
+
+    async def get_profile(
+        self,
+        *,
+        user_id: str,
+    ) -> temporalio.workflow.NexusOperationHandle[UserProfile]:
+        request = GetProfileRequest(
+            user_id=user_id,
+        )
+        return await self._nexus_client.start_operation(
+            operation="GetProfile",
+            input=request,
+            output_type=UserProfile,
+        )

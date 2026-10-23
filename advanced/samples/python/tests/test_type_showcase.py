@@ -60,6 +60,9 @@ def sync_report() -> type_showcase_models.SyncReport:
             "us-west": ("ok", "healthy"),
             "eu-central": ("err", "degraded"),
         },
+        item_count=3,
+        byte_count=5_000_000_000,
+        clock_skew_ms=-5_000_000_000,
     )
 
 

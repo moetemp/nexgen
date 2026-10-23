@@ -1,0 +1,1 @@
+The Python `--client` caller takes a `data_converter` in place of `payload_converter` and `payload_codec`. The payloads and failures inside a proto-backed model go through its converters and codec, and the model's own payload no longer goes through the codec.

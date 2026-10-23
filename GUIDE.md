@@ -561,6 +561,29 @@ Key observations:
   2. `_update_email(request)` -- internal standalone, takes request object
   3. `update_email(*, user_id, email)` -- public standalone convenience
 
+**Method parameters in Python.** WIT allows a required parameter after an
+optional one, and Python does not. When a required parameter follows one with a
+default, the method takes keyword arguments only (`self, *, ...`). A `list<T>`
+parameter defaults to empty, as in the standalone wrapper:
+
+```python
+async def append(self, sequence: int | None = None, texts: list[str] | None = None) -> None:
+    request = AppendRequest(log=self.log, sequence=sequence, texts=texts or [])
+```
+
+**A record as the identity.** A constructor field can be a record, such as a
+proto-backed reference. Each method then fills in the request field of that
+name, and a handle passes through Workflow input as its record:
+
+```wit
+resource log {
+  constructor(log: log-ref);
+
+  /// @nexus.operation "close-log"
+  close: func(reason: option<string>);
+}
+```
+
 ### Name-Binding: How Resource Methods Find Operations
 
 This is the non-obvious part. The generator does not require you to explicitly
@@ -707,6 +730,37 @@ return StartedWorkflow(
 
 If a resource constructor field name cannot be found in either, the generator
 raises `InvalidResource`.
+
+**A result record that holds the resource.** An operation can also return a
+proto-backed record with one `own<T>` field and other fields. The resource binds
+from the record's message as above, and the other fields come from the fields of
+the same name. The record is the API model only, and it declares only the fields
+that its caller sees. Its message travels as a wire record that takes the proto
+message's name. Python, TypeScript, .NET and Go generate it. In Python, the
+record lives in its resource's module.
+
+```wit
+/// @nexus.proto "temporal.api.streamservice.v1.CreateStreamResponse"
+record create-stream-result {
+  %stream: own<%stream>,
+  created: option<bool>,
+}
+```
+
+```python
+result = await handle  # CreateStreamResponse
+return CreateStreamResult(stream=Stream(stream=result.stream), created=result.created)
+```
+
+A response model field is always optional. When the resource field is required,
+the Python operation checks it first, and raises `RuntimeError` when the
+response leaves it empty:
+
+```python
+result = await handle
+if result.run_id is None:
+    raise RuntimeError("StartWorkflow answered without `run_id`")
+```
 
 ### Edge Cases and Error Conditions
 
@@ -1107,6 +1161,17 @@ wait is followed by a pause, from 50 ms and doubling up to 2 s. A
 answer = await client.read_until_entries(request, deadline=timedelta(seconds=30))
 ```
 
+Each resource with methods also gets a class in `client.py`, of the same name as
+the Workflow class. It takes the caller and the constructor fields, and each
+method fills in the request from them and calls the caller. A caller method
+whose operation returns such a resource gives back an instance bound to the
+caller.
+
+```python
+started = await client.start_workflow(request)  # StartedWorkflow
+await started.cancel(reason="done")
+```
+
 When the long poll also sets `offset-field` and `next-offset-field`, the caller
 gets `iter_<operation>`, an async iterator over the items of the result list.
 Each page is one `_until_` call, so it waits and backs off by the same rules.
@@ -1117,6 +1182,17 @@ deadline, it ends only on done. The idle timeout counts within one page.
 ```python
 async for entry in client.iter_read(request):
     print(entry.offset)
+```
+
+A resource method bound to such an operation gets `iter_<method>` too, with the
+method's parameters and a keyword `deadline`. It fills the request from `self`,
+calls the operation once per page, sets the wait field to what is left of the
+deadline, and pauses after a quick empty answer as the caller does. In a
+Workflow, the clock and the pauses are the Workflow's own, so they replay.
+
+```python
+async for record in stream.iter_read_records(topics=["tokens"]):
+    ...
 ```
 
 The caller supports operations whose input and output are models of the same
@@ -1863,12 +1939,31 @@ variant outcome {
 
 ---
 
+### @nexus.client-only
+
+**Placement:** Interface **Syntax:** `@nexus.client-only` (no arguments)
+
+Marks a service that only code outside a Workflow calls, such as an in-process
+call surface of a Worker extension. The Python target generates its models, its
+caller and its resource classes in `client.py`, and no Workflow stubs, services
+or System Nexus dispatch. It cannot have `@nexus.endpoint`. The other targets
+refuse it.
+
+```wit
+/// @nexus.service-name "temporal.sdk.streams.v1.StreamWriter"
+/// @nexus.client-only
+interface stream-writer { ... }
+```
+
+---
+
 ### @nexus.doc
 
-**Placement:** Record, record field, variant, variant case, or operation
-(function) **Syntax:** `@nexus.doc "<text>" [returns="<text>"]` Per-language
-overrides: `python="<text>"` `typescript="<text>"` `go="<text>"`
-`dotnet="<text>"` `java="<text>"` Return docs: `python-returns="<text>"`
+**Placement:** Record, record field, variant, variant case, operation
+(function), resource, or resource method **Syntax:**
+`@nexus.doc "<text>" [returns="<text>"]` Per-language overrides:
+`python="<text>"` `typescript="<text>"` `go="<text>"` `dotnet="<text>"`
+`java="<text>"` Return docs: `python-returns="<text>"`
 `typescript-returns="<text>"` `go-returns="<text>"` `dotnet-returns="<text>"`
 `java-returns="<text>"`
 
@@ -1884,6 +1979,9 @@ Javadoc text) so authored content cannot break the generated source.
 ///   returns="A workflow handle to the started workflow."
 signal-with-start-workflow: func(...) -> ...;
 ```
+
+Python emits the docs of a resource and its methods as docstrings. The other
+targets don't emit them yet.
 
 Variant documentation is emitted by Python, TypeScript, Go, and .NET; Java does
 not currently generate WIT variants. Python emits an attribute docstring after

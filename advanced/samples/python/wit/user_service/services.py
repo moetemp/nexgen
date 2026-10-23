@@ -8,6 +8,8 @@ import temporalio.workflow
 
 from .models import (
     GetUserRequest,
+    NotifyRequest,
+    SendVerificationRequest,
     UpdateEmailRequest,
 )
 from ._resources.user import (
@@ -31,6 +33,16 @@ class UserService:
         User,
     ] = Operation(name="UpdateEmail")
 
+    notify: Operation[
+        NotifyRequest,
+        None,
+    ] = Operation(name="Notify")
+
+    send_verification: Operation[
+        SendVerificationRequest,
+        None,
+    ] = Operation(name="SendVerification")
+
 
 class UserServiceClient:
     def __init__(self, endpoint: str) -> None:
@@ -44,6 +56,7 @@ class UserServiceClient:
         *,
         user_id: str,
     ) -> User:
+        """Get a user by id."""
         request = GetUserRequest(
             user_id=user_id,
         )
@@ -72,3 +85,37 @@ class UserServiceClient:
         )
         resource = await handle
         return bind_user_client(resource, self._nexus_client)
+
+    async def notify(
+        self,
+        *,
+        user_id: str,
+        reason: str | None = None,
+        channels: list[str] | None = None,
+        sender: str,
+    ) -> temporalio.workflow.NexusOperationHandle[None]:
+        request = NotifyRequest(
+            user_id=user_id,
+            reason=reason,
+            channels=channels or [],
+            sender=sender,
+        )
+        return await self._nexus_client.start_operation(
+            operation="Notify",
+            input=request,
+        )
+
+    async def send_verification(
+        self,
+        *,
+        user_id: str,
+        email: str | None = None,
+    ) -> temporalio.workflow.NexusOperationHandle[None]:
+        request = SendVerificationRequest(
+            user_id=user_id,
+            email=email,
+        )
+        return await self._nexus_client.start_operation(
+            operation="SendVerification",
+            input=request,
+        )

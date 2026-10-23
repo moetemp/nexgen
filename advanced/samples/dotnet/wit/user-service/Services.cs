@@ -17,6 +17,9 @@ namespace Nexgen.UserService
     [NexusService("UserService")]
     internal interface IUserService
     {
+        /// <summary>
+        /// Get a user by id.
+        /// </summary>
         [GeneratedCode("nexgen", null)]
         [NexusOperation("GetUser")]
         User GetUser(GetUserRequest request);
@@ -25,8 +28,19 @@ namespace Nexgen.UserService
         [NexusOperation("UpdateEmail")]
         User UpdateEmail(UpdateEmailRequest request);
 
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("Notify")]
+        void Notify(NotifyRequest request);
+
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("SendVerification")]
+        void SendVerification(SendVerificationRequest request);
+
     }
 
+    /// <summary>
+    /// Get a user by id.
+    /// </summary>
     [GeneratedCode("nexgen", null)]
     public class GetUserOptions
     {
@@ -58,6 +72,40 @@ namespace Nexgen.UserService
     }
 
     [GeneratedCode("nexgen", null)]
+    public class NotifyOptions
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="NotifyOptions"/> class.
+        /// </summary>
+        public NotifyOptions(string userId, IReadOnlyList<string> channels, string sender)
+        {
+            UserId = userId;
+            Channels = channels;
+            Sender = sender;
+        }
+
+        public string UserId { get; set; }
+        public string? Reason { get; set; }
+        public IReadOnlyList<string> Channels { get; set; }
+        public string Sender { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class SendVerificationOptions
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="SendVerificationOptions"/> class.
+        /// </summary>
+        public SendVerificationOptions(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; set; }
+        public string? Email { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
     public class UserServiceClient
     {
         private readonly NexusWorkflowClient<IUserService> _client;
@@ -67,6 +115,9 @@ namespace Nexgen.UserService
             _client = Workflow.CreateNexusWorkflowClient<IUserService>(endpoint);
         }
 
+        /// <summary>
+        /// Get a user by id.
+        /// </summary>
         [GeneratedCode("nexgen", null)]
         private async Task<User> GetUserAsync(GetUserRequest request)
         {
@@ -74,6 +125,9 @@ namespace Nexgen.UserService
             return User.BindClient(result, _client);
         }
 
+        /// <summary>
+        /// Get a user by id.
+        /// </summary>
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nexgen", null)]
         public Task<User> GetUserAsync(GetUserOptions options)
@@ -95,6 +149,40 @@ namespace Nexgen.UserService
         {
             var request = new UpdateEmailRequest(options.UserId, options.Email);
             return UpdateEmailAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task NotifyAsync(NotifyRequest request)
+        {
+            await _client.ExecuteNexusOperationAsync(svc => svc.Notify(request)).ConfigureAwait(true);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task NotifyAsync(NotifyOptions options)
+        {
+            var request = new NotifyRequest(options.UserId, options.Channels, options.Sender)
+            {
+                Reason = options.Reason,
+            };
+            return NotifyAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task SendVerificationAsync(SendVerificationRequest request)
+        {
+            await _client.ExecuteNexusOperationAsync(svc => svc.SendVerification(request)).ConfigureAwait(true);
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task SendVerificationAsync(SendVerificationOptions options)
+        {
+            var request = new SendVerificationRequest(options.UserId)
+            {
+                Email = options.Email,
+            };
+            return SendVerificationAsync(request);
         }
 
     }

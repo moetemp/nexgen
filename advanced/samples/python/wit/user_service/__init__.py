@@ -52,4 +52,16 @@ __nexus_operation_registry__: dict[
     ): _NexusOperationInfo(
         operation=_services.UserService.update_email,
     ),
+    (
+        "UserService",
+        "Notify",
+    ): _NexusOperationInfo(
+        operation=_services.UserService.notify,
+    ),
+    (
+        "UserService",
+        "SendVerification",
+    ): _NexusOperationInfo(
+        operation=_services.UserService.send_verification,
+    ),
 }

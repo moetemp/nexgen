@@ -469,6 +469,9 @@ pub(crate) fn generate_files_from_planned_tree(
     options: GenerateFilesOptions,
 ) -> Result<GeneratedFiles> {
     let mode = crate::nexgen_config::current().mode;
+    if language != Language::Python {
+        reject_resource_holders(language, &tree.root)?;
+    }
     let mut generated = match language {
         Language::Dotnet => dotnet::generate(tree, options.support_package.as_deref()),
         Language::Go => generate_go_tree(tree, options),
@@ -571,6 +574,43 @@ fn generation_warnings(plan: &PlannedSpec) -> Vec<String> {
             })
         })
         .collect()
+}
+
+/// Only the Python target builds a result record that holds a resource, or a client-only
+/// service.
+fn reject_resource_holders(language: Language, node: &ApiSpecNode<PlannedFamily>) -> Result<()> {
+    match node {
+        ApiSpecNode::Leaf(leaf) => {
+            for service in &leaf.spec.services {
+                if service.client_only {
+                    return Err(Error::UnsupportedClientOnlyService {
+                        language,
+                        service: service.name.clone(),
+                    });
+                }
+                for operation in &service.operations {
+                    if language == Language::Java
+                        && operation
+                            .data
+                            .output_resource_return
+                            .as_ref()
+                            .is_some_and(|resource_return| resource_return.holder.is_some())
+                    {
+                        return Err(Error::UnsupportedResourceHolder {
+                            language,
+                            service: service.name.clone(),
+                            operation: operation.name.clone(),
+                        });
+                    }
+                }
+            }
+            Ok(())
+        }
+        ApiSpecNode::Branch(branch) => branch
+            .children
+            .values()
+            .try_for_each(|child| reject_resource_holders(language, child)),
+    }
 }
 
 fn generation_warnings_for_tree(tree: &ApiSpecTree<PlannedFamily>) -> Vec<String> {

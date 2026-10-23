@@ -2717,6 +2717,16 @@ fn build_service(
     let experimental = experimental_directive(&directives, path, &context)?;
     let delay_load_temporalio_workflow =
         delay_load_temporalio_workflow_directive(&directives, path, &context)?;
+    let client_only = client_only_directive(&directives, path, &context)?;
+    if client_only && endpoint.is_some() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.clone(),
+            directive: "@nexus.client-only".to_string(),
+            reason: "cannot be combined with `@nexus.endpoint`, since no Workflow calls it"
+                .to_string(),
+        });
+    }
 
     let operations = interface
         .functions
@@ -2750,6 +2760,7 @@ fn build_service(
         namespace,
         operations_class,
         endpoint,
+        client_only,
         experimental,
         deprecated: false,
         delay_load_temporalio_workflow,
@@ -2828,6 +2839,10 @@ fn build_resource(
         "{service_context} resource `{}`",
         resource_name.to_upper_camel_case()
     );
+    let resource_directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
+    let doc = directive(&resource_directives, "doc", path, &context)?
+        .map(directive_language_string)
+        .unwrap_or_default();
 
     let constructor = interface.functions.values().find(
         |function| matches!(function.kind, FunctionKind::Constructor(id) if id == resource_id),
@@ -2889,6 +2904,7 @@ fn build_resource(
 
     Ok(ResourceSpec {
         name: resource_name,
+        doc,
         fields,
         methods,
         data: (),
@@ -2938,6 +2954,9 @@ fn build_resource_method(
 
     Ok(ResourceMethodSpec {
         name: method_name,
+        doc: directive(&directives, "doc", path, &context)?
+            .map(directive_language_string)
+            .unwrap_or_default(),
         params,
         result,
         operation_name: build_resource_method_operation_name(&directives, path, &context)?,
@@ -3691,6 +3710,21 @@ fn is_integer_or_optional_integer(resolve: &Resolve, ty: &Type) -> bool {
         },
         _ => false,
     }
+}
+
+fn client_only_directive(directives: &[Directive], path: &Path, context: &str) -> Result<bool> {
+    let Some(directive) = directive(directives, "client-only", path, context)? else {
+        return Ok(false);
+    };
+    if !directive.args.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.client-only".to_string(),
+            reason: "does not take arguments".to_string(),
+        });
+    }
+    Ok(true)
 }
 
 fn delay_load_temporalio_workflow_directive(

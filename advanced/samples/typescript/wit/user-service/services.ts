@@ -2,13 +2,25 @@
 
 import * as workflow from "@temporalio/workflow";
 import * as nexus from "nexus-rpc";
-import type { GetUserRequest, UpdateEmailRequest } from "./models";
+import type {
+  GetUserRequest,
+  UpdateEmailRequest,
+  NotifyRequest,
+  SendVerificationRequest,
+} from "./models";
 import type { User } from "./resources";
 import { bindUserClient } from "./resources";
 
 export const userService = nexus.service("UserService", {
+  /**
+   * Get a user by id.
+   */
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
   updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
+  notify: nexus.operation<NotifyRequest, void>({ name: "Notify" }),
+  sendVerification: nexus.operation<SendVerificationRequest, void>({
+    name: "SendVerification",
+  }),
 });
 
 export class UserServiceClient {
@@ -22,6 +34,8 @@ export class UserServiceClient {
   }
 
   /**
+   * Get a user by id.
+   *
    * @param request - Request for the operation.
    */
   public async getUser(request: GetUserRequest): Promise<User> {
@@ -43,5 +57,26 @@ export class UserServiceClient {
     );
     const resource = await handle.result();
     return bindUserClient(resource, this.client);
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async notify(
+    request: NotifyRequest,
+  ): Promise<workflow.NexusOperationHandle<void>> {
+    return await this.client.startOperation(userService.operations.notify, request);
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async sendVerification(
+    request: SendVerificationRequest,
+  ): Promise<workflow.NexusOperationHandle<void>> {
+    return await this.client.startOperation(
+      userService.operations.sendVerification,
+      request,
+    );
   }
 }

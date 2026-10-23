@@ -93,6 +93,7 @@ pub(crate) struct ResolvedServiceResources {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResolvedResourceSpec {
     pub(crate) name: String,
+    pub(crate) doc: SelectedTextSpec,
     pub(crate) fields: Vec<ResourceFieldSpec<SelectedFamily>>,
     pub(crate) methods: Vec<ResolvedResourceMethodSpec>,
 }
@@ -100,6 +101,7 @@ pub(crate) struct ResolvedResourceSpec {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ResolvedResourceMethodSpec {
     pub(crate) name: String,
+    pub(crate) doc: SelectedTextSpec,
     pub(crate) params: Vec<ResourceFieldSpec<SelectedFamily>>,
     pub(crate) result: Option<ResourceResultSpec<SelectedFamily>>,
     pub(crate) binding: ResolvedResourceMethodBinding,
@@ -119,6 +121,16 @@ pub struct ResolvedResourceReturnSpec {
     pub resource_name: String,
     pub output_message_name: String,
     pub bindings: Vec<ResolvedResourceFieldBinding>,
+    /// Set when the operation returns a record that holds the resource in one field.
+    pub holder: Option<ResolvedResourceHolder>,
+}
+
+/// A result record with one resource field. The resource binds from the record's message,
+/// and the other fields of the record come from the same message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedResourceHolder {
+    pub record_name: String,
+    pub field_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,6 +165,7 @@ pub enum RequestPlan {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RequestPlanField {
     pub field_name: String,
+    pub required: bool,
     pub value: RequestPlan,
 }
 
@@ -184,12 +197,19 @@ pub(crate) fn resolve_service_resources(
 
     let mut operation_returns = BTreeMap::new();
     for operation in &service.operations {
-        let Some(resource_name) = operation_output_resource_name(service, operation) else {
-            continue;
+        let holder = operation_output_resource_holder(spec, service, operation)?;
+        let resource_name = match &holder {
+            Some((_, _, resource_name, _)) => *resource_name,
+            None => {
+                let Some(resource_name) = operation_output_resource_name(service, operation) else {
+                    continue;
+                };
+                if operation_output_resource_wire_type(operation).is_none() {
+                    continue;
+                }
+                resource_name
+            }
         };
-        if operation_output_resource_wire_type(operation).is_none() {
-            continue;
-        }
         let resource = service
             .resource(resource_name)
             .ok_or_else(|| Error::InvalidResource {
@@ -210,7 +230,11 @@ pub(crate) fn resolve_service_resources(
                 ),
             });
         };
-        let Some(output_message_name) = operation_output_resource_message_name(operation) else {
+        let Some(output_message_name) = holder
+            .as_ref()
+            .map(|(_, _, _, proto_name)| *proto_name)
+            .or_else(|| operation_output_resource_message_name(operation))
+        else {
             return Err(Error::InvalidResource {
                 service: service.name.clone(),
                 resource: resource.name.to_upper_camel_case(),
@@ -246,6 +270,10 @@ pub(crate) fn resolve_service_resources(
                 resource_name: resource.name.clone(),
                 output_message_name: output_message_name.to_string(),
                 bindings,
+                holder: holder.map(|(record_name, field_key, _, _)| ResolvedResourceHolder {
+                    record_name: record_name.to_string(),
+                    field_key: field_key.to_string(),
+                }),
             },
         );
     }
@@ -293,6 +321,7 @@ fn resolve_resource_methods(
         .collect::<Result<Vec<_>>>()?;
     Ok(ResolvedResourceSpec {
         name: resource.name.clone(),
+        doc: resource.doc.clone(),
         fields: resource.fields.clone(),
         methods,
     })
@@ -353,6 +382,7 @@ fn resolve_resource_method(
         }
         return Ok(ResolvedResourceMethodSpec {
             name: method.name.clone(),
+            doc: method.doc.clone(),
             params: method.params.clone(),
             result: method.result.clone(),
             binding: ResolvedResourceMethodBinding::Operation {
@@ -407,6 +437,7 @@ fn resolve_resource_method(
 
     Ok(ResolvedResourceMethodSpec {
         name: method.name.clone(),
+        doc: method.doc.clone(),
         params: method.params.clone(),
         result: method.result.clone(),
         binding,
@@ -492,6 +523,7 @@ fn synthesize_request_plan(
         if let Some(source) = environment.get(&field.api_name) {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
+                required: field.required,
                 value: RequestPlan::Source(source.clone()),
             });
             continue;
@@ -504,6 +536,7 @@ fn synthesize_request_plan(
             {
                 fields.push(RequestPlanField {
                     field_name: field.api_name,
+                    required: field.required,
                     value,
                 });
                 continue;
@@ -532,6 +565,7 @@ fn synthesize_record_request_plan(
         if let Some(source) = environment.get(&field.api_name) {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
+                required: field.required,
                 value: RequestPlan::Source(source.clone()),
             });
             continue;
@@ -546,6 +580,7 @@ fn synthesize_record_request_plan(
         {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
+                required: field.required,
                 value,
             });
             continue;
@@ -557,6 +592,7 @@ fn synthesize_record_request_plan(
         {
             fields.push(RequestPlanField {
                 field_name: field.api_name,
+                required: field.required,
                 value,
             });
             continue;
@@ -748,6 +784,69 @@ fn operation_output_resource_name<'a>(
     service
         .resource(resource_name.as_str())
         .map(|_| resource_name.as_str())
+}
+
+/// The proto-backed result record of an operation that holds a resource of the service, as
+/// its record name, field key, resource name and proto message name.
+fn operation_output_resource_holder<'a>(
+    spec: &'a ApiSpec<SelectedFamily>,
+    service: &'a ServiceSpec<SelectedFamily>,
+    operation: &'a OperationSpec<SelectedFamily>,
+) -> Result<Option<(&'a str, &'a str, &'a str, &'a str)>> {
+    let record = match operation.output_type() {
+        Some(TypeSpec::Record(record_name)) => spec.record(record_name.as_str()),
+        Some(TypeSpec::External(ExternalTypeSpec::Proto(proto_name))) => {
+            spec.record_for_proto(proto_name.as_str())
+        }
+        _ => None,
+    };
+    let Some(record) = record else {
+        return Ok(None);
+    };
+    let resource_fields = record
+        .fields
+        .iter()
+        .filter_map(|(key, field)| match field.field_type.without_option() {
+            TypeSpec::Resource(resource) => Some((key.as_str(), resource.as_str())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let [(field_key, resource_name)] = resource_fields.as_slice() else {
+        if resource_fields.is_empty() {
+            return Ok(None);
+        }
+        return Err(Error::InvalidResource {
+            service: service.name.clone(),
+            resource: resource_fields[0].1.to_upper_camel_case(),
+            reason: format!(
+                "result record `{}` of operation `{}` holds more than one resource",
+                record.name, operation.name
+            ),
+        });
+    };
+    let Some(proto_name) = record
+        .source
+        .as_ref()
+        .and_then(|source| source.proto_type())
+    else {
+        return Err(Error::InvalidResource {
+            service: service.name.clone(),
+            resource: resource_name.to_upper_camel_case(),
+            reason: format!(
+                "result record `{}` of operation `{}` holds a resource, so it needs `@nexus.proto`",
+                record.name, operation.name
+            ),
+        });
+    };
+    if service.resource(resource_name).is_none() {
+        return Ok(None);
+    }
+    Ok(Some((
+        record.full_name.as_str(),
+        field_key,
+        resource_name,
+        proto_name.as_str(),
+    )))
 }
 
 fn operation_output_ref(operation: &OperationSpec<SelectedFamily>) -> Option<&str> {
@@ -1084,12 +1183,14 @@ interface user-service {
                 assert_eq!(fields.len(), 2);
                 assert!(fields.contains(&super::RequestPlanField {
                     field_name: "user-id".to_string(),
+                    required: true,
                     value: RequestPlan::Source(RequestPlanSource::ResourceField(
                         "user-id".to_string()
                     )),
                 }));
                 assert!(fields.contains(&super::RequestPlanField {
                     field_name: "email".to_string(),
+                    required: true,
                     value: RequestPlan::Source(RequestPlanSource::MethodParam("email".to_string())),
                 }));
             }

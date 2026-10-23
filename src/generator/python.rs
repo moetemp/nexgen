@@ -15,9 +15,9 @@ use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
     PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
-    PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
-    PlannedSpec, PlannedType, message_model_name, operation_input_model,
-    operation_output_direct_result,
+    PlannedResourceField, PlannedResourceHolder, PlannedResourceMethod,
+    PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind, PlannedSpec, PlannedType,
+    message_model_name, operation_input_model, operation_output_direct_result,
 };
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{
@@ -484,9 +484,18 @@ impl<'a> ApiPlanner<'a> {
 
     fn build(mut self, module_origin: GeneratedFileOrigin) -> Result<PythonGenerationResult> {
         let api_plan = self.api_plan;
+        // A client-only service gets no Workflow surface, so it comes last and only the
+        // caller module sees it.
         let services = api_plan
             .services
             .iter()
+            .filter(|service| !service.client_only)
+            .chain(
+                api_plan
+                    .services
+                    .iter()
+                    .filter(|service| service.client_only),
+            )
             .map(|service| {
                 let operations = service
                     .operations
@@ -502,6 +511,7 @@ impl<'a> ApiPlanner<'a> {
                     experimental: service.experimental,
                     deprecated: service.deprecated,
                     delay_load_temporalio_workflow: service.delay_load_temporalio_workflow,
+                    client_only: service.client_only,
                     operations,
                     resources: service
                         .resources
@@ -524,7 +534,12 @@ impl<'a> ApiPlanner<'a> {
             });
             self.resolve_message_value_conversion(&model_type)?;
         }
-        let model_refs = self.models.values().collect::<Vec<_>>();
+        let holders = resource_holders(api_plan);
+        let model_refs = self
+            .models
+            .values()
+            .filter(|model| !holders.contains_key(&model.full_name))
+            .collect::<Vec<_>>();
         let variant_refs = self.variants.values().collect::<Vec<_>>();
         let model_fragments =
             self.render_model_fragments(model_refs.as_slice(), variant_refs.as_slice())?;
@@ -537,8 +552,13 @@ impl<'a> ApiPlanner<'a> {
                 .chain(offset_types.values()),
         )?;
 
+        let workflow_services = services
+            .iter()
+            .take_while(|service| !service.client_only)
+            .count();
         let (files, exported_names) = self.render_package(
             &model_fragments,
+            &services[..workflow_services],
             &services,
             &offset_types.keys().cloned().collect::<Vec<_>>(),
             module_origin,
@@ -564,6 +584,7 @@ impl<'a> ApiPlanner<'a> {
         &self,
         model_fragments: &RenderedModelFragments,
         services: &[RenderedService<'_>],
+        client_services: &[RenderedService<'_>],
         offset_types: &[String],
         module_origin: GeneratedFileOrigin,
     ) -> Result<(GeneratedFileMap, BTreeSet<String>)> {
@@ -614,6 +635,11 @@ impl<'a> ApiPlanner<'a> {
                     .iter()
                     .map(|resource| resource.type_name.clone())
             })
+            .chain(
+                resource_holders(self.api_plan)
+                    .into_values()
+                    .map(|(model_name, _)| model_name),
+            )
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
@@ -697,14 +723,21 @@ impl<'a> ApiPlanner<'a> {
         if !resource_names.is_empty() {
             files.insert(
                 "_resources/__init__.py",
-                render_resources_package_init(services),
+                render_resources_package_init(services, self.api_plan),
                 GeneratedFileOrigin::fixed("generated Python resources package initializer"),
             )?;
         }
-        if crate::nexgen_config::current().client && !services.is_empty() {
+        if crate::nexgen_config::current().client && !client_services.is_empty() {
+            let (resource_classes, resource_imports) =
+                self.render_client_resources(client_services);
             files.insert(
                 "client.py",
-                render_client_module(services)?,
+                render_client_module(
+                    client_services,
+                    &resource_classes,
+                    &resource_imports,
+                    &model_names,
+                )?,
                 module_origin.clone(),
             )?;
         }
@@ -834,6 +867,17 @@ impl<'a> ApiPlanner<'a> {
             body.push_str("\n\n");
         }
         self.render_resource(&mut body, service, resource, bound_operations);
+        for (full_name, (_, resource_type)) in resource_holders(self.api_plan) {
+            if resource_type != resource.type_name {
+                continue;
+            }
+            let model = &self.models[&full_name];
+            body.push_str("\n\n");
+            render_record_model(&mut body, model, None);
+            for field in &model.fields {
+                module_imports.extend(field.imports.module_imports.iter().cloned());
+            }
+        }
         if !bound_operations.is_empty() && service.endpoint.is_some() {
             body.push_str("\n\n");
             for (index, bound_operation) in bound_operations.iter().enumerate() {
@@ -846,9 +890,25 @@ impl<'a> ApiPlanner<'a> {
         if service.endpoint.is_none() {
             body.push_str("\n\n");
             render_resource_client_binder(&mut body, resource);
+        } else {
+            // The standalone wrappers and the methods refer to the proto module of an enum
+            // parameter.
+            module_imports.extend(
+                bound_operations
+                    .iter()
+                    .filter_map(|bound_operation| bound_operation.operation.unpacked_input.as_ref())
+                    .flat_map(|unpacked_input| {
+                        unpacked_input.parameter_imports.module_imports.iter()
+                    })
+                    .cloned(),
+            );
         }
         if !service.delay_load_temporalio_workflow {
             module_imports.insert("temporalio.workflow".to_string());
+        }
+        if body.contains("_LONG_POLL_FIRST_PAUSE") {
+            body.insert_str(0, LONG_POLL_PAUSES);
+            module_imports.insert("asyncio".to_string());
         }
 
         let mut output = String::new();
@@ -892,9 +952,15 @@ impl<'a> ApiPlanner<'a> {
                 self.model_hoists,
             );
         }
+        let own_names = resource_holders(self.api_plan)
+            .into_values()
+            .filter(|(_, resource_type)| *resource_type == resource.type_name)
+            .map(|(model_name, _)| model_name)
+            .chain(std::iter::once(resource.type_name.clone()))
+            .collect::<BTreeSet<_>>();
         let used_resource_names = used_python_symbol_imports(&body, resource_names)
             .into_iter()
-            .filter(|name| name != &resource.type_name)
+            .filter(|name| !own_names.contains(name))
             .collect::<Vec<_>>();
         if !used_resource_names.is_empty() {
             render_named_python_import(&mut output, ".", &used_resource_names);
@@ -919,6 +985,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("class ");
         output.push_str(&resource.type_name);
         output.push_str(":\n");
+        render_python_docstring(output, "    ", resource.doc.as_deref(), &[], None, false);
         for field in &resource.fields {
             output.push_str("    ");
             output.push_str(&python_field_name(&field.name));
@@ -941,6 +1008,162 @@ impl<'a> ApiPlanner<'a> {
         }
     }
 
+    /// A resource class per resource for code outside a Workflow. It holds the caller, and
+    /// each method fills in the request as the Workflow class does, then calls the caller.
+    fn render_client_resources(
+        &self,
+        services: &[RenderedService<'_>],
+    ) -> (String, BTreeSet<String>) {
+        let mut output = String::new();
+        let mut module_imports = BTreeSet::new();
+        for service in services {
+            for resource in &service.resources {
+                if resource.methods.is_empty() {
+                    continue;
+                }
+                output.push_str("\n\nclass ");
+                output.push_str(&resource.type_name);
+                output.push_str(":\n");
+                render_python_docstring(
+                    &mut output,
+                    "    ",
+                    resource.doc.as_deref(),
+                    &[],
+                    None,
+                    false,
+                );
+                if resource.doc.is_some() {
+                    output.push('\n');
+                }
+                output.push_str("    def __init__(\n        self,\n        client: ");
+                output.push_str(&client_class_name(service));
+                output.push_str(",\n");
+                for field in &resource.fields {
+                    output.push_str("        ");
+                    output.push_str(&python_field_name(&field.name));
+                    output.push_str(": ");
+                    output.push_str(&self.python_resource_field_annotation(
+                        &field.kind,
+                        field.optional,
+                        field.function.as_ref(),
+                    ));
+                    output.push_str(",\n");
+                }
+                output.push_str("    ) -> None:\n");
+                output.push_str("        \"\"\"Bind the handle to a caller.\"\"\"\n");
+                output.push_str("        self._client: ");
+                output.push_str(&client_class_name(service));
+                output.push_str(" = client\n");
+                for field in &resource.fields {
+                    let name = python_field_name(&field.name);
+                    output.push_str("        self.");
+                    output.push_str(&name);
+                    output.push_str(": ");
+                    output.push_str(&self.python_resource_field_annotation(
+                        &field.kind,
+                        field.optional,
+                        field.function.as_ref(),
+                    ));
+                    output.push_str(" = ");
+                    output.push_str(&name);
+                    output.push('\n');
+                }
+                for method in &resource.methods {
+                    self.render_client_resource_method(&mut output, service, method);
+                }
+                // The methods refer to the proto module of an enum parameter.
+                module_imports.extend(
+                    service
+                        .operations
+                        .iter()
+                        .filter_map(|operation| operation.unpacked_input.as_ref())
+                        .flat_map(|input| input.parameter_imports.module_imports.iter())
+                        .filter(|module| output.contains(&format!("{module}.")))
+                        .cloned(),
+                );
+            }
+        }
+        (output, module_imports)
+    }
+
+    fn render_client_resource_method(
+        &self,
+        output: &mut String,
+        service: &RenderedService<'_>,
+        method: &PlannedResourceMethod,
+    ) {
+        let PlannedResourceMethodBindingSpec::Operation {
+            operation_name,
+            request_plan,
+            ..
+        } = &method.binding
+        else {
+            return;
+        };
+        let Some(operation) = service
+            .operations
+            .iter()
+            .find(|operation| operation.name == operation_name)
+        else {
+            return;
+        };
+        // The caller answers a result record that holds a resource with its wire model, so
+        // such a method stays on the Workflow class only.
+        if operation
+            .output_resource_return
+            .as_ref()
+            .is_some_and(|resource_return| resource_return.holder.is_some())
+        {
+            return;
+        }
+        let result_annotation = self.python_resource_method_result_annotation(method);
+        output.push_str("\n    async def ");
+        output.push_str(&python_field_name(&method.name));
+        output.push_str("(\n");
+        self.render_resource_method_params(output, method, None);
+        output.push_str("    ) -> ");
+        output.push_str(&result_annotation);
+        output.push_str(":\n");
+        render_python_docstring(output, "        ", method.doc.as_deref(), &[], None, false);
+        render_resource_method_request(output, method, operation, request_plan);
+        // A method with no result drops the answer.
+        output.push_str(if result_annotation == "None" {
+            "        _ = await self._client."
+        } else {
+            "        return await self._client."
+        });
+        output.push_str(&operation.attr_name);
+        output.push_str("(request)\n");
+
+        let Some(long_poll) = &operation.client_long_poll else {
+            return;
+        };
+        let Some(iter_method_name) = &long_poll.iter_method_name else {
+            return;
+        };
+        output.push_str("\n    async def iter_");
+        output.push_str(&python_field_name(&method.name));
+        output.push_str("(\n");
+        self.render_resource_method_params(
+            output,
+            method,
+            Some("deadline: datetime.timedelta | None = None"),
+        );
+        output.push_str("    ) -> collections.abc.AsyncIterator[");
+        output.push_str(&long_poll.item_annotation);
+        output.push_str("]:\n");
+        render_long_poll_iterator_docstring(
+            output,
+            long_poll,
+            &format!("``{}``", long_poll.method_name),
+        );
+        render_resource_method_request(output, method, operation, request_plan);
+        output.push_str("        async for item in self._client.");
+        output.push_str(iter_method_name);
+        output.push_str("(request, deadline=deadline):\n");
+        output.push_str("            yield item\n");
+    }
+
     fn render_resource_class_method(
         &self,
         output: &mut String,
@@ -953,24 +1176,11 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    async def ");
         output.push_str(&python_field_name(&method.name));
         output.push_str("(\n");
-        output.push_str("        self,\n");
-        for param in &method.params {
-            output.push_str("        ");
-            output.push_str(&python_field_name(&param.name));
-            output.push_str(": ");
-            output.push_str(&self.python_resource_field_annotation(
-                &param.kind,
-                param.optional,
-                param.function.as_ref(),
-            ));
-            if param.optional {
-                output.push_str(" = None");
-            }
-            output.push_str(",\n");
-        }
+        self.render_resource_method_params(output, method, None);
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
+        render_python_docstring(output, "        ", method.doc.as_deref(), &[], None, false);
 
         match &method.binding {
             PlannedResourceMethodBindingSpec::Operation { operation_name, .. } => {
@@ -995,6 +1205,7 @@ impl<'a> ApiPlanner<'a> {
                         operation,
                         &result_annotation,
                     );
+                    self.render_resource_method_iterator(output, service, method, operation);
                 }
             }
             PlannedResourceMethodBindingSpec::Stub => {
@@ -1006,6 +1217,136 @@ impl<'a> ApiPlanner<'a> {
                 )));
                 output.push_str(")\n");
             }
+        }
+    }
+
+    /// A method bound to a long poll that moves an offset also reads its pages as one
+    /// sequence. It waits and backs off by the rules of the caller's `_until_` loop.
+    fn render_resource_method_iterator(
+        &self,
+        output: &mut String,
+        service: &RenderedService<'_>,
+        method: &PlannedResourceMethod,
+        operation: &RenderedOperation<'_>,
+    ) {
+        let Some(long_poll) = &operation.client_long_poll else {
+            return;
+        };
+        let (
+            Some(_),
+            Some((offset, next_offset)),
+            PlannedResourceMethodBindingSpec::Operation { request_plan, .. },
+        ) = (
+            &long_poll.iter_method_name,
+            &long_poll.offset_attrs,
+            &method.binding,
+        )
+        else {
+            return;
+        };
+        output.push_str("\n    async def iter_");
+        output.push_str(&python_field_name(&method.name));
+        output.push_str("(\n");
+        self.render_resource_method_params(
+            output,
+            method,
+            Some("deadline: datetime.timedelta | None = None"),
+        );
+        output.push_str("    ) -> collections.abc.AsyncIterator[");
+        output.push_str(&long_poll.item_annotation);
+        output.push_str("]:\n");
+        render_long_poll_iterator_docstring(
+            output,
+            long_poll,
+            &format!("``{}`` operation", operation.wire_name),
+        );
+        render_resource_method_request(output, method, operation, request_plan);
+        output.push_str("        clock = asyncio.get_running_loop()\n");
+        output.push_str(
+            "        end = None if deadline is None else clock.time() + deadline.total_seconds()\n",
+        );
+        output.push_str("        pause = _LONG_POLL_FIRST_PAUSE\n");
+        output.push_str("        while True:\n");
+        // A local name that no request field has, so it shadows no parameter.
+        output.push_str("            page_wait = ");
+        output.push_str(LONG_POLL_ITERATOR_PAGE_SECONDS);
+        output.push_str(" if end is None else max(end - clock.time(), 0.001)\n");
+        if let Some(max_wait) = &long_poll.max_wait_seconds {
+            output.push_str("            page_wait = min(page_wait, ");
+            output.push_str(max_wait);
+            output.push_str(")\n");
+        }
+        output.push_str("            request = dataclasses.replace(\n");
+        output.push_str("                request, ");
+        output.push_str(&long_poll.wait.attr);
+        output.push('=');
+        output.push_str(&long_poll.wait.from_seconds("page_wait"));
+        output.push_str("\n            )\n");
+        output.push_str("            asked = clock.time()\n");
+        output.push_str("            handle = await ");
+        output.push_str(&request_operation_function_name(service, operation));
+        output.push_str("(request)\n");
+        output.push_str("            answer = await handle\n");
+        render_long_poll_iterator_page_end(output, long_poll, offset, next_offset, "request");
+        output.push_str("            if end is not None and clock.time() >= end:\n");
+        output.push_str("                return\n");
+        output.push_str("            if not answer.");
+        output.push_str(&long_poll.result_attr);
+        output.push_str(" and clock.time() - asked < page_wait / 2:\n");
+        output.push_str("                await asyncio.sleep(pause)\n");
+        output.push_str("                pause = min(pause * 2, _LONG_POLL_LAST_PAUSE)\n");
+        output.push_str("            else:\n");
+        output.push_str("                pause = _LONG_POLL_FIRST_PAUSE\n");
+    }
+
+    fn render_resource_method_params(
+        &self,
+        output: &mut String,
+        method: &PlannedResourceMethod,
+        keyword_param: Option<&str>,
+    ) {
+        output.push_str("        self,\n");
+        // Python refuses a parameter without a default after one with a default, and WIT
+        // allows any order, so such a method takes keyword arguments only.
+        let has_default = |param: &PlannedResourceField| {
+            param.optional || resource_method_list_param(param).is_some()
+        };
+        let keyword_only = method
+            .params
+            .iter()
+            .skip_while(|param| !has_default(param))
+            .any(|param| !has_default(param));
+        if keyword_only {
+            output.push_str("        *,\n");
+        }
+        for param in &method.params {
+            output.push_str("        ");
+            output.push_str(&python_field_name(&param.name));
+            output.push_str(": ");
+            if let Some(value) = resource_method_list_param(param) {
+                // A list request field defaults to empty, as in the standalone wrapper.
+                output.push_str("list[");
+                output.push_str(&self.python_resource_value_annotation(value));
+                output.push_str("] | None = None");
+            } else {
+                output.push_str(&self.python_resource_field_annotation(
+                    &param.kind,
+                    param.optional,
+                    param.function.as_ref(),
+                ));
+                if param.optional {
+                    output.push_str(" = None");
+                }
+            }
+            output.push_str(",\n");
+        }
+        if let Some(keyword_param) = keyword_param {
+            if !keyword_only {
+                output.push_str("        *,\n");
+            }
+            output.push_str("        ");
+            output.push_str(keyword_param);
+            output.push_str(",\n");
         }
     }
 
@@ -1251,9 +1592,13 @@ impl<'a> ApiPlanner<'a> {
         let overload_output_annotation = output_transform
             .and_then(|transform| transform.type_name.value().map(str::to_string))
             .or_else(|| {
-                output_resource_return
-                    .as_ref()
-                    .map(|resource| resource.resource_type_name.clone())
+                output_resource_return.as_ref().map(|resource| {
+                    resource
+                        .holder
+                        .as_ref()
+                        .map(|holder| holder.model_name.clone())
+                        .unwrap_or_else(|| resource.resource_type_name.clone())
+                })
             })
             .unwrap_or_else(|| output_annotation_default.clone());
         let unpacked_input = if let (Some(input), Some(rendered_input)) = (input, &rendered_input) {
@@ -2624,6 +2969,7 @@ struct RenderedService<'a> {
     experimental: bool,
     deprecated: bool,
     delay_load_temporalio_workflow: bool,
+    client_only: bool,
     operations: Vec<RenderedOperation<'a>>,
     resources: Vec<PlannedResource>,
 }
@@ -3642,9 +3988,15 @@ fn body_uses_python_symbol(body: &str, symbol: &str) -> bool {
 }
 
 fn used_python_symbol_imports(body: &str, candidates: &[String]) -> Vec<String> {
+    // A name in a docstring is prose, so it needs no import.
+    let code = body
+        .split("\"\"\"")
+        .step_by(2)
+        .collect::<Vec<_>>()
+        .join("\n");
     candidates
         .iter()
-        .filter(|candidate| body_uses_python_symbol(body, candidate))
+        .filter(|candidate| body_uses_python_symbol(&code, candidate))
         .cloned()
         .collect()
 }
@@ -4182,7 +4534,12 @@ fn client_model_name(
 /// model to a payload, hands the payload to the transport, and converts the
 /// answer back. A proto-backed model converts through its transfer-type
 /// converter, so the transport moves proto bytes and needs no message type.
-fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
+fn render_client_module(
+    services: &[RenderedService<'_>],
+    resource_classes: &str,
+    resource_imports: &BTreeSet<String>,
+    all_model_names: &[String],
+) -> Result<String> {
     let mut model_names = BTreeSet::new();
     let mut body = String::new();
     body.push_str(CLIENT_RUNTIME);
@@ -4300,7 +4657,26 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
             {
                 model_names.insert(format!("_{proto_model}TransferTypeConverter"));
             }
-            render_client_method(&mut body, operation, &input_model, output_model.as_deref());
+            // An operation that returns a resource with a client class gives back an instance
+            // of it, bound to this caller.
+            let client_resource =
+                operation
+                    .output_resource_return
+                    .as_ref()
+                    .filter(|resource_return| {
+                        resource_return.holder.is_none()
+                            && service.resources.iter().any(|resource| {
+                                resource.type_name == resource_return.resource_type_name
+                                    && !resource.methods.is_empty()
+                            })
+                    });
+            render_client_method(
+                &mut body,
+                operation,
+                &input_model,
+                output_model.as_deref(),
+                client_resource,
+            );
             if let (Some(long_poll), Some(output_model)) =
                 (&operation.client_long_poll, output_model.as_deref())
             {
@@ -4318,6 +4694,12 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
             }
         }
     }
+
+    body.push_str(resource_classes);
+    model_names.extend(used_python_symbol_imports(
+        resource_classes,
+        all_model_names,
+    ));
 
     let mut method_names = BTreeSet::new();
     for service in services {
@@ -4339,6 +4721,7 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
             }
         }
     }
+
     // A helper that no method uses would be dead code in the module.
     let uses_proto = services
         .iter()
@@ -4381,6 +4764,11 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
     output.push_str("import temporalio.api.common.v1\n");
     output.push_str("import temporalio.converter\n");
     output.push_str("import temporalio.nexus.system\n");
+    for module in resource_imports {
+        output.push_str("import ");
+        output.push_str(module);
+        output.push('\n');
+    }
     output.push('\n');
     render_named_python_import(
         &mut output,
@@ -4401,6 +4789,7 @@ fn render_client_method(
     operation: &RenderedOperation<'_>,
     input_model: &str,
     output_model: Option<&str>,
+    client_resource: Option<&PlannedOperationResourceReturn>,
 ) {
     output.push('\n');
     output.push_str("    async def ");
@@ -4408,7 +4797,12 @@ fn render_client_method(
     output.push_str("(self, request: ");
     output.push_str(input_model);
     output.push_str(") -> ");
-    output.push_str(output_model.unwrap_or("None"));
+    output.push_str(
+        client_resource
+            .map(|resource_return| resource_return.resource_type_name.as_str())
+            .or(output_model)
+            .unwrap_or("None"),
+    );
     output.push_str(":\n");
     render_python_docstring(
         output,
@@ -4453,9 +4847,27 @@ fn render_client_method(
             output.push_str(codec);
             output.push_str(")\n");
             output.push_str("        with self._converters():\n");
-            output.push_str("            return converter.from_transfer_type(message, ");
+            let Some(resource_return) = client_resource else {
+                output.push_str("            return converter.from_transfer_type(message, ");
+                output.push_str(output_model);
+                output.push_str(")\n");
+                return;
+            };
+            output.push_str("            result = converter.from_transfer_type(message, ");
             output.push_str(output_model);
             output.push_str(")\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
+            output.push_str("        return ");
+            output.push_str(&resource_return.resource_type_name);
+            output.push_str("(\n            self,\n");
+            for binding in &resource_return.bindings {
+                output.push_str("            ");
+                output.push_str(&python_field_name(&binding.field_name));
+                output.push('=');
+                output.push_str(&resource_return_binding_expr_python(binding));
+                output.push_str(",\n");
+            }
+            output.push_str("        )\n");
         }
         None => {
             output.push_str("        [value] = await self._data_converter.decode([answer], [");
@@ -4884,11 +5296,49 @@ async def _decode_payloads(
         payload.CopyFrom(decoded)
 "#;
 
-fn render_resources_package_init(services: &[RenderedService<'_>]) -> String {
+/// The result records that hold a resource, by full name, with the model name and the
+/// resource type. Each one lives in its resource's module, since the resource module imports
+/// the models and the record uses the resource class.
+fn resource_holders(api_plan: &PlannedSpec) -> BTreeMap<String, (String, String)> {
+    api_plan
+        .services
+        .iter()
+        .filter(|service| !service.client_only)
+        .flat_map(|service| service.operations.iter())
+        .filter_map(|operation| operation.data.output_resource_return.as_ref())
+        .filter_map(|resource_return| {
+            resource_return.holder.as_ref().map(|holder| {
+                (
+                    holder.record_full_name.clone(),
+                    (
+                        holder.model_name.clone(),
+                        resource_return.resource_type_name.clone(),
+                    ),
+                )
+            })
+        })
+        .collect()
+}
+
+fn render_resources_package_init(
+    services: &[RenderedService<'_>],
+    api_plan: &PlannedSpec,
+) -> String {
     let resources = services
         .iter()
         .flat_map(|service| service.resources.iter())
         .collect::<Vec<_>>();
+    let holders = resource_holders(api_plan);
+    let names_of = |resource: &PlannedResource| {
+        std::iter::once(resource.type_name.clone())
+            .chain(
+                holders
+                    .values()
+                    .filter(|(_, resource_type)| *resource_type == resource.type_name)
+                    .map(|(model_name, _)| model_name.clone()),
+            )
+            .collect::<Vec<_>>()
+    };
     let mut output = String::new();
     render_generated_file_header(&mut output);
     output.push('\n');
@@ -4896,14 +5346,16 @@ fn render_resources_package_init(services: &[RenderedService<'_>]) -> String {
         render_named_python_import(
             &mut output,
             &format!(".{}", resource_module_name(resource)),
-            std::slice::from_ref(&resource.type_name),
+            &names_of(resource),
         );
     }
     output.push_str("\n__all__ = [\n");
     for resource in &resources {
-        output.push_str("    ");
-        output.push_str(&python_string_literal(&resource.type_name));
-        output.push_str(",\n");
+        for name in names_of(resource) {
+            output.push_str("    ");
+            output.push_str(&python_string_literal(&name));
+            output.push_str(",\n");
+        }
     }
     output.push_str("]\n");
     output
@@ -5885,7 +6337,8 @@ fn render_endpoint_service_object_unpacked_method(
     output.push_str("    ) -> ");
     output.push_str(&operation_public_return_annotation(service, operation));
     output.push_str(":\n");
-    render_unpacked_operation_docstring(output, operation, unpacked_input, None);
+    // A method body sits one level deeper than a module function body.
+    render_unpacked_operation_docstring(output, "        ", operation, unpacked_input, None);
     for flattened_message in &unpacked_input.flattened_messages {
         render_flattened_message_setup(output, flattened_message);
     }
@@ -5963,6 +6416,7 @@ fn render_endpoint_service_object_operation_body(
             output.push('\n');
         } else if let Some(resource_return) = &operation.output_resource_return {
             output.push_str("        result = await handle\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
@@ -6269,7 +6723,7 @@ fn render_resource_method_inline_operation_body(
         return;
     };
 
-    render_resource_method_request(output, operation, request_plan);
+    render_resource_method_request(output, method, operation, request_plan);
     output.push_str("        nexus_client = getattr(self, \"_nexus_client\")\n");
     let returns_direct = operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
@@ -6331,6 +6785,7 @@ fn render_resource_method_inline_operation_body(
             output.push('\n');
         } else if let Some(resource_return) = &operation.output_resource_return {
             output.push_str("        result = await handle\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
@@ -6371,10 +6826,11 @@ fn render_resource_method_inline_operation_body(
 
 fn render_resource_method_request(
     output: &mut String,
+    method: &PlannedResourceMethod,
     operation: &RenderedOperation<'_>,
     request_plan: &RequestPlan,
 ) {
-    let request_expr = render_request_plan_python(request_plan);
+    let request_expr = render_request_plan_python(method, request_plan);
     output.push_str("        request = ");
     if let Some(unpacked_input) = &operation.unpacked_input {
         output.push_str(&unpacked_input.model_name);
@@ -6388,7 +6844,7 @@ fn render_resource_method_request(
                 output.push_str("            ");
                 output.push_str(&python_field_name(&field.field_name));
                 output.push('=');
-                output.push_str(&render_request_plan_python(&field.value));
+                output.push_str(&render_request_plan_python(method, &field.value));
                 output.push_str(",\n");
             }
         }
@@ -6438,7 +6894,7 @@ fn render_resource_method_operation_body(
     };
 
     let operation_attr_name = request_operation_function_name(service, operation);
-    render_resource_method_request(output, operation, request_plan);
+    render_resource_method_request(output, method, operation, request_plan);
     if *direct_return {
         if result_annotation == "None" {
             output.push_str("        await ");
@@ -6473,7 +6929,18 @@ fn render_resource_operation_call_args(output: &mut String, service: &RenderedSe
     }
 }
 
-fn render_request_plan_python(plan: &RequestPlan) -> String {
+fn render_request_plan_python(method: &PlannedResourceMethod, plan: &RequestPlan) -> String {
+    let render_method_param = |name: &str| {
+        let is_list = method
+            .params
+            .iter()
+            .any(|param| param.name == name && resource_method_list_param(param).is_some());
+        if is_list {
+            format!("{} or []", python_field_name(name))
+        } else {
+            python_field_name(name)
+        }
+    };
     render_request_plan(
         plan,
         python_field_name,
@@ -6486,9 +6953,48 @@ fn render_request_plan_python(plan: &RequestPlan) -> String {
                 format!("{model_name}({})", fields.join(", "))
             }
         },
-        |name| format!("self.{}", python_field_name(name)),
-        python_field_name,
+        |name, _| format!("self.{}", python_field_name(name)),
+        render_method_param,
     )
+}
+
+fn resource_method_list_param(param: &PlannedResourceField) -> Option<&PlannedType> {
+    match &param.kind {
+        PlannedType::List(value) if !param.optional && param.function.is_none() => Some(value),
+        _ => None,
+    }
+}
+
+/// A resource field that the response fills in is optional in the response model, so a
+/// required one is checked before the resource is built.
+fn render_resource_return_guards(
+    output: &mut String,
+    indent: &str,
+    operation: &RenderedOperation<'_>,
+    resource_return: &PlannedOperationResourceReturn,
+) {
+    for binding in &resource_return.bindings {
+        let ResolvedResourceBindingSource::ResultField {
+            proto_field_name, ..
+        } = &binding.source
+        else {
+            continue;
+        };
+        if binding.optional {
+            continue;
+        }
+        output.push_str(indent);
+        output.push_str("if result.");
+        output.push_str(proto_field_name);
+        output.push_str(" is None:\n");
+        output.push_str(indent);
+        output.push_str("    raise RuntimeError(");
+        output.push_str(&python_string_literal(&format!(
+            "{} answered without `{}`",
+            operation.wire_name, proto_field_name
+        )));
+        output.push_str(")\n");
+    }
 }
 
 fn resource_return_binding_expr_python(binding: &PlannedOperationResourceFieldBinding) -> String {
@@ -7636,7 +8142,7 @@ fn render_request_only_operation_function(
         output.push_str(",\n");
         output.push_str("]:\n");
         if render_request_doc {
-            render_operation_docstring(output, operation, &[], None);
+            render_operation_docstring(output, "    ", operation, &[], None);
         }
         render_temporalio_workflow_runtime_imports(
             output,
@@ -7696,7 +8202,7 @@ fn render_request_only_operation_function(
     }
 
     if render_request_doc {
-        render_operation_docstring(output, operation, &[], None);
+        render_operation_docstring(output, "    ", operation, &[], None);
     }
 
     render_temporalio_workflow_runtime_imports(
@@ -7753,6 +8259,11 @@ fn render_request_only_operation_function(
         output.push('\n');
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("    result = await handle\n");
+        render_resource_return_guards(output, "    ", operation, resource_return);
+        if let Some(holder) = &resource_return.holder {
+            render_resource_holder_return(output, resource_return, holder);
+            return;
+        }
         if service.endpoint.is_none() {
             output.push_str("    resource = ");
         } else {
@@ -7775,8 +8286,44 @@ fn render_request_only_operation_function(
     }
 }
 
+/// The holder record gets the resource in its resource field, and each other field from the
+/// field of the same name in the wire record.
+fn render_resource_holder_return(
+    output: &mut String,
+    resource_return: &PlannedOperationResourceReturn,
+    holder: &PlannedResourceHolder,
+) {
+    output.push_str("    return ");
+    output.push_str(&holder.model_name);
+    output.push_str("(\n");
+    for field in &holder.fields {
+        let name = python_field_name(&field.name);
+        output.push_str("        ");
+        output.push_str(&name);
+        if !field.resource {
+            output.push_str("=result.");
+            output.push_str(&name);
+            output.push_str(",\n");
+            continue;
+        }
+        output.push('=');
+        output.push_str(&resource_return.resource_type_name);
+        output.push_str("(\n");
+        for binding in &resource_return.bindings {
+            output.push_str("            ");
+            output.push_str(&python_field_name(&binding.field_name));
+            output.push('=');
+            output.push_str(&resource_return_binding_expr_python(binding));
+            output.push_str(",\n");
+        }
+        output.push_str("        ),\n");
+    }
+    output.push_str("    )\n");
+}
+
 fn render_unpacked_operation_docstring(
     output: &mut String,
+    indent: &str,
     operation: &RenderedOperation<'_>,
     unpacked_input: &RenderedUnpackedInput,
     primary_function: Option<&RenderedFunctionField>,
@@ -7858,7 +8405,13 @@ fn render_unpacked_operation_docstring(
         }
     }
 
-    render_operation_docstring(output, operation, &args, operation.return_doc.as_deref());
+    render_operation_docstring(
+        output,
+        indent,
+        operation,
+        &args,
+        operation.return_doc.as_deref(),
+    );
 }
 
 fn python_field_doc_rendered_as_function_arg(
@@ -7876,13 +8429,14 @@ fn python_field_doc_rendered_as_function_arg(
 
 fn render_operation_docstring(
     output: &mut String,
+    indent: &str,
     operation: &RenderedOperation<'_>,
     args: &[(String, String)],
     returns: Option<&str>,
 ) {
     render_python_docstring(
         output,
-        "    ",
+        indent,
         operation.doc.as_deref(),
         args,
         returns,
@@ -8124,7 +8678,7 @@ fn render_unpacked_operation_function(
         output.push_str(",\n");
         output.push_str("]:\n");
     }
-    render_unpacked_operation_docstring(output, operation, unpacked_input, None);
+    render_unpacked_operation_docstring(output, "    ", operation, unpacked_input, None);
     for flattened_message in &unpacked_input.flattened_messages {
         render_flattened_message_setup(output, flattened_message);
     }
@@ -8291,7 +8845,13 @@ fn render_function_unpacked_implementation(
         output.push_str(",\n");
         output.push_str("]:\n");
     }
-    render_unpacked_operation_docstring(output, operation, unpacked_input, primary_function);
+    render_unpacked_operation_docstring(
+        output,
+        "    ",
+        operation,
+        unpacked_input,
+        primary_function,
+    );
 
     for function in &unpacked_input.functions {
         if function.primary && matches!(function.args, RenderedFunctionArgs::Typed { .. }) {

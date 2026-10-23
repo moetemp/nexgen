@@ -45,6 +45,6 @@ export async function restartWorkflow(
   return new StartedWorkflow(
     requiredField(request.namespace, "resource", "namespace"),
     request.workflowId,
-    result.runId ?? undefined,
+    requiredField(result.runId, "resource", "runId"),
   );
 }

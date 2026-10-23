@@ -459,7 +459,13 @@ fn planned_value_type(value_type: &PlannedType, spec: &PlannedSpec) -> PlannedVa
             info: local_type_info(&variant_type.full_name),
             name: variant_type.name.clone(),
         }),
-        TypeSpec::Resource(_) => PlannedValueType::Unknown,
+        TypeSpec::Resource(resource) => PlannedValueType::External {
+            type_name: SelectedTextSpec {
+                value: Some(resource.type_name.clone()),
+                import: None,
+            },
+            fallback: Box::new(PlannedValueType::Unknown),
+        },
         TypeSpec::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(message))) => {
             PlannedValueType::Message(PlannedMessageType {
                 info: message.proto.clone(),
@@ -2610,6 +2616,22 @@ impl GoVisibilityMarker<'_> {
             }
             PlannedOperationOutput::Resource { .. } | PlannedOperationOutput::None => {}
         }
+        // A result record that holds a resource is what the caller gets.
+        if let Some(holder) = operation
+            .data
+            .output_resource_return
+            .as_ref()
+            .and_then(|resource_return| resource_return.holder.as_ref())
+            && self.public_keys.insert(holder.record_full_name.clone())
+            && let Some(record) = self.api_plan.record(&holder.record_full_name)
+        {
+            for (_, field) in record.public_fields() {
+                self.mark_operation_field_kind(
+                    &planned_field_kind(&field.field_type, self.api_plan),
+                    field.name.as_str(),
+                );
+            }
+        }
     }
 
     fn mark_resource_public_surface(&mut self, resource: &PlannedResource) {
@@ -4575,7 +4597,22 @@ fn render_resource_methods(
                             format!("{type_name}{{{}}}", fields.join(", "))
                         }
                     },
-                    |name| format!("u.{}", go_field_name(name)),
+                    |name, target_required| {
+                        let value = format!("u.{}", go_field_name(name));
+                        // An optional request field is a pointer where the resource field is not.
+                        let pointer = !target_required
+                            && resource.fields.iter().any(|field| {
+                                field.name == name
+                                    && !field.optional
+                                    && resolve_resource_field_kind(
+                                        &planned_field_kind(&field.kind, api_plan),
+                                        true,
+                                        package,
+                                    )
+                                    .starts_with('*')
+                            });
+                        if pointer { format!("&{value}") } else { value }
+                    },
                     |name| {
                         method_param_sources
                             .get(name)

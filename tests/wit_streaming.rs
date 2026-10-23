@@ -1,6 +1,7 @@
 //! WIT annotations for streaming services (`@nexus.offset` on record fields
-//! and `@nexus.long-poll` on operations) and the caller that `--client`
-//! generates for code outside a Workflow.
+//! and `@nexus.long-poll` on operations), the caller that `--client`
+//! generates for code outside a Workflow, and a resource handle whose methods
+//! take the rest of each request.
 #![cfg(feature = "advanced")]
 
 use std::collections::BTreeMap;
@@ -13,6 +14,9 @@ use nexgen::generator::GenerationMode;
 use nexgen::language::Language;
 use nexgen::nexgen_config::NexgenConfig;
 use nexgen::{GenerateRequest, generate_to_file};
+use prost::Message;
+use prost_types::field_descriptor_proto::{Label, Type};
+use prost_types::{DescriptorProto, FieldDescriptorProto, FileDescriptorProto, FileDescriptorSet};
 
 static OUTPUT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -127,6 +131,16 @@ fn try_generate_with(
     wit: &str,
     extra_inputs: Vec<PathBuf>,
 ) -> Result<BTreeMap<String, String>, String> {
+    try_generate_with_descriptors(config, language, wit, extra_inputs, None)
+}
+
+fn try_generate_with_descriptors(
+    config: NexgenConfig,
+    language: Language,
+    wit: &str,
+    extra_inputs: Vec<PathBuf>,
+    extra_descriptors: Option<&FileDescriptorSet>,
+) -> Result<BTreeMap<String, String>, String> {
     let temp_dir = unique_output_path(&format!("{language:?}"));
     fs::create_dir_all(&temp_dir).unwrap();
     let input_path = temp_dir.join("logs.wit");
@@ -146,9 +160,15 @@ fn try_generate_with(
             }
             .to_string(),
         ),
-        descriptor_paths: vec![
+        descriptor_paths: std::iter::once(
             project_root().join("advanced/samples/descriptors/temporal_api.bin"),
-        ],
+        )
+        .chain(extra_descriptors.map(|descriptors| {
+            let path = temp_dir.join("extra.bin");
+            fs::write(&path, descriptors.encode_to_vec()).unwrap();
+            path
+        }))
+        .collect(),
         output_path: output_path.clone(),
         format: false,
         java_package_name: None,
@@ -197,5 +217,220 @@ fn python_declares_one_offset_type_for_every_field_that_names_it() {
     assert!(
         models.contains("    next_offset: int | None = None"),
         "{models}"
+    );
+}
+
+fn proto_field(
+    name: &str,
+    number: i32,
+    kind: Type,
+    type_name: Option<&str>,
+) -> FieldDescriptorProto {
+    FieldDescriptorProto {
+        name: Some(name.to_string()),
+        number: Some(number),
+        label: Some(Label::Optional as i32),
+        r#type: Some(kind as i32),
+        type_name: type_name.map(str::to_string),
+        ..Default::default()
+    }
+}
+
+fn proto_message(name: &str, fields: Vec<FieldDescriptorProto>) -> DescriptorProto {
+    DescriptorProto {
+        name: Some(name.to_string()),
+        field: fields,
+        ..Default::default()
+    }
+}
+
+/// The protos of a log whose read is a long poll over offsets, as the Stream service's is.
+fn log_descriptors() -> FileDescriptorSet {
+    let mut entries = proto_field("entries", 1, Type::Message, Some(".acme.logs.v1.LogEntry"));
+    entries.label = Some(Label::Repeated as i32);
+    FileDescriptorSet {
+        file: vec![FileDescriptorProto {
+            name: Some("acme/logs/v1/logs.proto".to_string()),
+            package: Some("acme.logs.v1".to_string()),
+            syntax: Some("proto3".to_string()),
+            message_type: vec![
+                proto_message("LogRef", vec![proto_field("id", 1, Type::String, None)]),
+                proto_message(
+                    "LogEntry",
+                    vec![
+                        proto_field("offset", 1, Type::Int64, None),
+                        proto_field("text", 2, Type::String, None),
+                    ],
+                ),
+                proto_message(
+                    "ReadLogRequest",
+                    vec![
+                        proto_field("log", 1, Type::Message, Some(".acme.logs.v1.LogRef")),
+                        proto_field("from_offset", 2, Type::Int64, None),
+                        proto_field("wait_ms", 3, Type::Int64, None),
+                    ],
+                ),
+                proto_message(
+                    "CreateLogRequest",
+                    vec![proto_field("name", 1, Type::String, None)],
+                ),
+                proto_message(
+                    "CreateLogResponse",
+                    vec![
+                        proto_field("log", 1, Type::Message, Some(".acme.logs.v1.LogRef")),
+                        proto_field("created", 2, Type::Bool, None),
+                    ],
+                ),
+                proto_message(
+                    "ReadLogResponse",
+                    vec![
+                        entries,
+                        proto_field("next_offset", 2, Type::Int64, None),
+                        proto_field("done", 3, Type::Bool, None),
+                    ],
+                ),
+            ],
+            ..Default::default()
+        }],
+    }
+}
+
+/// A log handle whose read is a long poll that moves an offset.
+const LOG_HANDLE_WIT: &str = r#"package acme:logs@1.0.0;
+
+world logs {
+  export log-service;
+}
+
+/// @nexus.endpoint "logs"
+interface log-service {
+  /// @nexus.proto "acme.logs.v1.LogRef"
+  record log-ref {
+    id: string,
+  }
+
+  /// @nexus.proto "acme.logs.v1.LogEntry"
+  record log-entry {
+    /// @nexus.offset "log-offset"
+    offset: option<s64>,
+    text: option<string>,
+  }
+
+  /// @nexus.proto "acme.logs.v1.ReadLogRequest"
+  record read-log-request {
+    log: option<log-ref>,
+    /// @nexus.offset "log-offset"
+    from-offset: option<s64>,
+    wait-ms: option<s64>,
+  }
+
+  /// @nexus.proto "acme.logs.v1.ReadLogResponse"
+  record read-log-response {
+    entries: list<log-entry>,
+    /// @nexus.offset "log-offset"
+    next-offset: option<s64>,
+    done: option<bool>,
+  }
+
+  /// @nexus.doc "A handle on one log."
+  resource log {
+    constructor(log: log-ref);
+
+    /// @nexus.doc "Read one page of the log."
+    /// @nexus.operation "read-log"
+    read: func(from-offset: option<s64>) -> read-log-response;
+  }
+
+  /// @nexus.proto "acme.logs.v1.CreateLogRequest"
+  record create-log-request {
+    name: string,
+  }
+
+  /// @nexus.proto "acme.logs.v1.CreateLogResponse"
+  record create-log-result {
+    log: own<log>,
+    created: option<bool>,
+  }
+
+  create-log: func(request: create-log-request) -> create-log-result;
+
+  /// @nexus.long-poll
+  ///   wait-field="wait-ms"
+  ///   max-wait-ms="60000"
+  ///   result-field="entries"
+  ///   done-field="done"
+  ///   offset-field="from-offset"
+  ///   next-offset-field="next-offset"
+  read-log: func(request: read-log-request) -> read-log-response;
+}
+"#;
+
+fn generate_log_handle(config: NexgenConfig, wit: &str) -> BTreeMap<String, String> {
+    try_generate_with_descriptors(
+        config,
+        Language::Python,
+        wit,
+        Vec::new(),
+        Some(&log_descriptors()),
+    )
+    .unwrap()
+}
+
+fn client_config() -> NexgenConfig {
+    NexgenConfig {
+        mode: GenerationMode::NativeApi,
+        client: true,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn python_resource_reads_a_long_poll_that_moves_an_offset_as_one_sequence() {
+    let files = generate_log_handle(client_config(), LOG_HANDLE_WIT);
+    let log = file(&files, "_resources/log.py");
+
+    for expected in [
+        "    async def iter_read(\n        self,\n        from_offset: int | None = None,\n        \
+         *,\n        deadline: datetime.timedelta | None = None,\n    ) -> \
+         collections.abc.AsyncIterator[LogEntry]:\n",
+        "        request = ReadLogRequest(\n            log=self.log,\n",
+        "                request, wait_ms=max(int(page_wait * 1000), 1)\n",
+        "            handle = await _read_log(request)\n            answer = await handle\n",
+        "            for item in answer.entries or []:\n                yield item\n",
+        "            if answer.done:\n                return\n",
+        "                request = dataclasses.replace(request, from_offset=answer.next_offset)\n",
+        "\nimport asyncio\n",
+        "_LONG_POLL_FIRST_PAUSE = 0.05\n_LONG_POLL_LAST_PAUSE = 2.0\n",
+    ] {
+        assert!(log.contains(expected), "missing {expected:?} in\n{log}");
+    }
+}
+
+#[test]
+fn python_client_only_service_gets_a_caller_and_no_workflow_surface() {
+    let wit = LOG_HANDLE_WIT.replace(
+        "/// @nexus.endpoint \"logs\"\ninterface log-service {",
+        "/// @nexus.client-only\ninterface log-service {",
+    );
+    assert_ne!(wit, LOG_HANDLE_WIT);
+    let files = generate_log_handle(client_config(), &wit);
+
+    let workflow_files = files
+        .keys()
+        .filter(|name| {
+            name.starts_with("operations/")
+                || name.starts_with("_resources/")
+                || name.as_str() == "services.py"
+        })
+        .collect::<Vec<_>>();
+    assert!(workflow_files.is_empty(), "{workflow_files:?}");
+    let client = file(&files, "client.py");
+    assert!(client.contains("class LogServiceClient:\n"), "{client}");
+    assert!(client.contains("class Log:\n"), "{client}");
+    assert!(
+        client.contains(
+            "        async for item in self._client.iter_read_log(request, deadline=deadline):\n"
+        ),
+        "{client}"
     );
 }

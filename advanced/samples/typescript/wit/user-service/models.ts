@@ -8,3 +8,15 @@ export interface UpdateEmailRequest {
   userId: string;
   email: string;
 }
+
+export interface NotifyRequest {
+  userId: string;
+  reason?: string;
+  channels?: string[];
+  sender: string;
+}
+
+export interface SendVerificationRequest {
+  userId: string;
+  email?: string;
+}

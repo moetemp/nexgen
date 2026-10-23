@@ -17,6 +17,7 @@ from .models import (
     CancelWorkflowResponse,
     StartWorkflowRequest,
     StartWorkflowResult,
+    WorkflowExecution,
     _CancelWorkflowRequestTransferTypeConverter,
     _CancelWorkflowResponseTransferTypeConverter,
     _StartWorkflowRequestTransferTypeConverter,
@@ -181,9 +182,7 @@ class StartWorkflowServiceClient:
             input=payload,
         )
 
-    async def start_workflow(
-        self, request: StartWorkflowRequest
-    ) -> StartWorkflowResult:
+    async def start_workflow(self, request: StartWorkflowRequest) -> StartedWorkflow:
         with self._converters():
             message = _StartWorkflowRequestTransferTypeConverter().to_transfer_type(
                 request
@@ -195,11 +194,17 @@ class StartWorkflowServiceClient:
         message = _proto_message(answer, converter.transfer_type)
         await _decode_payloads(message, self._data_converter.payload_codec)
         with self._converters():
-            return converter.from_transfer_type(message, StartWorkflowResult)
+            result = converter.from_transfer_type(message, StartWorkflowResult)
+        if result.run_id is None:
+            raise RuntimeError("StartWorkflow answered without `run_id`")
+        return StartedWorkflow(
+            self,
+            namespace=request.namespace,
+            workflow_id=request.workflow_id,
+            run_id=result.run_id,
+        )
 
-    async def restart_workflow(
-        self, request: StartWorkflowRequest
-    ) -> StartWorkflowResult:
+    async def restart_workflow(self, request: StartWorkflowRequest) -> StartedWorkflow:
         with self._converters():
             message = _StartWorkflowRequestTransferTypeConverter().to_transfer_type(
                 request
@@ -211,7 +216,15 @@ class StartWorkflowServiceClient:
         message = _proto_message(answer, converter.transfer_type)
         await _decode_payloads(message, self._data_converter.payload_codec)
         with self._converters():
-            return converter.from_transfer_type(message, StartWorkflowResult)
+            result = converter.from_transfer_type(message, StartWorkflowResult)
+        if result.run_id is None:
+            raise RuntimeError("RestartWorkflow answered without `run_id`")
+        return StartedWorkflow(
+            self,
+            namespace=request.namespace,
+            workflow_id=request.workflow_id,
+            run_id=result.run_id,
+        )
 
     async def cancel_workflow(
         self, request: CancelWorkflowRequest
@@ -228,3 +241,45 @@ class StartWorkflowServiceClient:
         await _decode_payloads(message, self._data_converter.payload_codec)
         with self._converters():
             return converter.from_transfer_type(message, CancelWorkflowResponse)
+
+
+class StartedWorkflow:
+    """A handle on one started Workflow."""
+
+    def __init__(
+        self,
+        client: StartWorkflowServiceClient,
+        namespace: str,
+        workflow_id: str,
+        run_id: str,
+    ) -> None:
+        """Bind the handle to a caller."""
+        self._client: StartWorkflowServiceClient = client
+        self.namespace: str = namespace
+        self.workflow_id: str = workflow_id
+        self.run_id: str = run_id
+
+    async def cancel(
+        self,
+        reason: str | None = None,
+    ) -> None:
+        """Request the cancellation of the Workflow."""
+        request = CancelWorkflowRequest(
+            workflow_execution=WorkflowExecution(
+                workflow_id=self.workflow_id, run_id=self.run_id
+            ),
+            reason=reason,
+        )
+        _ = await self._client.cancel_workflow(request)
+
+    async def restart_workflow(
+        self,
+        workflow: str,
+        task_queue: str,
+    ) -> StartedWorkflow:
+        request = StartWorkflowRequest(
+            workflow_id=self.workflow_id,
+            workflow=workflow,
+            task_queue=task_queue,
+        )
+        return await self._client.restart_workflow(request)

@@ -583,6 +583,9 @@ pub struct ServiceSpec<F: TypeFamily = AuthoredFamily> {
     pub namespace: F::Text,
     pub operations_class: F::Text,
     pub endpoint: Option<String>,
+    /// Whether only callers outside a Workflow reach the service, so a target generates no
+    /// Workflow surface for it.
+    pub client_only: bool,
     pub experimental: bool,
     /// Whether the authored service is deprecated. Parsers carry this
     /// language-neutral annotation through planning; each backend chooses the
@@ -619,6 +622,7 @@ impl<F: TypeFamily> ServiceSpec<F> {
             namespace: map.map_text(self.namespace),
             operations_class: map.map_text(self.operations_class),
             endpoint: self.endpoint,
+            client_only: self.client_only,
             experimental: self.experimental,
             deprecated: self.deprecated,
             delay_load_temporalio_workflow: self.delay_load_temporalio_workflow,
@@ -750,6 +754,7 @@ impl<F: TypeFamily> OperationSpec<F> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourceSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
+    pub doc: F::Text,
     pub fields: Vec<ResourceFieldSpec<F>>,
     pub methods: Vec<ResourceMethodSpec<F>>,
     pub data: F::ResourceData,
@@ -766,6 +771,7 @@ pub struct ResourceFieldSpec<F: TypeFamily = AuthoredFamily> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ResourceMethodSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
+    pub doc: F::Text,
     pub params: Vec<ResourceFieldSpec<F>>,
     pub result: Option<ResourceResultSpec<F>>,
     pub operation_name: Option<String>,
@@ -785,6 +791,7 @@ impl<F: TypeFamily> ResourceSpec<F> {
         let data = map.map_resource_data(&self.name, self.data);
         ResourceSpec {
             name: self.name,
+            doc: map.map_text(self.doc),
             fields: self
                 .fields
                 .into_iter()
@@ -823,6 +830,7 @@ impl<F: TypeFamily> ResourceMethodSpec<F> {
     {
         ResourceMethodSpec {
             name: self.name,
+            doc: map.map_text(self.doc),
             params: self
                 .params
                 .into_iter()

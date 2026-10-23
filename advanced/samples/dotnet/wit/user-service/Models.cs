@@ -24,6 +24,40 @@ namespace Nexgen.UserService
     }
 
     [GeneratedCode("nexgen", null)]
+    public record NotifyRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="NotifyRequest"/> class.
+        /// </summary>
+        public NotifyRequest(string userId, IReadOnlyList<string> channels, string sender)
+        {
+            UserId = userId;
+            Channels = channels;
+            Sender = sender;
+        }
+
+        public string UserId { get; init; }
+        public string? Reason { get; init; }
+        public IReadOnlyList<string> Channels { get; init; }
+        public string Sender { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public record SendVerificationRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="SendVerificationRequest"/> class.
+        /// </summary>
+        public SendVerificationRequest(string userId)
+        {
+            UserId = userId;
+        }
+
+        public string UserId { get; init; }
+        public string? Email { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
     public record UpdateEmailRequest
     {
         /// <summary>

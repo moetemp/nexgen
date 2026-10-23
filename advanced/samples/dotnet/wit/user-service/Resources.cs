@@ -45,6 +45,20 @@ namespace Nexgen.UserService
             return User.BindClient(result, RequireNexgenClient());
         }
 
+        [GeneratedCode("nexgen", null)]
+        public async Task NotifyAsync(string? reason, IReadOnlyList<string> channels, string sender)
+        {
+            var request = new NotifyRequest(UserId, channels, sender) { Reason = reason };
+            await RequireNexgenClient().ExecuteNexusOperationAsync(svc => svc.Notify(request)).ConfigureAwait(true);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        public async Task SendVerificationAsync()
+        {
+            var request = new SendVerificationRequest(UserId) { Email = Email };
+            await RequireNexgenClient().ExecuteNexusOperationAsync(svc => svc.SendVerification(request)).ConfigureAwait(true);
+        }
+
     }
 
 }

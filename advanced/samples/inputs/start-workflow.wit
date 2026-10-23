@@ -14,9 +14,11 @@ interface start-workflow-service {
     run-id: option<string>,
   }
 
+  /// @nexus.doc "A handle on one started Workflow."
   resource started-workflow {
-    constructor(namespace: string, workflow-id: string, run-id: option<string>);
+    constructor(namespace: string, workflow-id: string, run-id: string);
 
+    /// @nexus.doc "Request the cancellation of the Workflow."
     /// @nexus.operation "cancel-workflow"
     cancel: func(reason: option<string>);
     restart-workflow: func(

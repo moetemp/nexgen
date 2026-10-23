@@ -11,6 +11,9 @@ use crate::generator::GenerationMode;
 pub struct NexgenConfig {
     pub mode: GenerationMode,
     pub system_nexus: bool,
+    /// Also generate a caller per service for code outside a Workflow, over a
+    /// transport that the caller gives.
+    pub client: bool,
 }
 
 impl Default for NexgenConfig {
@@ -18,6 +21,7 @@ impl Default for NexgenConfig {
         Self {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: false,
+            client: false,
         }
     }
 }
@@ -58,6 +62,7 @@ mod tests {
         let outer = NexgenConfig {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
+            client: false,
         };
         {
             let _outer_scope = scope(outer);
@@ -77,6 +82,7 @@ mod tests {
         let config = NexgenConfig {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
+            client: false,
         };
         {
             let _scope = scope(config);

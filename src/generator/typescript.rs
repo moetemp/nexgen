@@ -26,10 +26,10 @@ use crate::planning::{
 };
 use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{
-    AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec,
-    FunctionFieldSpec, FunctionResultSpec, IntSpec, LanguageImportSpec, LanguageImportStyle,
-    ModulePath, OperationSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec,
-    SelectedTextSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
+    AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec,
+    FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, IntSpec, LanguageImportSpec,
+    LanguageImportStyle, ModulePath, OperationSpec, RecordFieldSpec, RecordFieldVisibility,
+    RecordSpec, SelectedTextSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 
@@ -241,7 +241,7 @@ impl TypeScriptExternalModels {
             model,
             planned_record,
             api_plan,
-            &|value_type| resolve_typescript_value_type(api_plan, self, value_type),
+            &|value_type| resolve_typescript_value_type(api_plan, self, value_type, false),
         )
     }
 
@@ -318,6 +318,8 @@ struct ApiPlanner<'a> {
     flags: IndexMap<String, RenderedFlags>,
     variants: IndexMap<String, RenderedVariant>,
     models: IndexMap<String, RenderedModel>,
+    // False only while a proto-backed record's fields resolve.
+    json_ints: bool,
 }
 
 impl<'a> ApiPlanner<'a> {
@@ -328,6 +330,7 @@ impl<'a> ApiPlanner<'a> {
             enums: IndexMap::new(),
             flags: IndexMap::new(),
             variants: IndexMap::new(),
+            json_ints: true,
             models: IndexMap::new(),
         })
     }
@@ -511,15 +514,20 @@ impl<'a> ApiPlanner<'a> {
             output_annotation: output_transform
                 .and_then(|transform| transform.type_name.value().map(str::to_string))
                 .or_else(|| {
-                    output_resource_return
-                        .as_ref()
-                        .map(|resource| resource.resource_type_name.clone())
+                    output_resource_return.as_ref().map(|resource| {
+                        resource
+                            .holder
+                            .as_ref()
+                            .map_or(&resource.resource_type_name, |holder| &holder.model_name)
+                            .clone()
+                    })
                 })
                 .unwrap_or(output_annotation_default),
             output_transform_type_import: output_transform
                 .and_then(|transform| transform.type_import.value().map(str::to_string)),
             output_transform_expr: output_transform
-                .and_then(|transform| transform.transform.value().map(str::to_string)),
+                .and_then(|transform| transform.transform.value().map(str::to_string))
+                .or_else(|| held_resource_transform(self.api_plan, operation.output_type()?)),
             output_resource_return,
             output_direct_result: operation.output_direct_result(),
             output_model_name: operation
@@ -833,6 +841,29 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn build_field_with_wire_expr(
+        &mut self,
+        record: &RecordSpec<PlannedFamily>,
+        field_name: &str,
+        field: &RecordFieldSpec<PlannedFamily>,
+        generated_field_name: &str,
+        wire_field_name: &str,
+        wire_field_expr: &str,
+    ) -> RenderedField {
+        let proto_backed = matches!(record.source, Some(ExternalTypeSourceSpec::Proto(_)));
+        let json_ints = std::mem::replace(&mut self.json_ints, !proto_backed);
+        let rendered = self.build_record_field(
+            record,
+            field_name,
+            field,
+            generated_field_name,
+            wire_field_name,
+            wire_field_expr,
+        );
+        self.json_ints = json_ints;
+        rendered
+    }
+
+    fn build_record_field(
         &mut self,
         record: &RecordSpec<PlannedFamily>,
         field_name: &str,
@@ -1297,7 +1328,12 @@ impl<'a> ApiPlanner<'a> {
 
     fn resolve_planned_value_type(&mut self, value_type: &PlannedType) -> ResolvedFieldType {
         self.ensure_rendered_value_type(value_type);
-        resolve_typescript_value_type(self.api_plan, &self.external_models, value_type)
+        resolve_typescript_value_type(
+            self.api_plan,
+            &self.external_models,
+            value_type,
+            self.json_ints,
+        )
     }
 
     /// Register declarations separately from pure type resolution so emission
@@ -1381,6 +1417,7 @@ fn resolve_typescript_value_type(
     api_plan: &PlannedSpec,
     external_models: &TypeScriptExternalModels,
     value_type: &PlannedType,
+    json: bool,
 ) -> ResolvedFieldType {
     match value_type {
         PlannedType::TypeParameter(parameter) => ResolvedFieldType {
@@ -1395,19 +1432,21 @@ fn resolve_typescript_value_type(
             requirements: TypeScriptRequirements::default(),
             wire_conversion: None,
         },
-        PlannedType::Int(IntSpec::I32) => ResolvedFieldType {
-            annotation: "number".to_string(),
-            kind: ResolvedFieldKind::Scalar,
-            requirements: TypeScriptRequirements::default(),
-            wire_conversion: None,
-        },
-        PlannedType::Int(IntSpec::I64) => ResolvedFieldType {
+        // A proto 64-bit field is the proto runtime's `Long`. Anything else goes over JSON, and
+        // the other languages read it as a plain number.
+        PlannedType::Int(IntSpec::I64) if !json => ResolvedFieldType {
             annotation: "Long".to_string(),
             kind: ResolvedFieldKind::Scalar,
             requirements: TypeScriptRequirements {
                 long: true,
                 ..Default::default()
             },
+            wire_conversion: None,
+        },
+        PlannedType::Int(_) => ResolvedFieldType {
+            annotation: "number".to_string(),
+            kind: ResolvedFieldKind::Scalar,
+            requirements: TypeScriptRequirements::default(),
             wire_conversion: None,
         },
         PlannedType::Bool => ResolvedFieldType {
@@ -1505,7 +1544,7 @@ fn resolve_typescript_value_type(
             wire_conversion: None,
         },
         PlannedType::Option(inner) => {
-            let inner = resolve_typescript_value_type(api_plan, external_models, inner);
+            let inner = resolve_typescript_value_type(api_plan, external_models, inner, json);
             ResolvedFieldType {
                 annotation: format!("{} | undefined", inner.annotation),
                 kind: inner.kind,
@@ -1514,7 +1553,7 @@ fn resolve_typescript_value_type(
             }
         }
         PlannedType::List(inner) => {
-            let inner = resolve_typescript_value_type(api_plan, external_models, inner);
+            let inner = resolve_typescript_value_type(api_plan, external_models, inner, json);
             ResolvedFieldType {
                 annotation: typescript_array_annotation(&inner.annotation),
                 kind: ResolvedFieldKind::Scalar,
@@ -1523,8 +1562,8 @@ fn resolve_typescript_value_type(
             }
         }
         PlannedType::Map(key, value) => {
-            let key = resolve_typescript_value_type(api_plan, external_models, key);
-            let value = resolve_typescript_value_type(api_plan, external_models, value);
+            let key = resolve_typescript_value_type(api_plan, external_models, key, json);
+            let value = resolve_typescript_value_type(api_plan, external_models, value, json);
             let mut requirements = key.requirements;
             requirements.merge(&value.requirements);
             ResolvedFieldType {
@@ -1537,7 +1576,7 @@ fn resolve_typescript_value_type(
         PlannedType::Tuple(items) => {
             let item_types = items
                 .iter()
-                .map(|item| resolve_typescript_value_type(api_plan, external_models, item))
+                .map(|item| resolve_typescript_value_type(api_plan, external_models, item, json))
                 .collect::<Vec<_>>();
             let mut requirements = TypeScriptRequirements::default();
             for item_type in &item_types {
@@ -1560,10 +1599,10 @@ fn resolve_typescript_value_type(
         PlannedType::Result { ok, err } => {
             let ok = ok
                 .as_ref()
-                .map(|ok| resolve_typescript_value_type(api_plan, external_models, ok));
+                .map(|ok| resolve_typescript_value_type(api_plan, external_models, ok, json));
             let err = err
                 .as_ref()
-                .map(|err| resolve_typescript_value_type(api_plan, external_models, err));
+                .map(|err| resolve_typescript_value_type(api_plan, external_models, err, json));
             let mut requirements = TypeScriptRequirements::default();
             if let Some(ok) = &ok {
                 requirements.merge(&ok.requirements);
@@ -1586,7 +1625,8 @@ fn resolve_typescript_value_type(
             target: fallback,
             ..
         })) => {
-            let mut resolved = resolve_typescript_value_type(api_plan, external_models, fallback);
+            let mut resolved =
+                resolve_typescript_value_type(api_plan, external_models, fallback, json);
             if let Some(annotation) = type_name.value() {
                 resolved.annotation = annotation.to_string();
                 resolved.requirements = TypeScriptRequirements {
@@ -2572,8 +2612,7 @@ pub(in crate::generator) fn typescript_authored_type_annotation(
 ) -> String {
     match authored_type {
         TypeSpec::Bool => "boolean".to_string(),
-        TypeSpec::Int(IntSpec::I32) | TypeSpec::Float => "number".to_string(),
-        TypeSpec::Int(IntSpec::I64) => "Long".to_string(),
+        TypeSpec::Int(_) | TypeSpec::Float => "number".to_string(),
         TypeSpec::String => "string".to_string(),
         TypeSpec::Bytes => "Uint8Array".to_string(),
         TypeSpec::TypeParameter(parameter) => parameter.name.clone(),
@@ -3850,6 +3889,16 @@ fn render_endpoint_service_operation_body(
         output.push_str("    return ");
         output.push_str(transform_expr);
         output.push_str(";\n");
+    } else if let Some(resource_return) = &operation.output_resource_return
+        && resource_return.holder.is_some()
+    {
+        output.push_str("    const result = await handle.result();\n");
+        output.push_str("    return ");
+        output.push_str(&typescript_resource_return_value(
+            resource_return,
+            Some("this.client"),
+        ));
+        output.push_str(";\n");
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("    const result = await handle.result();\n");
         output.push_str("    return ");
@@ -4229,6 +4278,29 @@ fn render_models_module(
         api_plan,
         &body,
     );
+    // A result record that holds a resource uses its class.
+    let held_resources = api_plan
+        .services
+        .iter()
+        .flat_map(|service| service.operations.iter())
+        .filter_map(|operation| operation.data.output_resource_return.as_ref())
+        .filter(|resource_return| resource_return.holder.is_some())
+        .map(|resource_return| resource_return.resource_type_name.clone())
+        .chain(api_plan.records().filter_map(|(_, record)| {
+            record
+                .fields
+                .values()
+                .find_map(|field| match field.field_type.without_option() {
+                    TypeSpec::Resource(resource) => Some(resource.type_name.clone()),
+                    _ => None,
+                })
+        }))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect::<Vec<_>>();
+    if !held_resources.is_empty() {
+        render_type_imports(&mut imports, "./resources", &held_resources);
+    }
     render_generated_module(imports, body)
 }
 
@@ -4429,6 +4501,9 @@ fn render_resources_module(
         &[("workflow", typescript_workflow_module(), false)],
     );
     render_typescript_requirement_imports(&mut imports, requirements);
+    if body.contains("Long.fromNumber(") {
+        imports.push_str("import Long from \"long\";\n");
+    }
     render_type_imports(
         &mut imports,
         "./models",
@@ -5578,10 +5653,14 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
         output.push_str("  public async ");
         output.push_str(&typescript_generated_field_name(&method.name));
         output.push_str("(\n");
-        for param in &method.params {
+        // TypeScript refuses an optional parameter before a required one, and WIT allows
+        // any order, so such a parameter takes `undefined` explicitly.
+        let last_required = method.params.iter().rposition(|param| !param.optional);
+        for (index, param) in method.params.iter().enumerate() {
+            let before_required = last_required.is_some_and(|last| index < last);
             output.push_str("    ");
             output.push_str(&typescript_generated_field_name(&param.name));
-            if param.optional {
+            if param.optional && !before_required {
                 output.push('?');
             }
             output.push_str(": ");
@@ -5590,6 +5669,9 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                 false,
                 param.function.as_ref(),
             ));
+            if param.optional && before_required {
+                output.push_str(" | undefined");
+            }
             output.push_str(",\n");
         }
         output.push_str("  ): Promise<");
@@ -5608,6 +5690,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                     .expect("bound operation should exist on the resource service");
                 let branchable_params =
                     branchable_request_method_params(method, request_plan, operation);
+                let long_sources = typescript_long_sources(resource, method, operation);
                 let endpoint_expr = None;
                 let client_expr = service
                     .endpoint
@@ -5625,6 +5708,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                         request_plan,
                         &branchable_params,
                         true,
+                        &long_sources,
                     ));
                 } else {
                     output.push_str(&render_resource_method_operation_body(
@@ -5638,6 +5722,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                         request_plan,
                         &branchable_params,
                         false,
+                        &long_sources,
                     ));
                 }
             }
@@ -5754,8 +5839,7 @@ fn typescript_resource_field_annotation(
 
 fn typescript_resource_value_annotation(value: &PlannedType) -> String {
     match value {
-        PlannedType::Int(IntSpec::I32) => "number".to_string(),
-        PlannedType::Int(IntSpec::I64) => "Long".to_string(),
+        PlannedType::Int(_) => "number".to_string(),
         PlannedType::Float => "number".to_string(),
         PlannedType::Bool => "boolean".to_string(),
         PlannedType::String => "string".to_string(),
@@ -5835,9 +5919,6 @@ fn collect_typescript_value_requirements(
     requirements: &mut TypeScriptRequirements,
 ) {
     match value {
-        PlannedType::Int(IntSpec::I64) => {
-            requirements.long = true;
-        }
         PlannedType::Option(inner) | PlannedType::List(inner) => {
             collect_typescript_value_requirements(inner, requirements);
         }
@@ -5928,6 +6009,7 @@ fn render_resource_method_operation_body(
     request_plan: &RequestPlan,
     branchable_params: &[String],
     direct_return: bool,
+    long_sources: &BTreeMap<String, bool>,
 ) -> String {
     let indent_str = " ".repeat(indent);
     if let Some((param_name, remaining)) = branchable_params.split_first() {
@@ -5948,6 +6030,7 @@ fn render_resource_method_operation_body(
             request_plan,
             remaining,
             direct_return,
+            long_sources,
         ));
         output.push_str(&indent_str);
         output.push_str("} else {\n");
@@ -5962,13 +6045,14 @@ fn render_resource_method_operation_body(
             request_plan,
             remaining,
             direct_return,
+            long_sources,
         ));
         output.push_str(&indent_str);
         output.push_str("}\n");
         return output;
     }
 
-    let request_expr = render_request_plan_typescript(request_plan);
+    let request_expr = render_request_plan_typescript(request_plan, long_sources);
     let mut output = String::new();
     output.push_str(&indent_str);
     output.push_str("const request = ");
@@ -6116,7 +6200,15 @@ fn render_resource_start_operation(
     output.push_str("    );\n");
 }
 
-fn render_request_plan_typescript(plan: &RequestPlan) -> String {
+fn render_request_plan_typescript(
+    plan: &RequestPlan,
+    long_sources: &BTreeMap<String, bool>,
+) -> String {
+    let long_value = |name: &str, value: String| match long_sources.get(name) {
+        Some(true) => format!("{value} == null ? undefined : Long.fromNumber({value})"),
+        Some(false) => format!("Long.fromNumber({value})"),
+        None => value,
+    };
     render_request_plan(
         plan,
         typescript_generated_field_name,
@@ -6128,9 +6220,75 @@ fn render_request_plan_typescript(plan: &RequestPlan) -> String {
                 format!("{{ {} }}", fields.join(", "))
             }
         },
-        |name| format!("this.{}", typescript_generated_field_name(name)),
-        typescript_generated_field_name,
+        |name| {
+            long_value(
+                name,
+                format!("this.{}", typescript_generated_field_name(name)),
+            )
+        },
+        |name| long_value(name, typescript_generated_field_name(name)),
     )
+}
+
+/// The 64-bit resource fields and method params of a method whose request is proto-backed, with
+/// whether each is optional. They are numbers, and the proto-backed request has `Long` fields.
+fn typescript_long_sources(
+    resource: &PlannedResource,
+    method: &PlannedResourceMethod,
+    operation: &RenderedOperation<'_>,
+) -> BTreeMap<String, bool> {
+    if !operation
+        .input
+        .as_ref()
+        .is_some_and(|input| input.transfer_type_converter.is_some())
+    {
+        return BTreeMap::new();
+    }
+    resource
+        .fields
+        .iter()
+        .chain(&method.params)
+        .filter(|field| matches!(field.kind, PlannedType::Int(IntSpec::I64)))
+        .map(|field| (field.name.clone(), field.optional))
+        .collect()
+}
+
+/// The resource that an operation returns, bound to `client` when one is given, or the
+/// result record that holds it. The record takes each other field from the field of the
+/// same name in the wire record.
+fn typescript_resource_return_value(
+    resource_return: &PlannedOperationResourceReturn,
+    client: Option<&str>,
+) -> String {
+    let args = resource_return
+        .bindings
+        .iter()
+        .map(resource_return_binding_expr_typescript)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let mut value = format!("new {}({args})", resource_return.resource_type_name);
+    if let Some(client) = client {
+        value = format!(
+            "{}({value}, {client})",
+            resource_client_bind_function_name_for_type(&resource_return.resource_type_name)
+        );
+    }
+    let Some(holder) = &resource_return.holder else {
+        return value;
+    };
+    let fields = holder
+        .fields
+        .iter()
+        .map(|field| {
+            let name = typescript_generated_field_name(&field.name);
+            if field.resource {
+                format!("{name}: {value}")
+            } else {
+                format!("{name}: result.{name}")
+            }
+        })
+        .collect::<Vec<_>>();
+    format!("{{ {} }}", fields.join(", "))
 }
 
 fn resource_return_binding_expr_typescript(
@@ -6328,6 +6486,10 @@ fn render_operation_function(
             output.push_str("  return ");
             output.push_str(transform_expr);
             output.push_str(";\n");
+        } else if let Some(resource_return) = &operation.output_resource_return {
+            output.push_str("  return ");
+            output.push_str(&typescript_resource_return_value(resource_return, None));
+            output.push_str(";\n");
         } else {
             output.push_str("  return result as ");
             output.push_str(&operation.output_annotation);
@@ -6358,6 +6520,16 @@ fn render_operation_function(
         output.push_str("  const result = await handle.result();\n");
         output.push_str("  return ");
         output.push_str(transform_expr);
+        output.push_str(";\n");
+    } else if let Some(resource_return) = &operation.output_resource_return
+        && resource_return.holder.is_some()
+    {
+        output.push_str("  const result = await handle.result();\n");
+        output.push_str("  return ");
+        output.push_str(&typescript_resource_return_value(
+            resource_return,
+            service.endpoint.is_none().then_some("endpoint"),
+        ));
         output.push_str(";\n");
     } else if let Some(resource_return) = &operation.output_resource_return {
         output.push_str("  const result = await handle.result();\n");
@@ -6470,6 +6642,36 @@ fn render_operation_input_alias(
         output.push_str("?: never");
     }
     output.push_str(" }\n    : never\n  : never;\n\n");
+}
+
+/// A WIT-only result record that holds a resource gets the resource as a plain object, so the
+/// operation builds the class from it.
+fn held_resource_transform(api_plan: &PlannedSpec, output: &PlannedType) -> Option<String> {
+    let PlannedType::Record(record) = output else {
+        return None;
+    };
+    let record = api_plan.record(&record.full_name)?;
+    if record.source.is_some() {
+        return None;
+    }
+    let (field_name, resource_name) =
+        record
+            .fields
+            .values()
+            .find_map(|field| match field.field_type.without_option() {
+                TypeSpec::Resource(resource) => Some((&field.name, &resource.type_name)),
+                _ => None,
+            })?;
+    let resource = api_plan
+        .services
+        .iter()
+        .flat_map(|service| service.resources.iter())
+        .map(|resource| &resource.data)
+        .find(|resource| resource.type_name == *resource_name)?;
+    let field = typescript_generated_field_name(field_name);
+    let mut value = String::new();
+    render_resource_constructor(&mut value, resource, &format!("result.{field}"), "  ");
+    Some(format!("{{ ...result, {field}: {value} }}"))
 }
 
 fn render_resource_constructor(
@@ -6636,9 +6838,8 @@ fn is_typescript_keyword(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        TypeScriptRequirements, collect_typescript_value_requirements, render_support_import,
-        render_support_import_if, render_typescript_requirement_imports, sourced_support_call,
-        support_reference,
+        TypeScriptRequirements, render_support_import, render_support_import_if,
+        render_typescript_requirement_imports, sourced_support_call, support_reference,
     };
     use std::path::Path;
     use std::path::PathBuf;
@@ -6647,8 +6848,6 @@ mod tests {
     use crate::generator::generate_source;
     use crate::language::Language;
     use crate::nexgen_config::{NexgenConfig, current, scope};
-    use crate::planning::PlannedType;
-    use crate::spec::IntSpec;
 
     #[test]
     fn helper_calls_ignore_prose_literals_and_qualified_calls() {
@@ -6671,11 +6870,10 @@ mod tests {
 
     #[test]
     fn requirement_imports_are_structural() {
-        let nested_long = PlannedType::List(Box::new(PlannedType::Option(Box::new(
-            PlannedType::Int(IntSpec::I64),
-        ))));
-        let mut requirements = TypeScriptRequirements::default();
-        collect_typescript_value_requirements(&nested_long, &mut requirements);
+        let requirements = TypeScriptRequirements {
+            long: true,
+            ..Default::default()
+        };
 
         let mut imports = String::new();
         render_typescript_requirement_imports(&mut imports, &requirements);

@@ -2,9 +2,17 @@
 
 import * as workflow from "@temporalio/workflow";
 import * as nexus from "nexus-rpc";
-import type { GetUserRequest, UpdateEmailRequest } from "./models";
-import type { User } from "./resources";
-import { bindUserClient } from "./resources";
+import type {
+  GetUserRequest,
+  UpdateEmailRequest,
+  NotifyRequest,
+  UserProfile,
+  GetProfileRequest,
+  OpenSessionRequest,
+  EndSessionRequest,
+} from "./models";
+import type { User, Session } from "./resources";
+import { bindUserClient, bindSessionClient } from "./resources";
 
 export const userService = nexus.service("UserService", {
   /**
@@ -12,6 +20,10 @@ export const userService = nexus.service("UserService", {
    */
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
   updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
+  notify: nexus.operation<NotifyRequest, void>({ name: "Notify" }),
+  getProfile: nexus.operation<GetProfileRequest, UserProfile>({ name: "GetProfile" }),
+  openSession: nexus.operation<OpenSessionRequest, Session>({ name: "OpenSession" }),
+  endSession: nexus.operation<EndSessionRequest, void>({ name: "EndSession" }),
 });
 
 export class UserServiceClient {
@@ -48,5 +60,44 @@ export class UserServiceClient {
     );
     const resource = await handle.result();
     return bindUserClient(resource, this.client);
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async notify(
+    request: NotifyRequest,
+  ): Promise<workflow.NexusOperationHandle<void>> {
+    return await this.client.startOperation(userService.operations.notify, request);
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async getProfile(
+    request: GetProfileRequest,
+  ): Promise<workflow.NexusOperationHandle<UserProfile>> {
+    return await this.client.startOperation(userService.operations.getProfile, request);
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async openSession(request: OpenSessionRequest): Promise<Session> {
+    const handle = await this.client.startOperation(
+      userService.operations.openSession,
+      request,
+    );
+    const resource = await handle.result();
+    return bindSessionClient(resource, this.client);
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async endSession(
+    request: EndSessionRequest,
+  ): Promise<workflow.NexusOperationHandle<void>> {
+    return await this.client.startOperation(userService.operations.endSession, request);
   }
 }

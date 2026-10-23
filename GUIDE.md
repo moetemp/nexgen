@@ -29,6 +29,7 @@ of `@nexus` directives.
   - [Omitted Fields](#omitted-fields)
   - [Flattened Records](#flattened-records)
   - [Output Transforms](#output-transforms)
+- [Callers Outside a Workflow](#callers-outside-a-workflow)
 - [Function References](#function-references)
 - [Directive Glossary](#directive-glossary)
 
@@ -707,6 +708,27 @@ return StartedWorkflow(
 If a resource constructor field name cannot be found in either, the generator
 raises `InvalidResource`.
 
+**A result record that holds the resource.** An operation can also return a
+proto-backed record with one `own<T>` field and other fields. The resource binds
+from the record's message as above, and the other fields come from the fields of
+the same name. The record is the API model only, and it declares only the fields
+that its caller sees. Its message travels as a wire record that takes the proto
+message's name. Python, TypeScript, .NET and Go generate it. In Python, the
+record lives in its resource's module.
+
+```wit
+/// @nexus.proto "acme.jobs.v1.CreateJobResponse"
+record create-job-result {
+  job: own<job>,
+  created: option<bool>,
+}
+```
+
+```python
+result = await handle  # CreateJobResponse
+return CreateJobResult(job=Job(job_id=result.job_id), created=result.created)
+```
+
 ### Edge Cases and Error Conditions
 
 #### Same field name in constructor and method parameter
@@ -1055,6 +1077,84 @@ return handles.FromSignalWithStart(request, &result)
 ```
 
 ---
+
+## Callers Outside a Workflow
+
+With `--client`, the Python target also writes `client.py` beside `models.py`.
+It declares one caller per service, `<Service>Client`, for code that is not in a
+Workflow, such as an Activity or a client process. The caller does not choose
+how a call travels. It takes a `Transport`, an object with one method:
+
+```python
+class Transport(typing.Protocol):
+    async def call(
+        self,
+        *,
+        service: str,
+        operation: str,
+        input: temporalio.api.common.v1.Payload,
+    ) -> temporalio.api.common.v1.Payload: ...
+```
+
+Each caller method converts its request to a payload, gives it to the transport,
+and converts the answer. A proto-backed model travels as a `binary/protobuf`
+payload of its proto message, so a transport that moves proto bytes needs
+nothing else. An answer for it can be `binary/protobuf`, `json/protobuf` or
+`json/plain`. The caller takes a `data_converter`, the SDK default when none is
+given. Each payload and failure inside a proto-backed model goes through its
+converters and codec, as in Workflow code. The model's own payload doesn't,
+since the service reads it. A model that is not proto-backed is one user value,
+and the data converter converts and encodes it whole. A transport raises
+`TransportError` for a call that failed, with `retryable` set when the same call
+can succeed later.
+
+```python
+client = StartWorkflowServiceClient(my_transport)
+response = await client.cancel_workflow(request)
+```
+
+An operation with `@nexus.long-poll` also gets `<operation>_until_<result>`,
+which takes the request and a `deadline` (a `datetime.timedelta`). It calls the
+operation until an answer has something in the result list, or has the done
+field set, or the deadline passes. At the deadline it returns the last answer,
+so the caller keeps its place. Each call asks the service to wait for what is
+left of the deadline, at most `max-wait-ms`. After an answer with nothing, the
+next call starts from the answer's next offset, and the idle timeout counts down
+across calls. An answer with nothing that comes back in less than half of its
+wait is followed by a pause, from 50 ms and doubling up to 2 s. A
+`TransportError` with `retryable` set is tried again while the deadline allows.
+
+```python
+answer = await client.read_until_entries(request, deadline=timedelta(seconds=30))
+```
+
+Each resource with methods also gets a class in `client.py`, of the same name as
+the Workflow class. It takes the caller and the constructor fields, and each
+method fills in the request from them and calls the caller. A caller method
+whose operation returns such a resource gives back an instance bound to the
+caller.
+
+```python
+started = await client.start_workflow(request)  # StartedWorkflow
+await started.cancel(reason="done")
+```
+
+When the long poll also sets `offset-field` and `next-offset-field`, the caller
+gets `iter_<operation>`, an async iterator over the items of the result list.
+Each page is one `_until_` call, so it waits and backs off by the same rules.
+The next page starts at the answer's next offset. The iterator ends after an
+answer with the done field set, or when its optional `deadline` passes. With no
+deadline, it ends only on done. The idle timeout counts within one page.
+
+```python
+async for entry in client.iter_read(request):
+    print(entry.offset)
+```
+
+The caller supports operations whose input and output are models of the same
+module. An operation whose models take type parameters, or that returns a
+resource without a wire type, is a generation error. TypeScript and .NET do not
+generate a caller yet.
 
 ## Function References
 
@@ -1703,6 +1803,49 @@ Cannot be combined with `@nexus.source`.
 
 ---
 
+### @nexus.long-poll
+
+**Placement:** Operation (function) whose input and output are records
+**Syntax:**
+
+```
+@nexus.long-poll
+  wait-field="<input-field>" result-field="<output-field>"
+  [max-wait-ms="<milliseconds>"] [done-field="<output-field>"]
+  [offset-field="<input-field>" next-offset-field="<output-field>"]
+  [idle-timeout-field="<input-field>"]
+```
+
+Declares that the endpoint parks a call for up to the wait the caller sends, and
+answers early when it has something. Each member is a WIT field name. The
+directive changes no model and no wire byte. A generated client uses it to
+repeat the call until it answers with something or a deadline passes. With both
+offset fields, the client and a bound resource method also read the pages as one
+async iterator.
+
+- `wait-field` is an optional input field, a `duration` or an integer count of
+  milliseconds. The caller sets it on each call, so it is not a parameter.
+- `max-wait-ms` is the largest wait the endpoint accepts. A call never asks for
+  more.
+- `result-field` is an output list. An empty list means nothing came yet.
+- `done-field` is an output boolean that says nothing more will come.
+- `offset-field` and `next-offset-field` go together. Both are integer fields of
+  the same type. After an answer with nothing, the next call starts from the
+  offset that the answer gave, so a read that starts at the end does not skip
+  what arrives between calls.
+- `idle-timeout-field` is an optional input field, a `duration` or an integer
+  count of milliseconds. The endpoint ends a call when nothing comes for this
+  long. Each call sends what is left of it, so the idle time counts across
+  calls.
+
+```wit
+/// @nexus.long-poll wait-field="wait" max-wait-ms="60000" result-field="entries"
+///   done-field="done" offset-field="from-offset" next-offset-field="next-offset"
+read: func(request: read-request) -> read-response;
+```
+
+---
+
 ### @nexus.experimental
 
 **Placement:** Interface, record, variant, or operation (function) **Syntax:**
@@ -1726,10 +1869,11 @@ variant outcome {
 
 ### @nexus.doc
 
-**Placement:** Record, record field, variant, variant case, or operation
-(function) **Syntax:** `@nexus.doc "<text>" [returns="<text>"]` Per-language
-overrides: `python="<text>"` `typescript="<text>"` `go="<text>"`
-`dotnet="<text>"` `java="<text>"` Return docs: `python-returns="<text>"`
+**Placement:** Record, record field, variant, variant case, operation
+(function), resource, or resource method **Syntax:**
+`@nexus.doc "<text>" [returns="<text>"]` Per-language overrides:
+`python="<text>"` `typescript="<text>"` `go="<text>"` `dotnet="<text>"`
+`java="<text>"` Return docs: `python-returns="<text>"`
 `typescript-returns="<text>"` `go-returns="<text>"` `dotnet-returns="<text>"`
 `java-returns="<text>"`
 
@@ -1745,6 +1889,9 @@ Javadoc text) so authored content cannot break the generated source.
 ///   returns="A workflow handle to the started workflow."
 signal-with-start-workflow: func(...) -> ...;
 ```
+
+Python emits the docs of a resource and its methods as docstrings. The other
+targets don't emit them yet.
 
 Variant documentation is emitted by Python, TypeScript, Go, and .NET; Java does
 not currently generate WIT variants. Python emits an attribute docstring after

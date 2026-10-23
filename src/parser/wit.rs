@@ -1454,14 +1454,10 @@ fn resolve_authored_field_type_spec(
 ) -> Result<TypeSpec> {
     match ty {
         Type::Bool => Ok(TypeSpec::Bool),
-        Type::U8
-        | Type::U16
-        | Type::U32
-        | Type::U64
-        | Type::S8
-        | Type::S16
-        | Type::S32
-        | Type::S64 => Ok(TypeSpec::Int(IntSpec::I32)),
+        Type::S8 | Type::S16 | Type::S32 => Ok(TypeSpec::Int(IntSpec::I32)),
+        Type::S64 => Ok(TypeSpec::Int(IntSpec::I64)),
+        Type::U8 | Type::U16 | Type::U32 => Ok(TypeSpec::Int(IntSpec::U32)),
+        Type::U64 => Ok(TypeSpec::Int(IntSpec::U64)),
         Type::F32 | Type::F64 => Ok(TypeSpec::Float),
         Type::Char | Type::String => Ok(TypeSpec::String),
         Type::Id(id) => {
@@ -2420,9 +2416,10 @@ fn resolve_named_wit_type(
 fn primitive_wit_type(type_name: &str) -> Option<TypeSpec> {
     match type_name {
         "bool" => Some(TypeSpec::Bool),
-        "u8" | "u16" | "u32" | "u64" | "s8" | "s16" | "s32" | "s64" => {
-            Some(TypeSpec::Int(IntSpec::I32))
-        }
+        "s8" | "s16" | "s32" => Some(TypeSpec::Int(IntSpec::I32)),
+        "s64" => Some(TypeSpec::Int(IntSpec::I64)),
+        "u8" | "u16" | "u32" => Some(TypeSpec::Int(IntSpec::U32)),
+        "u64" => Some(TypeSpec::Int(IntSpec::U64)),
         "f32" | "f64" => Some(TypeSpec::Float),
         "char" | "string" => Some(TypeSpec::String),
         "bytes" => Some(TypeSpec::Bytes),
@@ -2770,6 +2767,10 @@ fn build_resource(
         "{service_context} resource `{}`",
         resource_name.to_upper_camel_case()
     );
+    let resource_directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
+    let doc = directive(&resource_directives, "doc", path, &context)?
+        .map(directive_language_string)
+        .unwrap_or_default();
 
     let constructor = interface.functions.values().find(
         |function| matches!(function.kind, FunctionKind::Constructor(id) if id == resource_id),
@@ -2831,6 +2832,7 @@ fn build_resource(
 
     Ok(ResourceSpec {
         name: resource_name,
+        doc,
         fields,
         methods,
         data: (),
@@ -2880,6 +2882,9 @@ fn build_resource_method(
 
     Ok(ResourceMethodSpec {
         name: method_name,
+        doc: directive(&directives, "doc", path, &context)?
+            .map(directive_language_string)
+            .unwrap_or_default(),
         params,
         result,
         operation_name: build_resource_method_operation_name(&directives, path, &context)?,
@@ -2990,6 +2995,14 @@ fn build_operation(
         &operation_name,
     )?;
     let serialization_context = build_operation_serialization_context(&directives, path, &context)?;
+    let long_poll = build_operation_long_poll(
+        resolve,
+        &directives,
+        input_type,
+        function.result.as_ref(),
+        path,
+        &context,
+    )?;
     let output = if let Some(output_type) = function.result.as_ref() {
         Some(
             find_operation_type_spec(resolve, output_type, path, &context)?.ok_or_else(|| {
@@ -3029,8 +3042,224 @@ fn build_operation(
         output,
         output_transform,
         serialization_context,
+        long_poll,
         data: (),
     })
+}
+
+const LONG_POLL_KEYS: [&str; 7] = [
+    "wait-field",
+    "max-wait-ms",
+    "result-field",
+    "done-field",
+    "offset-field",
+    "next-offset-field",
+    "idle-timeout-field",
+];
+
+/// Reads `@nexus.long-poll` on an operation. Each `*-field` value is a WIT
+/// field name of the input or output record, and the spec keeps its record
+/// field key. A name that does not resolve, or a field of the wrong shape, is
+/// a load error here, not a compile error in generated code.
+fn build_operation_long_poll(
+    resolve: &Resolve,
+    directives: &[Directive],
+    input_type: &Type,
+    output_type: Option<&Type>,
+    path: &Path,
+    context: &str,
+) -> Result<Option<OperationLongPollSpec>> {
+    let Some(directive) = directive(directives, "long-poll", path, context)? else {
+        return Ok(None);
+    };
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.long-poll".to_string(),
+        reason,
+    };
+    if let Some(key) = directive
+        .args
+        .keys()
+        .find(|key| !LONG_POLL_KEYS.contains(&key.as_str()))
+    {
+        return Err(invalid(if key == "value" {
+            "takes only `key=value` members".to_string()
+        } else {
+            format!("unknown member `{key}`")
+        }));
+    }
+    let input = wit_record_of(resolve, input_type)
+        .ok_or_else(|| invalid("the operation input must be a record".to_string()))?;
+    let output = output_type
+        .and_then(|output_type| wit_record_of(resolve, output_type))
+        .ok_or_else(|| invalid("the operation output must be a record".to_string()))?;
+    let field = |record: &Record, side: &str, key: &str| -> Result<Option<(String, Type)>> {
+        let Some(name) = directive.value(key) else {
+            return Ok(None);
+        };
+        let Some(field) = record.fields.iter().find(|field| field.name == name) else {
+            return Err(invalid(format!(
+                "`{key}` refers to `{name}`, which the {side} record does not declare"
+            )));
+        };
+        let field_context = format!("{context} field `{name}`");
+        let field_directives =
+            parse_directives(field.docs.contents.as_deref(), path, &field_context)?;
+        let field_key = directive_value(
+            &field_directives,
+            "proto-field",
+            path,
+            &field_context,
+            "value",
+        )?
+        .unwrap_or_else(|| field.name.to_snake_case());
+        Ok(Some((field_key, field.ty)))
+    };
+    let duration_field = |key: &str| -> Result<Option<LongPollDurationField>> {
+        let Some((field_key, ty)) = field(input, "input", key)? else {
+            return Ok(None);
+        };
+        let Some(inner) = optional_inner_type(resolve, &ty) else {
+            return Err(invalid(format!(
+                "`{key}` must refer to an optional field, since the caller sets it on every call"
+            )));
+        };
+        let kind = if find_proto_name_for_type(resolve, &inner, path, context)?.as_deref()
+            == Some("google.protobuf.Duration")
+        {
+            LongPollDurationKind::Duration
+        } else if is_integer_type(resolve, &inner) {
+            LongPollDurationKind::Milliseconds
+        } else {
+            return Err(invalid(format!(
+                "`{key}` must refer to a duration or an integer count of milliseconds"
+            )));
+        };
+        Ok(Some(LongPollDurationField {
+            field: field_key,
+            kind,
+        }))
+    };
+
+    let wait_field = duration_field("wait-field")?
+        .ok_or_else(|| invalid("missing required `wait-field`".to_string()))?;
+    let max_wait_ms = directive
+        .value("max-wait-ms")
+        .map(|value| match value.parse::<u64>() {
+            Ok(value) if value > 0 => Ok(value),
+            _ => Err(invalid(format!(
+                "`max-wait-ms` must be a positive integer, found `{value}`"
+            ))),
+        })
+        .transpose()?;
+    let (result_field, result_type) = field(output, "output", "result-field")?
+        .ok_or_else(|| invalid("missing required `result-field`".to_string()))?;
+    if !is_list_or_optional_list(resolve, &result_type) {
+        return Err(invalid(
+            "`result-field` must refer to a list field".to_string(),
+        ));
+    }
+    let done_field = field(output, "output", "done-field")?
+        .map(|(field_key, ty)| {
+            if is_bool_or_optional_bool(resolve, &ty) {
+                Ok(field_key)
+            } else {
+                Err(invalid(
+                    "`done-field` must refer to a boolean field".to_string(),
+                ))
+            }
+        })
+        .transpose()?;
+    let offset = match (
+        field(input, "input", "offset-field")?,
+        field(output, "output", "next-offset-field")?,
+    ) {
+        (None, None) => None,
+        (Some((input_field, input_type)), Some((output_field, output_type))) => {
+            if optional_inner_type(resolve, &input_type).is_none() {
+                return Err(invalid(
+                    "`offset-field` must refer to an optional field, since a first call may omit it"
+                        .to_string(),
+                ));
+            }
+            if !is_integer_or_optional_integer(resolve, &input_type)
+                || !is_integer_or_optional_integer(resolve, &output_type)
+            {
+                return Err(invalid(
+                    "`offset-field` and `next-offset-field` must refer to integer fields"
+                        .to_string(),
+                ));
+            }
+            Some(LongPollOffsetFields {
+                input_field,
+                output_field,
+            })
+        }
+        _ => {
+            return Err(invalid(
+                "`offset-field` and `next-offset-field` go together".to_string(),
+            ));
+        }
+    };
+    let idle_timeout_field = duration_field("idle-timeout-field")?;
+
+    Ok(Some(OperationLongPollSpec {
+        wait_field,
+        max_wait_ms,
+        result_field,
+        done_field,
+        offset,
+        idle_timeout_field,
+    }))
+}
+
+fn wit_record_of<'a>(resolve: &'a Resolve, ty: &Type) -> Option<&'a Record> {
+    let Type::Id(id) = ty else {
+        return None;
+    };
+    match &resolve.types[*id].kind {
+        TypeDefKind::Record(record) => Some(record),
+        TypeDefKind::Type(inner) => wit_record_of(resolve, inner),
+        _ => None,
+    }
+}
+
+fn optional_inner_type(resolve: &Resolve, ty: &Type) -> Option<Type> {
+    let Type::Id(id) = ty else {
+        return None;
+    };
+    match &resolve.types[*id].kind {
+        TypeDefKind::Option(inner) => Some(*inner),
+        TypeDefKind::Type(inner) => optional_inner_type(resolve, inner),
+        _ => None,
+    }
+}
+
+fn is_list_or_optional_list(resolve: &Resolve, ty: &Type) -> bool {
+    let Type::Id(id) = ty else {
+        return false;
+    };
+    match &resolve.types[*id].kind {
+        TypeDefKind::List(_) => true,
+        TypeDefKind::Option(inner) | TypeDefKind::Type(inner) => {
+            is_list_or_optional_list(resolve, inner)
+        }
+        _ => false,
+    }
+}
+
+fn is_bool_or_optional_bool(resolve: &Resolve, ty: &Type) -> bool {
+    match ty {
+        Type::Bool => true,
+        Type::Id(id) => match &resolve.types[*id].kind {
+            TypeDefKind::Option(inner) | TypeDefKind::Type(inner) => {
+                is_bool_or_optional_bool(resolve, inner)
+            }
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 fn find_operation_type_spec(
@@ -3380,6 +3609,35 @@ fn experimental_directive(directives: &[Directive], path: &Path, context: &str) 
         });
     }
     Ok(true)
+}
+
+fn is_integer_type(resolve: &Resolve, ty: &Type) -> bool {
+    match ty {
+        Type::Id(id) => match &resolve.types[*id].kind {
+            TypeDefKind::Type(inner) => is_integer_type(resolve, inner),
+            _ => false,
+        },
+        _ => is_integer_or_optional_integer(resolve, ty),
+    }
+}
+
+fn is_integer_or_optional_integer(resolve: &Resolve, ty: &Type) -> bool {
+    match ty {
+        Type::U8
+        | Type::U16
+        | Type::U32
+        | Type::U64
+        | Type::S8
+        | Type::S16
+        | Type::S32
+        | Type::S64 => true,
+        Type::Id(id) => match &resolve.types[*id].kind {
+            TypeDefKind::Option(inner) => is_integer_type(resolve, inner),
+            TypeDefKind::Type(inner) => is_integer_or_optional_integer(resolve, inner),
+            _ => false,
+        },
+        _ => false,
+    }
 }
 
 fn delay_load_temporalio_workflow_directive(

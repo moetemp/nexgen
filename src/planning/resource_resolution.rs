@@ -816,26 +816,19 @@ fn operation_output_resource_holder<'a>(
             ),
         });
     };
-    // A WIT-only holder travels as JSON, with the resource as the object of its fields, as a
-    // direct `own<T>` result does. Without an endpoint, nothing binds the held resource to a
-    // client.
     let Some(proto_name) = record
         .source
         .as_ref()
         .and_then(|source| source.proto_type())
     else {
-        if service.endpoint.is_none() {
-            return Err(Error::InvalidResource {
-                service: service.name.clone(),
-                resource: resource_name.to_upper_camel_case(),
-                reason: format!(
-                    "result record `{}` of operation `{}` holds a resource, so it needs \
-                     `@nexus.proto` or a service with `@nexus.endpoint`",
-                    record.name, operation.name
-                ),
-            });
-        }
-        return Ok(None);
+        return Err(Error::InvalidResource {
+            service: service.name.clone(),
+            resource: resource_name.to_upper_camel_case(),
+            reason: format!(
+                "result record `{}` of operation `{}` holds a resource, so it needs `@nexus.proto`",
+                record.name, operation.name
+            ),
+        });
     };
     if service.resource(resource_name).is_none() {
         return Ok(None);

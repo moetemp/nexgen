@@ -32,3 +32,13 @@ class GetProfileRequest:
 @dataclasses.dataclass(slots=True)
 class UserProfile:
     display_name: str
+
+
+@dataclasses.dataclass(slots=True)
+class OpenSessionRequest:
+    user_id: str
+
+
+@dataclasses.dataclass(slots=True)
+class EndSessionRequest:
+    session: str

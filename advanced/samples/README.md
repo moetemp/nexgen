@@ -127,6 +127,7 @@ records are proto-backed, as a stream service's are, on the sample proto in
 [`descriptors/streamsample/`](descriptors/streamsample/).
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
+- .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/)
 - Python: [`python/wit/stream_service/`](python/wit/stream_service/)
 - TypeScript:
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),

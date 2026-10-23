@@ -15,9 +15,6 @@ import type { User, Session } from "./resources";
 import { bindUserClient, bindSessionClient } from "./resources";
 
 export const userService = nexus.service("UserService", {
-  /**
-   * Get a user by id.
-   */
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
   updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
   notify: nexus.operation<NotifyRequest, void>({ name: "Notify" }),
@@ -37,8 +34,6 @@ export class UserServiceClient {
   }
 
   /**
-   * Get a user by id.
-   *
    * @param request - Request for the operation.
    */
   public async getUser(request: GetUserRequest): Promise<User> {

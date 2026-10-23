@@ -76,7 +76,6 @@ class UserServiceClient:
         *,
         user_id: str,
     ) -> User:
-        """Get a user by id."""
         request = GetUserRequest(
             user_id=user_id,
         )

@@ -65,12 +65,12 @@ namespace Nexgen.UserService
     [GeneratedCode("nexgen", null)]
     public class Session
     {
-        public Session(string session)
+        public Session(string sessionValue)
         {
-            Session = session;
+            SessionValue = sessionValue;
         }
 
-        public string Session { get; }
+        public string SessionValue { get; }
 
         internal NexusWorkflowClient<IUserService>? NexgenClient { get; set; }
 
@@ -88,7 +88,7 @@ namespace Nexgen.UserService
         [GeneratedCode("nexgen", null)]
         public async Task EndAsync()
         {
-            var request = new EndSessionRequest(Session);
+            var request = new EndSessionRequest(SessionValue);
             await RequireNexgenClient().ExecuteNexusOperationAsync(svc => svc.EndSession(request)).ConfigureAwait(true);
         }
 

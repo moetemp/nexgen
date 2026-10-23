@@ -2,7 +2,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
 import * as nexus from "nexus-rpc";
 
-import { Session, User } from "../wit/user-service/resources.ts";
+import { User } from "../wit/user-service/resources.ts";
 import { userService } from "../wit/user-service/services.ts";
 import { executeWorkflowWithNexus, withWorkflowEnvironment } from "./helpers.ts";
 
@@ -30,13 +30,6 @@ describe("user-service generated output", () => {
           return new User(input.userId, input.email);
         },
         async notify() {},
-        async getProfile() {
-          return { displayName: "Alice" };
-        },
-        async openSession(_ctx, input) {
-          return new Session(input.userId);
-        },
-        async endSession() {},
       });
 
       const result = await executeWorkflowWithNexus<{

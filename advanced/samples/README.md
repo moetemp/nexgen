@@ -65,14 +65,6 @@ sample-project instructions for [Go](go/README.md), [Python](python/README.md),
   [`typescript/wit/start-workflow/`](typescript/wit/start-workflow/),
   [`typescript/tests/start-workflow.test.ts`](typescript/tests/start-workflow.test.ts)
 
-### `log-service`
-
-A long-poll read with offsets, and the Python caller from `--client`.
-
-- WIT: [`inputs/log-service.wit`](inputs/log-service.wit)
-- Python: [`python/wit/log_service/`](python/wit/log_service/),
-  [`python/tests/test_log_service.py`](python/tests/test_log_service.py)
-
 ### `workflow-handle`
 
 A System Nexus operation that returns a resource. TypeScript only for now.

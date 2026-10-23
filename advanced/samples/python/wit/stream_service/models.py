@@ -68,7 +68,7 @@ class ReadRecordsRequest:
     from_offset: int | None = None
     topics: list[str] | None = dataclasses.field(default_factory=list)
     max_records: int | None = None
-    wait: datetime.timedelta | None = None
+    wait_ms: int | None = None
 
 
 @dataclasses.dataclass(slots=True)

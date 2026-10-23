@@ -69,7 +69,7 @@ export interface ReadRecordsRequest {
   fromOffset?: number;
   topics?: string[];
   maxRecords?: number;
-  wait?: common.Duration;
+  waitMs?: number;
 }
 
 export interface DescribeStreamResponse {

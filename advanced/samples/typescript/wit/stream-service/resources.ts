@@ -35,14 +35,14 @@ export class Stream {
     fromOffset: number | undefined,
     topics: string[],
     maxRecords?: number,
-    wait?: common.Duration,
+    waitMs?: number,
   ): Promise<ReadRecordsResponse> {
     const request = {
       stream: this.stream,
       fromOffset: fromOffset,
       topics: topics,
       maxRecords: maxRecords,
-      wait: wait,
+      waitMs: waitMs,
     };
     const handle = await readRecords(request);
     return await handle.result();

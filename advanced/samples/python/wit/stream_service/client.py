@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import collections.abc
 import contextlib
+import dataclasses
+import datetime
 import typing
 
 import temporalio.api.common.v1
@@ -19,6 +23,7 @@ from .models import (
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
+    StreamRecord,
 )
 from ._resources import CreateStreamResult
 
@@ -56,6 +61,13 @@ class TransportError(Exception):
         """Create a transport error."""
         super().__init__(message)
         self.retryable: bool = retryable
+
+
+# An answer with nothing that comes back in less than half of its wait is
+# followed by a pause, so a service that ignores the wait is not asked again
+# at once. The pause doubles up to the last one.
+_LONG_POLL_FIRST_PAUSE = 0.05
+_LONG_POLL_LAST_PAUSE = 2.0
 
 
 class StreamServiceClient:
@@ -127,6 +139,85 @@ class StreamServiceClient:
         answer = await self._call("ReadRecords", payload)
         [value] = await self._data_converter.decode([answer], [ReadRecordsResponse])
         return typing.cast(ReadRecordsResponse, value)
+
+    async def read_records_until_records(
+        self,
+        request: ReadRecordsRequest,
+        *,
+        deadline: datetime.timedelta,
+    ) -> ReadRecordsResponse:
+        """Call ``read_records`` until it answers with ``records``, or with ``done`` set,
+        or the deadline passes.
+
+        Each call sets ``wait_ms`` to what is left of the deadline, at most 60 s.
+        After an answer with nothing, the next call sets ``from_offset`` to the answer's
+        ``next_offset``.
+        When the deadline passes, the last answer comes back, so the caller keeps its
+        place.
+        A ``TransportError`` with ``retryable`` set is tried again while the deadline
+        allows.
+        """
+        clock = asyncio.get_running_loop()
+        started = clock.time()
+        end = started + deadline.total_seconds()
+        attempt: ReadRecordsRequest = request
+        pause = _LONG_POLL_FIRST_PAUSE
+        while True:
+            wait = max(end - clock.time(), 0.001)
+            wait = min(wait, 60.0)
+            attempt = dataclasses.replace(attempt, wait_ms=max(int(wait * 1000), 1))
+            asked = clock.time()
+            try:
+                answer = await self.read_records(attempt)
+            except TransportError as error:
+                if not error.retryable or clock.time() + pause >= end:
+                    raise
+                await asyncio.sleep(pause)
+                pause = min(pause * 2, _LONG_POLL_LAST_PAUSE)
+                continue
+            if answer.records or answer.done:
+                return answer
+            if answer.next_offset is not None:
+                attempt = dataclasses.replace(attempt, from_offset=answer.next_offset)
+            left = end - clock.time()
+            if left <= 0:
+                return answer
+            if clock.time() - asked < wait / 2:
+                await asyncio.sleep(min(pause, left))
+                pause = min(pause * 2, _LONG_POLL_LAST_PAUSE)
+            else:
+                pause = _LONG_POLL_FIRST_PAUSE
+
+    async def iter_read_records(
+        self,
+        request: ReadRecordsRequest,
+        *,
+        deadline: datetime.timedelta | None = None,
+    ) -> collections.abc.AsyncIterator[StreamRecord]:
+        """Yield each item of ``records``, page after page, as one sequence.
+
+        Each page is one ``read_records_until_records`` call, which sets ``wait_ms`` to
+        what is left of the deadline. The next page starts at the answer's
+        ``next_offset``.
+        The iterator ends after an answer with ``done`` set, or when the deadline
+        passes. With no deadline, it ends only on ``done``.
+        """
+        clock = asyncio.get_running_loop()
+        end = None if deadline is None else clock.time() + deadline.total_seconds()
+        attempt = request
+        while True:
+            left = 60.0 if end is None else end - clock.time()
+            if left <= 0:
+                return
+            answer = await self.read_records_until_records(
+                attempt, deadline=datetime.timedelta(seconds=left)
+            )
+            for item in answer.records or []:
+                yield item
+            if answer.done:
+                return
+            if answer.next_offset is not None:
+                attempt = dataclasses.replace(attempt, from_offset=answer.next_offset)
 
     async def describe_stream(
         self, request: DescribeStreamRequest

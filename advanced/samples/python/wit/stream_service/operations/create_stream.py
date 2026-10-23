@@ -26,6 +26,8 @@ async def _create_stream(
         output_type=CreateStreamResult,
     )
     result = await handle
+    if result.stream is None:
+        raise RuntimeError("CreateStream answered without `stream`")
     return Stream(
         stream=result.stream,
     )

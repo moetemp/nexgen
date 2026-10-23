@@ -144,7 +144,7 @@ pub(crate) struct PlannedResourceHolderField {
 pub(crate) struct PlannedOperationResourceFieldBinding {
     pub(crate) field_name: String,
     pub(crate) optional: bool,
-    pub(crate) wide_int: bool,
+    pub(crate) long: bool,
     pub(crate) source: ResolvedResourceBindingSource,
 }
 

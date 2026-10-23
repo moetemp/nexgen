@@ -6289,7 +6289,7 @@ fn resource_return_binding_expr_typescript(
     binding: &PlannedOperationResourceFieldBinding,
 ) -> String {
     let value = resource_return_binding_value_typescript(binding);
-    if !binding.wide_int {
+    if !binding.long {
         return value;
     }
     // A proto answer holds a 64-bit integer as a `Long`, and the resource field is a number.

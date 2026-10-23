@@ -137,8 +137,8 @@ pub struct ResolvedResourceHolder {
 pub struct ResolvedResourceFieldBinding {
     pub field_name: String,
     pub optional: bool,
-    /// A 64-bit integer, which a proto answer holds as a wider type than the resource field.
-    pub wide_int: bool,
+    /// A 64-bit integer, which a proto answer holds as a `Long` in TypeScript.
+    pub long: bool,
     pub source: ResolvedResourceBindingSource,
 }
 
@@ -261,10 +261,7 @@ pub(crate) fn resolve_service_resources(
                 Ok(ResolvedResourceFieldBinding {
                     field_name: field.name.clone(),
                     optional: field.optional,
-                    wide_int: matches!(
-                        field.field_type,
-                        TypeSpec::Int(IntSpec::I64 | IntSpec::U64)
-                    ),
+                    long: matches!(field.field_type, TypeSpec::Int(IntSpec::I64 | IntSpec::U64)),
                     source,
                 })
             })

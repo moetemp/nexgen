@@ -521,6 +521,64 @@ export const openWriterRequestTransferTypeConverter = {
     return openWriterRequestToProto(value);
   },
 };
+export interface CloseWriterResponse {
+  lastOffset?: Long;
+}
+
+function closeWriterResponseFromProto(
+  proto: streamsample.v1.ICloseWriterResponse,
+): CloseWriterResponse {
+  return {
+    lastOffset: proto.lastOffset ?? undefined,
+  };
+}
+
+function closeWriterResponseToProto(
+  model: CloseWriterResponse,
+): streamsample.v1.ICloseWriterResponse {
+  return {
+    lastOffset: model.lastOffset,
+  };
+}
+
+export const closeWriterResponseTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.ICloseWriterResponse): CloseWriterResponse {
+    return closeWriterResponseFromProto(value);
+  },
+
+  toTransferType(value: CloseWriterResponse): streamsample.v1.ICloseWriterResponse {
+    return closeWriterResponseToProto(value);
+  },
+};
+export interface CloseWriterRequest {
+  writerId?: Long;
+}
+
+function closeWriterRequestFromProto(
+  proto: streamsample.v1.ICloseWriterRequest,
+): CloseWriterRequest {
+  return {
+    writerId: proto.writerId ?? undefined,
+  };
+}
+
+function closeWriterRequestToProto(
+  model: CloseWriterRequest,
+): streamsample.v1.ICloseWriterRequest {
+  return {
+    writerId: model.writerId,
+  };
+}
+
+export const closeWriterRequestTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.ICloseWriterRequest): CloseWriterRequest {
+    return closeWriterRequestFromProto(value);
+  },
+
+  toTransferType(value: CloseWriterRequest): streamsample.v1.ICloseWriterRequest {
+    return closeWriterRequestToProto(value);
+  },
+};
 export interface CloseWritersResponse {
   failed?: number;
 }

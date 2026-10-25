@@ -103,3 +103,11 @@ message OpenWriterRequest {
 
 message OpenWriterResponse {
 }
+
+message CloseWriterRequest {
+    uint64 writer_id = 1;
+}
+
+message CloseWriterResponse {
+    int64 last_offset = 1;
+}

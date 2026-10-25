@@ -97,5 +97,13 @@ export namespace streamsample {
     }
 
     interface IOpenWriterResponse {}
+
+    interface ICloseWriterRequest {
+      writerId?: Long | null;
+    }
+
+    interface ICloseWriterResponse {
+      lastOffset?: Long | null;
+    }
   }
 }

@@ -21,6 +21,8 @@ from .models import (
     AppendRecordsResponse,
     CloseStreamRequest,
     CloseStreamResponse,
+    CloseWriterRequest,
+    CloseWriterResponse,
     CloseWritersRequest,
     CloseWritersResponse,
     CreateStreamRequest,
@@ -38,6 +40,8 @@ from .models import (
     _AppendRecordsResponseTransferTypeConverter,
     _CloseStreamRequestTransferTypeConverter,
     _CloseStreamResponseTransferTypeConverter,
+    _CloseWriterRequestTransferTypeConverter,
+    _CloseWriterResponseTransferTypeConverter,
     _CloseWritersRequestTransferTypeConverter,
     _CloseWritersResponseTransferTypeConverter,
     _CreateStreamRequestTransferTypeConverter,
@@ -437,6 +441,20 @@ class StreamWriterClient:
         await _decode_payloads(message, self._data_converter.payload_codec)
         with self._converters():
             return converter.from_transfer_type(message, OpenWriterResponse)
+
+    async def close_writer(self, request: CloseWriterRequest) -> CloseWriterResponse:
+        with self._converters():
+            message = _CloseWriterRequestTransferTypeConverter().to_transfer_type(
+                request
+            )
+        await _encode_payloads(message, self._data_converter.payload_codec)
+        payload = _proto_payload(message)
+        answer = await self._call("CloseWriter", payload)
+        converter = _CloseWriterResponseTransferTypeConverter()
+        message = _proto_message(answer, converter.transfer_type)
+        await _decode_payloads(message, self._data_converter.payload_codec)
+        with self._converters():
+            return converter.from_transfer_type(message, CloseWriterResponse)
 
     async def close_writers(self, request: CloseWritersRequest) -> CloseWritersResponse:
         """Drop every open writer, for example at shutdown."""

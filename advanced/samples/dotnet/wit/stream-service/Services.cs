@@ -48,6 +48,10 @@ namespace Nexgen.StreamService
         [NexusOperation("OpenWriter")]
         OpenWriterResponse OpenWriter(OpenWriterRequest request);
 
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("CloseWriter")]
+        CloseWriterResponse CloseWriter(CloseWriterRequest request);
+
         /// <summary>
         /// Drop every open writer, for example at shutdown.
         /// </summary>
@@ -62,6 +66,12 @@ namespace Nexgen.StreamService
     {
         public StreamRef? Stream { get; set; }
         public System.TimeSpan? MaxRetryDuration { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class CloseWriterOptions
+    {
+        public ulong? WriterId { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -91,6 +101,24 @@ namespace Nexgen.StreamService
                 MaxRetryDuration = options?.MaxRetryDuration,
             };
             return OpenWriterAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task<CloseWriterResponse> CloseWriterAsync(CloseWriterRequest request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<CloseWriterResponse>(svc => svc.CloseWriter(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task<CloseWriterResponse> CloseWriterAsync(CloseWriterOptions? options = null)
+        {
+            var request = new CloseWriterRequest()
+            {
+                WriterId = options?.WriterId,
+            };
+            return CloseWriterAsync(request);
         }
 
         /// <summary>

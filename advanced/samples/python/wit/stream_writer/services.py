@@ -15,6 +15,12 @@ from .models import (
     OpenWriterResponse,
 )
 
+if typing.TYPE_CHECKING:
+    from .models import (
+        Producer,
+        StreamRef,
+    )
+
 
 @service(name="streamsample.v1.StreamWriter")
 class StreamWriter:

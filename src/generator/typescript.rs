@@ -4498,6 +4498,9 @@ fn render_resources_module(
         &[("workflow", typescript_workflow_module(), false)],
     );
     render_typescript_requirement_imports(&mut imports, requirements);
+    if body.contains("Long.fromNumber(") {
+        imports.push_str("import Long from \"long\";\n");
+    }
     render_type_imports(
         &mut imports,
         "./models",
@@ -5684,6 +5687,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                     .expect("bound operation should exist on the resource service");
                 let branchable_params =
                     branchable_request_method_params(method, request_plan, operation);
+                let long_sources = typescript_long_sources(resource, method, operation);
                 let endpoint_expr = None;
                 let client_expr = service
                     .endpoint
@@ -5701,6 +5705,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                         request_plan,
                         &branchable_params,
                         true,
+                        &long_sources,
                     ));
                 } else {
                     output.push_str(&render_resource_method_operation_body(
@@ -5714,6 +5719,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                         request_plan,
                         &branchable_params,
                         false,
+                        &long_sources,
                     ));
                 }
             }
@@ -6000,6 +6006,7 @@ fn render_resource_method_operation_body(
     request_plan: &RequestPlan,
     branchable_params: &[String],
     direct_return: bool,
+    long_sources: &BTreeMap<String, bool>,
 ) -> String {
     let indent_str = " ".repeat(indent);
     if let Some((param_name, remaining)) = branchable_params.split_first() {
@@ -6020,6 +6027,7 @@ fn render_resource_method_operation_body(
             request_plan,
             remaining,
             direct_return,
+            long_sources,
         ));
         output.push_str(&indent_str);
         output.push_str("} else {\n");
@@ -6034,13 +6042,14 @@ fn render_resource_method_operation_body(
             request_plan,
             remaining,
             direct_return,
+            long_sources,
         ));
         output.push_str(&indent_str);
         output.push_str("}\n");
         return output;
     }
 
-    let request_expr = render_request_plan_typescript(request_plan);
+    let request_expr = render_request_plan_typescript(request_plan, long_sources);
     let mut output = String::new();
     output.push_str(&indent_str);
     output.push_str("const request = ");
@@ -6188,7 +6197,15 @@ fn render_resource_start_operation(
     output.push_str("    );\n");
 }
 
-fn render_request_plan_typescript(plan: &RequestPlan) -> String {
+fn render_request_plan_typescript(
+    plan: &RequestPlan,
+    long_sources: &BTreeMap<String, bool>,
+) -> String {
+    let long_value = |name: &str, value: String| match long_sources.get(name) {
+        Some(true) => format!("{value} == null ? undefined : Long.fromNumber({value})"),
+        Some(false) => format!("Long.fromNumber({value})"),
+        None => value,
+    };
     render_request_plan(
         plan,
         typescript_generated_field_name,
@@ -6200,9 +6217,37 @@ fn render_request_plan_typescript(plan: &RequestPlan) -> String {
                 format!("{{ {} }}", fields.join(", "))
             }
         },
-        |name| format!("this.{}", typescript_generated_field_name(name)),
-        typescript_generated_field_name,
+        |name| {
+            long_value(
+                name,
+                format!("this.{}", typescript_generated_field_name(name)),
+            )
+        },
+        |name| long_value(name, typescript_generated_field_name(name)),
     )
+}
+
+/// The 64-bit resource fields and method params of a method whose request is proto-backed, with
+/// whether each is optional. They are numbers, and the proto-backed request has `Long` fields.
+fn typescript_long_sources(
+    resource: &PlannedResource,
+    method: &PlannedResourceMethod,
+    operation: &RenderedOperation<'_>,
+) -> BTreeMap<String, bool> {
+    if operation
+        .input
+        .as_ref()
+        .is_none_or(|input| input.transfer_type_converter.is_none())
+    {
+        return BTreeMap::new();
+    }
+    resource
+        .fields
+        .iter()
+        .chain(&method.params)
+        .filter(|field| matches!(field.kind, PlannedType::Int(IntSpec::I64)))
+        .map(|field| (field.name.clone(), field.optional))
+        .collect()
 }
 
 /// The resource that an operation returns, bound to `client` when one is given, or the

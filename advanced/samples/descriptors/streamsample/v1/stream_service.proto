@@ -88,3 +88,11 @@ message DescribeStreamResponse {
     int64 last_offset = 1;
     google.protobuf.Duration retention = 2;
 }
+
+message CloseWriterRequest {
+    uint64 writer_id = 1;
+}
+
+message CloseWriterResponse {
+    int64 last_offset = 1;
+}

@@ -84,5 +84,13 @@ export namespace streamsample {
       lastOffset?: Long | null;
       retention?: google.protobuf.IDuration | null;
     }
+
+    interface ICloseWriterRequest {
+      writerId?: Long | null;
+    }
+
+    interface ICloseWriterResponse {
+      lastOffset?: Long | null;
+    }
   }
 }

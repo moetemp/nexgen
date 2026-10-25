@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from nexusrpc import Operation, service
+import typing
+import temporalio.workflow
+
 from .models import (
     AppendRecordsRequest,
     AppendRecordsResponse,
     CloseStreamRequest,
     CloseStreamResponse,
+    CloseWriterRequest,
+    CloseWriterResponse,
     CreateStreamRequest,
     CreateStreamResponse,
     DescribeStreamRequest,
@@ -43,3 +48,33 @@ class StreamService:
         DescribeStreamRequest,
         DescribeStreamResponse,
     ] = Operation(name="DescribeStream")
+
+
+@service(name="streamsample.v1.StreamWriter")
+class StreamWriter:
+    close_writer: Operation[
+        CloseWriterRequest,
+        CloseWriterResponse,
+    ] = Operation(name="CloseWriter")
+
+
+class StreamWriterClient:
+    def __init__(self, endpoint: str) -> None:
+        self._nexus_client: typing.Any = temporalio.workflow.create_nexus_client(
+            service="streamsample.v1.StreamWriter",
+            endpoint=endpoint,
+        )
+
+    async def close_writer(
+        self,
+        *,
+        writer_id: int | None = None,
+    ) -> temporalio.workflow.NexusOperationHandle[CloseWriterResponse]:
+        request = CloseWriterRequest(
+            writer_id=writer_id,
+        )
+        return await self._nexus_client.start_operation(
+            operation="CloseWriter",
+            input=request,
+            output_type=CloseWriterResponse,
+        )

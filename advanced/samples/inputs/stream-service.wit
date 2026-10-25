@@ -149,6 +149,13 @@ interface stream-service {
   close-stream: func(request: close-stream-request) -> close-stream-response;
 
   /// @nexus.operation name="ReadRecords"
+  /// @nexus.long-poll
+  ///   wait-field="wait"
+  ///   max-wait-ms="60000"
+  ///   result-field="records"
+  ///   done-field="done"
+  ///   offset-field="from-offset"
+  ///   next-offset-field="next-offset"
   read-records: func(request: read-records-request) -> read-records-response;
 
   /// @nexus.operation name="DescribeStream"

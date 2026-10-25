@@ -68,6 +68,10 @@ struct GenerateArgs {
     #[cfg(feature = "advanced")]
     #[arg(long = "system-nexus")]
     system_nexus: bool,
+    /// Generate a caller per service for code outside a Workflow (Python).
+    #[cfg(feature = "advanced")]
+    #[arg(long = "client")]
+    client: bool,
 }
 
 #[derive(Args)]
@@ -188,6 +192,7 @@ fn main() -> ExitCode {
             #[cfg(feature = "advanced")]
             {
                 let system_nexus = args.common.system_nexus;
+                let client = args.common.client;
                 let config = NexgenConfig {
                     mode: if args.common.generate_native_api {
                         nexgen::generator::GenerationMode::NativeApi
@@ -195,6 +200,7 @@ fn main() -> ExitCode {
                         nexgen::generator::GenerationMode::DefinitionsOnly
                     },
                     system_nexus,
+                    client,
                 };
                 let mut request = generate_request(
                     Language::Python,
@@ -221,6 +227,7 @@ fn main() -> ExitCode {
             #[cfg(feature = "advanced")]
             {
                 let system_nexus = args.common.system_nexus;
+                let client = args.common.client;
                 let config = NexgenConfig {
                     mode: if args.common.generate_native_api {
                         nexgen::generator::GenerationMode::NativeApi
@@ -228,6 +235,7 @@ fn main() -> ExitCode {
                         nexgen::generator::GenerationMode::DefinitionsOnly
                     },
                     system_nexus,
+                    client,
                 };
                 let mut request = generate_request(
                     Language::TypeScript,
@@ -294,6 +302,7 @@ fn generate_request(
                 nexgen::generator::GenerationMode::DefinitionsOnly
             },
             system_nexus: args.system_nexus,
+            client: args.client,
         },
         #[cfg(not(feature = "advanced"))]
         config: Default::default(),

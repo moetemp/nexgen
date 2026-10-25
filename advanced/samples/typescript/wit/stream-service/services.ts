@@ -13,6 +13,8 @@ import {
   readRecordsRequestTransferTypeConverter,
   describeStreamResponseTransferTypeConverter,
   describeStreamRequestTransferTypeConverter,
+  openWriterResponseTransferTypeConverter,
+  openWriterRequestTransferTypeConverter,
   closeWritersResponseTransferTypeConverter,
   closeWritersRequestTransferTypeConverter,
 } from "./models";
@@ -27,6 +29,8 @@ import type {
   ReadRecordsRequest,
   DescribeStreamResponse,
   DescribeStreamRequest,
+  OpenWriterResponse,
+  OpenWriterRequest,
   CloseWritersResponse,
   CloseWritersRequest,
 } from "./models";
@@ -60,6 +64,11 @@ export const streamService = nexus.service("streamsample.v1.StreamService", {
 });
 
 export const streamWriter = nexus.service("streamsample.v1.StreamWriter", {
+  openWriter: nexus.operation<OpenWriterRequest, OpenWriterResponse>({
+    name: "OpenWriter",
+    inputType: { transferTypeConverter: openWriterRequestTransferTypeConverter },
+    outputType: { transferTypeConverter: openWriterResponseTransferTypeConverter },
+  }),
   /**
    * Drop every open writer, for example at shutdown.
    */
@@ -78,6 +87,18 @@ export class StreamWriterClient {
       service: streamWriter,
       endpoint,
     });
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async openWriter(
+    request: OpenWriterRequest,
+  ): Promise<workflow.NexusOperationHandle<OpenWriterResponse>> {
+    return await this.client.startOperation(
+      streamWriter.operations.openWriter,
+      request,
+    );
   }
 
   /**

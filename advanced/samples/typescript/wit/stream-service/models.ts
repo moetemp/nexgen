@@ -460,6 +460,58 @@ export const describeStreamRequestTransferTypeConverter = {
     return describeStreamRequestToProto(value);
   },
 };
+export type OpenWriterResponse = Record<string, never>;
+
+function openWriterResponseFromProto(
+  proto: streamsample.v1.IOpenWriterResponse,
+): OpenWriterResponse {
+  return {};
+}
+
+function openWriterResponseToProto(
+  model: OpenWriterResponse,
+): streamsample.v1.IOpenWriterResponse {
+  return {};
+}
+
+export const openWriterResponseTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.IOpenWriterResponse): OpenWriterResponse {
+    return openWriterResponseFromProto(value);
+  },
+
+  toTransferType(value: OpenWriterResponse): streamsample.v1.IOpenWriterResponse {
+    return openWriterResponseToProto(value);
+  },
+};
+export interface OpenWriterRequest {
+  stream?: StreamRef;
+}
+
+function openWriterRequestFromProto(
+  proto: streamsample.v1.IOpenWriterRequest,
+): OpenWriterRequest {
+  return {
+    stream: proto.stream == null ? undefined : streamRefFromProto(proto.stream),
+  };
+}
+
+function openWriterRequestToProto(
+  model: OpenWriterRequest,
+): streamsample.v1.IOpenWriterRequest {
+  return {
+    stream: model.stream == null ? undefined : streamRefToProto(model.stream),
+  };
+}
+
+export const openWriterRequestTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.IOpenWriterRequest): OpenWriterRequest {
+    return openWriterRequestFromProto(value);
+  },
+
+  toTransferType(value: OpenWriterRequest): streamsample.v1.IOpenWriterRequest {
+    return openWriterRequestToProto(value);
+  },
+};
 export interface CloseWritersResponse {
   failed?: number;
 }

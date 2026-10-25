@@ -21,13 +21,15 @@ from .models import (
     DescribeStreamRequest,
     DescribeStreamResponse,
     OpenWriterRequest,
-    OpenWriterResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
+    WriterResult,
 )
+from ._resources.writer import bind_writer_client
 
 if typing.TYPE_CHECKING:
     from .models import StreamRef
+    from ._resources import Writer
 
 
 @service(name="streamsample.v1.StreamService")
@@ -62,7 +64,7 @@ class StreamService:
 class StreamWriter:
     open_writer: Operation[
         OpenWriterRequest,
-        OpenWriterResponse,
+        WriterResult,
     ] = Operation(name="OpenWriter")
 
     close_writer: Operation[
@@ -88,16 +90,23 @@ class StreamWriterClient:
         *,
         stream: StreamRef | None = None,
         max_retry_duration: datetime.timedelta | None = None,
-    ) -> temporalio.workflow.NexusOperationHandle[OpenWriterResponse]:
+    ) -> Writer:
         request = OpenWriterRequest(
             stream=stream,
             max_retry_duration=max_retry_duration,
         )
-        return await self._nexus_client.start_operation(
+        handle = await self._nexus_client.start_operation(
             operation="OpenWriter",
             input=request,
-            output_type=OpenWriterResponse,
+            output_type=WriterResult,
         )
+        result = await handle
+        if result.writer_id is None:
+            raise RuntimeError("OpenWriter answered without `writer_id`")
+        resource = Writer(
+            writer_id=result.writer_id,
+        )
+        return bind_writer_client(resource, self._nexus_client)
 
     async def close_writer(
         self,

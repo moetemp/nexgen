@@ -429,12 +429,16 @@ Global___OpenWriterRequest: _TypeAlias = OpenWriterRequest  # noqa: Y015
 class OpenWriterResponse(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 
+    WRITER_ID_FIELD_NUMBER: _builtins.int
+    writer_id: _builtins.int
     def __init__(
         self,
+        *,
+        writer_id: _builtins.int = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["writer_id", b"writer_id"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 

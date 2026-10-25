@@ -30,12 +30,12 @@ from .models import (
     DescribeStreamRequest,
     DescribeStreamResponse,
     OpenWriterRequest,
-    OpenWriterResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamRecord,
     StreamRef,
     StreamStatus,
+    WriterResult,
     _AppendRecordsRequestTransferTypeConverter,
     _AppendRecordsResponseTransferTypeConverter,
     _CloseStreamRequestTransferTypeConverter,
@@ -49,9 +49,9 @@ from .models import (
     _DescribeStreamRequestTransferTypeConverter,
     _DescribeStreamResponseTransferTypeConverter,
     _OpenWriterRequestTransferTypeConverter,
-    _OpenWriterResponseTransferTypeConverter,
     _ReadRecordsRequestTransferTypeConverter,
     _ReadRecordsResponseTransferTypeConverter,
+    _WriterResultTransferTypeConverter,
 )
 
 
@@ -428,7 +428,7 @@ class StreamWriterClient:
             input=payload,
         )
 
-    async def open_writer(self, request: OpenWriterRequest) -> OpenWriterResponse:
+    async def open_writer(self, request: OpenWriterRequest) -> Writer:
         with self._converters():
             message = _OpenWriterRequestTransferTypeConverter().to_transfer_type(
                 request
@@ -436,11 +436,17 @@ class StreamWriterClient:
         await _encode_payloads(message, self._data_converter.payload_codec)
         payload = _proto_payload(message)
         answer = await self._call("OpenWriter", payload)
-        converter = _OpenWriterResponseTransferTypeConverter()
+        converter = _WriterResultTransferTypeConverter()
         message = _proto_message(answer, converter.transfer_type)
         await _decode_payloads(message, self._data_converter.payload_codec)
         with self._converters():
-            return converter.from_transfer_type(message, OpenWriterResponse)
+            result = converter.from_transfer_type(message, WriterResult)
+        if result.writer_id is None:
+            raise RuntimeError("OpenWriter answered without `writer_id`")
+        return Writer(
+            self,
+            writer_id=result.writer_id,
+        )
 
     async def close_writer(self, request: CloseWriterRequest) -> CloseWriterResponse:
         with self._converters():
@@ -565,3 +571,24 @@ class CreateStreamResult:
     stream: Stream
     created: bool | None = None
     status: StreamStatus | None = None
+
+
+class Writer:
+    """An open writer of one stream."""
+
+    def __init__(
+        self,
+        client: StreamWriterClient,
+        writer_id: int,
+    ) -> None:
+        """Bind the handle to a caller."""
+        self._client: StreamWriterClient = client
+        self.writer_id: int = writer_id
+
+    async def close(
+        self,
+    ) -> CloseWriterResponse:
+        request = CloseWriterRequest(
+            writer_id=self.writer_id,
+        )
+        return await self._client.close_writer(request)

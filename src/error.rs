@@ -225,6 +225,14 @@ pub enum Error {
     )]
     IncompleteOperationOutputTransform { service: String, operation: String },
 
+    #[error("{language} cannot generate a caller for operation `{service}.{operation}`: {reason}")]
+    UnsupportedClientOperation {
+        language: Language,
+        service: String,
+        operation: String,
+        reason: String,
+    },
+
     #[error(
         "service `{service}` operation `{operation}` references unknown input proto type `{type_name}`"
     )]

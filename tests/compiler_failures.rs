@@ -161,6 +161,7 @@ fn run_case(directory: &Path, repo: &Path) -> Result<Vec<String>, String> {
             config: nexgen::nexgen_config::NexgenConfig {
                 mode: GenerationMode::NativeApi,
                 system_nexus: expected.system_nexus,
+                client: false,
             },
             language,
             input_paths: inputs.clone(),

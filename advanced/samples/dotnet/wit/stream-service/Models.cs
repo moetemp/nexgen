@@ -764,12 +764,14 @@ namespace Nexgen.StreamService
     public record OpenWriterRequest
     {
         public StreamRef? Stream { get; init; }
+        public System.TimeSpan? MaxRetryDuration { get; init; }
 
         internal static OpenWriterRequest FromTransferType(StreamSample.V1.OpenWriterRequest wire)
         {
             return new OpenWriterRequest()
             {
                 Stream = wire.Stream == null ? null : StreamRef.FromTransferType(wire.Stream),
+                MaxRetryDuration = wire.MaxRetryDuration == null ? null : Nexgen.Support.ProtoExtensions.FromDurationProto(wire.MaxRetryDuration),
             };
         }
 
@@ -779,6 +781,10 @@ namespace Nexgen.StreamService
             if (Stream is { } stream)
             {
                 proto.Stream = (StreamSample.V1.StreamRef)stream.ToTransferType();
+            }
+            if (MaxRetryDuration is { } maxRetryDuration)
+            {
+                proto.MaxRetryDuration = maxRetryDuration.ToProto();
             }
             return proto;
         }

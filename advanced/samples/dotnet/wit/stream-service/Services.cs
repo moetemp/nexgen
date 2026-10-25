@@ -61,6 +61,7 @@ namespace Nexgen.StreamService
     public class OpenWriterOptions
     {
         public StreamRef? Stream { get; set; }
+        public System.TimeSpan? MaxRetryDuration { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -87,6 +88,7 @@ namespace Nexgen.StreamService
             var request = new OpenWriterRequest()
             {
                 Stream = options?.Stream,
+                MaxRetryDuration = options?.MaxRetryDuration,
             };
             return OpenWriterAsync(request);
         }

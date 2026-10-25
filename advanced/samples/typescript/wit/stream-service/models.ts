@@ -485,6 +485,7 @@ export const openWriterResponseTransferTypeConverter = {
 };
 export interface OpenWriterRequest {
   stream?: StreamRef;
+  maxRetryDuration?: common.Duration;
 }
 
 function openWriterRequestFromProto(
@@ -492,6 +493,10 @@ function openWriterRequestFromProto(
 ): OpenWriterRequest {
   return {
     stream: proto.stream == null ? undefined : streamRefFromProto(proto.stream),
+    maxRetryDuration:
+      proto.maxRetryDuration == null
+        ? undefined
+        : support.durationFromProto(proto.maxRetryDuration),
   };
 }
 
@@ -500,6 +505,10 @@ function openWriterRequestToProto(
 ): streamsample.v1.IOpenWriterRequest {
   return {
     stream: model.stream == null ? undefined : streamRefToProto(model.stream),
+    maxRetryDuration:
+      model.maxRetryDuration == null
+        ? undefined
+        : support.durationToProto(model.maxRetryDuration),
   };
 }
 

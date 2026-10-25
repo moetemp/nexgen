@@ -57,13 +57,14 @@ namespace StreamSample.V1 {
             "ZS52MS5TdHJlYW1SZWYiWwoWRGVzY3JpYmVTdHJlYW1SZXNwb25zZRITCgts",
             "YXN0X29mZnNldBgBIAEoAxIsCglyZXRlbnRpb24YAiABKAsyGS5nb29nbGUu",
             "cHJvdG9idWYuRHVyYXRpb24iFQoTQ2xvc2VXcml0ZXJzUmVxdWVzdCImChRD",
-            "bG9zZVdyaXRlcnNSZXNwb25zZRIOCgZmYWlsZWQYASABKAUiPwoRT3Blbldy",
+            "bG9zZVdyaXRlcnNSZXNwb25zZRIOCgZmYWlsZWQYASABKAUidgoRT3Blbldy",
             "aXRlclJlcXVlc3QSKgoGc3RyZWFtGAEgASgLMhouc3RyZWFtc2FtcGxlLnYx",
-            "LlN0cmVhbVJlZiIUChJPcGVuV3JpdGVyUmVzcG9uc2UqegoMU3RyZWFtU3Rh",
-            "dHVzEh0KGVNUUkVBTV9TVEFUVVNfVU5TUEVDSUZJRUQQABIWChJTVFJFQU1f",
-            "U1RBVFVTX09QRU4QARIYChRTVFJFQU1fU1RBVFVTX0NMT1NFRBACEhkKFVNU",
-            "UkVBTV9TVEFUVVNfRVhQSVJFRBADQhKqAg9TdHJlYW1TYW1wbGUuVjFiBnBy",
-            "b3RvMw=="));
+            "LlN0cmVhbVJlZhI1ChJtYXhfcmV0cnlfZHVyYXRpb24YAiABKAsyGS5nb29n",
+            "bGUucHJvdG9idWYuRHVyYXRpb24iFAoST3BlbldyaXRlclJlc3BvbnNlKnoK",
+            "DFN0cmVhbVN0YXR1cxIdChlTVFJFQU1fU1RBVFVTX1VOU1BFQ0lGSUVEEAAS",
+            "FgoSU1RSRUFNX1NUQVRVU19PUEVOEAESGAoUU1RSRUFNX1NUQVRVU19DTE9T",
+            "RUQQAhIZChVTVFJFQU1fU1RBVFVTX0VYUElSRUQQA0ISqgIPU3RyZWFtU2Ft",
+            "cGxlLlYxYgZwcm90bzM="));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { global::Google.Protobuf.WellKnownTypes.DurationReflection.Descriptor, global::Temporalio.Api.Common.V1.MessageReflection.Descriptor, },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::StreamSample.V1.StreamStatus), }, null, new pbr::GeneratedClrTypeInfo[] {
@@ -82,7 +83,7 @@ namespace StreamSample.V1 {
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.DescribeStreamResponse), global::StreamSample.V1.DescribeStreamResponse.Parser, new[]{ "LastOffset", "Retention" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseWritersRequest), global::StreamSample.V1.CloseWritersRequest.Parser, null, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseWritersResponse), global::StreamSample.V1.CloseWritersResponse.Parser, new[]{ "Failed" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.OpenWriterRequest), global::StreamSample.V1.OpenWriterRequest.Parser, new[]{ "Stream" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.OpenWriterRequest), global::StreamSample.V1.OpenWriterRequest.Parser, new[]{ "Stream", "MaxRetryDuration" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.OpenWriterResponse), global::StreamSample.V1.OpenWriterResponse.Parser, null, null, null, null, null)
           }));
     }
@@ -3958,6 +3959,7 @@ namespace StreamSample.V1 {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public OpenWriterRequest(OpenWriterRequest other) : this() {
       stream_ = other.stream_ != null ? other.stream_.Clone() : null;
+      maxRetryDuration_ = other.maxRetryDuration_ != null ? other.maxRetryDuration_.Clone() : null;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -3979,6 +3981,18 @@ namespace StreamSample.V1 {
       }
     }
 
+    /// <summary>Field number for the "max_retry_duration" field.</summary>
+    public const int MaxRetryDurationFieldNumber = 2;
+    private global::Google.Protobuf.WellKnownTypes.Duration maxRetryDuration_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::Google.Protobuf.WellKnownTypes.Duration MaxRetryDuration {
+      get { return maxRetryDuration_; }
+      set {
+        maxRetryDuration_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -3995,6 +4009,7 @@ namespace StreamSample.V1 {
         return true;
       }
       if (!object.Equals(Stream, other.Stream)) return false;
+      if (!object.Equals(MaxRetryDuration, other.MaxRetryDuration)) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -4003,6 +4018,7 @@ namespace StreamSample.V1 {
     public override int GetHashCode() {
       int hash = 1;
       if (stream_ != null) hash ^= Stream.GetHashCode();
+      if (maxRetryDuration_ != null) hash ^= MaxRetryDuration.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -4025,6 +4041,10 @@ namespace StreamSample.V1 {
         output.WriteRawTag(10);
         output.WriteMessage(Stream);
       }
+      if (maxRetryDuration_ != null) {
+        output.WriteRawTag(18);
+        output.WriteMessage(MaxRetryDuration);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -4039,6 +4059,10 @@ namespace StreamSample.V1 {
         output.WriteRawTag(10);
         output.WriteMessage(Stream);
       }
+      if (maxRetryDuration_ != null) {
+        output.WriteRawTag(18);
+        output.WriteMessage(MaxRetryDuration);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -4051,6 +4075,9 @@ namespace StreamSample.V1 {
       int size = 0;
       if (stream_ != null) {
         size += 1 + pb::CodedOutputStream.ComputeMessageSize(Stream);
+      }
+      if (maxRetryDuration_ != null) {
+        size += 1 + pb::CodedOutputStream.ComputeMessageSize(MaxRetryDuration);
       }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
@@ -4069,6 +4096,12 @@ namespace StreamSample.V1 {
           Stream = new global::StreamSample.V1.StreamRef();
         }
         Stream.MergeFrom(other.Stream);
+      }
+      if (other.maxRetryDuration_ != null) {
+        if (maxRetryDuration_ == null) {
+          MaxRetryDuration = new global::Google.Protobuf.WellKnownTypes.Duration();
+        }
+        MaxRetryDuration.MergeFrom(other.MaxRetryDuration);
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -4096,6 +4129,13 @@ namespace StreamSample.V1 {
             input.ReadMessage(Stream);
             break;
           }
+          case 18: {
+            if (maxRetryDuration_ == null) {
+              MaxRetryDuration = new global::Google.Protobuf.WellKnownTypes.Duration();
+            }
+            input.ReadMessage(MaxRetryDuration);
+            break;
+          }
         }
       }
     #endif
@@ -4120,6 +4160,13 @@ namespace StreamSample.V1 {
               Stream = new global::StreamSample.V1.StreamRef();
             }
             input.ReadMessage(Stream);
+            break;
+          }
+          case 18: {
+            if (maxRetryDuration_ == null) {
+              MaxRetryDuration = new global::Google.Protobuf.WellKnownTypes.Duration();
+            }
+            input.ReadMessage(MaxRetryDuration);
             break;
           }
         }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from nexusrpc import Operation, service
 import typing
+import datetime
 import temporalio.workflow
 
 from .models import (
@@ -79,9 +80,11 @@ class StreamWriterClient:
         self,
         *,
         stream: StreamRef | None = None,
+        max_retry_duration: datetime.timedelta | None = None,
     ) -> temporalio.workflow.NexusOperationHandle[OpenWriterResponse]:
         request = OpenWriterRequest(
             stream=stream,
+            max_retry_duration=max_retry_duration,
         )
         return await self._nexus_client.start_operation(
             operation="OpenWriter",

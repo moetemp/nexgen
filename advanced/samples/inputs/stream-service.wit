@@ -165,11 +165,13 @@ interface stream-service {
 // The writer has no endpoint, as the stream writer service has none.
 /// @nexus.service-name "streamsample.v1.StreamWriter"
 interface stream-writer {
+  use nexus:temporal-types/model@1.0.0.{duration};
   use stream-service.{stream-ref};
 
   /// @nexus.proto "streamsample.v1.OpenWriterRequest" typescript-import="#streamsample"
   record open-writer-request {
     %stream: option<stream-ref>,
+    max-retry-duration: option<duration>,
   }
 
   /// @nexus.proto "streamsample.v1.OpenWriterResponse" typescript-import="#streamsample"

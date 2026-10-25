@@ -686,6 +686,7 @@ temporalio.converter.transfer_type_convertible(
 @dataclasses.dataclass(slots=True)
 class OpenWriterRequest:
     stream: StreamRef | None = None
+    max_retry_duration: datetime.timedelta | None = None
 
 
 class _OpenWriterRequestTransferTypeConverter(
@@ -709,6 +710,9 @@ class _OpenWriterRequestTransferTypeConverter(
             )
             if value.HasField("stream")
             else None,
+            max_retry_duration=_support.duration_from_proto(value.max_retry_duration)
+            if value.HasField("max_retry_duration")
+            else None,
         )
 
     @typing_extensions.override
@@ -720,6 +724,10 @@ class _OpenWriterRequestTransferTypeConverter(
         if value.stream is not None:
             message.stream.CopyFrom(
                 _StreamRefTransferTypeConverter().to_transfer_type(value.stream)
+            )
+        if value.max_retry_duration is not None:
+            message.max_retry_duration.CopyFrom(
+                _support.duration_to_proto(value.max_retry_duration)
             )
         return message
 

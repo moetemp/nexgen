@@ -1902,8 +1902,9 @@ Javadoc text) so authored content cannot break the generated source.
 signal-with-start-workflow: func(...) -> ...;
 ```
 
-Python emits the docs of a resource and its methods as docstrings. The other
-targets don't emit them yet.
+Python emits the docs of a resource and its methods as docstrings, on the
+Workflow class and on the `client.py` class. The other targets don't emit them
+yet.
 
 Variant documentation is emitted by Python, TypeScript, Go, and .NET; Java does
 not currently generate WIT variants. Python emits an attribute docstring after

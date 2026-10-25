@@ -972,6 +972,14 @@ impl<'a> ApiPlanner<'a> {
                 output.push_str("\n\nclass ");
                 output.push_str(&resource.type_name);
                 output.push_str(":\n");
+                render_python_docstring(
+                    &mut output,
+                    "    ",
+                    resource.doc.as_deref(),
+                    &[],
+                    None,
+                    false,
+                );
                 output.push_str("    def __init__(\n        self,\n        client: ");
                 output.push_str(&client_class_name(service));
                 output.push_str(",\n");
@@ -1050,6 +1058,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
+        render_python_docstring(output, "        ", method.doc.as_deref(), &[], None, false);
         render_resource_method_request(output, method, operation, request_plan);
         // A method with no result drops the answer.
         output.push_str(if result_annotation == "None" {

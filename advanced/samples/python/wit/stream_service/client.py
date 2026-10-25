@@ -373,6 +373,8 @@ class StreamServiceClient:
 
 
 class Stream:
+    """A handle on one stream, built from its ref."""
+
     def __init__(
         self,
         client: StreamServiceClient,
@@ -387,6 +389,7 @@ class Stream:
         sequence: int | None = None,
         records: list[AppendRecord] | None = None,
     ) -> AppendRecordsResponse:
+        """Append records. The answer has the first and the last offset."""
         request = AppendRecordsRequest(
             stream=self.stream,
             sequence=sequence,
@@ -411,6 +414,7 @@ class Stream:
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse:
+        """Read one page of records."""
         request = ReadRecordsRequest(
             stream=self.stream,
             from_offset=from_offset,

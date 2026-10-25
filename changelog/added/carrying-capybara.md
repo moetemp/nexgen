@@ -1,1 +1,1 @@
-With `--client`, the Python caller module declares a class per resource with methods, bound to the caller, and a caller method that returns such a resource gives back an instance.
+With `--client`, the Python caller module declares a class per resource with methods, bound to the caller, and a caller method that returns such a resource gives back an instance. The class and its methods have the `@nexus.doc` docstrings.

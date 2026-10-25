@@ -58,3 +58,34 @@ async def test_iterator_reads_every_page_from_the_next_offset() -> None:
     assert offsets == [1, 2]
     assert asked == [0, 2, 2]
     assert all(waits)
+
+
+async def test_client_create_stream_returns_a_bound_stream() -> None:
+    class Transport:
+        async def call(
+            self, *, service: str, operation: str, input: Payload
+        ) -> Payload:
+            assert (service, operation) == (
+                "streamsample.v1.StreamService",
+                "CreateStream",
+            )
+            request = stream_service_pb2.CreateStreamRequest.FromString(input.data)
+            answer = stream_service_pb2.CreateStreamResponse(
+                stream=request.ref, created=True
+            )
+            return Payload(
+                metadata={"encoding": b"binary/protobuf"},
+                data=answer.SerializeToString(),
+            )
+
+    client = stream_service_client.StreamServiceClient(Transport())
+    result = await client.create_stream(
+        stream_service_models.CreateStreamRequest(
+            ref=stream_service_models.StreamRef(id="stream-1")
+        )
+    )
+
+    assert isinstance(result.stream, stream_service_client.Stream)
+    assert result.stream.stream.id == "stream-1"
+    assert result.stream._client is client
+    assert result.created

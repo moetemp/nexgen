@@ -16,12 +16,11 @@ import temporalio.converter
 import temporalio.nexus.system
 
 from .models import (
+    AppendRecord,
     AppendRecordsRequest,
     AppendRecordsResponse,
     CloseStreamRequest,
     CloseStreamResponse,
-    CloseWriterRequest,
-    CloseWriterResponse,
     CreateStreamRequest,
     CreateStreamResponse,
     DescribeStreamRequest,
@@ -29,12 +28,12 @@ from .models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamRecord,
+    StreamRef,
+    StreamStatus,
     _AppendRecordsRequestTransferTypeConverter,
     _AppendRecordsResponseTransferTypeConverter,
     _CloseStreamRequestTransferTypeConverter,
     _CloseStreamResponseTransferTypeConverter,
-    _CloseWriterRequestTransferTypeConverter,
-    _CloseWriterResponseTransferTypeConverter,
     _CreateStreamRequestTransferTypeConverter,
     _CreateStreamResponseTransferTypeConverter,
     _DescribeStreamRequestTransferTypeConverter,
@@ -207,7 +206,7 @@ class StreamServiceClient:
             input=payload,
         )
 
-    async def create_stream(self, request: CreateStreamRequest) -> CreateStreamResponse:
+    async def create_stream(self, request: CreateStreamRequest) -> CreateStreamResult:
         with self._converters():
             message = _CreateStreamRequestTransferTypeConverter().to_transfer_type(
                 request
@@ -219,7 +218,17 @@ class StreamServiceClient:
         message = _proto_message(answer, converter.transfer_type)
         await _decode_payloads(message, self._data_converter.payload_codec)
         with self._converters():
-            return converter.from_transfer_type(message, CreateStreamResponse)
+            result = converter.from_transfer_type(message, CreateStreamResponse)
+        if result.stream is None:
+            raise RuntimeError("CreateStream answered without `stream`")
+        return CreateStreamResult(
+            stream=Stream(
+                self,
+                stream=result.stream,
+            ),
+            created=result.created,
+            status=result.status,
+        )
 
     async def append_records(
         self, request: AppendRecordsRequest
@@ -363,60 +372,92 @@ class StreamServiceClient:
             return converter.from_transfer_type(message, DescribeStreamResponse)
 
 
-class StreamWriterClient:
-    """Calls the `streamsample.v1.StreamWriter` operations over a transport.
-
-    For code outside a Workflow. Workflow code uses the operation stubs.
-    """
-
+class Stream:
     def __init__(
         self,
-        transport: Transport,
-        *,
-        data_converter: temporalio.converter.DataConverter | None = None,
+        client: StreamServiceClient,
+        stream: StreamRef,
     ) -> None:
-        """Create a caller.
+        """Bind the handle to a caller."""
+        self._client: StreamServiceClient = client
+        self.stream: StreamRef = stream
 
-        Args:
-            transport: Carries each call to the service.
-            data_converter: Converts and encodes the user values. A proto-backed
-                model travels as is, and each payload and failure inside it goes
-                through the converter and the codec, as in Workflow code. A model
-                that is not proto-backed is one user value. Defaults to the SDK's
-                default data converter.
+    async def append_records(
+        self,
+        sequence: int | None = None,
+        records: list[AppendRecord] | None = None,
+    ) -> AppendRecordsResponse:
+        request = AppendRecordsRequest(
+            stream=self.stream,
+            sequence=sequence,
+            records=records or [],
+        )
+        return await self._client.append_records(request)
+
+    async def close(
+        self,
+        result: typing.Any | None = None,
+    ) -> None:
+        request = CloseStreamRequest(
+            stream=self.stream,
+            result=result,
+        )
+        _ = await self._client.close_stream(request)
+
+    async def read_records(
+        self,
+        from_offset: int | None = None,
+        topics: list[str] | None = None,
+        max_records: int | None = None,
+        wait: datetime.timedelta | None = None,
+    ) -> ReadRecordsResponse:
+        request = ReadRecordsRequest(
+            stream=self.stream,
+            from_offset=from_offset,
+            topics=topics or [],
+            max_records=max_records,
+            wait=wait,
+        )
+        return await self._client.read_records(request)
+
+    async def iter_read_records(
+        self,
+        from_offset: int | None = None,
+        topics: list[str] | None = None,
+        max_records: int | None = None,
+        wait: datetime.timedelta | None = None,
+        *,
+        deadline: datetime.timedelta | None = None,
+    ) -> collections.abc.AsyncIterator[StreamRecord]:
+        """Yield each item of ``records``, page after page, as one sequence.
+
+        Each page is one ``read_records_until_records`` call, which sets ``wait`` to
+        what is left of the deadline. The next page starts at the answer's
+        ``next_offset``.
+        The iterator ends after an answer with ``done`` set, or when the deadline
+        passes. With no deadline, it ends only on ``done``.
         """
-        self._transport: Transport = transport
-        self._data_converter: temporalio.converter.DataConverter = (
-            data_converter or temporalio.converter.DataConverter.default
+        request = ReadRecordsRequest(
+            stream=self.stream,
+            from_offset=from_offset,
+            topics=topics or [],
+            max_records=max_records,
+            wait=wait,
         )
+        async for item in self._client.iter_read_records(request, deadline=deadline):
+            yield item
 
-    def _converters(self) -> contextlib.AbstractContextManager[None]:
-        return temporalio.nexus.system._user_converter_context(
-            temporalio.nexus.system._SystemNexusUserConverters(
-                payload_converter=self._data_converter.payload_converter,
-                failure_converter=self._data_converter.failure_converter,
-            )
+    async def describe(
+        self,
+    ) -> DescribeStreamResponse:
+        request = DescribeStreamRequest(
+            stream=self.stream,
         )
+        return await self._client.describe_stream(request)
 
-    async def _call(
-        self, operation: str, payload: temporalio.api.common.v1.Payload
-    ) -> temporalio.api.common.v1.Payload:
-        return await self._transport.call(
-            service="streamsample.v1.StreamWriter",
-            operation=operation,
-            input=payload,
-        )
 
-    async def close_writer(self, request: CloseWriterRequest) -> CloseWriterResponse:
-        with self._converters():
-            message = _CloseWriterRequestTransferTypeConverter().to_transfer_type(
-                request
-            )
-        await _encode_payloads(message, self._data_converter.payload_codec)
-        payload = _proto_payload(message)
-        answer = await self._call("CloseWriter", payload)
-        converter = _CloseWriterResponseTransferTypeConverter()
-        message = _proto_message(answer, converter.transfer_type)
-        await _decode_payloads(message, self._data_converter.payload_codec)
-        with self._converters():
-            return converter.from_transfer_type(message, CloseWriterResponse)
+@dataclasses.dataclass(slots=True)
+class CreateStreamResult:
+    stream: Stream
+    created: bool | None = None
+    status: StreamStatus | None = None

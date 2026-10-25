@@ -702,7 +702,10 @@ impl<'a> ApiPlanner<'a> {
         if crate::nexgen_config::current().client && !services.is_empty() {
             files.insert(
                 "client.py",
-                render_client_module(services)?,
+                {
+                    let resource_classes = self.render_client_resources(services);
+                    render_client_module(services, &resource_classes, &model_names)?
+                },
                 module_origin.clone(),
             )?;
         }
@@ -957,30 +960,170 @@ impl<'a> ApiPlanner<'a> {
         }
     }
 
-    fn render_resource_class_method(
+    /// A resource class per resource for code outside a Workflow. It holds the caller, and
+    /// each method fills in the request as the Workflow class does, then calls the caller.
+    fn render_client_resources(&self, services: &[RenderedService<'_>]) -> String {
+        let mut output = String::new();
+        for service in services {
+            for resource in &service.resources {
+                if resource.methods.is_empty() {
+                    continue;
+                }
+                output.push_str("\n\nclass ");
+                output.push_str(&resource.type_name);
+                output.push_str(":\n");
+                output.push_str("    def __init__(\n        self,\n        client: ");
+                output.push_str(&client_class_name(service));
+                output.push_str(",\n");
+                for field in &resource.fields {
+                    output.push_str("        ");
+                    output.push_str(&python_field_name(&field.name));
+                    output.push_str(": ");
+                    output.push_str(&self.python_resource_field_annotation(
+                        &field.kind,
+                        field.optional,
+                        field.function.as_ref(),
+                    ));
+                    output.push_str(",\n");
+                }
+                output.push_str("    ) -> None:\n");
+                output.push_str("        \"\"\"Bind the handle to a caller.\"\"\"\n");
+                output.push_str("        self._client: ");
+                output.push_str(&client_class_name(service));
+                output.push_str(" = client\n");
+                for field in &resource.fields {
+                    let name = python_field_name(&field.name);
+                    output.push_str("        self.");
+                    output.push_str(&name);
+                    output.push_str(": ");
+                    output.push_str(&self.python_resource_field_annotation(
+                        &field.kind,
+                        field.optional,
+                        field.function.as_ref(),
+                    ));
+                    output.push_str(" = ");
+                    output.push_str(&name);
+                    output.push('\n');
+                }
+                for method in &resource.methods {
+                    self.render_client_resource_method(&mut output, service, method);
+                }
+                // A record that holds the resource gets a client twin that holds the client
+                // class.
+                for (full_name, (_, resource_type)) in resource_holders(self.api_plan) {
+                    if resource_type == resource.type_name {
+                        output.push_str("\n\n");
+                        render_record_model(&mut output, &self.models[&full_name], None);
+                    }
+                }
+            }
+        }
+        output
+    }
+
+    fn render_client_resource_method(
         &self,
         output: &mut String,
         service: &RenderedService<'_>,
-        resource: &PlannedResource,
         method: &PlannedResourceMethod,
-        bound_operations: &[ResourceBoundOperation<'_>],
     ) {
+        let PlannedResourceMethodBindingSpec::Operation {
+            operation_name,
+            request_plan,
+            ..
+        } = &method.binding
+        else {
+            return;
+        };
+        let Some(operation) = service
+            .operations
+            .iter()
+            .find(|operation| operation.name == operation_name)
+        else {
+            return;
+        };
         let result_annotation = self.python_resource_method_result_annotation(method);
-        output.push_str("    async def ");
+        output.push_str("\n    async def ");
         output.push_str(&python_field_name(&method.name));
         output.push_str("(\n");
+        self.render_client_resource_method_params(output, method, None);
+        output.push_str("    ) -> ");
+        output.push_str(&result_annotation);
+        output.push_str(":\n");
+        render_resource_method_request(output, method, operation, request_plan);
+        // A method with no result drops the answer.
+        output.push_str(if result_annotation == "None" {
+            "        _ = await self._client."
+        } else {
+            "        return await self._client."
+        });
+        output.push_str(&operation.attr_name);
+        output.push_str("(request)\n");
+
+        let Some(long_poll) = &operation.client_long_poll else {
+            return;
+        };
+        let Some(iter_method_name) = &long_poll.iter_method_name else {
+            return;
+        };
+        output.push_str("\n    async def iter_");
+        output.push_str(&python_field_name(&method.name));
+        output.push_str("(\n");
+        self.render_client_resource_method_params(
+            output,
+            method,
+            Some("deadline: datetime.timedelta | None = None"),
+        );
+        output.push_str("    ) -> collections.abc.AsyncIterator[");
+        output.push_str(&long_poll.item_annotation);
+        output.push_str("]:\n");
+        render_long_poll_iterator_docstring(
+            output,
+            long_poll,
+            &format!("``{}``", long_poll.method_name),
+        );
+        render_resource_method_request(output, method, operation, request_plan);
+        output.push_str("        async for item in self._client.");
+        output.push_str(iter_method_name);
+        output.push_str("(request, deadline=deadline):\n");
+        output.push_str("            yield item\n");
+    }
+
+    fn render_client_resource_method_params(
+        &self,
+        output: &mut String,
+        method: &PlannedResourceMethod,
+        keyword_param: Option<&str>,
+    ) {
         output.push_str("        self,\n");
+        let keyword_only = self.render_resource_method_params(output, method);
+        if let Some(keyword_param) = keyword_param {
+            if !keyword_only {
+                output.push_str("        *,\n");
+            }
+            output.push_str("        ");
+            output.push_str(keyword_param);
+            output.push_str(",\n");
+        }
+    }
+
+    /// Renders the parameters after `self`, and says whether they are keyword-only.
+    fn render_resource_method_params(
+        &self,
+        output: &mut String,
+        method: &PlannedResourceMethod,
+    ) -> bool {
         // Python refuses a parameter without a default after one with a default, and WIT
         // allows any order, so such a method takes keyword arguments only.
         let has_default = |param: &PlannedResourceField| {
             param.optional || resource_method_list_param(param).is_some()
         };
-        if method
+        let keyword_only = method
             .params
             .iter()
             .skip_while(|param| !has_default(param))
-            .any(|param| !has_default(param))
-        {
+            .any(|param| !has_default(param));
+        if keyword_only {
             output.push_str("        *,\n");
         }
         for param in &method.params {
@@ -1004,6 +1147,23 @@ impl<'a> ApiPlanner<'a> {
             }
             output.push_str(",\n");
         }
+        keyword_only
+    }
+
+    fn render_resource_class_method(
+        &self,
+        output: &mut String,
+        service: &RenderedService<'_>,
+        resource: &PlannedResource,
+        method: &PlannedResourceMethod,
+        bound_operations: &[ResourceBoundOperation<'_>],
+    ) {
+        let result_annotation = self.python_resource_method_result_annotation(method);
+        output.push_str("    async def ");
+        output.push_str(&python_field_name(&method.name));
+        output.push_str("(\n");
+        output.push_str("        self,\n");
+        self.render_resource_method_params(output, method);
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
@@ -4183,7 +4343,11 @@ fn client_model_name(
 /// model to a payload, hands the payload to the transport, and converts the
 /// answer back. A proto-backed model converts through its transfer-type
 /// converter, so the transport moves proto bytes and needs no message type.
-fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
+fn render_client_module(
+    services: &[RenderedService<'_>],
+    resource_classes: &str,
+    all_model_names: &[String],
+) -> Result<String> {
     let mut model_names = BTreeSet::new();
     let mut body = String::new();
     body.push_str(CLIENT_RUNTIME);
@@ -4301,7 +4465,25 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
             {
                 model_names.insert(format!("_{proto_model}TransferTypeConverter"));
             }
-            render_client_method(&mut body, operation, &input_model, output_model.as_deref());
+            // An operation that returns a resource with a client class gives back an instance
+            // of it, bound to this caller.
+            let client_resource =
+                operation
+                    .output_resource_return
+                    .as_ref()
+                    .filter(|resource_return| {
+                        service.resources.iter().any(|resource| {
+                            resource.type_name == resource_return.resource_type_name
+                                && !resource.methods.is_empty()
+                        })
+                    });
+            render_client_method(
+                &mut body,
+                operation,
+                &input_model,
+                output_model.as_deref(),
+                client_resource,
+            );
             if let (Some(long_poll), Some(output_model)) =
                 (&operation.client_long_poll, output_model.as_deref())
             {
@@ -4340,6 +4522,12 @@ fn render_client_module(services: &[RenderedService<'_>]) -> Result<String> {
             }
         }
     }
+    body.push_str(resource_classes);
+    model_names.extend(used_python_symbol_imports(
+        resource_classes,
+        all_model_names,
+    ));
+
     // A helper that no method uses would be dead code in the module.
     let uses_proto = services
         .iter()
@@ -4402,6 +4590,7 @@ fn render_client_method(
     operation: &RenderedOperation<'_>,
     input_model: &str,
     output_model: Option<&str>,
+    client_resource: Option<&PlannedOperationResourceReturn>,
 ) {
     output.push('\n');
     output.push_str("    async def ");
@@ -4409,7 +4598,19 @@ fn render_client_method(
     output.push_str("(self, request: ");
     output.push_str(input_model);
     output.push_str(") -> ");
-    output.push_str(output_model.unwrap_or("None"));
+    output.push_str(
+        client_resource
+            .map(|resource_return| {
+                resource_return
+                    .holder
+                    .as_ref()
+                    .map_or(resource_return.resource_type_name.as_str(), |holder| {
+                        holder.model_name.as_str()
+                    })
+            })
+            .or(output_model)
+            .unwrap_or("None"),
+    );
     output.push_str(":\n");
     render_python_docstring(
         output,
@@ -4454,9 +4655,53 @@ fn render_client_method(
             output.push_str(codec);
             output.push_str(")\n");
             output.push_str("        with self._converters():\n");
-            output.push_str("            return converter.from_transfer_type(message, ");
+            let Some(resource_return) = client_resource else {
+                output.push_str("            return converter.from_transfer_type(message, ");
+                output.push_str(output_model);
+                output.push_str(")\n");
+                return;
+            };
+            output.push_str("            result = converter.from_transfer_type(message, ");
             output.push_str(output_model);
             output.push_str(")\n");
+            render_resource_return_guards(output, "        ", operation, resource_return);
+            let mut value = format!(
+                "{}(\n                self,\n",
+                resource_return.resource_type_name
+            );
+            for binding in &resource_return.bindings {
+                value.push_str("                ");
+                value.push_str(&python_field_name(&binding.field_name));
+                value.push('=');
+                value.push_str(&resource_return_binding_expr_python(binding));
+                value.push_str(",\n");
+            }
+            value.push_str("            )");
+            let Some(holder) = &resource_return.holder else {
+                output.push_str("        return ");
+                output.push_str(&value);
+                output.push('\n');
+                return;
+            };
+            // The record that holds the resource is the client twin, which holds the class bound
+            // to this caller.
+            output.push_str("        return ");
+            output.push_str(&holder.model_name);
+            output.push_str("(\n");
+            for field in &holder.fields {
+                let name = python_field_name(&field.name);
+                output.push_str("            ");
+                output.push_str(&name);
+                output.push('=');
+                if field.resource {
+                    output.push_str(&value);
+                } else {
+                    output.push_str("result.");
+                    output.push_str(&name);
+                }
+                output.push_str(",\n");
+            }
+            output.push_str("        )\n");
         }
         None => {
             output.push_str("        [value] = await self._data_converter.decode([answer], [");

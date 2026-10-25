@@ -685,4 +685,86 @@ namespace Nexgen.StreamService
 
     }
 
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(CloseWriterRequest.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record CloseWriterRequest
+    {
+        public ulong? WriterId { get; init; }
+
+        internal static CloseWriterRequest FromTransferType(StreamSample.V1.CloseWriterRequest wire)
+        {
+            return new CloseWriterRequest()
+            {
+                WriterId = wire.WriterId == 0 ? null : wire.WriterId,
+            };
+        }
+
+        internal StreamSample.V1.CloseWriterRequest ToTransferType()
+        {
+            var proto = new StreamSample.V1.CloseWriterRequest();
+            if (WriterId is { } writerId)
+            {
+                proto.WriterId = writerId;
+            }
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(StreamSample.V1.CloseWriterRequest);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((CloseWriterRequest)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : CloseWriterRequest.FromTransferType((StreamSample.V1.CloseWriterRequest)transferType);
+        }
+
+    }
+
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(CloseWriterResponse.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record CloseWriterResponse
+    {
+        public long? LastOffset { get; init; }
+
+        internal static CloseWriterResponse FromTransferType(StreamSample.V1.CloseWriterResponse wire)
+        {
+            return new CloseWriterResponse()
+            {
+                LastOffset = wire.LastOffset == 0 ? null : wire.LastOffset,
+            };
+        }
+
+        internal StreamSample.V1.CloseWriterResponse ToTransferType()
+        {
+            var proto = new StreamSample.V1.CloseWriterResponse();
+            if (LastOffset is { } lastOffset)
+            {
+                proto.LastOffset = lastOffset;
+            }
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(StreamSample.V1.CloseWriterResponse);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((CloseWriterResponse)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : CloseWriterResponse.FromTransferType((StreamSample.V1.CloseWriterResponse)transferType);
+        }
+
+    }
+
 }

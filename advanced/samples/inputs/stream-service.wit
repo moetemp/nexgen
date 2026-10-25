@@ -2,6 +2,7 @@ package temporal:stream-service@1.0.0;
 
 world system {
   export stream-service;
+  export stream-writer;
 }
 
 // The records are proto-backed, as the stream service's are. The sample has its own proto in
@@ -148,4 +149,21 @@ interface stream-service {
 
   /// @nexus.operation name="DescribeStream"
   describe-stream: func(request: describe-stream-request) -> describe-stream-response;
+}
+
+// The writer has no endpoint, as the stream writer service has none.
+/// @nexus.service-name "streamsample.v1.StreamWriter"
+interface stream-writer {
+  /// @nexus.proto "streamsample.v1.CloseWriterRequest" typescript-import="#streamsample"
+  record close-writer-request {
+    writer-id: option<u64>,
+  }
+
+  /// @nexus.proto "streamsample.v1.CloseWriterResponse" typescript-import="#streamsample"
+  record close-writer-response {
+    last-offset: option<s64>,
+  }
+
+  /// @nexus.operation name="CloseWriter"
+  close-writer: func(request: close-writer-request) -> close-writer-response;
 }

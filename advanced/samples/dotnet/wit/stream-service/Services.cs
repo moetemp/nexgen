@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using NexusRpc;
 using Temporalio.Converters;
+using Temporalio.Workflows;
 using Nexgen.Support;
 
 namespace Nexgen.StreamService
@@ -36,6 +37,52 @@ namespace Nexgen.StreamService
         [GeneratedCode("nexgen", null)]
         [NexusOperation("DescribeStream")]
         DescribeStreamResponse DescribeStream(DescribeStreamRequest request);
+
+    }
+
+    [GeneratedCode("nexgen", null)]
+    [NexusService("streamsample.v1.StreamWriter")]
+    internal interface IStreamWriter
+    {
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("CloseWriter")]
+        CloseWriterResponse CloseWriter(CloseWriterRequest request);
+
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class CloseWriterOptions
+    {
+        public ulong? WriterId { get; set; }
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class StreamWriterClient
+    {
+        private readonly NexusWorkflowClient<IStreamWriter> _client;
+
+        public StreamWriterClient(string endpoint)
+        {
+            _client = Workflow.CreateNexusWorkflowClient<IStreamWriter>(endpoint);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task<CloseWriterResponse> CloseWriterAsync(CloseWriterRequest request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<CloseWriterResponse>(svc => svc.CloseWriter(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task<CloseWriterResponse> CloseWriterAsync(CloseWriterOptions? options = null)
+        {
+            var request = new CloseWriterRequest()
+            {
+                WriterId = options?.WriterId,
+            };
+            return CloseWriterAsync(request);
+        }
 
     }
 

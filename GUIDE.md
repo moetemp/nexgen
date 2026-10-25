@@ -1168,6 +1168,11 @@ module. An operation whose models take type parameters, or that returns a
 resource without a wire type, is a generation error. TypeScript and .NET do not
 generate a caller yet.
 
+A service that only code outside a Workflow calls, such as a call surface that a
+Worker serves in process, takes [`@nexus.client-only`](#nexusclient-only). The
+Python target then writes its models and `client.py` only, with no Workflow
+stubs, services or operation registry.
+
 ## Function References
 
 Nexus and Temporal often need to identify a function by name on the wire, while
@@ -1854,6 +1859,25 @@ async iterator.
 /// @nexus.long-poll wait-field="wait" max-wait-ms="60000" result-field="entries"
 ///   done-field="done" offset-field="from-offset" next-offset-field="next-offset"
 read: func(request: read-request) -> read-response;
+```
+
+---
+
+### @nexus.client-only
+
+**Placement:** Interface **Syntax:** `@nexus.client-only` (no arguments)
+
+Marks a service that only code outside a Workflow calls. With `--client`, the
+Python target generates its models, its caller and its resource classes in
+`client.py`, and no Workflow stubs, services or System Nexus dispatch. Without
+`--client`, it generates only the models. The interface cannot also have
+`@nexus.endpoint`, since no Workflow calls it. TypeScript, .NET, Go and Java
+ignore the directive and generate the service as any other.
+
+```wit
+/// @nexus.service-name "temporal.sdk.streams.v1.StreamWriter"
+/// @nexus.client-only
+interface stream-writer { ... }
 ```
 
 ---

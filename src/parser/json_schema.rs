@@ -6068,6 +6068,7 @@ fn build_service(
         namespace: LanguageStringSpec::default(),
         operations_class: LanguageStringSpec::default(),
         endpoint: service.endpoint.clone(),
+        client_only: false,
         experimental: false,
         deprecated: service
             .extra

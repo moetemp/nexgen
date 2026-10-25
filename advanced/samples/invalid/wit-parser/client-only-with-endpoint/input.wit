@@ -1,0 +1,10 @@
+package test:client-only-with-endpoint;
+
+world system { export api; }
+
+/// @nexus.endpoint "api"
+/// @nexus.client-only
+interface api {
+  record request { id: string }
+  request-op: func(request: request) -> request;
+}

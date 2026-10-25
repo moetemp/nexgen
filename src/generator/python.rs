@@ -485,9 +485,18 @@ impl<'a> ApiPlanner<'a> {
 
     fn build(mut self, module_origin: GeneratedFileOrigin) -> Result<PythonGenerationResult> {
         let api_plan = self.api_plan;
+        // A client-only service gets no Workflow surface, so it comes last and only the
+        // caller module sees it.
         let services = api_plan
             .services
             .iter()
+            .filter(|service| !service.client_only)
+            .chain(
+                api_plan
+                    .services
+                    .iter()
+                    .filter(|service| service.client_only),
+            )
             .map(|service| {
                 let operations = service
                     .operations
@@ -503,6 +512,7 @@ impl<'a> ApiPlanner<'a> {
                     experimental: service.experimental,
                     deprecated: service.deprecated,
                     delay_load_temporalio_workflow: service.delay_load_temporalio_workflow,
+                    client_only: service.client_only,
                     operations,
                     resources: service
                         .resources
@@ -536,8 +546,16 @@ impl<'a> ApiPlanner<'a> {
             self.render_model_fragments(model_refs.as_slice(), variant_refs.as_slice())?;
         validate_python_generated_names(self.api_plan, &model_fragments.generated_names)?;
 
-        let (files, exported_names) =
-            self.render_package(&model_fragments, &services, module_origin)?;
+        let workflow_services = services
+            .iter()
+            .take_while(|service| !service.client_only)
+            .count();
+        let (files, exported_names) = self.render_package(
+            &model_fragments,
+            &services[..workflow_services],
+            &services,
+            module_origin,
+        )?;
         Ok(PythonGenerationResult {
             files,
             warnings: Vec::new(),
@@ -559,6 +577,7 @@ impl<'a> ApiPlanner<'a> {
         &self,
         model_fragments: &RenderedModelFragments,
         services: &[RenderedService<'_>],
+        client_services: &[RenderedService<'_>],
         module_origin: GeneratedFileOrigin,
     ) -> Result<(GeneratedFileMap, BTreeSet<String>)> {
         let mode = crate::nexgen_config::current().mode;
@@ -611,6 +630,15 @@ impl<'a> ApiPlanner<'a> {
             .chain(
                 resource_holders(self.api_plan)
                     .into_values()
+                    // A client-only service has no resources module for its holder records.
+                    .filter(|(_, resource_type)| {
+                        services.iter().any(|service| {
+                            service
+                                .resources
+                                .iter()
+                                .any(|resource| resource.type_name == *resource_type)
+                        })
+                    })
                     .map(|(model_name, _)| model_name),
             )
             .collect::<BTreeSet<_>>()
@@ -699,12 +727,12 @@ impl<'a> ApiPlanner<'a> {
                 GeneratedFileOrigin::fixed("generated Python resources package initializer"),
             )?;
         }
-        if crate::nexgen_config::current().client && !services.is_empty() {
+        if crate::nexgen_config::current().client && !client_services.is_empty() {
             files.insert(
                 "client.py",
                 {
-                    let resource_classes = self.render_client_resources(services);
-                    render_client_module(services, &resource_classes, &model_names)?
+                    let resource_classes = self.render_client_resources(client_services);
+                    render_client_module(client_services, &resource_classes, &model_names)?
                 },
                 module_origin.clone(),
             )?;
@@ -2838,6 +2866,7 @@ struct RenderedService<'a> {
     experimental: bool,
     deprecated: bool,
     delay_load_temporalio_workflow: bool,
+    client_only: bool,
     operations: Vec<RenderedOperation<'a>>,
     resources: Vec<PlannedResource>,
 }

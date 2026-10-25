@@ -1,0 +1,9 @@
+package test:client-only-arguments;
+
+world system { export api; }
+
+/// @nexus.client-only reason="in process"
+interface api {
+  record request { id: string }
+  request-op: func(request: request) -> request;
+}

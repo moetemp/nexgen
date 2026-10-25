@@ -1418,3 +1418,188 @@ interface api {
     assert!(!ping.contains("import PongRequest\n"), "{ping}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+#[test]
+fn python_client_only_service_gets_a_caller_and_no_workflow_surface() {
+    let temp_dir = unique_output_path("python-client-only");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("client-only.wit");
+    let wit = r#"
+package temporal:client-only@1.0.0;
+
+world system { export writer-service; }
+
+/// @nexus.client-only
+interface writer-service {
+  record write-request {
+    writer-id: u64,
+    text: string,
+  }
+
+  record close-writers-request {
+  }
+
+  /// @nexus.doc "An open writer."
+  resource writer {
+    constructor(writer-id: u64);
+
+    /// @nexus.doc "Write one line."
+    /// @nexus.operation "write"
+    write: func(text: string);
+  }
+
+  write: func(request: write-request);
+
+  close-writers: func(request: close-writers-request);
+}
+"#;
+    fs::write(&wit_path, wit).unwrap();
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            client: true,
+            ..Default::default()
+        },
+        language: nexgen::language::Language::Python,
+        input_paths: vec![wit_path],
+        support_package: Some("temporal_support".into()),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let files = read_python_package_files(&output_path);
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    let workflow_files = files
+        .keys()
+        .filter(|path| {
+            path.starts_with("operations")
+                || path.starts_with("_resources")
+                || *path == Path::new("services.py")
+        })
+        .collect::<Vec<_>>();
+    assert!(workflow_files.is_empty(), "{workflow_files:?}");
+    assert!(
+        files.contains_key(Path::new("models.py")),
+        "{:?}",
+        files.keys()
+    );
+    let client = &files[Path::new("client.py")];
+    assert!(client.contains("class WriterServiceClient:\n"), "{client}");
+    assert!(
+        client.contains("class Writer:\n    \"\"\"An open writer.\"\"\"\n"),
+        "{client}"
+    );
+    assert!(
+        client.contains("        _ = await self._client.write(request)\n"),
+        "{client}"
+    );
+}
+
+#[test]
+fn python_client_only_service_keeps_a_holder_record_in_the_caller_module() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-client-only-holder");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("client-only-holder.wit");
+    let wit = r#"
+package temporal:client-only-holder@1.0.0;
+
+world system { export stream-service; }
+
+/// @nexus.client-only
+/// @nexus.service-name "streamsample.v1.StreamService"
+interface stream-service {
+  use nexus:temporal-types/model@1.0.0.{duration, placeholder};
+
+  /// @nexus.proto "streamsample.v1.StreamRef"
+  record stream-ref {
+    id: string,
+    workflow-id: option<string>,
+  }
+
+  /// @nexus.proto "streamsample.v1.CreateStreamRequest"
+  record create-stream-request {
+    %ref: option<stream-ref>,
+    retention: option<duration>,
+    /// @nexus.omit
+    namespace: placeholder,
+  }
+
+  /// @nexus.proto "streamsample.v1.DescribeStreamRequest"
+  record describe-stream-request {
+    %stream: option<stream-ref>,
+    /// @nexus.omit
+    namespace: placeholder,
+  }
+
+  /// @nexus.proto "streamsample.v1.DescribeStreamResponse"
+  record describe-stream-response {
+    last-offset: option<s64>,
+    retention: option<duration>,
+  }
+
+  resource %stream {
+    constructor(%stream: stream-ref);
+
+    /// @nexus.operation "describe-stream"
+    describe: func() -> describe-stream-response;
+  }
+
+  /// @nexus.proto "streamsample.v1.CreateStreamResponse"
+  record create-stream-result {
+    %stream: own<%stream>,
+    created: option<bool>,
+  }
+
+  create-stream: func(request: create-stream-request) -> create-stream-result;
+
+  describe-stream: func(request: describe-stream-request) -> describe-stream-response;
+}
+"#;
+    fs::write(&wit_path, wit).unwrap();
+    let descriptors = root.join("advanced/samples/descriptors");
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            client: true,
+            ..Default::default()
+        },
+        language: nexgen::language::Language::Python,
+        input_paths: vec![wit_path, linked_inputs_path(&root)],
+        support_package: Some("temporal_support".into()),
+        descriptor_paths: vec![
+            descriptors.join("temporal_api.bin"),
+            descriptors.join("stream_service.bin"),
+        ],
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let files = read_python_package_files(&output_path);
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    let names = files.keys().map(PathBuf::as_path).collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            Path::new("__init__.py"),
+            Path::new("client.py"),
+            Path::new("models.py")
+        ],
+    );
+    // The caller builds the record that holds the client class from the wire answer.
+    assert!(
+        files[Path::new("client.py")].contains("class CreateStreamResult:\n"),
+        "{}",
+        files[Path::new("client.py")]
+    );
+    assert!(!files[Path::new("models.py")].contains("class CreateStreamResult:\n"));
+}

@@ -68,6 +68,7 @@ class StreamWriterClient:
     async def close_writers(
         self,
     ) -> temporalio.workflow.NexusOperationHandle[CloseWritersResponse]:
+        """Drop every open writer, for example at shutdown."""
         request = CloseWritersRequest()
         return await self._nexus_client.start_operation(
             operation="CloseWriters",

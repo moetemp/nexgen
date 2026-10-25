@@ -421,6 +421,7 @@ class StreamWriterClient:
         )
 
     async def close_writers(self, request: CloseWritersRequest) -> CloseWritersResponse:
+        """Drop every open writer, for example at shutdown."""
         with self._converters():
             message = _CloseWritersRequestTransferTypeConverter().to_transfer_type(
                 request

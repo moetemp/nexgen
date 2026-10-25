@@ -686,4 +686,77 @@ namespace Nexgen.StreamService
 
     }
 
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(CloseWritersRequest.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record CloseWritersRequest
+    {
+        internal static CloseWritersRequest FromTransferType(StreamSample.V1.CloseWritersRequest wire)
+        {
+            return new CloseWritersRequest();
+        }
+
+        internal StreamSample.V1.CloseWritersRequest ToTransferType()
+        {
+            var proto = new StreamSample.V1.CloseWritersRequest();
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(StreamSample.V1.CloseWritersRequest);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((CloseWritersRequest)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : CloseWritersRequest.FromTransferType((StreamSample.V1.CloseWritersRequest)transferType);
+        }
+
+    }
+
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(CloseWritersResponse.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record CloseWritersResponse
+    {
+        public int? Failed { get; init; }
+
+        internal static CloseWritersResponse FromTransferType(StreamSample.V1.CloseWritersResponse wire)
+        {
+            return new CloseWritersResponse()
+            {
+                Failed = wire.Failed == 0 ? null : wire.Failed,
+            };
+        }
+
+        internal StreamSample.V1.CloseWritersResponse ToTransferType()
+        {
+            var proto = new StreamSample.V1.CloseWritersResponse();
+            if (Failed is { } failed)
+            {
+                proto.Failed = failed;
+            }
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(StreamSample.V1.CloseWritersResponse);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((CloseWritersResponse)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : CloseWritersResponse.FromTransferType((StreamSample.V1.CloseWritersResponse)transferType);
+        }
+
+    }
+
 }

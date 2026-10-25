@@ -681,3 +681,79 @@ class _DescribeStreamResponseTransferTypeConverter(
 temporalio.converter.transfer_type_convertible(
     _DescribeStreamResponseTransferTypeConverter
 )(DescribeStreamResponse)  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True)
+class CloseWritersRequest:
+    pass
+
+
+class _CloseWritersRequestTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        CloseWritersRequest, streamsample.v1.stream_service_pb2.CloseWritersRequest
+    ]
+):
+    transfer_type: (
+        type[streamsample.v1.stream_service_pb2.CloseWritersRequest] | None
+    ) = streamsample.v1.stream_service_pb2.CloseWritersRequest
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: streamsample.v1.stream_service_pb2.CloseWritersRequest,
+        type_hint: type[CloseWritersRequest],
+    ) -> CloseWritersRequest:
+        return CloseWritersRequest()
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: CloseWritersRequest,
+    ) -> streamsample.v1.stream_service_pb2.CloseWritersRequest:
+        message = streamsample.v1.stream_service_pb2.CloseWritersRequest()
+        return message
+
+
+temporalio.converter.transfer_type_convertible(
+    _CloseWritersRequestTransferTypeConverter
+)(CloseWritersRequest)  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True)
+class CloseWritersResponse:
+    failed: int | None = None
+
+
+class _CloseWritersResponseTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        CloseWritersResponse, streamsample.v1.stream_service_pb2.CloseWritersResponse
+    ]
+):
+    transfer_type: (
+        type[streamsample.v1.stream_service_pb2.CloseWritersResponse] | None
+    ) = streamsample.v1.stream_service_pb2.CloseWritersResponse
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: streamsample.v1.stream_service_pb2.CloseWritersResponse,
+        type_hint: type[CloseWritersResponse],
+    ) -> CloseWritersResponse:
+        return CloseWritersResponse(
+            failed=value.failed if value.failed != 0 else None,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: CloseWritersResponse,
+    ) -> streamsample.v1.stream_service_pb2.CloseWritersResponse:
+        message = streamsample.v1.stream_service_pb2.CloseWritersResponse()
+        if value.failed is not None:
+            message.failed = value.failed
+        return message
+
+
+temporalio.converter.transfer_type_convertible(
+    _CloseWritersResponseTransferTypeConverter
+)(CloseWritersResponse)  # pyright: ignore[reportUnusedCallResult]

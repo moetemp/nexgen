@@ -460,6 +460,58 @@ export const describeStreamRequestTransferTypeConverter = {
     return describeStreamRequestToProto(value);
   },
 };
+export interface CloseWritersResponse {
+  failed?: number;
+}
+
+function closeWritersResponseFromProto(
+  proto: streamsample.v1.ICloseWritersResponse,
+): CloseWritersResponse {
+  return {
+    failed: proto.failed ?? undefined,
+  };
+}
+
+function closeWritersResponseToProto(
+  model: CloseWritersResponse,
+): streamsample.v1.ICloseWritersResponse {
+  return {
+    failed: model.failed,
+  };
+}
+
+export const closeWritersResponseTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.ICloseWritersResponse): CloseWritersResponse {
+    return closeWritersResponseFromProto(value);
+  },
+
+  toTransferType(value: CloseWritersResponse): streamsample.v1.ICloseWritersResponse {
+    return closeWritersResponseToProto(value);
+  },
+};
+export type CloseWritersRequest = Record<string, never>;
+
+function closeWritersRequestFromProto(
+  proto: streamsample.v1.ICloseWritersRequest,
+): CloseWritersRequest {
+  return {};
+}
+
+function closeWritersRequestToProto(
+  model: CloseWritersRequest,
+): streamsample.v1.ICloseWritersRequest {
+  return {};
+}
+
+export const closeWritersRequestTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.ICloseWritersRequest): CloseWritersRequest {
+    return closeWritersRequestFromProto(value);
+  },
+
+  toTransferType(value: CloseWritersRequest): streamsample.v1.ICloseWritersRequest {
+    return closeWritersRequestToProto(value);
+  },
+};
 export interface CreateStreamResult {
   stream: Stream;
   created?: boolean;

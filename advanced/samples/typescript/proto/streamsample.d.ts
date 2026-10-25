@@ -84,5 +84,11 @@ export namespace streamsample {
       lastOffset?: Long | null;
       retention?: google.protobuf.IDuration | null;
     }
+
+    interface ICloseWritersRequest {}
+
+    interface ICloseWritersResponse {
+      failed?: number | null;
+    }
   }
 }

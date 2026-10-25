@@ -5,9 +5,12 @@ export { appendRecords } from "./operations/append-records";
 export { closeStream } from "./operations/close-stream";
 export { readRecords } from "./operations/read-records";
 export { describeStream } from "./operations/describe-stream";
+export { streamWriter, StreamWriterClient } from "./services";
 export type {
   AppendRecordsRequest,
   CloseStreamRequest,
+  CloseWritersRequest,
+  CloseWritersResponse,
   CreateStreamRequest,
   DescribeStreamRequest,
   ReadRecordsRequest,

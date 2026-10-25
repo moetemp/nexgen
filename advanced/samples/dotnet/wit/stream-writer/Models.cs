@@ -13,7 +13,7 @@ namespace Nexgen.StreamWriter
     [GeneratedCode("nexgen", null)]
     public record CloseWriterRequest
     {
-        public long? WriterId { get; init; }
+        public ulong? WriterId { get; init; }
 
         internal static CloseWriterRequest FromTransferType(StreamSample.V1.CloseWriterRequest wire)
         {

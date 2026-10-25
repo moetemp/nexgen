@@ -26,7 +26,7 @@ namespace Nexgen.StreamWriter
     [GeneratedCode("nexgen", null)]
     public class CloseWriterOptions
     {
-        public long? WriterId { get; set; }
+        public ulong? WriterId { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]

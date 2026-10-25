@@ -43,10 +43,10 @@ languages = ["dotnet"]
 system_nexus = true
 descriptors = ["temporal_api.bin", "brook_streams.bin"]
 
-# Brook's writer WIT, byte for byte. It uses records of brook-stream-service. No language generates
-# it yet.
+# Brook's writer WIT, byte for byte. It uses records of brook-stream-service. Only .NET generates
+# it today, for the same reason as the service.
 [brook-stream-writer]
-languages = []
+languages = ["dotnet"]
 descriptors = ["temporal_api.bin", "brook_streams.bin"]
 
 # A System Nexus operation that returns a resource.

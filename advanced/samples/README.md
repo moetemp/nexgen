@@ -168,14 +168,15 @@ protos of the API proposal and to Brook's runtime proto, in
 example ids apart from the other stream samples. The writer uses records of the
 service, so its build links `brook-stream-service.wit`.
 
-Only .NET generates the service today, and the sample project leaves it out of
-the build, as it does `workflow-handle`. Python and TypeScript need the Stream
-protos in their SDK's proto package, which no release has yet. The writer
-generates in no language yet.
+Only .NET generates them today, and the sample project leaves both out of the
+build. The service is a System Nexus sample, as `workflow-handle` is, and the
+writer has the namespace of the `stream-writer` sample. Python and TypeScript
+need the Stream protos in their SDK's proto package, which no release has yet.
 
 - WIT: [`inputs/brook-stream-service.wit`](inputs/brook-stream-service.wit),
   [`inputs/brook-stream-writer.wit`](inputs/brook-stream-writer.wit)
-- .NET: [`dotnet/wit/brook-stream-service/`](dotnet/wit/brook-stream-service/)
+- .NET: [`dotnet/wit/brook-stream-service/`](dotnet/wit/brook-stream-service/),
+  [`dotnet/wit/brook-stream-writer/`](dotnet/wit/brook-stream-writer/)
 
 ## Supporting files
 

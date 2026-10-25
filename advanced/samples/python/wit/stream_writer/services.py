@@ -21,6 +21,12 @@ from .models import (
 from ._resources.writer import bind_writer_client
 
 if typing.TYPE_CHECKING:
+    from .models import (
+        AppendRecord,
+        Producer,
+        StreamRef,
+        WorkflowTaskEpoch,
+    )
     from ._resources import Writer
 
 

@@ -31,18 +31,20 @@ interface stream-service {
     body: option<payload>,
   }
 
+  /// @nexus.proto "streamsample.v1.StreamStatus" typescript-import="#streamsample"
+  enum stream-status {
+    stream-status-unspecified,
+    stream-status-open,
+    stream-status-closed,
+    stream-status-expired,
+  }
+
   /// @nexus.proto "streamsample.v1.CreateStreamRequest" typescript-import="#streamsample"
   record create-stream-request {
     %ref: option<stream-ref>,
     retention: option<duration>,
     /// @nexus.omit
     namespace: placeholder,
-  }
-
-  /// @nexus.proto "streamsample.v1.CreateStreamResponse" typescript-import="#streamsample"
-  record create-stream-response {
-    %stream: option<stream-ref>,
-    created: option<bool>,
   }
 
   /// @nexus.proto "streamsample.v1.AppendRecordsRequest" typescript-import="#streamsample"
@@ -124,8 +126,16 @@ interface stream-service {
     describe: func() -> describe-stream-response;
   }
 
+  // The stream binds from the stream field of the response, and the other fields stay beside it.
+  /// @nexus.proto "streamsample.v1.CreateStreamResponse" typescript-import="#streamsample"
+  record create-stream-result {
+    %stream: own<%stream>,
+    created: option<bool>,
+    status: option<stream-status>,
+  }
+
   /// @nexus.operation name="CreateStream"
-  create-stream: func(request: create-stream-request) -> create-stream-response;
+  create-stream: func(request: create-stream-request) -> create-stream-result;
 
   /// @nexus.operation name="AppendRecords"
   append-records: func(request: append-records-request) -> append-records-response;

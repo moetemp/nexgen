@@ -1,0 +1,21 @@
+// The client target should take the field as a parameter. Remove this fixture when
+// temporalio/nexgen#301 is done.
+package temporal:client-sourced-field@1.0.0;
+
+world system { export namespace-service; }
+
+/// @nexus.endpoint "__temporal_system"
+interface namespace-service {
+  /// @nexus.proto "temporal.api.workflowservice.v1.DescribeNamespaceRequest"
+  record describe-request {
+    /// @nexus.source python="workflow_namespace()"
+    namespace: string,
+    id: string,
+    weak-consistency: option<bool>,
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionResponse"
+  record describe-response {}
+
+  describe: func(request: describe-request) -> describe-response;
+}

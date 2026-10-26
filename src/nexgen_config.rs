@@ -14,6 +14,7 @@ pub struct NexgenConfig {
     /// Python modules for protos that `temporalio.api` doesn't have yet, such as an API that isn't
     /// released. Without an entry, a `temporal/...` proto file is a `temporalio...` module.
     pub python_proto_modules: Vec<ProtoModule>,
+    pub targets: GenerationTargets,
 }
 
 /// A proto file path prefix, such as `temporal/api/stream/` or one `.proto` file, and the Python
@@ -41,6 +42,25 @@ impl Default for NexgenConfig {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: false,
             python_proto_modules: Vec::new(),
+            targets: GenerationTargets::default(),
+        }
+    }
+}
+
+/// Where the generated API is called from. A target changes only how an operation is invoked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GenerationTargets {
+    /// Workflow code.
+    pub workflow: bool,
+    /// Code outside a Workflow, through a client extension. Only for System Nexus.
+    pub client: bool,
+}
+
+impl Default for GenerationTargets {
+    fn default() -> Self {
+        Self {
+            workflow: true,
+            client: false,
         }
     }
 }
@@ -82,6 +102,7 @@ mod tests {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
             python_proto_modules: Vec::new(),
+            targets: Default::default(),
         };
         {
             let _outer_scope = scope(outer.clone());
@@ -102,6 +123,7 @@ mod tests {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
             python_proto_modules: Vec::new(),
+            targets: Default::default(),
         };
         {
             let _scope = scope(config.clone());

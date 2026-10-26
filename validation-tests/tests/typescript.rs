@@ -1668,6 +1668,7 @@ fn renders_sample_with_versioned_header() {
     generate_to_file(&GenerateRequest {
         config: NexgenConfig {
             system_nexus: true,
+            targets: Default::default(),
             mode: GenerationMode::NativeApi,
             ..Default::default()
         },

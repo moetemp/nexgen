@@ -148,8 +148,8 @@ Only part of today's output builds, so the samples leave the rest out:
 
 - The TypeScript writer client, which has no endpoint, returns a resource that
   it doesn't import as a value. `tsc` skips it.
-- Python doesn't generate the writer, since a caller method's docstring loses
-  its indent.
+- Python doesn't generate the writer's client, since the empty signature of
+  `close-writers` keeps a bare `*`.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)

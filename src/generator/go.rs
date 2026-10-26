@@ -5869,6 +5869,7 @@ mod tests {
                 mode: crate::generator::GenerationMode::NativeApi,
                 system_nexus,
                 python_proto_modules: Vec::new(),
+                targets: Default::default(),
             },
             language: crate::language::Language::Go,
             input_paths: vec![input],
@@ -6069,6 +6070,7 @@ mod tests {
     fn system_nexus_factory_avoids_self_import_namespace() {
         let _scope = crate::nexgen_config::scope(crate::nexgen_config::NexgenConfig {
             system_nexus: true,
+            targets: Default::default(),
             ..Default::default()
         });
         let package = super::GoPackageContext {

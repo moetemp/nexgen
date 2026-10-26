@@ -29,8 +29,10 @@ descriptors = "temporal"
 # Brook's Stream service WIT, byte for byte. Its records bind to the Stream protos of
 # temporalio/api#895 in descriptors/streams/, which no SDK has yet. So Python imports them from the
 # sample's own package, and the other Temporal protos from temporalio.
+# Python also gets the client target, which turns on System Nexus for Python.
 [stream-service]
 languages = ["python", "typescript", "dotnet"]
+targets = ["workflow", "client"]
 descriptors = ["temporal_api.bin", "streams.bin"]
 
 [stream-service.python_proto_modules]
@@ -40,9 +42,11 @@ descriptors = ["temporal_api.bin", "streams.bin"]
 "temporal/sdk/streams/" = "streamprotos.temporal.sdk.streams"
 
 # Brook's writer WIT, byte for byte. It uses records of stream-service, and Brook's runtime proto.
-# Python doesn't generate it yet, since a caller method's docstring loses its indent.
+# Brook generates only its client. Python doesn't generate it yet, since the empty signature of
+# close-writers keeps a bare keyword marker.
 [stream-writer]
 languages = ["typescript", "dotnet"]
+targets = ["client"]
 descriptors = ["temporal_api.bin", "streams.bin"]
 
 # A System Nexus operation that returns a resource.

@@ -9,6 +9,8 @@ import abc
 from .models import (
     CloseWriterRequest,
     CloseWriterResponse,
+    CloseWritersRequest,
+    CloseWritersResponse,
 )
 
 
@@ -53,6 +55,26 @@ class StreamWriterClientExtension(abc.ABC):
         ``endpoint`` is ``None`` for a service with no endpoint, which the client serves.
         """
         ...
+
+    async def _close_writers(
+        self,
+        request: CloseWritersRequest,
+    ) -> collections.abc.Awaitable[CloseWritersResponse,]:
+        nexus_client = self._create_nexus_client(
+            service="streamsample.v1.StreamWriter",
+            endpoint=None,
+        )
+        return await nexus_client.start_operation(
+            operation="CloseWriters",
+            input=request,
+            output_type=CloseWritersResponse,
+        )
+
+    async def close_writers(
+        self,
+    ) -> collections.abc.Awaitable[CloseWritersResponse,]:
+        request = CloseWritersRequest()
+        return await self._close_writers(request)
 
     async def _close_writer(
         self,

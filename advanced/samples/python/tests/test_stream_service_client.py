@@ -19,7 +19,12 @@ from wit.stream_service.models import (
     StreamRef,
 )
 from wit.stream_writer.client import StreamWriterClientExtension
-from wit.stream_writer.models import CloseWriterRequest, CloseWriterResponse
+from wit.stream_writer.models import (
+    CloseWriterRequest,
+    CloseWriterResponse,
+    CloseWritersRequest,
+    CloseWritersResponse,
+)
 
 
 @dataclasses.dataclass
@@ -141,3 +146,12 @@ async def test_a_poll_yields_each_page_until_the_helper_stops() -> None:
         ReadRecordsRequest(stream=ref, from_offset=0),
         ReadRecordsRequest(stream=ref, from_offset=1),
     ]
+
+
+async def test_an_empty_request_takes_no_arguments() -> None:
+    client = FakeClient({"CloseWriters": [CloseWritersResponse(failed=0)]})
+
+    closed = await (await client.close_writers())
+
+    assert closed.failed == 0
+    assert [call.input for call in client.calls] == [CloseWritersRequest()]

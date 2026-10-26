@@ -26,12 +26,6 @@ descriptors = "temporal"
 languages = ["python", "dotnet", "typescript"]
 descriptors = "temporal"
 
-# A proto-backed result record that holds a resource next to its other fields.
-[proto-record-with-resource]
-system_nexus = true
-languages = ["python", "typescript", "dotnet", "go"]
-descriptors = "temporal"
-
 [stream-service]
 languages = ["python", "typescript", "dotnet"]
 # The sample proto imports the Temporal API messages, so it needs both sets.

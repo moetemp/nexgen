@@ -148,21 +148,6 @@ records are proto-backed, as a stream service's are, on the sample proto in
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
   [`typescript/tests/stream-service.test.ts`](typescript/tests/stream-service.test.ts)
 
-### `proto-record-with-resource`
-
-A System Nexus operation that returns a proto-backed record that holds a
-resource, next to the other fields of the same message.
-
-- WIT:
-  [`inputs/proto-record-with-resource.wit`](inputs/proto-record-with-resource.wit)
-- .NET:
-  [`dotnet/wit/proto-record-with-resource/`](dotnet/wit/proto-record-with-resource/)
-- Go: [`go/protorecordwithresource/`](go/protorecordwithresource/)
-- Python:
-  [`python/wit/proto_record_with_resource/`](python/wit/proto_record_with_resource/)
-- TypeScript:
-  [`typescript/wit/proto-record-with-resource/`](typescript/wit/proto-record-with-resource/)
-
 ## Supporting files
 
 - [`inputs/deps/`](inputs/deps/): reusable Temporal semantic/common type WIT

@@ -1,0 +1,8 @@
+languages = ["python"]
+targets = ["workflow", "client"]
+
+[error]
+kind = "unsupported-client-target"
+contains = [
+  "the client target is only for System Nexus services so far, so it needs `--system-nexus`",
+]

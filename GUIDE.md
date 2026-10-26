@@ -30,6 +30,7 @@ of `@nexus` directives.
   - [Flattened Records](#flattened-records)
   - [Output Transforms](#output-transforms)
 - [Function References](#function-references)
+- [Generation Targets](#generation-targets)
 - [Directive Glossary](#directive-glossary)
 
 ---
@@ -1438,6 +1439,36 @@ descriptor replaces signature-derived typing.
 | `varargs`                | Treat a final list-shaped signature parameter as `*args`.              | Generates positional overloads plus list-form `args`.      |
 | `param`                  | Disambiguate which final parameter is the varargs list.                | Required when the signature has more than one parameter.   |
 | `typescript-drop-prefix` | Remove implicit receiver/context parameters from TypeScript inference. | TypeScript omits the prefix from inferred argument tuples. |
+
+---
+
+## Generation Targets
+
+`--targets` sets where the generated API is called from. Repeat the flag or
+separate the targets with commas.
+
+- `workflow`, the default, is the API for Workflow code.
+- `client` writes `client.py`, the same API for code outside a Workflow. So far
+  it's only for Python, with `--system-nexus` and `--native-api`. With `client`
+  alone, the package has no Workflow code.
+
+`client.py` has a `<Service>ClientExtension` per service, with the operations of
+the workflow target as methods. A client class inherits it and implements
+`_create_nexus_client`, which returns an object with the `start_operation` of
+the workflow Nexus client. A resource keeps the client that built it. A service
+with no `@nexus.endpoint` passes `endpoint=None`.
+
+```python
+class StreamClient(StreamServiceClientExtension):
+    def _create_nexus_client(self, *, service, endpoint):
+        ...  # for example, start a standalone Nexus operation
+
+stream = await StreamClient().create_stream(ref=ref)
+await stream.append_records(records=records)
+```
+
+The client target refuses a `@nexus.source` field, which has no value outside a
+Workflow yet.
 
 ---
 

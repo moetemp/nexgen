@@ -26,14 +26,18 @@ descriptors = "temporal"
 languages = ["python", "dotnet", "typescript"]
 descriptors = "temporal"
 
+# Python also gets the client target here and in the stream writer. It turns on System Nexus
+# for Python.
 [stream-service]
 languages = ["python", "typescript", "dotnet"]
+targets = ["workflow", "client"]
 # The sample proto imports the Temporal API messages, so it needs both sets.
 descriptors = ["temporal_api.bin", "stream_service.bin"]
 
 # The stream writer, a package apart from the stream service, as in Brook.
 [stream-writer]
 languages = ["python", "typescript", "dotnet"]
+targets = ["workflow", "client"]
 descriptors = ["temporal_api.bin", "stream_service.bin"]
 
 # Brook's Stream service WIT, byte for byte. Only .NET generates it today, since the other SDKs'

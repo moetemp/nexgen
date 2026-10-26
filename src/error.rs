@@ -20,6 +20,8 @@ pub type Result<T> = std::result::Result<T, Error>;
     strum_discriminants(serde(rename_all = "kebab-case"))
 )]
 pub enum Error {
+    #[error("the client target {reason}")]
+    UnsupportedClientTarget { reason: String },
     #[error("failed to read `{path}`: {source}")]
     ReadFile {
         path: PathBuf,

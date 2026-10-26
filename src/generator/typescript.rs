@@ -7275,6 +7275,7 @@ interface workflow-service {
         .unwrap();
         let _scope = scope(NexgenConfig {
             system_nexus: true,
+            targets: Default::default(),
             ..current()
         });
         let output =

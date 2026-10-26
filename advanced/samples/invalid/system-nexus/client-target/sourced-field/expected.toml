@@ -1,0 +1,8 @@
+languages = ["python"]
+descriptors = "temporal"
+system_nexus = true
+targets = ["client"]
+
+[error]
+kind = "unsupported-client-target"
+contains = ["`DescribeRequest.namespace`", "outside a Workflow", "`@nexus.source`"]

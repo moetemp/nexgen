@@ -286,6 +286,47 @@ interface example-service {
 }
 
 #[test]
+fn python_client_target_alone_renders_no_workflow_code() {
+    let temp_dir = unique_output_path("python-client-only");
+    let input_path = temp_dir.join("writers.wit");
+    fs::create_dir_all(&temp_dir).unwrap();
+    fs::write(
+        &input_path,
+        "package temporal:client-only@1.0.0;\n\nworld writer { export writers; }\n\n\
+         interface writers {\n  record close-request { id: string }\n  \
+         record close-response { done: bool }\n\n  \
+         close: func(request: close-request) -> close-response;\n}\n",
+    )
+    .unwrap();
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            system_nexus: true,
+            targets: nexgen::nexgen_config::GenerationTargets {
+                workflow: false,
+                client: true,
+            },
+        },
+        language: nexgen::language::Language::Python,
+        input_paths: vec![input_path],
+        support_package: Some("temporal_support".into()),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let files = read_python_package_files(&output_path);
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    assert!(files.contains_key(Path::new("client.py")));
+    let services = &files[Path::new("services.py")];
+    assert!(!services.contains("temporalio.workflow"), "{services}");
+}
+
+#[test]
 fn python_sourced_helper_import_is_automatic() {
     let root = project_root();
     let temp_dir = unique_output_path("python-sourced-support-only");

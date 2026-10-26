@@ -66,6 +66,7 @@ fn generate_to_string_with_system_nexus(
         config: nexgen::nexgen_config::NexgenConfig {
             mode: nexgen::generator::GenerationMode::NativeApi,
             system_nexus,
+            targets: Default::default(),
         },
         language,
         input_paths: input_paths.to_vec(),
@@ -981,6 +982,7 @@ interface sample-service {{
         config: nexgen::nexgen_config::NexgenConfig {
             mode: nexgen::generator::GenerationMode::NativeApi,
             system_nexus,
+            targets: Default::default(),
         },
         language: nexgen::language::Language::Go,
         input_paths: vec![wit_path],

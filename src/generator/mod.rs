@@ -469,6 +469,7 @@ pub(crate) fn generate_files_from_planned_tree(
     options: GenerateFilesOptions,
 ) -> Result<GeneratedFiles> {
     let mode = crate::nexgen_config::current().mode;
+    validate_targets(language)?;
     let mut generated = match language {
         Language::Dotnet => dotnet::generate(tree, options.support_package.as_deref()),
         Language::Go => generate_go_tree(tree, options),
@@ -489,6 +490,24 @@ pub(crate) fn generate_files_from_planned_tree(
         Vec::new()
     };
     Ok(generated)
+}
+
+/// For now the client target is only for Python, System Nexus and the native API.
+fn validate_targets(language: Language) -> Result<()> {
+    let config = crate::nexgen_config::current();
+    if !config.targets.client {
+        return Ok(());
+    }
+    let reason = if language != Language::Python {
+        format!("is only for Python so far, not for {language}")
+    } else if !config.system_nexus {
+        "is only for System Nexus services so far, so it needs `--system-nexus`".to_string()
+    } else if config.mode != GenerationMode::NativeApi {
+        "is only for the native API so far, so it needs `--native-api`".to_string()
+    } else {
+        return Ok(());
+    };
+    Err(Error::UnsupportedClientTarget { reason })
 }
 
 fn generate_go_tree(

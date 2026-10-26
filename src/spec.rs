@@ -668,6 +668,9 @@ pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub output: Option<TypeSpec<F>>,
     pub output_transform: Option<OperationOutputTransformSpec<F>>,
     pub serialization_context: F::Text,
+    /// The support helper that turns a request and its response into the next request of a
+    /// poll, or into nothing to stop (`@nexus.poll` on WIT). It changes no model or wire byte.
+    pub poll_next: F::Text,
     pub data: F::OperationData,
 }
 
@@ -704,6 +707,7 @@ impl<F: TypeFamily> OperationSpec<F> {
                 .output_transform
                 .map(|transform| transform.map_names_with(map)),
             serialization_context: map.map_text(self.serialization_context),
+            poll_next: map.map_text(self.poll_next),
             data,
         }
     }

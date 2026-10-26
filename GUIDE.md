@@ -1766,6 +1766,32 @@ Cannot be combined with `@nexus.default`.
 
 ---
 
+### @nexus.poll
+
+**Placement:** Operation function **Syntax:** `@nexus.poll python="<helper>"`
+
+Generates an `iter_<name>` async iterator next to the operation, and next to
+each resource method that binds it. The iterator sends the request, yields the
+response, and calls `<helper>(request, response)` from `--support-package`. The
+helper returns the next request, or `None` to stop. So the directive names no
+fields of one kind of poll, and the caller collects the responses. Only Python
+generates the iterator so far. The other targets ignore the directive.
+
+```wit
+/// @nexus.operation name="ReadRecords"
+/// @nexus.poll python="next_read_request"
+read-records: func(request: read-records-request) -> read-records-response;
+```
+
+```python
+def next_read_request(request, response):
+    if response.done:
+        return None
+    return dataclasses.replace(request, from_offset=response.next_offset)
+```
+
+---
+
 ### @nexus.default
 
 **Placement:** Record field (whose type is a WIT enum or a protobuf-enum alias)

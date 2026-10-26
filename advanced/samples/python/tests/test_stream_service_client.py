@@ -13,6 +13,11 @@ from wit.stream_service.models import (
     AppendRecordsResponse,
     CreateStreamRequest,
     CreateStreamResult,
+    ReadRecordsRequest,
+    ReadRecordsResponse,
+    StreamData,
+    StreamItemData,
+    StreamRecord,
     StreamRef,
 )
 
@@ -40,7 +45,7 @@ class FakeNexusClient:
     ) -> collections.abc.Awaitable[typing.Any]:
         del output_type
         self._client.calls.append(Call(self._service, self._endpoint, operation, input))
-        answer = self._client.answers[operation]
+        answer = self._client.answers[operation].pop(0)
 
         async def result() -> object:
             return answer
@@ -51,8 +56,8 @@ class FakeNexusClient:
 class FakeClient(StreamServiceClientExtension):
     """Stands in for the SDK client that inherits the generated extensions."""
 
-    def __init__(self, answers: dict[str, object]) -> None:
-        self.answers: dict[str, object] = answers
+    def __init__(self, answers: dict[str, list[object]]) -> None:
+        self.answers: dict[str, list[object]] = answers
         self.calls: list[Call] = []
 
     @override
@@ -69,8 +74,8 @@ async def test_a_created_stream_calls_its_operations_through_the_client() -> Non
     ref = StreamRef(id="s1")
     client = FakeClient(
         {
-            "CreateStream": CreateStreamResult(stream=ref, created=True),
-            "AppendRecords": AppendRecordsResponse(first_offset=1, last_offset=2),
+            "CreateStream": [CreateStreamResult(stream=ref, created=True)],
+            "AppendRecords": [AppendRecordsResponse(first_offset=1, last_offset=2)],
         }
     )
 
@@ -92,4 +97,32 @@ async def test_a_created_stream_calls_its_operations_through_the_client() -> Non
             "AppendRecords",
             AppendRecordsRequest(stream=ref, records=[AppendRecord(body="hi")]),
         ),
+    ]
+
+
+async def test_a_poll_yields_each_page_until_the_helper_stops() -> None:
+    ref = StreamRef(id="s1")
+    first = ReadRecordsResponse(
+        records=[StreamRecord(item=StreamItemData(StreamData(body="a")))],
+        next_offset=2,
+    )
+    last = ReadRecordsResponse(
+        records=[StreamRecord(item=StreamItemData(StreamData(body="b")))],
+        next_offset=3,
+        done=True,
+    )
+    client = FakeClient(
+        {
+            "CreateStream": [CreateStreamResult(stream=ref)],
+            "ReadRecords": [first, last],
+        }
+    )
+    stream = await client.create_stream(stream_id="s1")
+
+    pages = [page async for page in stream.iter_read(from_offset=1)]
+
+    assert pages == [first, last]
+    assert [call.input for call in client.calls[1:]] == [
+        ReadRecordsRequest(stream=ref, from_offset=1),
+        ReadRecordsRequest(stream=ref, from_offset=2),
     ]

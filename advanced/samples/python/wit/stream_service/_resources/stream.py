@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections.abc
 import dataclasses
 import typing
 import datetime
@@ -24,6 +25,7 @@ from ..models import (
     StreamStatus,
     WorkflowTaskEpoch,
 )
+import temporal_support as _support
 
 
 @dataclasses.dataclass
@@ -97,6 +99,34 @@ class Stream:
         )
         handle = await _read_records(request)
         return await handle
+
+    async def iter_read(
+        self,
+        from_offset: int | None = None,
+        start: StreamReadStart | None = None,
+        max_records: int | None = None,
+        wait: datetime.timedelta | None = None,
+        create_wait: datetime.timedelta | None = None,
+    ) -> collections.abc.AsyncIterator[ReadRecordsResponse]:
+        """Yield each response of ``read``. The next request comes from the poll helper,
+        and the iterator ends when the helper returns ``None``.
+        """
+        request = ReadRecordsRequest(
+            stream=self.stream,
+            from_offset=from_offset,
+            start=start,
+            max_records=max_records,
+            wait=wait,
+            create_wait=create_wait,
+        )
+        while True:
+            handle = await _read_records(request)
+            response = await handle
+            yield response
+            next_request = _support.next_read_request(request, response)
+            if next_request is None:
+                return
+            request = next_request
 
     async def describe(
         self,
@@ -250,6 +280,40 @@ async def read_records(
         max_bytes=max_bytes,
     )
     return await _read_records(request)
+
+
+async def iter_read_records(
+    *,
+    stream: StreamRef,
+    from_offset: int | None = None,
+    start: StreamReadStart | None = None,
+    max_records: int | None = None,
+    wait: datetime.timedelta | None = None,
+    create_wait: datetime.timedelta | None = None,
+    last: int | None = None,
+    max_bytes: int | None = None,
+) -> collections.abc.AsyncIterator[ReadRecordsResponse]:
+    """Yield each response of ``read_records``. The next request comes from the poll
+    helper, and the iterator ends when the helper returns ``None``.
+    """
+    request = ReadRecordsRequest(
+        stream=stream,
+        from_offset=from_offset,
+        start=start,
+        max_records=max_records,
+        wait=wait,
+        create_wait=create_wait,
+        last=last,
+        max_bytes=max_bytes,
+    )
+    while True:
+        handle = await _read_records(request)
+        response = await handle
+        yield response
+        next_request = _support.next_read_request(request, response)
+        if next_request is None:
+            return
+        request = next_request
 
 
 async def _describe_stream(

@@ -21,8 +21,11 @@ export class Stream {
     public readonly status: StreamStatus | undefined,
   ) {}
 
-  public async appendRecords(records: AppendRecord[]): Promise<AppendRecordsResponse> {
-    const request = { stream: this.stream, records: records };
+  public async appendRecords(
+    sequence: number | undefined,
+    records: AppendRecord[],
+  ): Promise<AppendRecordsResponse> {
+    const request = { stream: this.stream, sequence: sequence, records: records };
     const handle = await appendRecords(request);
     return await handle.result();
   }
@@ -34,12 +37,14 @@ export class Stream {
   }
 
   public async readRecords(
+    fromOffset: number | undefined,
     topics: string[],
     maxRecords?: number,
     wait?: common.Duration,
   ): Promise<ReadRecordsResponse> {
     const request = {
       stream: this.stream,
+      fromOffset: fromOffset,
       topics: topics,
       maxRecords: maxRecords,
       wait: wait,

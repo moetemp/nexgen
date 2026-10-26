@@ -27,9 +27,9 @@ namespace Nexgen.StreamService
         public StreamStatus? Status { get; }
 
         [GeneratedCode("nexgen", null)]
-        public Task<AppendRecordsResponse> AppendRecordsAsync(IReadOnlyList<AppendRecord> records)
+        public Task<AppendRecordsResponse> AppendRecordsAsync(long? sequence, IReadOnlyList<AppendRecord> records)
         {
-            var request = new AppendRecordsOptions(records) { Stream = StreamValue };
+            var request = new AppendRecordsOptions(records) { Stream = StreamValue, Sequence = sequence };
             return Operations.AppendRecordsAsync(request);
         }
 
@@ -41,9 +41,9 @@ namespace Nexgen.StreamService
         }
 
         [GeneratedCode("nexgen", null)]
-        public Task<ReadRecordsResponse> ReadRecordsAsync(IReadOnlyList<string> topics, int? maxRecords, System.TimeSpan? wait)
+        public Task<ReadRecordsResponse> ReadRecordsAsync(long? fromOffset, IReadOnlyList<string> topics, int? maxRecords, System.TimeSpan? wait)
         {
-            var request = new ReadRecordsOptions(topics) { Stream = StreamValue, MaxRecords = maxRecords, Wait = wait };
+            var request = new ReadRecordsOptions(topics) { Stream = StreamValue, FromOffset = fromOffset, MaxRecords = maxRecords, Wait = wait };
             return Operations.ReadRecordsAsync(request);
         }
 

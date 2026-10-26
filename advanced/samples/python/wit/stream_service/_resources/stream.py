@@ -32,11 +32,13 @@ class Stream:
 
     async def append_records(
         self,
+        sequence: int | None = None,
         records: list[AppendRecord] | None = None,
     ) -> AppendRecordsResponse:
         """Append records. The answer has the first and the last offset."""
         request = AppendRecordsRequest(
             stream=self.stream,
+            sequence=sequence,
             records=records or [],
         )
         handle = await _append_records(request)
@@ -55,6 +57,7 @@ class Stream:
 
     async def read_records(
         self,
+        from_offset: int | None = None,
         topics: list[str] | None = None,
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
@@ -62,6 +65,7 @@ class Stream:
         """Read one page of records."""
         request = ReadRecordsRequest(
             stream=self.stream,
+            from_offset=from_offset,
             topics=topics or [],
             max_records=max_records,
             wait=wait,

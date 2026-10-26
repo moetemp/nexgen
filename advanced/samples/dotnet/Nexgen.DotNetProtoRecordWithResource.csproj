@@ -4,13 +4,13 @@
     <LangVersion>9.0</LangVersion>
     <Nullable>enable</Nullable>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <AssemblyName>Nexgen.DotNetWorkflowRun</AssemblyName>
+    <AssemblyName>Nexgen.DotNetProtoRecordWithResource</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- The generated interceptor partial requires matching SDK changes. -->
-    <Compile Include="wit/workflow-run/**/*.cs"
-             Exclude="wit/workflow-run/SystemNexusWorkflowOutboundInterceptor.cs" />
+    <Compile Include="wit/proto-record-with-resource/**/*.cs"
+             Exclude="wit/proto-record-with-resource/SystemNexusWorkflowOutboundInterceptor.cs" />
     <Compile Include="TemporalSupport/*.cs" />
   </ItemGroup>
 

@@ -26,7 +26,8 @@ descriptors = "temporal"
 languages = ["python", "dotnet", "typescript"]
 descriptors = "temporal"
 
-[workflow-run]
+# A proto-backed result record that holds a resource next to its other fields.
+[proto-record-with-resource]
 system_nexus = true
 languages = ["python", "typescript", "dotnet", "go"]
 descriptors = "temporal"

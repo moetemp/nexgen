@@ -2995,6 +2995,7 @@ fn build_operation(
         &operation_name,
     )?;
     let serialization_context = build_operation_serialization_context(&directives, path, &context)?;
+    let poll_next = build_operation_poll(&directives, path, &context)?;
     let output = if let Some(output_type) = function.result.as_ref() {
         Some(
             find_operation_type_spec(resolve, output_type, path, &context)?.ok_or_else(|| {
@@ -3034,6 +3035,7 @@ fn build_operation(
         output,
         output_transform,
         serialization_context,
+        poll_next,
         data: (),
     })
 }
@@ -3175,6 +3177,48 @@ fn build_operation_serialization_context(
                 path: path.to_path_buf(),
                 context: context.to_string(),
                 directive: "@nexus.serialization-context".to_string(),
+                reason: format!("invalid `{language}` support helper `{helper}`"),
+            });
+        }
+    }
+    Ok(spec)
+}
+
+/// Reads `@nexus.poll` on an operation. Each language value names a support helper that takes
+/// the request and its response and returns the next request, or `None` to stop.
+fn build_operation_poll(
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<LanguageStringSpec> {
+    let Some(directive) = directive(directives, "poll", path, context)? else {
+        return Ok(LanguageStringSpec::default());
+    };
+
+    let spec = directive_language_string(directive);
+    if spec.default.is_none() && spec.by_language.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.poll".to_string(),
+            reason: "name the support helper that builds the next request".to_string(),
+        });
+    }
+    for (language, helper) in spec
+        .default
+        .iter()
+        .map(|helper| ("default", helper.as_str()))
+        .chain(
+            spec.by_language
+                .iter()
+                .map(|(language, helper)| (language_key(*language), helper.as_str())),
+        )
+    {
+        if !is_valid_support_helper_path(helper) {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context: context.to_string(),
+                directive: "@nexus.poll".to_string(),
                 reason: format!("invalid `{language}` support helper `{helper}`"),
             });
         }

@@ -23,6 +23,7 @@ from .models import (
     StreamRef,
     StreamStatus,
 )
+import temporal_support as _support
 
 
 _OutputT = typing.TypeVar("_OutputT")
@@ -188,6 +189,34 @@ class StreamServiceClientExtension(abc.ABC):
         )
         return await self._read_records(request)
 
+    async def iter_read_records(
+        self,
+        *,
+        stream: StreamRef | None = None,
+        from_offset: int | None = None,
+        topics: list[str] | None = None,
+        max_records: int | None = None,
+        wait: datetime.timedelta | None = None,
+    ) -> collections.abc.AsyncIterator[ReadRecordsResponse]:
+        """Yield each response of ``read_records``. The next request comes from the poll
+        helper, and the iterator ends when the helper returns ``None``.
+        """
+        request = ReadRecordsRequest(
+            stream=stream,
+            from_offset=from_offset,
+            topics=topics or [],
+            max_records=max_records,
+            wait=wait,
+        )
+        while True:
+            handle = await self._read_records(request)
+            response = await handle
+            yield response
+            next_request = _support.next_read_request(request, response)
+            if next_request is None:
+                return
+            request = next_request
+
     async def _describe_stream(
         self,
         request: DescribeStreamRequest,
@@ -264,6 +293,32 @@ class Stream:
         )
         handle = await self._client._read_records(request)
         return await handle
+
+    async def iter_read_records(
+        self,
+        from_offset: int | None = None,
+        topics: list[str] | None = None,
+        max_records: int | None = None,
+        wait: datetime.timedelta | None = None,
+    ) -> collections.abc.AsyncIterator[ReadRecordsResponse]:
+        """Yield each response of ``read_records``. The next request comes from the poll
+        helper, and the iterator ends when the helper returns ``None``.
+        """
+        request = ReadRecordsRequest(
+            stream=self.stream,
+            from_offset=from_offset,
+            topics=topics or [],
+            max_records=max_records,
+            wait=wait,
+        )
+        while True:
+            handle = await self._client._read_records(request)
+            response = await handle
+            yield response
+            next_request = _support.next_read_request(request, response)
+            if next_request is None:
+                return
+            request = next_request
 
     async def describe(
         self,

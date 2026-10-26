@@ -1032,6 +1032,7 @@ impl<'a> ApiPlanner<'a> {
         for method in &resource.methods {
             output.push_str("\n");
             self.render_resource_class_method(output, service, resource, method, bound_operations);
+            self.render_resource_poll_method(output, service, method, bound_operations);
         }
     }
 
@@ -1047,41 +1048,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    async def ");
         output.push_str(&python_field_name(&method.name));
         output.push_str("(\n");
-        output.push_str("        self,\n");
-        // Python refuses a parameter without a default after one with a default, and WIT
-        // allows any order, so such a method takes keyword arguments only.
-        let has_default = |param: &PlannedResourceField| {
-            param.optional || resource_method_list_param(param).is_some()
-        };
-        if method
-            .params
-            .iter()
-            .skip_while(|param| !has_default(param))
-            .any(|param| !has_default(param))
-        {
-            output.push_str("        *,\n");
-        }
-        for param in &method.params {
-            output.push_str("        ");
-            output.push_str(&python_field_name(&param.name));
-            output.push_str(": ");
-            if let Some(value) = resource_method_list_param(param) {
-                // A list request field defaults to empty, as in the standalone wrapper.
-                output.push_str("list[");
-                output.push_str(&self.python_resource_value_annotation(value));
-                output.push_str("] | None = None");
-            } else {
-                output.push_str(&self.python_resource_field_annotation(
-                    &param.kind,
-                    param.optional,
-                    param.function.as_ref(),
-                ));
-                if param.optional {
-                    output.push_str(" = None");
-                }
-            }
-            output.push_str(",\n");
-        }
+        self.render_resource_method_params(output, method);
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
@@ -1122,6 +1089,109 @@ impl<'a> ApiPlanner<'a> {
                 output.push_str(")\n");
             }
         }
+    }
+
+    fn render_resource_method_params(&self, output: &mut String, method: &PlannedResourceMethod) {
+        output.push_str("        self,\n");
+        // Python refuses a parameter without a default after one with a default, and WIT
+        // allows any order, so such a method takes keyword arguments only.
+        let has_default = |param: &PlannedResourceField| {
+            param.optional || resource_method_list_param(param).is_some()
+        };
+        if method
+            .params
+            .iter()
+            .skip_while(|param| !has_default(param))
+            .any(|param| !has_default(param))
+        {
+            output.push_str("        *,\n");
+        }
+        for param in &method.params {
+            output.push_str("        ");
+            output.push_str(&python_field_name(&param.name));
+            output.push_str(": ");
+            if let Some(value) = resource_method_list_param(param) {
+                // A list request field defaults to empty, as in the standalone wrapper.
+                output.push_str("list[");
+                output.push_str(&self.python_resource_value_annotation(value));
+                output.push_str("] | None = None");
+            } else {
+                output.push_str(&self.python_resource_field_annotation(
+                    &param.kind,
+                    param.optional,
+                    param.function.as_ref(),
+                ));
+                if param.optional {
+                    output.push_str(" = None");
+                }
+            }
+            output.push_str(",\n");
+        }
+    }
+
+    /// Renders `iter_<method>` for a method whose operation polls. It sends the method's request,
+    /// yields each response, and asks the poll helper for the next request until it has none.
+    fn render_resource_poll_method(
+        &self,
+        output: &mut String,
+        service: &RenderedService<'_>,
+        method: &PlannedResourceMethod,
+        bound_operations: &[ResourceBoundOperation<'_>],
+    ) {
+        let PlannedResourceMethodBindingSpec::Operation {
+            operation_name,
+            request_plan,
+            direct_return,
+            ..
+        } = &method.binding
+        else {
+            return;
+        };
+        let Some(operation) = bound_operations
+            .iter()
+            .map(|bound_operation| bound_operation.operation)
+            .find(|operation| operation.name == operation_name)
+        else {
+            return;
+        };
+        let result_annotation = self.python_resource_method_result_annotation(method);
+        let Some(next_expr) = &operation.poll_next_expr else {
+            return;
+        };
+        if service.endpoint.is_none() || result_annotation == "None" {
+            return;
+        }
+        let method_name = python_field_name(&method.name);
+        output.push_str("\n    async def iter_");
+        output.push_str(&method_name);
+        output.push_str("(\n");
+        self.render_resource_method_params(output, method);
+        output.push_str("    ) -> collections.abc.AsyncIterator[");
+        output.push_str(&result_annotation);
+        output.push_str("]:\n");
+        let summary = format!(
+            "Yield each response of ``{method_name}``. The next request comes from the poll \
+             helper, and the iterator ends when the helper returns ``None``."
+        );
+        render_python_docstring(output, "        ", Some(&summary), &[], None, false);
+        render_resource_method_request(output, method, operation, request_plan);
+        let call = format!(
+            "{}{}(",
+            resource_operation_call_receiver(),
+            request_operation_function_name(service, operation)
+        );
+        output.push_str("        while True:\n");
+        if *direct_return {
+            output.push_str("            response = await ");
+            output.push_str(&call);
+            output.push_str("request)\n");
+        } else {
+            output.push_str("            handle = await ");
+            output.push_str(&call);
+            output.push_str("request)\n");
+            output.push_str("            response = await handle\n");
+        }
+        render_poll_loop_end(output, "            ", next_expr);
     }
 
     fn python_resource_method_result_annotation(&self, method: &PlannedResourceMethod) -> String {
@@ -1429,6 +1499,10 @@ impl<'a> ApiPlanner<'a> {
                 .and_then(|transform| transform.transform.value().map(str::to_string)),
             serialization_context_expr: operation
                 .serialization_context
+                .value()
+                .map(|helper| format!("_support.{helper}")),
+            poll_next_expr: operation
+                .poll_next
                 .value()
                 .map(|helper| format!("_support.{helper}")),
             output_resource_return,
@@ -2671,6 +2745,7 @@ struct RenderedOperation<'a> {
     output_type_expr: String,
     output_transform_expr: Option<String>,
     serialization_context_expr: Option<String>,
+    poll_next_expr: Option<String>,
     output_resource_return: Option<PlannedOperationResourceReturn>,
     output_direct_result: bool,
     output_none: bool,
@@ -6793,6 +6868,7 @@ fn render_operation_functions(
             output.push('\n');
         }
         render_unpacked_operation_function(output, service, operation, unpacked_input);
+        render_operation_poll_function(output, service, operation, unpacked_input);
     }
 }
 
@@ -7909,6 +7985,94 @@ fn render_client_extension(output: &mut String, service: &RenderedService<'_>) {
             output.push('\n');
         }
     }
+}
+
+/// The end of a poll loop body. The helper sees the request it answered, so it can carry
+/// whatever it needs from the response into the next one.
+fn render_poll_loop_end(output: &mut String, indent: &str, next_expr: &str) {
+    output.push_str(indent);
+    output.push_str("yield response\n");
+    output.push_str(indent);
+    output.push_str("next_request = ");
+    output.push_str(next_expr);
+    output.push_str("(request, response)\n");
+    output.push_str(indent);
+    output.push_str("if next_request is None:\n");
+    output.push_str(indent);
+    output.push_str("    return\n");
+    output.push_str(indent);
+    output.push_str("request = next_request\n");
+}
+
+/// Renders `iter_<operation>` for an operation that polls, with the same parameters as its
+/// unpacked function.
+fn render_operation_poll_function(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    unpacked_input: &RenderedUnpackedInput,
+) {
+    let Some(next_expr) = &operation.poll_next_expr else {
+        return;
+    };
+    if !unpacked_input.functions.is_empty()
+        || operation.output_transform_expr.is_some()
+        || operation.output_resource_return.is_some()
+    {
+        return;
+    }
+    output.push('\n');
+    render_operation_signature_start(output, &format!("iter_{}", operation.attr_name));
+    output.push_str("    *,\n");
+    for field in &unpacked_input.parameters {
+        output.push_str("    ");
+        output.push_str(&field.attr_name);
+        output.push_str(": ");
+        output.push_str(&python_parameter_annotation(
+            &field.annotation,
+            &field.default_kind,
+        ));
+        if let Some(default_expr) = python_parameter_default_expr(&field.default_kind) {
+            render_python_default_expr(output, &default_expr, "    ");
+        }
+        output.push_str(",\n");
+    }
+    output.push_str(") -> collections.abc.AsyncIterator[");
+    output.push_str(&function_unpacked_implementation_return_annotation(
+        service, operation,
+    ));
+    output.push_str("]:\n");
+    let summary = format!(
+        "Yield each response of ``{}``. The next request comes from the poll helper, and the \
+         iterator ends when the helper returns ``None``.",
+        operation.attr_name
+    );
+    render_python_docstring(output, "    ", Some(&summary), &[], None, false);
+    for flattened_message in &unpacked_input.flattened_messages {
+        render_flattened_message_setup(output, flattened_message);
+    }
+    output.push_str("    request = ");
+    output.push_str(&unpacked_input.model_name);
+    output.push_str("(\n");
+    for field in &unpacked_input.request_fields {
+        output.push_str("        ");
+        output.push_str(&field.attr_name);
+        output.push('=');
+        output.push_str(&unpacked_request_field_value_expr(field));
+        output.push_str(",\n");
+    }
+    output.push_str("    )\n");
+    output.push_str("    while True:\n");
+    output.push_str("        handle = await ");
+    output.push_str(operation_call_receiver());
+    output.push_str(&request_operation_function_name(service, operation));
+    output.push_str("(request)\n");
+    if operation.output_direct_result {
+        output.push_str("        response = handle\n");
+    } else {
+        output.push_str("        response = await handle\n");
+    }
+    render_poll_loop_end(output, "        ", next_expr);
 }
 
 fn render_resource_client_binding(output: &mut String, indent: &str) {

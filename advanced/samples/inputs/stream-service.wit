@@ -143,7 +143,9 @@ interface stream-service {
   /// @nexus.operation name="CloseStream"
   close-stream: func(request: close-stream-request) -> close-stream-response;
 
+  // A read continues from the offset where the last page ended.
   /// @nexus.operation name="ReadRecords"
+  /// @nexus.poll python="next_read_request"
   read-records: func(request: read-records-request) -> read-records-response;
 
   /// @nexus.operation name="DescribeStream"

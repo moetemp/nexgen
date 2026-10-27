@@ -34,6 +34,7 @@ type notifyRequest struct {
 	Reason   *string
 	Channels []string
 	Sender   string
+	Email    *bool
 }
 
 func (m notifyRequest) GetUserID() string {
@@ -50,6 +51,10 @@ func (m notifyRequest) GetChannels() []string {
 
 func (m notifyRequest) GetSender() string {
 	return m.Sender
+}
+
+func (m notifyRequest) GetEmail() *bool {
+	return m.Email
 }
 
 // --- Resources ---
@@ -77,7 +82,7 @@ func (u *User) Notify(ctx workflow.Context, reason string, channels []string, se
 	if reason != "" {
 		reasonPtr = &reason
 	}
-	return notify(ctx, notifyRequest{UserID: u.UserID, Reason: reasonPtr, Channels: channels, Sender: sender})
+	return notify(ctx, notifyRequest{UserID: u.UserID, Reason: reasonPtr, Channels: channels, Sender: sender, Email: u.Email})
 }
 
 // --- Operations (internal) ---
@@ -136,6 +141,8 @@ type NotifyOptions struct {
 	Channels []string
 	// Sender - Required.
 	Sender string
+	// Email - Optional.
+	Email bool
 }
 
 func Notify(ctx workflow.Context, opts NotifyOptions) workflow.Future {
@@ -143,10 +150,15 @@ func Notify(ctx workflow.Context, opts NotifyOptions) workflow.Future {
 	if opts.Reason != "" {
 		reason = &opts.Reason
 	}
+	var email *bool
+	if opts.Email != false {
+		email = &opts.Email
+	}
 	return notify(ctx, notifyRequest{
 		UserID:   opts.UserID,
 		Reason:   reason,
 		Channels: opts.Channels,
 		Sender:   opts.Sender,
+		Email:    email,
 	})
 }

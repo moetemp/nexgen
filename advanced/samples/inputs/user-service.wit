@@ -28,6 +28,8 @@ interface user-service {
     reason: option<string>,
     channels: list<string>,
     sender: string,
+    // The user's own email has the same name and another type, so it must not fill this field.
+    email: option<bool>,
   }
 
   get-user: func(request: get-user-request) -> user-result;

@@ -22,3 +22,4 @@ class NotifyRequest:
     reason: str | None = None
     channels: list[str] | None = dataclasses.field(default_factory=list)
     sender: str
+    email: bool | None = None

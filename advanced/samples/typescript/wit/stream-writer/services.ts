@@ -16,6 +16,9 @@ import type {
 } from "./models";
 
 export const streamWriter = nexus.service("streamsample.v1.StreamWriter", {
+  /**
+   * Drop every open writer, for example at shutdown.
+   */
   closeWriters: nexus.operation<CloseWritersRequest, CloseWritersResponse>({
     name: "CloseWriters",
     inputType: { transferTypeConverter: closeWritersRequestTransferTypeConverter },
@@ -39,6 +42,8 @@ export class StreamWriterClient {
   }
 
   /**
+   * Drop every open writer, for example at shutdown.
+   *
    * @param request - Request for the operation.
    */
   public async closeWriters(

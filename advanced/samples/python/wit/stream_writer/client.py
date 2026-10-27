@@ -73,6 +73,7 @@ class StreamWriterClientExtension(abc.ABC):
     async def close_writers(
         self,
     ) -> collections.abc.Awaitable[CloseWritersResponse,]:
+        """Drop every open writer, for example at shutdown."""
         request = CloseWritersRequest()
         return await self._close_writers(request)
 

@@ -1040,3 +1040,62 @@ interface api {
     assert!(!ping.contains("import PongRequest\n"), "{ping}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+#[test]
+fn python_proto_modules_map_a_proto_file_prefix_to_a_local_module() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-proto-modules");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("proto-modules.wit");
+    fs::write(
+        &wit_path,
+        r#"package temporal:nexus@1.0.0;
+
+world system { export models; }
+
+interface models {
+  /// @nexus.proto "temporal.api.common.v1.WorkflowType"
+  record workflow-type {
+    name: string,
+  }
+}
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::DefinitionsOnly,
+            system_nexus: false,
+            python_proto_modules: vec![
+                nexgen::nexgen_config::ProtoModule::parse(
+                    "temporal/api/common/=local_protos.temporal.api.common",
+                )
+                .unwrap(),
+                nexgen::nexgen_config::ProtoModule::parse("temporal/api/=unused").unwrap(),
+            ],
+        },
+        language: nexgen::language::Language::Python,
+        input_paths: vec![wit_path],
+        support_package: Some("temporal_support".into()),
+        descriptor_paths: vec![descriptor_path(&root)],
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let models = fs::read_to_string(output_path.join("models.py")).unwrap();
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    // The longest prefix wins, so the shorter `temporal/api/` entry maps neither file.
+    assert!(
+        models.contains("local_protos.temporal.api.common.v1.message_pb2"),
+        "{models}"
+    );
+    assert!(
+        !models.contains("temporalio.api.common.v1.message_pb2"),
+        "{models}"
+    );
+    assert!(!models.contains("unused"), "{models}");
+}

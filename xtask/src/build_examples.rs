@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as ProcessCommand;
@@ -6,7 +7,7 @@ use heck::ToSnakeCase;
 use nexgen::error::Error as NexgenError;
 use nexgen::generator::{GenerationMode, TsDateTimeTypes};
 use nexgen::language::Language;
-use nexgen::nexgen_config::NexgenConfig;
+use nexgen::nexgen_config::{NexgenConfig, ProtoModule};
 use nexgen::{GenerateRequest, format_generated_files, generate_to_file};
 use serde::Deserialize;
 
@@ -23,6 +24,10 @@ struct ExampleConfig {
     languages: Option<Vec<String>>,
     #[serde(default)]
     system_nexus: bool,
+    /// Python modules for protos that `temporalio.api` doesn't have, from a proto file path prefix
+    /// to its module. Only the Python output uses it.
+    #[serde(default)]
+    python_proto_modules: BTreeMap<String, String>,
     // Each example plans against only the protos it declares, so one sample's protos can't
     // change how another example resolves a proto name.
     descriptors: Option<ExampleDescriptors>,
@@ -488,14 +493,25 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
     let output_path = example_output_path(repo_root, language, example_id);
     let language_root = advanced_language_root(repo_root, language);
     reset_example_output_directory(&language_root, &output_path)?;
-    let system_nexus = config
-        .examples
-        .get(example_id)
-        .is_some_and(|example| example.system_nexus);
+    let example = config.examples.get(example_id);
+    let system_nexus = example.is_some_and(|example| example.system_nexus);
     let generate_request = GenerateRequest {
         config: NexgenConfig {
             mode: GenerationMode::NativeApi,
             system_nexus,
+            python_proto_modules: example
+                .filter(|_| language == Language::Python)
+                .map(|example| {
+                    example
+                        .python_proto_modules
+                        .iter()
+                        .map(|(proto_prefix, module)| ProtoModule {
+                            proto_prefix: proto_prefix.clone(),
+                            module: module.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         },
         language,
         input_paths,

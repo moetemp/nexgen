@@ -7,10 +7,32 @@ use std::cell::RefCell;
 
 use crate::generator::GenerationMode;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NexgenConfig {
     pub mode: GenerationMode,
     pub system_nexus: bool,
+    /// Python modules for protos that `temporalio.api` doesn't have yet, such as an API that isn't
+    /// released. Without an entry, a `temporal/...` proto file is a `temporalio...` module.
+    pub python_proto_modules: Vec<ProtoModule>,
+}
+
+/// A proto file path prefix, such as `temporal/api/stream/` or one `.proto` file, and the Python
+/// module path that it maps to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProtoModule {
+    pub proto_prefix: String,
+    pub module: String,
+}
+
+impl ProtoModule {
+    /// Parses `PROTO_PREFIX=MODULE`, the form of the CLI flag and of `examples.toml`.
+    pub fn parse(value: &str) -> Option<Self> {
+        let (proto_prefix, module) = value.split_once('=')?;
+        (!proto_prefix.is_empty() && !module.is_empty()).then(|| Self {
+            proto_prefix: proto_prefix.to_string(),
+            module: module.to_string(),
+        })
+    }
 }
 
 impl Default for NexgenConfig {
@@ -18,6 +40,7 @@ impl Default for NexgenConfig {
         Self {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: false,
+            python_proto_modules: Vec::new(),
         }
     }
 }
@@ -27,7 +50,7 @@ thread_local! {
 }
 
 pub fn current() -> NexgenConfig {
-    CONFIGS.with(|configs| configs.borrow().last().copied().unwrap_or_default())
+    CONFIGS.with(|configs| configs.borrow().last().cloned().unwrap_or_default())
 }
 
 pub fn scope(config: NexgenConfig) -> NexgenConfigScope {
@@ -58,9 +81,10 @@ mod tests {
         let outer = NexgenConfig {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
+            python_proto_modules: Vec::new(),
         };
         {
-            let _outer_scope = scope(outer);
+            let _outer_scope = scope(outer.clone());
             assert_eq!(current(), outer);
             let result = std::panic::catch_unwind(|| {
                 let _inner_scope = scope(NexgenConfig::default());
@@ -77,9 +101,10 @@ mod tests {
         let config = NexgenConfig {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
+            python_proto_modules: Vec::new(),
         };
         {
-            let _scope = scope(config);
+            let _scope = scope(config.clone());
             assert_eq!(current(), config);
             assert_eq!(
                 std::thread::spawn(current).join().unwrap(),

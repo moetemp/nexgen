@@ -1556,8 +1556,31 @@ fn oneof_field_write(oneof: &ProtoOneof, value_expr: &str, required: bool) -> Re
     RenderedWireWrite { lines }
 }
 
+// The longest matching prefix wins, so one `.proto` file can map apart from its directory.
+fn mapped_python_module_path(file_name: &str) -> Option<String> {
+    let config = crate::nexgen_config::current();
+    let mapping = config
+        .python_proto_modules
+        .iter()
+        .filter(|mapping| file_name.starts_with(&mapping.proto_prefix))
+        .max_by_key(|mapping| mapping.proto_prefix.len())?;
+    let rest = file_name[mapping.proto_prefix.len()..].trim_start_matches('/');
+    let rest = rest.strip_suffix(".proto").map_or_else(
+        || rest.replace('/', "."),
+        |stem| format!("{}_pb2", stem.replace('/', ".")),
+    );
+    Some(if rest.is_empty() {
+        mapping.module.clone()
+    } else {
+        format!("{}.{rest}", mapping.module)
+    })
+}
+
 fn python_module_path_for_file_name(file_name: Option<&str>, package: &str) -> Option<String> {
     if let Some(file_name) = file_name {
+        if let Some(module_path) = mapped_python_module_path(file_name) {
+            return Some(module_path);
+        }
         let mut module_path = file_name.replace('/', ".");
         if let Some(stripped) = module_path.strip_suffix(".proto") {
             module_path = format!("{stripped}_pb2");

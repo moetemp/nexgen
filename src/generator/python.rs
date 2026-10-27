@@ -705,7 +705,13 @@ impl<'a> ApiPlanner<'a> {
         if !services.is_empty() {
             files.insert(
                 "services.py",
-                render_service_module(services, self.api_plan, self.model_hoists, workflow_api),
+                render_service_module(
+                    services,
+                    self.api_plan,
+                    self.model_hoists,
+                    &self.language_imports,
+                    workflow_api,
+                ),
                 module_origin.clone(),
             )?;
         }
@@ -4252,6 +4258,7 @@ fn render_service_module(
     services: &[RenderedService<'_>],
     api_plan: &PlannedSpec,
     model_hoists: Option<&PythonModelHoists>,
+    language_imports: &[LanguageImportSpec],
     include_endpoint_clients: bool,
 ) -> String {
     let mut module_imports = BTreeSet::new();
@@ -4417,6 +4424,14 @@ fn render_service_module(
     }) {
         output.push_str("import typing_extensions\n");
     }
+    // An unpacked parameter can have a type from another module, such as `datetime.timedelta`.
+    render_language_python_imports(
+        &mut output,
+        &endpoint_client_body,
+        language_imports,
+        &BTreeSet::from(["typing".to_string(), "temporalio.workflow".to_string()]),
+        &BTreeSet::new(),
+    );
     if needs_temporalio_workflow_runtime {
         output.push_str("import temporalio.workflow\n");
     }

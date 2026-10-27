@@ -149,6 +149,24 @@ records are proto-backed, as a stream service's are, on the sample proto in
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
   [`typescript/tests/stream-service.test.ts`](typescript/tests/stream-service.test.ts)
 
+### `brook-stream-service` and `brook-stream-writer`
+
+Brook's Stream service and writer WIT, byte for byte. They are the nexgen inputs
+of the Brook crate, `temporalio-streams`. Their records bind to the Stream
+protos of the API proposal and to Brook's runtime proto, in
+[`descriptors/brook/`](descriptors/brook/). The `brook-` prefix keeps their
+example ids apart from the other stream samples. The writer uses records of the
+service, so its build links `brook-stream-service.wit`.
+
+Only .NET generates the service today, and the sample project leaves it out of
+the build, as it does `workflow-handle`. Python and TypeScript need the Stream
+protos in their SDK's proto package, which no release has yet. The writer
+generates in no language yet.
+
+- WIT: [`inputs/brook-stream-service.wit`](inputs/brook-stream-service.wit),
+  [`inputs/brook-stream-writer.wit`](inputs/brook-stream-writer.wit)
+- .NET: [`dotnet/wit/brook-stream-service/`](dotnet/wit/brook-stream-service/)
+
 ## Supporting files
 
 - [`inputs/deps/`](inputs/deps/): reusable Temporal semantic/common type WIT
@@ -164,6 +182,10 @@ records are proto-backed, as a stream service's are, on the sample proto in
   [`python/streamsample/`](python/streamsample/),
   [`dotnet/proto/`](dotnet/proto/) and
   [`typescript/proto/streamsample.d.ts`](typescript/proto/streamsample.d.ts).
+- [`descriptors/brook_streams.bin`](descriptors/brook_streams.bin): descriptor
+  set of the Brook protos in [`descriptors/brook/`](descriptors/brook/). Only
+  the Brook examples list it. [`dotnet/proto/brook/`](dotnet/proto/brook/) holds
+  their C# bindings.
 - [`wire/proto/`](wire/proto/): proto wire fixtures used by the
   proto-compatibility tests.
 - Per-language notes: [`dotnet/README.md`](dotnet/README.md),
@@ -209,3 +231,22 @@ protoc -I descriptors -I "$API" --csharp_out=dotnet/proto streamsample/v1/stream
 The TypeScript `typescript/proto/streamsample.d.ts` mirrors the proto by hand,
 with only the `I<Message>` interfaces and the enums that the generated code
 imports.
+
+### The Brook proto bindings
+
+The protos in `descriptors/brook/` are byte copies of the Stream protos of the
+API proposal (`temporalio/api#895`) and of Brook's runtime proto. After a change
+to them, rebuild the descriptor set and the C# bindings with `protoc` 33.1.
+`API` is a checkout of the Temporal API protos that has
+`temporal.api.common.v1.Execution`.
+
+```sh
+cd advanced/samples
+FILES="temporal/api/enums/v1/stream.proto temporal/api/stream/v1/message.proto
+  temporal/api/streamservice/v1/request_response.proto
+  temporal/sdk/streams/v1/runtime.proto"
+protoc -I descriptors/brook -I "$API" \
+  --descriptor_set_out=descriptors/brook_streams.bin $FILES
+protoc -I descriptors/brook -I "$API" --csharp_out=dotnet/proto/brook \
+  --csharp_opt=base_namespace= $FILES
+```

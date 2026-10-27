@@ -31,6 +31,19 @@ languages = ["python", "typescript", "dotnet"]
 # The sample proto imports the Temporal API messages, so it needs both sets.
 descriptors = ["temporal_api.bin", "stream_service.bin"]
 
+# Brook's Stream service WIT, byte for byte. Only .NET generates it today, since the other SDKs'
+# proto packages lack the Stream protos in descriptors/brook/.
+[brook-stream-service]
+languages = ["dotnet"]
+system_nexus = true
+descriptors = ["temporal_api.bin", "brook_streams.bin"]
+
+# Brook's writer WIT, byte for byte. It uses records of brook-stream-service. No language generates
+# it yet.
+[brook-stream-writer]
+languages = []
+descriptors = ["temporal_api.bin", "brook_streams.bin"]
+
 # A System Nexus operation that returns a resource.
 [workflow-handle]
 languages = ["python", "dotnet", "typescript"]

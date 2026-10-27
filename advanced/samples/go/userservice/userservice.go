@@ -82,7 +82,7 @@ func (u *User) Notify(ctx workflow.Context, reason string, channels []string, se
 	if reason != "" {
 		reasonPtr = &reason
 	}
-	return notify(ctx, notifyRequest{UserID: u.UserID, Reason: reasonPtr, Channels: channels, Sender: sender, Email: u.Email})
+	return notify(ctx, notifyRequest{UserID: u.UserID, Reason: reasonPtr, Channels: channels, Sender: sender})
 }
 
 // --- Operations (internal) ---

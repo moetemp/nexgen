@@ -12,12 +12,17 @@ from temporalio.converter import DataConverter, PayloadConverter
 import temporalio.nexus.system
 
 from wit.proto_oneof import (
+    EndpointTarget,
+    EndpointTargetVariantExternal,
+    EndpointTargetVariantWorker,
+    EndpointWorkerTarget,
     Outcome,
     OutcomeValueFailure,
     OutcomeValueSuccess,
     PauseActivityRequest,
 )
 from wit.proto_oneof.models import (
+    _EndpointTargetTransferTypeConverter,
     _OutcomeTransferTypeConverter,
     _PauseActivityRequestTransferTypeConverter,
 )
@@ -129,3 +134,22 @@ def test_optional_proto_oneof_round_trips_unset_as_none() -> None:
         request_id="request-id",
     )
     assert converter.from_transfer_type(proto, PauseActivityRequest) == model
+
+
+def test_proto_oneof_case_round_trips_as_its_record() -> None:
+    converter = _EndpointTargetTransferTypeConverter()
+    model = EndpointTarget(
+        variant=EndpointTargetVariantWorker(
+            EndpointWorkerTarget(namespace="ns", task_queue="tq")
+        )
+    )
+
+    wire = converter.to_transfer_type(model)
+    assert wire.WhichOneof("variant") == "worker"
+    assert wire.worker.task_queue == "tq"
+
+    decoded = converter.from_transfer_type(wire, EndpointTarget)
+    assert decoded == model
+    assert isinstance(decoded.variant, EndpointTargetVariantWorker)
+    assert isinstance(decoded.variant.value, EndpointWorkerTarget)
+    assert not isinstance(decoded.variant, EndpointTargetVariantExternal)

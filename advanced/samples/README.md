@@ -149,14 +149,18 @@ crate, `temporalio-streams`. Its records bind to the Stream protos of the API
 proposal (`temporalio/api#895`), in
 [`descriptors/streams/`](descriptors/streams/).
 
-Only part of today's output builds, so the sample leaves the rest out. Python
-and TypeScript don't generate the service. They panic on the read item, a
-`oneof` of proto-bound records, and Python can't import the protos. .NET types
-each case of the read item as its proto class.
+Only part of today's output builds, so the sample leaves the rest out:
+
+- Python doesn't generate the service, since it can't import the protos.
+- TypeScript passes a `number` where a resource method's proto request wants a
+  `Long`. `tsc` skips the service, but the test still checks its models.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
+- TypeScript:
+  [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
+  [`typescript/tests/stream-service.test.ts`](typescript/tests/stream-service.test.ts)
 
 ## Supporting files
 

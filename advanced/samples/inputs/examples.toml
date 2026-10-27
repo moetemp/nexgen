@@ -42,10 +42,10 @@ descriptors = ["temporal_api.bin", "streams.bin"]
 "temporal/sdk/streams/" = "streamprotos.temporal.sdk.streams"
 
 # Brook's writer WIT, byte for byte. It uses records of stream-service, and Brook's runtime proto.
-# Brook generates only its client.
+# Brook generates only its client. The workflow target covers the endpoint-less caller too.
 [stream-writer]
 languages = ["python", "typescript", "dotnet"]
-targets = ["client"]
+targets = ["workflow", "client"]
 descriptors = ["temporal_api.bin", "streams.bin"]
 
 [stream-writer.python_proto_modules]

@@ -144,11 +144,6 @@ protos of the API proposal (`temporalio/api#895`) and to Brook's runtime proto,
 in [`descriptors/streams/`](descriptors/streams/). The writer uses records of
 the service, so its build links `stream-service.wit`.
 
-Only part of today's output builds, so the samples leave the rest out:
-
-- The TypeScript writer client, which has no endpoint, returns a resource that
-  it doesn't import as a value. `tsc` skips it.
-
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),

@@ -26,8 +26,19 @@ import type {
   CloseWritersResponse,
   CloseWritersRequest,
 } from "./models";
-import type { Writer } from "./resources";
+import { Writer } from "./resources";
 import { bindWriterClient } from "./resources";
+
+function requiredField<T>(
+  value: T | null | undefined,
+  owner: string,
+  field: string,
+): T {
+  if (value == null) {
+    throw new Error(`missing required field ${owner}.${field}`);
+  }
+  return value;
+}
 
 /**
  * @experimental This API is experimental and subject to change.
@@ -86,7 +97,7 @@ export class StreamWriterClient {
     );
     const result = await handle.result();
     return bindWriterClient(
-      new Writer(requiredField(result.writerId, "resource", "writerId")),
+      new Writer(requiredField(result.writerId, "resource", "writerId").toNumber()),
       this.client,
     );
   }

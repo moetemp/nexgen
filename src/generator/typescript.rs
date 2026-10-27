@@ -4398,6 +4398,7 @@ fn render_service_module(
             body.push('\n');
         }
     }
+    let body = with_private_required_field(body);
     let mut imports = String::new();
     render_typescript_namespace_imports(
         &mut imports,
@@ -4457,11 +4458,13 @@ fn render_service_module(
         api_plan,
         &body,
     );
-    render_type_imports(
-        &mut imports,
-        "./resources",
-        &used_import_names(&body, &resource_type_names(services)),
-    );
+    // A resource that the body builds is a value import, and the rest are types.
+    let (built_resources, typed_resources): (Vec<_>, Vec<_>) =
+        used_import_names(&body, &resource_type_names(services))
+            .into_iter()
+            .partition(|name| body.contains(&format!("new {name}(")));
+    render_value_imports(&mut imports, "./resources", &built_resources);
+    render_type_imports(&mut imports, "./resources", &typed_resources);
     let resource_client_binders = services
         .iter()
         .filter(|service| include_native_api && service.endpoint.is_none())
@@ -6342,6 +6345,20 @@ fn typescript_resource_return_value(
 }
 
 fn resource_return_binding_expr_typescript(
+    binding: &PlannedOperationResourceFieldBinding,
+) -> String {
+    let value = resource_return_binding_value_typescript(binding);
+    if !binding.long {
+        return value;
+    }
+    // A proto answer holds a 64-bit integer as a `Long`, and the resource field is a number.
+    match value.strip_suffix(" ?? undefined") {
+        Some(optional) => format!("{optional}?.toNumber()"),
+        None => format!("{value}.toNumber()"),
+    }
+}
+
+fn resource_return_binding_value_typescript(
     binding: &PlannedOperationResourceFieldBinding,
 ) -> String {
     match &binding.source {

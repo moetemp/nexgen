@@ -255,9 +255,9 @@ fn descriptor_path(root: &Path) -> PathBuf {
     root.join("advanced/samples/descriptors/temporal_api.bin")
 }
 
-// The descriptor set of the stream-service sample proto.
+// The descriptor set of the stream protos.
 fn stream_descriptor_path(root: &Path) -> PathBuf {
-    root.join("advanced/samples/descriptors/stream_service.bin")
+    root.join("advanced/samples/descriptors/streams.bin")
 }
 
 fn typescript_root(root: &Path) -> PathBuf {

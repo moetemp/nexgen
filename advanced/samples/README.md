@@ -139,18 +139,33 @@ sourced maps. Native tests exercise conversions through the generated APIs.
 - TypeScript: [`typescript/wit/proto-generic/`](typescript/wit/proto-generic/),
   [`typescript/tests/proto-generic.test.ts`](typescript/tests/proto-generic.test.ts)
 
-### `stream-service`
+### `stream-service` and `stream-writer`
 
-A stream API shape: a resource built from a ref and a read with offsets. The
-records are proto-backed, as a stream service's are, on the sample proto in
-[`descriptors/streamsample/`](descriptors/streamsample/).
+Brook's Stream service and writer WIT, byte for byte. They are the nexgen inputs
+of the Brook crate, `temporalio-streams`. Their records bind to the Stream
+protos of the API proposal (`temporalio/api#895`) and to Brook's runtime proto,
+in [`descriptors/streams/`](descriptors/streams/). The writer uses records of
+the service, so its build links `stream-service.wit`.
 
-- WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
-- .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/)
-- Python: [`python/wit/stream_service/`](python/wit/stream_service/)
-- TypeScript:
-  [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
-  [`typescript/tests/stream-service.test.ts`](typescript/tests/stream-service.test.ts)
+Only part of today's output builds, so the samples leave the rest out:
+
+- Python and TypeScript don't generate the service. They panic on the read item,
+  a `oneof` of proto-bound records, and Python can't import the protos. .NET
+  types each case of the read item as its proto class.
+- .NET plans the writer's `uint64` `writer-id` as a `long`, so the sample
+  project leaves the .NET writer out of the build.
+- The TypeScript writer passes a `number` where its proto request wants a
+  `Long`, and returns a resource that it doesn't import as a value. `tsc` skips
+  it.
+- Python doesn't generate the writer, since a caller method's docstring loses
+  its indent.
+
+- WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
+  [`inputs/stream-writer.wit`](inputs/stream-writer.wit)
+- .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),
+  [`dotnet/wit/stream-writer/`](dotnet/wit/stream-writer/),
+  [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
+- TypeScript: [`typescript/wit/stream-writer/`](typescript/wit/stream-writer/)
 
 ## Supporting files
 
@@ -161,12 +176,12 @@ records are proto-backed, as a stream service's are, on the sample proto in
   [`inputs/examples.toml`](inputs/examples.toml). Descriptors are opt-in, as in
   the compiler rejection fixtures, so an example with no `descriptors` gets
   none. A list specifies files in `descriptors/`.
-- [`descriptors/stream_service.bin`](descriptors/stream_service.bin): descriptor
-  set of the `stream-service` sample proto. Only `stream-service` lists it in
-  `descriptors`. The sample projects hold its bindings:
-  [`python/streamsample/`](python/streamsample/),
-  [`dotnet/proto/`](dotnet/proto/) and
-  [`typescript/proto/streamsample.d.ts`](typescript/proto/streamsample.d.ts).
+- [`descriptors/streams.bin`](descriptors/streams.bin): descriptor set of the
+  stream protos. Only the stream examples list it in `descriptors`. No SDK has
+  these protos yet, so the sample projects hold their bindings:
+  [`python/streamprotos/`](python/streamprotos/),
+  [`dotnet/proto/streams/`](dotnet/proto/streams/) and
+  [`typescript/proto/streams.d.ts`](typescript/proto/streams.d.ts).
 - [`wire/proto/`](wire/proto/): proto wire fixtures used by the
   proto-compatibility tests.
 - Per-language notes: [`dotnet/README.md`](dotnet/README.md),
@@ -190,25 +205,32 @@ belongs in one. The per-language tests live in the sibling `tests/` directories.
 (The `nexgen` CLI itself never deletes: it writes into an existing `--output`
 directory and leaves everything already there alone.)
 
-### The `stream-service` proto bindings
+### The stream proto bindings
 
-Upstream has no stream protos, so the sample has its own. After a change to
-`descriptors/streamsample/v1/stream_service.proto`, rebuild its descriptor set
-and bindings with `protoc` 33.1 and `mypy-protobuf` 5.1.0. `API` is a checkout
-of the Temporal API protos (`temporalio/api`), for
-`temporal/api/common/v1/message.proto`.
+The protos in `descriptors/streams/` are byte copies of the Stream protos of
+`temporalio/api#895` and of Brook's runtime proto. After a change to them,
+rebuild the descriptor set and the bindings with `protoc` 33.1 and
+`mypy-protobuf` 5.1.0. `API` is a checkout of the Temporal API protos that has
+`temporal.api.common.v1.Execution`.
 
 ```sh
 cd advanced/samples
-protoc -I descriptors -I "$API" --descriptor_set_out=descriptors/stream_service.bin \
-  streamsample/v1/stream_service.proto
-protoc -I descriptors -I "$API" --python_out=python --mypy_out=python \
-  streamsample/v1/stream_service.proto
-perl -pi -e 's/^from temporal\.api\./from temporalio.api./' \
-  python/streamsample/v1/stream_service_pb2.py python/streamsample/v1/stream_service_pb2.pyi
-protoc -I descriptors -I "$API" --csharp_out=dotnet/proto streamsample/v1/stream_service.proto
+FILES="temporal/api/enums/v1/stream.proto temporal/api/stream/v1/message.proto
+  temporal/api/streamservice/v1/request_response.proto
+  temporal/sdk/streams/v1/runtime.proto"
+protoc -I descriptors/streams -I "$API" \
+  --descriptor_set_out=descriptors/streams.bin $FILES
+protoc -I descriptors/streams -I "$API" --python_out=python/streamprotos \
+  --mypy_out=python/streamprotos $FILES
+perl -pi -e 's/^from temporal\.api\.(stream|streamservice)\./from streamprotos.temporal.api.$1./;
+  s/^from temporal\.api\.enums\.v1 import stream_pb2/from streamprotos.temporal.api.enums.v1 import stream_pb2/;
+  s/^from temporal\.api\./from temporalio.api./' \
+  $(find python/streamprotos -name '*_pb2.py*')
+protoc -I descriptors/streams -I "$API" --csharp_out=dotnet/proto/streams \
+  --csharp_opt=base_namespace= $FILES
 ```
 
-The TypeScript `typescript/proto/streamsample.d.ts` mirrors the proto by hand,
-with only the `I<Message>` interfaces and the enums that the generated code
-imports.
+The TypeScript `typescript/proto/streams.d.ts` mirrors the protos with only the
+`I<Message>` interfaces, oneof names and enums, as `protobufjs` declares them.
+It adds them to `@temporalio/proto` with `declare module`, so the generated code
+imports them as it does the other Temporal protos.

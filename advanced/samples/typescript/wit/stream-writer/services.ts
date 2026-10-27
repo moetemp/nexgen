@@ -3,7 +3,7 @@
 import * as workflow from "@temporalio/workflow";
 import * as nexus from "nexus-rpc";
 import {
-  openWriterResponseTransferTypeConverter,
+  writerResultTransferTypeConverter,
   openWriterRequestTransferTypeConverter,
   closeWritersResponseTransferTypeConverter,
   closeWritersRequestTransferTypeConverter,
@@ -11,19 +11,21 @@ import {
   closeWriterRequestTransferTypeConverter,
 } from "./models";
 import type {
-  OpenWriterResponse,
+  WriterResult,
   OpenWriterRequest,
   CloseWritersResponse,
   CloseWritersRequest,
   CloseWriterResponse,
   CloseWriterRequest,
 } from "./models";
+import type { Writer } from "./resources";
+import { bindWriterClient } from "./resources";
 
 export const streamWriter = nexus.service("streamsample.v1.StreamWriter", {
-  openWriter: nexus.operation<OpenWriterRequest, OpenWriterResponse>({
+  openWriter: nexus.operation<OpenWriterRequest, WriterResult>({
     name: "OpenWriter",
     inputType: { transferTypeConverter: openWriterRequestTransferTypeConverter },
-    outputType: { transferTypeConverter: openWriterResponseTransferTypeConverter },
+    outputType: { transferTypeConverter: writerResultTransferTypeConverter },
   }),
   /**
    * Drop every open writer, for example at shutdown.
@@ -53,12 +55,15 @@ export class StreamWriterClient {
   /**
    * @param request - Request for the operation.
    */
-  public async openWriter(
-    request: OpenWriterRequest,
-  ): Promise<workflow.NexusOperationHandle<OpenWriterResponse>> {
-    return await this.client.startOperation(
+  public async openWriter(request: OpenWriterRequest): Promise<Writer> {
+    const handle = await this.client.startOperation(
       streamWriter.operations.openWriter,
       request,
+    );
+    const result = await handle.result();
+    return bindWriterClient(
+      new Writer(requiredField(result.writerId, "resource", "writerId")),
+      this.client,
     );
   }
 

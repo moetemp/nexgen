@@ -18,10 +18,6 @@ interface stream-writer {
     max-retry-duration: option<duration>,
   }
 
-  /// @nexus.proto "streamsample.v1.OpenWriterResponse" typescript-import="#streamsample"
-  record open-writer-response {
-  }
-
   /// @nexus.proto "streamsample.v1.CloseWritersRequest" typescript-import="#streamsample"
   record close-writers-request {
   }
@@ -31,8 +27,19 @@ interface stream-writer {
     failed: option<s32>,
   }
 
+  /// @nexus.doc "An open writer of one stream."
+  resource writer {
+    constructor(writer-id: u64);
+
+    /// @nexus.operation "close-writer"
+    close: func() -> close-writer-response;
+  }
+
+  /// @nexus.proto "streamsample.v1.OpenWriterResponse" typescript-import="#streamsample"
+  type writer-result = own<writer>;
+
   /// @nexus.operation name="OpenWriter"
-  open-writer: func(request: open-writer-request) -> open-writer-response;
+  open-writer: func(request: open-writer-request) -> writer-result;
 
   /// @nexus.doc "Drop every open writer, for example at shutdown."
   /// @nexus.operation name="CloseWriters"

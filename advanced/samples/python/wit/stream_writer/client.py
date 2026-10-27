@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import collections.abc
+import dataclasses
 import typing
 import datetime
 import abc
@@ -13,9 +14,9 @@ from .models import (
     CloseWritersRequest,
     CloseWritersResponse,
     OpenWriterRequest,
-    OpenWriterResponse,
     Producer,
     StreamRef,
+    WriterResult,
 )
 
 
@@ -64,15 +65,22 @@ class StreamWriterClientExtension(abc.ABC):
     async def _open_writer(
         self,
         request: OpenWriterRequest,
-    ) -> collections.abc.Awaitable[OpenWriterResponse,]:
+    ) -> Writer:
         nexus_client = self._create_nexus_client(
             service="streamsample.v1.StreamWriter",
             endpoint=None,
         )
-        return await nexus_client.start_operation(
+        handle = await nexus_client.start_operation(
             operation="OpenWriter",
             input=request,
-            output_type=OpenWriterResponse,
+            output_type=WriterResult,
+        )
+        result = await handle
+        if result.writer_id is None:
+            raise RuntimeError("OpenWriter answered without `writer_id`")
+        return Writer(
+            _client=self,
+            writer_id=result.writer_id,
         )
 
     async def open_writer(
@@ -81,7 +89,7 @@ class StreamWriterClientExtension(abc.ABC):
         stream: StreamRef | None = None,
         producer: Producer | None = None,
         max_retry_duration: datetime.timedelta | None = None,
-    ) -> collections.abc.Awaitable[OpenWriterResponse,]:
+    ) -> Writer:
         request = OpenWriterRequest(
             stream=stream,
             producer=producer,
@@ -133,3 +141,20 @@ class StreamWriterClientExtension(abc.ABC):
             writer_id=writer_id,
         )
         return await self._close_writer(request)
+
+
+@dataclasses.dataclass
+class Writer:
+    """An open writer of one stream."""
+
+    _client: StreamWriterClientExtension = dataclasses.field(repr=False, compare=False)
+    writer_id: int
+
+    async def close(
+        self,
+    ) -> CloseWriterResponse:
+        request = CloseWriterRequest(
+            writer_id=self.writer_id,
+        )
+        handle = await self._client._close_writer(request)
+        return await handle

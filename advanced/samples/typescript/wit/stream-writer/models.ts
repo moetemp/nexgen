@@ -23,27 +23,31 @@ export enum ProducerKind {
   ProducerKindClient = 3,
 }
 
-export type OpenWriterResponse = Record<string, never>;
+export interface WriterResult {
+  writerId?: Long;
+}
 
-function openWriterResponseFromProto(
+function writerResultFromProto(
   proto: streamsample.v1.IOpenWriterResponse,
-): OpenWriterResponse {
-  return {};
+): WriterResult {
+  return {
+    writerId: proto.writerId ?? undefined,
+  };
 }
 
-function openWriterResponseToProto(
-  model: OpenWriterResponse,
-): streamsample.v1.IOpenWriterResponse {
-  return {};
+function writerResultToProto(model: WriterResult): streamsample.v1.IOpenWriterResponse {
+  return {
+    writerId: model.writerId,
+  };
 }
 
-export const openWriterResponseTransferTypeConverter = {
-  fromTransferType(value: streamsample.v1.IOpenWriterResponse): OpenWriterResponse {
-    return openWriterResponseFromProto(value);
+export const writerResultTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.IOpenWriterResponse): WriterResult {
+    return writerResultFromProto(value);
   },
 
-  toTransferType(value: OpenWriterResponse): streamsample.v1.IOpenWriterResponse {
-    return openWriterResponseToProto(value);
+  toTransferType(value: WriterResult): streamsample.v1.IOpenWriterResponse {
+    return writerResultToProto(value);
   },
 };
 export interface OpenWriterRequest {

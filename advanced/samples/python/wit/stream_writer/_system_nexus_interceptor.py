@@ -33,7 +33,7 @@ async def _start_system_nexus_operation(
         and input.operation_name == "OpenWriter"
     ):
         typed_input = typing.cast(
-            "StartNexusOperationInput[models.OpenWriterRequest, models.OpenWriterResponse]",
+            "StartNexusOperationInput[models.OpenWriterRequest, models.WriterResult]",
             input,
         )
         # The dispatch check above establishes that this operation's response type is _OutputT.
@@ -86,7 +86,7 @@ class _SystemNexusWorkflowOutboundInterceptorBase(abc.ABC):
 
     async def start_open_writer(
         self, request: models.OpenWriterRequest
-    ) -> temporalio.workflow.NexusOperationHandle[models.OpenWriterResponse]:
+    ) -> temporalio.workflow.NexusOperationHandle[models.WriterResult]:
         """Intercept the OpenWriter operation."""
         return await self._next_system_nexus_interceptor().start_open_writer(request)
 
@@ -112,7 +112,7 @@ class _SystemNexusWorkflowOutboundInterceptorTerminal(abc.ABC):
 
     async def start_open_writer(
         self, request: models.OpenWriterRequest
-    ) -> temporalio.workflow.NexusOperationHandle[models.OpenWriterResponse]:
+    ) -> temporalio.workflow.NexusOperationHandle[models.WriterResult]:
         from temporalio.worker._interceptor import StartNexusOperationInput
         from temporalio.nexus.system import TEMPORAL_SYSTEM_ENDPOINT
         from temporalio.workflow import NexusOperationCancellationType
@@ -123,7 +123,7 @@ class _SystemNexusWorkflowOutboundInterceptorTerminal(abc.ABC):
                 service="streamsample.v1.StreamWriter",
                 operation="OpenWriter",
                 input=request,
-                output_type=models.OpenWriterResponse,
+                output_type=models.WriterResult,
                 schedule_to_close_timeout=None,
                 schedule_to_start_timeout=None,
                 start_to_close_timeout=None,

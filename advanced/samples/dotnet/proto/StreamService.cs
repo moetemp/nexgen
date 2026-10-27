@@ -63,15 +63,16 @@ namespace StreamSample.V1 {
             "UmVxdWVzdBIqCgZzdHJlYW0YASABKAsyGi5zdHJlYW1zYW1wbGUudjEuU3Ry",
             "ZWFtUmVmEisKCHByb2R1Y2VyGAIgASgLMhkuc3RyZWFtc2FtcGxlLnYxLlBy",
             "b2R1Y2VyEjUKEm1heF9yZXRyeV9kdXJhdGlvbhgDIAEoCzIZLmdvb2dsZS5w",
-            "cm90b2J1Zi5EdXJhdGlvbiIUChJPcGVuV3JpdGVyUmVzcG9uc2UiJwoSQ2xv",
-            "c2VXcml0ZXJSZXF1ZXN0EhEKCXdyaXRlcl9pZBgBIAEoBCIqChNDbG9zZVdy",
-            "aXRlclJlc3BvbnNlEhMKC2xhc3Rfb2Zmc2V0GAEgASgDKn8KDFByb2R1Y2Vy",
-            "S2luZBIdChlQUk9EVUNFUl9LSU5EX1VOU1BFQ0lGSUVEEAASGgoWUFJPRFVD",
-            "RVJfS0lORF9XT1JLRkxPVxABEhoKFlBST0RVQ0VSX0tJTkRfQUNUSVZJVFkQ",
-            "AhIYChRQUk9EVUNFUl9LSU5EX0NMSUVOVBADKnoKDFN0cmVhbVN0YXR1cxId",
-            "ChlTVFJFQU1fU1RBVFVTX1VOU1BFQ0lGSUVEEAASFgoSU1RSRUFNX1NUQVRV",
-            "U19PUEVOEAESGAoUU1RSRUFNX1NUQVRVU19DTE9TRUQQAhIZChVTVFJFQU1f",
-            "U1RBVFVTX0VYUElSRUQQA0ISqgIPU3RyZWFtU2FtcGxlLlYxYgZwcm90bzM="));
+            "cm90b2J1Zi5EdXJhdGlvbiInChJPcGVuV3JpdGVyUmVzcG9uc2USEQoJd3Jp",
+            "dGVyX2lkGAEgASgEIicKEkNsb3NlV3JpdGVyUmVxdWVzdBIRCgl3cml0ZXJf",
+            "aWQYASABKAQiKgoTQ2xvc2VXcml0ZXJSZXNwb25zZRITCgtsYXN0X29mZnNl",
+            "dBgBIAEoAyp/CgxQcm9kdWNlcktpbmQSHQoZUFJPRFVDRVJfS0lORF9VTlNQ",
+            "RUNJRklFRBAAEhoKFlBST0RVQ0VSX0tJTkRfV09SS0ZMT1cQARIaChZQUk9E",
+            "VUNFUl9LSU5EX0FDVElWSVRZEAISGAoUUFJPRFVDRVJfS0lORF9DTElFTlQQ",
+            "Ayp6CgxTdHJlYW1TdGF0dXMSHQoZU1RSRUFNX1NUQVRVU19VTlNQRUNJRklF",
+            "RBAAEhYKElNUUkVBTV9TVEFUVVNfT1BFThABEhgKFFNUUkVBTV9TVEFUVVNf",
+            "Q0xPU0VEEAISGQoVU1RSRUFNX1NUQVRVU19FWFBJUkVEEANCEqoCD1N0cmVh",
+            "bVNhbXBsZS5WMWIGcHJvdG8z"));
       descriptor = pbr::FileDescriptor.FromGeneratedCode(descriptorData,
           new pbr::FileDescriptor[] { global::Google.Protobuf.WellKnownTypes.DurationReflection.Descriptor, global::Temporalio.Api.Common.V1.MessageReflection.Descriptor, },
           new pbr::GeneratedClrTypeInfo(new[] {typeof(global::StreamSample.V1.ProducerKind), typeof(global::StreamSample.V1.StreamStatus), }, null, new pbr::GeneratedClrTypeInfo[] {
@@ -92,7 +93,7 @@ namespace StreamSample.V1 {
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseWritersRequest), global::StreamSample.V1.CloseWritersRequest.Parser, null, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseWritersResponse), global::StreamSample.V1.CloseWritersResponse.Parser, new[]{ "Failed" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.OpenWriterRequest), global::StreamSample.V1.OpenWriterRequest.Parser, new[]{ "Stream", "Producer", "MaxRetryDuration" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.OpenWriterResponse), global::StreamSample.V1.OpenWriterResponse.Parser, null, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.OpenWriterResponse), global::StreamSample.V1.OpenWriterResponse.Parser, new[]{ "WriterId" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseWriterRequest), global::StreamSample.V1.CloseWriterRequest.Parser, new[]{ "WriterId" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseWriterResponse), global::StreamSample.V1.CloseWriterResponse.Parser, new[]{ "LastOffset" }, null, null, null, null)
           }));
@@ -4546,6 +4547,7 @@ namespace StreamSample.V1 {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public OpenWriterResponse(OpenWriterResponse other) : this() {
+      writerId_ = other.writerId_;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -4553,6 +4555,18 @@ namespace StreamSample.V1 {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public OpenWriterResponse Clone() {
       return new OpenWriterResponse(this);
+    }
+
+    /// <summary>Field number for the "writer_id" field.</summary>
+    public const int WriterIdFieldNumber = 1;
+    private ulong writerId_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public ulong WriterId {
+      get { return writerId_; }
+      set {
+        writerId_ = value;
+      }
     }
 
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
@@ -4570,6 +4584,7 @@ namespace StreamSample.V1 {
       if (ReferenceEquals(other, this)) {
         return true;
       }
+      if (WriterId != other.WriterId) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -4577,6 +4592,7 @@ namespace StreamSample.V1 {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override int GetHashCode() {
       int hash = 1;
+      if (WriterId != 0UL) hash ^= WriterId.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -4595,6 +4611,10 @@ namespace StreamSample.V1 {
     #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       output.WriteRawMessage(this);
     #else
+      if (WriterId != 0UL) {
+        output.WriteRawTag(8);
+        output.WriteUInt64(WriterId);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -4605,6 +4625,10 @@ namespace StreamSample.V1 {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
+      if (WriterId != 0UL) {
+        output.WriteRawTag(8);
+        output.WriteUInt64(WriterId);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -4615,6 +4639,9 @@ namespace StreamSample.V1 {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public int CalculateSize() {
       int size = 0;
+      if (WriterId != 0UL) {
+        size += 1 + pb::CodedOutputStream.ComputeUInt64Size(WriterId);
+      }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
       }
@@ -4626,6 +4653,9 @@ namespace StreamSample.V1 {
     public void MergeFrom(OpenWriterResponse other) {
       if (other == null) {
         return;
+      }
+      if (other.WriterId != 0UL) {
+        WriterId = other.WriterId;
       }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
@@ -4646,6 +4676,10 @@ namespace StreamSample.V1 {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
+          case 8: {
+            WriterId = input.ReadUInt64();
+            break;
+          }
         }
       }
     #endif
@@ -4665,6 +4699,10 @@ namespace StreamSample.V1 {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
+          case 8: {
+            WriterId = input.ReadUInt64();
+            break;
+          }
         }
       }
     }

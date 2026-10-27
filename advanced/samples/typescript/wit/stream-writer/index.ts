@@ -7,5 +7,5 @@ export type {
   CloseWritersRequest,
   CloseWritersResponse,
   OpenWriterRequest,
-  OpenWriterResponse,
+  WriterResult,
 } from "./models";

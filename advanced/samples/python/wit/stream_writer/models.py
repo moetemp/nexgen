@@ -184,13 +184,13 @@ temporalio.converter.transfer_type_convertible(_ProducerTransferTypeConverter)(P
 
 
 @dataclasses.dataclass(slots=True)
-class OpenWriterResponse:
-    pass
+class WriterResult:
+    writer_id: int | None = None
 
 
-class _OpenWriterResponseTransferTypeConverter(
+class _WriterResultTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        OpenWriterResponse, streamsample.v1.stream_service_pb2.OpenWriterResponse
+        WriterResult, streamsample.v1.stream_service_pb2.OpenWriterResponse
     ]
 ):
     transfer_type: (
@@ -201,22 +201,26 @@ class _OpenWriterResponseTransferTypeConverter(
     def from_transfer_type(
         self,
         value: streamsample.v1.stream_service_pb2.OpenWriterResponse,
-        type_hint: type[OpenWriterResponse],
-    ) -> OpenWriterResponse:
-        return OpenWriterResponse()
+        type_hint: type[WriterResult],
+    ) -> WriterResult:
+        return WriterResult(
+            writer_id=value.writer_id if value.writer_id != 0 else None,
+        )
 
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: OpenWriterResponse,
+        value: WriterResult,
     ) -> streamsample.v1.stream_service_pb2.OpenWriterResponse:
         message = streamsample.v1.stream_service_pb2.OpenWriterResponse()
+        if value.writer_id is not None:
+            message.writer_id = value.writer_id
         return message
 
 
-temporalio.converter.transfer_type_convertible(
-    _OpenWriterResponseTransferTypeConverter
-)(OpenWriterResponse)  # pyright: ignore[reportUnusedCallResult]
+temporalio.converter.transfer_type_convertible(_WriterResultTransferTypeConverter)(
+    WriterResult
+)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)

@@ -110,7 +110,9 @@ export namespace streamsample {
       maxRetryDuration?: google.protobuf.IDuration | null;
     }
 
-    interface IOpenWriterResponse {}
+    interface IOpenWriterResponse {
+      writerId?: Long | null;
+    }
 
     interface ICloseWriterRequest {
       writerId?: Long | null;

@@ -19,7 +19,7 @@ namespace Nexgen.StreamWriter
     {
         [GeneratedCode("nexgen", null)]
         [NexusOperation("OpenWriter")]
-        OpenWriterResponse OpenWriter(OpenWriterRequest request);
+        WriterResult OpenWriter(OpenWriterRequest request);
 
         /// <summary>
         /// Drop every open writer, for example at shutdown.
@@ -59,15 +59,15 @@ namespace Nexgen.StreamWriter
         }
 
         [GeneratedCode("nexgen", null)]
-        private async Task<OpenWriterResponse> OpenWriterAsync(OpenWriterRequest request)
+        private async Task<Writer> OpenWriterAsync(OpenWriterRequest request)
         {
-            var result = await _client.ExecuteNexusOperationAsync<OpenWriterResponse>(svc => svc.OpenWriter(request)).ConfigureAwait(true);
-            return result;
+            var result = await _client.ExecuteNexusOperationAsync<WriterResult>(svc => svc.OpenWriter(request)).ConfigureAwait(true);
+            return Writer.BindClient(new Writer((result.WriterId ?? throw new System.InvalidOperationException("OpenWriter answered without `writer_id`"))), _client);
         }
 
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nexgen", null)]
-        public Task<OpenWriterResponse> OpenWriterAsync(OpenWriterOptions? options = null)
+        public Task<Writer> OpenWriterAsync(OpenWriterOptions? options = null)
         {
             var request = new OpenWriterRequest()
             {

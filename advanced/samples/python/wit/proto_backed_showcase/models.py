@@ -210,11 +210,7 @@ class _WorkflowExecutionTransferTypeConverter(
         value: temporalio.api.common.v1.message_pb2.WorkflowExecution,
         type_hint: type[WorkflowExecution],
     ) -> WorkflowExecution:
-        if not value.workflow_id:
-            raise ValueError("missing required field WorkflowExecution.workflow_id")
         workflow_id = value.workflow_id
-        if not value.run_id:
-            raise ValueError("missing required field WorkflowExecution.run_id")
         run_id = value.run_id
         return WorkflowExecution(
             workflow_id=workflow_id,
@@ -314,13 +310,7 @@ class _TaskQueuePartitionTransferTypeConverter(
         value: temporalio.api.taskqueue.v1.message_pb2.TaskQueuePartitionMetadata,
         type_hint: type[TaskQueuePartition],
     ) -> TaskQueuePartition:
-        if not value.key:
-            raise ValueError("missing required field TaskQueuePartition.key")
         key = value.key
-        if not value.owner_host_name:
-            raise ValueError(
-                "missing required field TaskQueuePartition.owner_host_name"
-            )
         owner_host_name = value.owner_host_name
         return TaskQueuePartition(
             key=key,
@@ -412,11 +402,7 @@ class _BadBinaryTransferTypeConverter(
         value: temporalio.api.namespace.v1.message_pb2.BadBinaryInfo,
         type_hint: type[BadBinary],
     ) -> BadBinary:
-        if not value.reason:
-            raise ValueError("missing required field BadBinary.reason")
         reason = value.reason
-        if not value.operator:
-            raise ValueError("missing required field BadBinary.operator")
         operator = value.operator
         return BadBinary(
             reason=reason,

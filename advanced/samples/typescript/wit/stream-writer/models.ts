@@ -152,7 +152,7 @@ export interface StreamRef {
 
 function streamRefFromProto(proto: temporal.api.stream.v1.IStreamRef): StreamRef {
   return {
-    id: requiredField(proto.id === "" ? undefined : proto.id, "StreamRef", "id"),
+    id: proto.id ?? "",
     owner: proto.owner == null ? undefined : executionFromProto(proto.owner),
     backend: proto.backend ?? undefined,
   };
@@ -230,7 +230,7 @@ export interface Producer {
 
 function producerFromProto(proto: temporal.api.stream.v1.IProducer): Producer {
   return {
-    id: requiredField(proto.id === "" ? undefined : proto.id, "Producer", "id"),
+    id: proto.id ?? "",
     kind: proto.kind == null ? undefined : (proto.kind as number as StreamProducerKind),
     epoch: proto.epoch == null ? undefined : producerEpochFromProto(proto.epoch),
     runId: proto.runId ?? undefined,

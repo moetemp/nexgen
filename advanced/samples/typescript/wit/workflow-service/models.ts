@@ -284,11 +284,7 @@ function signalWithStartWorkflowRequestFromProto<
       "workflow",
     ),
     args: requestArgsFromPayloads(proto.input) as any,
-    id: requiredField(
-      proto.workflowId === "" ? undefined : proto.workflowId,
-      "SignalWithStartWorkflowRequest",
-      "id",
-    ),
+    id: proto.workflowId ?? "",
     taskQueue: requiredField(
       support.taskQueueFromProto(
         requiredField(proto.taskQueue, "SignalWithStartWorkflowRequest", "taskQueue"),
@@ -296,11 +292,7 @@ function signalWithStartWorkflowRequestFromProto<
       "SignalWithStartWorkflowRequest",
       "taskQueue",
     ),
-    signal: requiredField(
-      proto.signalName === "" ? undefined : proto.signalName,
-      "SignalWithStartWorkflowRequest",
-      "signal",
-    ),
+    signal: proto.signalName ?? "",
     signalArgs: requestArgsFromPayloads(proto.signalInput) as any,
     executionTimeout:
       proto.workflowExecutionTimeout == null
@@ -367,11 +359,7 @@ function signalWithStartWorkflowRequestFromProto<
                   : support.payloadFromProto(proto.userMetadata.details))!,
               ),
     headers: proto.header == null ? undefined : support.headerFromProto(proto.header),
-    namespace: requiredField(
-      proto.namespace === "" ? undefined : proto.namespace,
-      "sourced field",
-      "namespace",
-    ),
+    namespace: proto.namespace ?? "",
   };
 }
 

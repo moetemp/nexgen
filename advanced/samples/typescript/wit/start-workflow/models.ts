@@ -67,11 +67,7 @@ function startWorkflowRequestFromProto(
       "StartWorkflowRequest",
       "workflow",
     ),
-    workflowId: requiredField(
-      proto.workflowId === "" ? undefined : proto.workflowId,
-      "StartWorkflowRequest",
-      "workflowId",
-    ),
+    workflowId: proto.workflowId ?? "",
     taskQueue: requiredField(
       support.taskQueueFromProto(
         requiredField(proto.taskQueue, "StartWorkflowRequest", "taskQueue"),
@@ -83,11 +79,7 @@ function startWorkflowRequestFromProto(
       proto.workflowStartDelay == null
         ? undefined
         : support.durationFromProto(proto.workflowStartDelay),
-    namespace: requiredField(
-      proto.namespace === "" ? undefined : proto.namespace,
-      "sourced field",
-      "namespace",
-    ),
+    namespace: proto.namespace ?? "",
   };
 }
 
@@ -168,11 +160,7 @@ function cancelWorkflowRequestFromProto(
       ),
     ),
     reason: proto.reason ?? undefined,
-    namespace: requiredField(
-      proto.namespace === "" ? undefined : proto.namespace,
-      "sourced field",
-      "namespace",
-    ),
+    namespace: proto.namespace ?? "",
   };
 }
 
@@ -214,11 +202,7 @@ function workflowExecutionFromProto(
   proto: temporal.api.common.v1.IWorkflowExecution,
 ): WorkflowExecution {
   return {
-    workflowId: requiredField(
-      proto.workflowId === "" ? undefined : proto.workflowId,
-      "WorkflowExecution",
-      "workflowId",
-    ),
+    workflowId: proto.workflowId ?? "",
     runId: proto.runId ?? undefined,
   };
 }

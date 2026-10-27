@@ -78,9 +78,9 @@ describe("stream-service generated output", () => {
     ];
 
     for (const proto of protos) {
-      expect(() =>
-        createStreamRequestTransferTypeConverter.fromTransferType(proto),
-      ).toThrow("missing required field CreateStreamRequest.streamId");
+      expect(
+        createStreamRequestTransferTypeConverter.fromTransferType(proto).streamId,
+      ).toBe("");
     }
   });
 

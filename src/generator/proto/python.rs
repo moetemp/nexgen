@@ -677,11 +677,9 @@ fn field_read(
     match policy {
         WireReadPolicy::Required { missing_error } => {
             let mut setup_lines = Vec::new();
+            // A field without presence reads as its default when unset, so it is never missing.
             if field_has_proto_presence(field) {
                 setup_lines.push(format!("if not value.HasField(\"{proto_name}\"):"));
-                setup_lines.push(format!("    raise ValueError({missing_error})"));
-            } else if matches!(&field.field_type, PlannedType::String | PlannedType::Bytes) {
-                setup_lines.push(format!("if not value.{proto_name}:"));
                 setup_lines.push(format!("    raise ValueError({missing_error})"));
             }
             setup_lines.push(format!("{attr_name} = {value_expr}"));

@@ -1730,14 +1730,14 @@ fn required_from_wire_expr(
     generated_field_name: &str,
     field: &RecordFieldSpec<PlannedFamily>,
 ) -> String {
+    // A proto3 string or bytes without presence is never missing. Unset is the empty value,
+    // and proto3 JSON leaves that value out.
     let wire_value_expr = if field_has_presence(field) {
         wire_value_expr.to_string()
     } else if matches!(&field.field_type, PlannedType::String) {
-        format!("{wire_value_expr} === '' ? undefined : {wire_value_expr}")
+        return format!("{wire_value_expr} ?? ''");
     } else if matches!(&field.field_type, PlannedType::Bytes) {
-        format!(
-            "{wire_value_expr} == null || {wire_value_expr}.length === 0 ? undefined : {wire_value_expr}"
-        )
+        return format!("{wire_value_expr} ?? new Uint8Array()");
     } else {
         format!("{wire_value_expr} ?? undefined")
     };

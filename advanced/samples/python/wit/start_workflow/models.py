@@ -43,8 +43,6 @@ class _StartWorkflowRequestTransferTypeConverter(
         if not value.HasField("workflow_type"):
             raise ValueError("missing required field StartWorkflowRequest.workflow")
         workflow = _support.workflow_type_from_proto(value.workflow_type)
-        if not value.workflow_id:
-            raise ValueError("missing required field StartWorkflowRequest.workflow_id")
         workflow_id = value.workflow_id
         if not value.HasField("task_queue"):
             raise ValueError("missing required field StartWorkflowRequest.task_queue")
@@ -211,8 +209,6 @@ class _WorkflowExecutionTransferTypeConverter(
         value: temporalio.api.common.v1.message_pb2.WorkflowExecution,
         type_hint: type[WorkflowExecution],
     ) -> WorkflowExecution:
-        if not value.workflow_id:
-            raise ValueError("missing required field WorkflowExecution.workflow_id")
         workflow_id = value.workflow_id
         return WorkflowExecution(
             workflow_id=workflow_id,

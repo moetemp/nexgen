@@ -1,0 +1,1 @@
+Python and TypeScript decode an empty proto3 `string` or `bytes` field without presence in a proto-backed WIT record, where they raised a missing required field error. TypeScript also reads the field as empty when proto3 JSON leaves it out.

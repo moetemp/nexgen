@@ -86,8 +86,6 @@ class _CreateStreamRequestTransferTypeConverter(
         value: streamprotos.temporal.api.streamservice.v1.request_response_pb2.CreateStreamRequest,
         type_hint: type[CreateStreamRequest],
     ) -> CreateStreamRequest:
-        if not value.stream_id:
-            raise ValueError("missing required field CreateStreamRequest.stream_id")
         stream_id = value.stream_id
         return CreateStreamRequest(
             stream_id=stream_id,
@@ -159,8 +157,6 @@ class _ProducerTransferTypeConverter(
         value: streamprotos.temporal.api.stream.v1.message_pb2.Producer,
         type_hint: type[Producer],
     ) -> Producer:
-        if not value.id:
-            raise ValueError("missing required field Producer.id")
         id = value.id
         return Producer(
             id=id,
@@ -340,8 +336,6 @@ class _StreamRefTransferTypeConverter(
         value: streamprotos.temporal.api.stream.v1.message_pb2.StreamRef,
         type_hint: type[StreamRef],
     ) -> StreamRef:
-        if not value.id:
-            raise ValueError("missing required field StreamRef.id")
         id = value.id
         return StreamRef(
             id=id,
@@ -1192,8 +1186,6 @@ class _SupersessionTransferTypeConverter(
         value: streamprotos.temporal.api.stream.v1.message_pb2.Supersession,
         type_hint: type[Supersession],
     ) -> Supersession:
-        if not value.producer_id:
-            raise ValueError("missing required field Supersession.producer_id")
         producer_id = value.producer_id
         return Supersession(
             producer_id=producer_id,

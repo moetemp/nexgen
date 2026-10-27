@@ -160,16 +160,8 @@ function workflowExecutionFromProto(
   proto: temporal.api.common.v1.IWorkflowExecution,
 ): WorkflowExecution {
   return {
-    workflowId: requiredField(
-      proto.workflowId === "" ? undefined : proto.workflowId,
-      "WorkflowExecution",
-      "workflowId",
-    ),
-    runId: requiredField(
-      proto.runId === "" ? undefined : proto.runId,
-      "WorkflowExecution",
-      "runId",
-    ),
+    workflowId: proto.workflowId ?? "",
+    runId: proto.runId ?? "",
   };
 }
 
@@ -239,16 +231,8 @@ function taskQueuePartitionFromProto(
   proto: temporal.api.taskqueue.v1.ITaskQueuePartitionMetadata,
 ): TaskQueuePartition {
   return {
-    key: requiredField(
-      proto.key === "" ? undefined : proto.key,
-      "TaskQueuePartition",
-      "key",
-    ),
-    ownerHostName: requiredField(
-      proto.ownerHostName === "" ? undefined : proto.ownerHostName,
-      "TaskQueuePartition",
-      "ownerHostName",
-    ),
+    key: proto.key ?? "",
+    ownerHostName: proto.ownerHostName ?? "",
   };
 }
 
@@ -330,16 +314,8 @@ function badBinaryFromProto(
   proto: temporal.api.namespace.v1.IBadBinaryInfo,
 ): BadBinary {
   return {
-    reason: requiredField(
-      proto.reason === "" ? undefined : proto.reason,
-      "BadBinary",
-      "reason",
-    ),
-    operator: requiredField(
-      proto.operator === "" ? undefined : proto.operator,
-      "BadBinary",
-      "operator",
-    ),
+    reason: proto.reason ?? "",
+    operator: proto.operator ?? "",
   };
 }
 

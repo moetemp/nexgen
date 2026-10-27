@@ -38,8 +38,6 @@ class _EndpointExternalTargetTransferTypeConverter(
         value: temporalio.api.nexus.v1.message_pb2.EndpointTarget.External,
         type_hint: type[EndpointExternalTarget],
     ) -> EndpointExternalTarget:
-        if not value.url:
-            raise ValueError("missing required field EndpointExternalTarget.url")
         url = value.url
         return EndpointExternalTarget(
             url=url,
@@ -151,11 +149,7 @@ class _EndpointWorkerTargetTransferTypeConverter(
         value: temporalio.api.nexus.v1.message_pb2.EndpointTarget.Worker,
         type_hint: type[EndpointWorkerTarget],
     ) -> EndpointWorkerTarget:
-        if not value.namespace:
-            raise ValueError("missing required field EndpointWorkerTarget.namespace")
         namespace = value.namespace
-        if not value.task_queue:
-            raise ValueError("missing required field EndpointWorkerTarget.task_queue")
         task_queue = value.task_queue
         return EndpointWorkerTarget(
             namespace=namespace,
@@ -268,11 +262,7 @@ class _PauseActivityRequestTransferTypeConverter(
         value: temporalio.api.workflowservice.v1.request_response_pb2.PauseActivityRequest,
         type_hint: type[PauseActivityRequest],
     ) -> PauseActivityRequest:
-        if not value.namespace:
-            raise ValueError("missing required field PauseActivityRequest.namespace")
         namespace = value.namespace
-        if not value.identity:
-            raise ValueError("missing required field PauseActivityRequest.identity")
         identity = value.identity
         _oneof_activity: ActivitySelectionId | ActivitySelectionType | None
         match value.WhichOneof("activity"):
@@ -282,11 +272,7 @@ class _PauseActivityRequestTransferTypeConverter(
                 _oneof_activity = ActivitySelectionType(value.type)
             case None:
                 _oneof_activity = None
-        if not value.reason:
-            raise ValueError("missing required field PauseActivityRequest.reason")
         reason = value.reason
-        if not value.request_id:
-            raise ValueError("missing required field PauseActivityRequest.request_id")
         request_id = value.request_id
         return PauseActivityRequest(
             namespace=namespace,
@@ -352,11 +338,7 @@ class _WorkflowExecutionTransferTypeConverter(
         value: temporalio.api.common.v1.message_pb2.WorkflowExecution,
         type_hint: type[WorkflowExecution],
     ) -> WorkflowExecution:
-        if not value.workflow_id:
-            raise ValueError("missing required field WorkflowExecution.workflow_id")
         workflow_id = value.workflow_id
-        if not value.run_id:
-            raise ValueError("missing required field WorkflowExecution.run_id")
         run_id = value.run_id
         return WorkflowExecution(
             workflow_id=workflow_id,

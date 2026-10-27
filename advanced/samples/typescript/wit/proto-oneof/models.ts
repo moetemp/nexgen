@@ -34,11 +34,7 @@ function endpointExternalTargetFromProto(
   proto: temporal.api.nexus.v1.EndpointTarget.IExternal,
 ): EndpointExternalTarget {
   return {
-    url: requiredField(
-      proto.url === "" ? undefined : proto.url,
-      "EndpointExternalTarget",
-      "url",
-    ),
+    url: proto.url ?? "",
   };
 }
 
@@ -141,16 +137,8 @@ function endpointWorkerTargetFromProto(
   proto: temporal.api.nexus.v1.EndpointTarget.IWorker,
 ): EndpointWorkerTarget {
   return {
-    namespace: requiredField(
-      proto.namespace === "" ? undefined : proto.namespace,
-      "EndpointWorkerTarget",
-      "namespace",
-    ),
-    taskQueue: requiredField(
-      proto.taskQueue === "" ? undefined : proto.taskQueue,
-      "EndpointWorkerTarget",
-      "taskQueue",
-    ),
+    namespace: proto.namespace ?? "",
+    taskQueue: proto.taskQueue ?? "",
   };
 }
 
@@ -276,29 +264,13 @@ function pauseActivityRequestFromProto(
       throw new Error("invalid oneof discriminator for PauseActivityRequest.activity");
   }
   return {
-    namespace: requiredField(
-      proto.namespace === "" ? undefined : proto.namespace,
-      "PauseActivityRequest",
-      "namespace",
-    ),
+    namespace: proto.namespace ?? "",
     execution:
       proto.execution == null ? undefined : workflowExecutionFromProto(proto.execution),
-    identity: requiredField(
-      proto.identity === "" ? undefined : proto.identity,
-      "PauseActivityRequest",
-      "identity",
-    ),
+    identity: proto.identity ?? "",
     activity: result3,
-    reason: requiredField(
-      proto.reason === "" ? undefined : proto.reason,
-      "PauseActivityRequest",
-      "reason",
-    ),
-    requestId: requiredField(
-      proto.requestId === "" ? undefined : proto.requestId,
-      "PauseActivityRequest",
-      "requestId",
-    ),
+    reason: proto.reason ?? "",
+    requestId: proto.requestId ?? "",
   };
 }
 
@@ -353,16 +325,8 @@ function workflowExecutionFromProto(
   proto: temporal.api.common.v1.IWorkflowExecution,
 ): WorkflowExecution {
   return {
-    workflowId: requiredField(
-      proto.workflowId === "" ? undefined : proto.workflowId,
-      "WorkflowExecution",
-      "workflowId",
-    ),
-    runId: requiredField(
-      proto.runId === "" ? undefined : proto.runId,
-      "WorkflowExecution",
-      "runId",
-    ),
+    workflowId: proto.workflowId ?? "",
+    runId: proto.runId ?? "",
   };
 }
 

@@ -97,7 +97,6 @@ def test_a_native_create_without_a_stream_id_decodes() -> None:
     # On native, an empty stream id asks the server for one. Proto3 has no presence for a string.
     wire = request_response_pb2.CreateStreamRequest(stream_id="")
 
-    with pytest.raises(
-        ValueError, match="missing required field CreateStreamRequest.stream_id"
-    ):
-        _ = converter.from_transfer_type(wire, CreateStreamRequest)
+    decoded = converter.from_transfer_type(wire, CreateStreamRequest)
+    assert decoded == CreateStreamRequest(stream_id="")
+    assert converter.to_transfer_type(decoded) == wire

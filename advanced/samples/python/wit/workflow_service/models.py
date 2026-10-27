@@ -72,18 +72,12 @@ class _SignalWithStartWorkflowRequestTransferTypeConverter(
                 "missing required field SignalWithStartWorkflowRequest.workflow"
             )
         workflow = _support.workflow_type_from_proto(value.workflow_type)
-        if not value.workflow_id:
-            raise ValueError("missing required field SignalWithStartWorkflowRequest.id")
         id = value.workflow_id
         if not value.HasField("task_queue"):
             raise ValueError(
                 "missing required field SignalWithStartWorkflowRequest.task_queue"
             )
         task_queue = _support.task_queue_from_proto(value.task_queue)
-        if not value.signal_name:
-            raise ValueError(
-                "missing required field SignalWithStartWorkflowRequest.signal"
-            )
         signal = value.signal_name
         return SignalWithStartWorkflowRequest(
             workflow=workflow,

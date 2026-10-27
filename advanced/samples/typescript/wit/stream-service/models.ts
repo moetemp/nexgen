@@ -121,7 +121,7 @@ export interface StreamRef {
 
 function streamRefFromProto(proto: temporal.api.stream.v1.IStreamRef): StreamRef {
   return {
-    id: requiredField(proto.id === "" ? undefined : proto.id, "StreamRef", "id"),
+    id: proto.id ?? "",
     owner: proto.owner == null ? undefined : executionFromProto(proto.owner),
     backend: proto.backend ?? undefined,
   };
@@ -211,11 +211,7 @@ function createStreamRequestFromProto(
   proto: temporal.api.streamservice.v1.ICreateStreamRequest,
 ): CreateStreamRequest {
   return {
-    streamId: requiredField(
-      proto.streamId === "" ? undefined : proto.streamId,
-      "CreateStreamRequest",
-      "streamId",
-    ),
+    streamId: proto.streamId ?? "",
     retention:
       proto.retention == null ? undefined : support.durationFromProto(proto.retention),
     withdrawRun: proto.withdrawRun ?? undefined,
@@ -265,7 +261,7 @@ export interface Producer {
 
 function producerFromProto(proto: temporal.api.stream.v1.IProducer): Producer {
   return {
-    id: requiredField(proto.id === "" ? undefined : proto.id, "Producer", "id"),
+    id: proto.id ?? "",
     kind: proto.kind == null ? undefined : (proto.kind as number as StreamProducerKind),
     epoch: proto.epoch == null ? undefined : producerEpochFromProto(proto.epoch),
     runId: proto.runId ?? undefined,
@@ -866,11 +862,7 @@ function supersessionFromProto(
   proto: temporal.api.stream.v1.ISupersession,
 ): Supersession {
   return {
-    producerId: requiredField(
-      proto.producerId === "" ? undefined : proto.producerId,
-      "Supersession",
-      "producerId",
-    ),
+    producerId: proto.producerId ?? "",
     failedTasks: proto.failedTasks?.slice(),
     producerKind:
       proto.producerKind == null

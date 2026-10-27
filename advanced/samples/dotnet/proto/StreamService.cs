@@ -39,10 +39,11 @@ namespace StreamSample.V1 {
             "cHJvdG9idWYuRHVyYXRpb24iggEKFENyZWF0ZVN0cmVhbVJlc3BvbnNlEioK",
             "BnN0cmVhbRgBIAEoCzIaLnN0cmVhbXNhbXBsZS52MS5TdHJlYW1SZWYSDwoH",
             "Y3JlYXRlZBgCIAEoCBItCgZzdGF0dXMYAyABKA4yHS5zdHJlYW1zYW1wbGUu",
-            "djEuU3RyZWFtU3RhdHVzIpcBChRBcHBlbmRSZWNvcmRzUmVxdWVzdBIRCglu",
+            "djEuU3RyZWFtU3RhdHVzIsQBChRBcHBlbmRSZWNvcmRzUmVxdWVzdBIRCglu",
             "YW1lc3BhY2UYASABKAkSKgoGc3RyZWFtGAIgASgLMhouc3RyZWFtc2FtcGxl",
             "LnYxLlN0cmVhbVJlZhIQCghzZXF1ZW5jZRgDIAEoAxIuCgdyZWNvcmRzGAQg",
-            "AygLMh0uc3RyZWFtc2FtcGxlLnYxLkFwcGVuZFJlY29yZCJCChVBcHBlbmRS",
+            "AygLMh0uc3RyZWFtc2FtcGxlLnYxLkFwcGVuZFJlY29yZBIrCghwcm9kdWNl",
+            "chgFIAEoCzIZLnN0cmVhbXNhbXBsZS52MS5Qcm9kdWNlciJCChVBcHBlbmRS",
             "ZWNvcmRzUmVzcG9uc2USFAoMZmlyc3Rfb2Zmc2V0GAEgASgDEhMKC2xhc3Rf",
             "b2Zmc2V0GAIgASgDIoQBChJDbG9zZVN0cmVhbVJlcXVlc3QSEQoJbmFtZXNw",
             "YWNlGAEgASgJEioKBnN0cmVhbRgCIAEoCzIaLnN0cmVhbXNhbXBsZS52MS5T",
@@ -82,7 +83,7 @@ namespace StreamSample.V1 {
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.Producer), global::StreamSample.V1.Producer.Parser, new[]{ "Kind", "Id", "RunId" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CreateStreamRequest), global::StreamSample.V1.CreateStreamRequest.Parser, new[]{ "Namespace", "Ref", "Retention" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CreateStreamResponse), global::StreamSample.V1.CreateStreamResponse.Parser, new[]{ "Stream", "Created", "Status" }, null, null, null, null),
-            new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.AppendRecordsRequest), global::StreamSample.V1.AppendRecordsRequest.Parser, new[]{ "Namespace", "Stream", "Sequence", "Records" }, null, null, null, null),
+            new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.AppendRecordsRequest), global::StreamSample.V1.AppendRecordsRequest.Parser, new[]{ "Namespace", "Stream", "Sequence", "Records", "Producer" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.AppendRecordsResponse), global::StreamSample.V1.AppendRecordsResponse.Parser, new[]{ "FirstOffset", "LastOffset" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseStreamRequest), global::StreamSample.V1.CloseStreamRequest.Parser, new[]{ "Namespace", "Stream", "Result" }, null, null, null, null),
             new pbr::GeneratedClrTypeInfo(typeof(global::StreamSample.V1.CloseStreamResponse), global::StreamSample.V1.CloseStreamResponse.Parser, null, null, null, null, null),
@@ -1761,6 +1762,7 @@ namespace StreamSample.V1 {
       stream_ = other.stream_ != null ? other.stream_.Clone() : null;
       sequence_ = other.sequence_;
       records_ = other.records_.Clone();
+      producer_ = other.producer_ != null ? other.producer_.Clone() : null;
       _unknownFields = pb::UnknownFieldSet.Clone(other._unknownFields);
     }
 
@@ -1817,6 +1819,18 @@ namespace StreamSample.V1 {
       get { return records_; }
     }
 
+    /// <summary>Field number for the "producer" field.</summary>
+    public const int ProducerFieldNumber = 5;
+    private global::StreamSample.V1.Producer producer_;
+    [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
+    [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
+    public global::StreamSample.V1.Producer Producer {
+      get { return producer_; }
+      set {
+        producer_ = value;
+      }
+    }
+
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override bool Equals(object other) {
@@ -1836,6 +1850,7 @@ namespace StreamSample.V1 {
       if (!object.Equals(Stream, other.Stream)) return false;
       if (Sequence != other.Sequence) return false;
       if(!records_.Equals(other.records_)) return false;
+      if (!object.Equals(Producer, other.Producer)) return false;
       return Equals(_unknownFields, other._unknownFields);
     }
 
@@ -1847,6 +1862,7 @@ namespace StreamSample.V1 {
       if (stream_ != null) hash ^= Stream.GetHashCode();
       if (Sequence != 0L) hash ^= Sequence.GetHashCode();
       hash ^= records_.GetHashCode();
+      if (producer_ != null) hash ^= Producer.GetHashCode();
       if (_unknownFields != null) {
         hash ^= _unknownFields.GetHashCode();
       }
@@ -1878,6 +1894,10 @@ namespace StreamSample.V1 {
         output.WriteInt64(Sequence);
       }
       records_.WriteTo(output, _repeated_records_codec);
+      if (producer_ != null) {
+        output.WriteRawTag(42);
+        output.WriteMessage(Producer);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(output);
       }
@@ -1901,6 +1921,10 @@ namespace StreamSample.V1 {
         output.WriteInt64(Sequence);
       }
       records_.WriteTo(ref output, _repeated_records_codec);
+      if (producer_ != null) {
+        output.WriteRawTag(42);
+        output.WriteMessage(Producer);
+      }
       if (_unknownFields != null) {
         _unknownFields.WriteTo(ref output);
       }
@@ -1921,6 +1945,9 @@ namespace StreamSample.V1 {
         size += 1 + pb::CodedOutputStream.ComputeInt64Size(Sequence);
       }
       size += records_.CalculateSize(_repeated_records_codec);
+      if (producer_ != null) {
+        size += 1 + pb::CodedOutputStream.ComputeMessageSize(Producer);
+      }
       if (_unknownFields != null) {
         size += _unknownFields.CalculateSize();
       }
@@ -1946,6 +1973,12 @@ namespace StreamSample.V1 {
         Sequence = other.Sequence;
       }
       records_.Add(other.records_);
+      if (other.producer_ != null) {
+        if (producer_ == null) {
+          Producer = new global::StreamSample.V1.Producer();
+        }
+        Producer.MergeFrom(other.Producer);
+      }
       _unknownFields = pb::UnknownFieldSet.MergeFrom(_unknownFields, other._unknownFields);
     }
 
@@ -1984,6 +2017,13 @@ namespace StreamSample.V1 {
             records_.AddEntriesFrom(input, _repeated_records_codec);
             break;
           }
+          case 42: {
+            if (producer_ == null) {
+              Producer = new global::StreamSample.V1.Producer();
+            }
+            input.ReadMessage(Producer);
+            break;
+          }
         }
       }
     #endif
@@ -2020,6 +2060,13 @@ namespace StreamSample.V1 {
           }
           case 34: {
             records_.AddEntriesFrom(ref input, _repeated_records_codec);
+            break;
+          }
+          case 42: {
+            if (producer_ == null) {
+              Producer = new global::StreamSample.V1.Producer();
+            }
+            input.ReadMessage(Producer);
             break;
           }
         }

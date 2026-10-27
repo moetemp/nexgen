@@ -216,12 +216,15 @@ class AppendRecordsRequest(_message.Message):
     STREAM_FIELD_NUMBER: _builtins.int
     SEQUENCE_FIELD_NUMBER: _builtins.int
     RECORDS_FIELD_NUMBER: _builtins.int
+    PRODUCER_FIELD_NUMBER: _builtins.int
     namespace: _builtins.str
     sequence: _builtins.int
     @_builtins.property
     def stream(self) -> Global___StreamRef: ...
     @_builtins.property
     def records(self) -> _containers.RepeatedCompositeFieldContainer[Global___AppendRecord]: ...
+    @_builtins.property
+    def producer(self) -> Global___Producer: ...
     def __init__(
         self,
         *,
@@ -229,10 +232,11 @@ class AppendRecordsRequest(_message.Message):
         stream: Global___StreamRef | None = ...,
         sequence: _builtins.int = ...,
         records: _abc.Iterable[Global___AppendRecord] | None = ...,
+        producer: Global___Producer | None = ...,
     ) -> None: ...
-    _HasFieldArgType: _TypeAlias = _typing.Literal["stream", b"stream"]  # noqa: Y015
+    _HasFieldArgType: _TypeAlias = _typing.Literal["producer", b"producer", "stream", b"stream"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
-    _ClearFieldArgType: _TypeAlias = _typing.Literal["namespace", b"namespace", "records", b"records", "sequence", b"sequence", "stream", b"stream"]  # noqa: Y015
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["namespace", b"namespace", "producer", b"producer", "records", b"records", "sequence", b"sequence", "stream", b"stream"]  # noqa: Y015
     def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 

@@ -1428,12 +1428,16 @@ fn field_write_for_rendered_field(
             ),
         );
     }
+    // A sourced `option` field defaults to its source, which may still give `None`.
     let optional_guard = matches!(
         rendered_field.default_kind,
         PythonFieldDefaultKind::None
             | PythonFieldDefaultKind::EmptyDict
             | PythonFieldDefaultKind::EmptyList
-    );
+    ) || (matches!(
+        planned_field.visibility,
+        crate::spec::RecordFieldVisibility::Sourced { .. }
+    ) && !planned_field.required);
     let converter = planned_field
         .function
         .as_ref()

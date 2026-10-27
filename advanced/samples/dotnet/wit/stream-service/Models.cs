@@ -11,6 +11,15 @@ namespace Nexgen.StreamService
 {
 
     [GeneratedCode("nexgen", null)]
+    public enum ProducerKind
+    {
+        ProducerKindUnspecified = 0,
+        ProducerKindWorkflow = 1,
+        ProducerKindActivity = 2,
+        ProducerKindClient = 3,
+    }
+
+    [GeneratedCode("nexgen", null)]
     public enum StreamStatus
     {
         StreamStatusUnspecified = 0,
@@ -80,6 +89,7 @@ namespace Nexgen.StreamService
         public StreamRef? Stream { get; init; }
         public long? Sequence { get; init; }
         public IReadOnlyList<AppendRecord> Records { get; init; }
+        public Producer? Producer { get; init; }
 
         internal static AppendRecordsRequest FromTransferType(StreamSample.V1.AppendRecordsRequest wire)
         {
@@ -87,6 +97,7 @@ namespace Nexgen.StreamService
             {
                 Stream = wire.Stream == null ? null : StreamRef.FromTransferType(wire.Stream),
                 Sequence = wire.Sequence == 0 ? null : wire.Sequence,
+                Producer = wire.Producer == null ? null : Producer.FromTransferType(wire.Producer),
             };
         }
 
@@ -102,6 +113,10 @@ namespace Nexgen.StreamService
                 proto.Sequence = sequence;
             }
             proto.Records.Add(System.Linq.Enumerable.Select(Records, item => (StreamSample.V1.AppendRecord)item.ToTransferType()));
+            if (Producer is { } producer)
+            {
+                proto.Producer = (StreamSample.V1.Producer)producer.ToTransferType();
+            }
             return proto;
         }
 
@@ -432,6 +447,66 @@ namespace Nexgen.StreamService
 
             /// <summary>Converts a transfer-type value to this model.</summary>
             public object? FromTransferType(object? transferType) => transferType is null ? null : DescribeStreamResponse.FromTransferType((StreamSample.V1.DescribeStreamResponse)transferType);
+        }
+
+    }
+
+    /// <summary>
+    /// Who writes to a stream. The stream writer takes it.
+    /// </summary>
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(Producer.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record Producer
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Producer"/> class.
+        /// </summary>
+        public Producer(string id)
+        {
+            Id = id;
+        }
+
+        public ProducerKind? Kind { get; init; }
+        public string Id { get; init; }
+        public string? RunId { get; init; }
+
+        internal static Producer FromTransferType(StreamSample.V1.Producer wire)
+        {
+            return new Producer(wire.Id)
+            {
+                Kind = (int)wire.Kind == 0 ? null : (ProducerKind)wire.Kind,
+                RunId = string.IsNullOrEmpty(wire.RunId) ? null : wire.RunId,
+            };
+        }
+
+        internal StreamSample.V1.Producer ToTransferType()
+        {
+            var proto = new StreamSample.V1.Producer();
+            if (Kind is { } kind)
+            {
+                proto.Kind = (StreamSample.V1.ProducerKind)kind;
+            }
+            proto.Id = Id;
+            if (RunId is { } runId)
+            {
+                proto.RunId = runId;
+            }
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(StreamSample.V1.Producer);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((Producer)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : Producer.FromTransferType((StreamSample.V1.Producer)transferType);
         }
 
     }

@@ -20,6 +20,13 @@ class StreamStatus(enum.IntEnum):
     StreamStatusExpired = 3
 
 
+class ProducerKind(enum.IntEnum):
+    ProducerKindUnspecified = 0
+    ProducerKindWorkflow = 1
+    ProducerKindActivity = 2
+    ProducerKindClient = 3
+
+
 @dataclasses.dataclass(slots=True)
 class CreateStreamRequest:
     ref: StreamRef | None = None
@@ -181,6 +188,9 @@ class AppendRecordsRequest:
     stream: StreamRef | None = None
     sequence: int | None = None
     records: list[AppendRecord] | None = dataclasses.field(default_factory=list)
+    producer: Producer | None = dataclasses.field(
+        default_factory=_support.workflow_producer
+    )
 
 
 class _AppendRecordsRequestTransferTypeConverter(
@@ -211,6 +221,11 @@ class _AppendRecordsRequestTransferTypeConverter(
                 )
                 for item in value.records
             ],
+            producer=_ProducerTransferTypeConverter().from_transfer_type(
+                value.producer, Producer
+            )
+            if value.HasField("producer")
+            else _support.workflow_producer(),
         )
 
     @typing_extensions.override
@@ -231,6 +246,10 @@ class _AppendRecordsRequestTransferTypeConverter(
                 item.CopyFrom(
                     _AppendRecordTransferTypeConverter().to_transfer_type(element)
                 )
+        if value.producer is not None:
+            message.producer.CopyFrom(
+                _ProducerTransferTypeConverter().to_transfer_type(value.producer)
+            )
         return message
 
 
@@ -285,6 +304,58 @@ class _AppendRecordTransferTypeConverter(
 temporalio.converter.transfer_type_convertible(_AppendRecordTransferTypeConverter)(
     AppendRecord
 )  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True, kw_only=True)
+class Producer:
+    """Who writes to a stream. The stream writer takes it."""
+
+    kind: ProducerKind | None = None
+    id: str
+    run_id: str | None = None
+
+
+class _ProducerTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        Producer, streamsample.v1.stream_service_pb2.Producer
+    ]
+):
+    transfer_type: type[streamsample.v1.stream_service_pb2.Producer] | None = (
+        streamsample.v1.stream_service_pb2.Producer
+    )
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: streamsample.v1.stream_service_pb2.Producer,
+        type_hint: type[Producer],
+    ) -> Producer:
+        if not value.id:
+            raise ValueError("missing required field Producer.id")
+        id = value.id
+        return Producer(
+            kind=ProducerKind(value.kind) if value.kind != 0 else None,
+            id=id,
+            run_id=value.run_id if bool(value.run_id) else None,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: Producer,
+    ) -> streamsample.v1.stream_service_pb2.Producer:
+        message = streamsample.v1.stream_service_pb2.Producer()
+        if value.kind is not None:
+            message.kind = streamsample.v1.stream_service_pb2.ProducerKind.ValueType(
+                value.kind
+            )
+        message.id = value.id
+        if value.run_id is not None:
+            message.run_id = value.run_id
+        return message
+
+
+temporalio.converter.transfer_type_convertible(_ProducerTransferTypeConverter)(Producer)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)

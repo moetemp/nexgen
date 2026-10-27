@@ -1,0 +1,5 @@
+languages = ["python"]
+
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.source", "duplicate source for target `client`"]

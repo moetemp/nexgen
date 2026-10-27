@@ -1,0 +1,15 @@
+package temporal:source-mixed-targets@1.0.0;
+
+world service { export writer-service; }
+
+/// @nexus.endpoint "writers"
+interface writer-service {
+  record write-request {
+    /// @nexus.source python="any_writer()"
+    /// @nexus.source target="client" python="client_writer()"
+    writer: option<string>,
+  }
+  record write-response {}
+
+  write: func(request: write-request) -> write-response;
+}

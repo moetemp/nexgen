@@ -36,6 +36,7 @@ namespace Nexgen.StreamService
         public StreamRef? Stream { get; set; }
         public long? Sequence { get; set; }
         public IReadOnlyList<AppendRecord> Records { get; set; }
+        public Producer? Producer { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -114,6 +115,7 @@ namespace Nexgen.StreamService
             {
                 Stream = options.Stream,
                 Sequence = options.Sequence,
+                Producer = options.Producer,
             };
             return AppendRecordsAsync(request);
         }

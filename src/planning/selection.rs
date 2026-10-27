@@ -302,6 +302,7 @@ mod tests {
                             field_type: TypeSpec::String,
                             default_value: None,
                             required: true,
+                            client_source: None,
                             visibility: RecordFieldVisibility::Public,
                             function: Some(FunctionFieldSpec {
                                 primary: false,

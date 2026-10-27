@@ -68,6 +68,10 @@ interface stream-service {
     %stream: option<stream-ref>,
     sequence: option<s64>,
     records: list<append-record>,
+    // Each target fills the writer from where the call runs.
+    /// @nexus.source target="workflow" python="workflow_producer()"
+    /// @nexus.source target="client" python="client_producer()"
+    producer: option<producer>,
     /// @nexus.omit
     namespace: placeholder,
   }

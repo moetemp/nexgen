@@ -13,6 +13,8 @@ from wit.stream_service.models import (
     AppendRecordsResponse,
     CreateStreamRequest,
     CreateStreamResult,
+    Producer,
+    ProducerKind,
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamRecord,
@@ -100,8 +102,11 @@ async def test_a_created_stream_calls_its_operations_through_the_client() -> Non
             "streamsample.v1.StreamService",
             "streams",
             "AppendRecords",
+            # The client source fills the producer, since no Workflow runs.
             AppendRecordsRequest(
-                stream=ref, records=[AppendRecord(topic="t", body="hi")]
+                stream=ref,
+                records=[AppendRecord(topic="t", body="hi")],
+                producer=Producer(kind=ProducerKind.ProducerKindClient, id="client"),
             ),
         ),
     ]

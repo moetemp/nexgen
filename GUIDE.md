@@ -1467,8 +1467,9 @@ stream = await StreamClient().create_stream(ref=ref)
 await stream.append_records(records=records)
 ```
 
-The client target refuses a `@nexus.source` field, which has no value outside a
-Workflow yet.
+A `@nexus.source` field needs a source that applies in the client target, one
+with `target="client"` or with no target. The client target refuses a field
+whose only source is for the workflow target.
 
 ---
 
@@ -1739,6 +1740,25 @@ factory. Go calls `support.WorkflowNamespace(ctx)`. Both helpers come from the
 configured support package.
 
 Cannot be combined with `@nexus.default`.
+
+A source can name the target it applies in, with `target="workflow"` or
+`target="client"`. A field can have one source for each target. A source with no
+target applies in every target, so it can't be combined with a targeted one. In
+a target with no source, the field is an argument as usual.
+
+```wit
+/// @nexus.source target="workflow" python="workflow_producer()"
+/// @nexus.source target="client" python="client_producer()"
+producer: option<producer>,
+```
+
+The workflow source is the model's default, as before. The client target passes
+the client source in each request that it builds, since the models are shared.
+The client target runs in Activities and in client code alike, so one client
+helper serves both. It can check `temporalio.activity.in_activity()` at run
+time. A field with only a client source must be an `option`, since the workflow
+target can leave it unset. The client target refuses a field whose only source
+has `target="workflow"`.
 
 ---
 

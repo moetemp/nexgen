@@ -58,6 +58,7 @@ export namespace streamsample {
       stream?: IStreamRef | null;
       sequence?: Long | null;
       records?: IAppendRecord[] | null;
+      producer?: IProducer | null;
     }
 
     interface IAppendRecordsResponse {

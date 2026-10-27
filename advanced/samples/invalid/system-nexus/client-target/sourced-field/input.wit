@@ -1,5 +1,5 @@
-// The client target should take the field as a parameter. Remove this fixture when
-// temporalio/nexgen#301 is done.
+// The field's only source is for the workflow target, so the client target can't fill it.
+// temporalio/nexgen#301 tracks taking such a field as a parameter instead.
 package temporal:client-sourced-field@1.0.0;
 
 world system { export namespace-service; }
@@ -8,7 +8,7 @@ world system { export namespace-service; }
 interface namespace-service {
   /// @nexus.proto "temporal.api.workflowservice.v1.DescribeNamespaceRequest"
   record describe-request {
-    /// @nexus.source python="workflow_namespace()"
+    /// @nexus.source target="workflow" python="workflow_namespace()"
     namespace: string,
     id: string,
     weak-consistency: option<bool>,

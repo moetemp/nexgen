@@ -837,6 +837,9 @@ pub struct RecordFieldSpec<F: TypeFamily = AuthoredFamily> {
     pub field_type: TypeSpec<F>,
     pub default_value: Option<FieldDefaultSpec>,
     pub required: bool,
+    /// The support helper that fills the field in the client target. The workflow target's
+    /// source is in `visibility`.
+    pub client_source: Option<String>,
     pub visibility: RecordFieldVisibility,
     pub function: Option<FunctionFieldSpec<F>>,
     pub data: F::FieldData,
@@ -1100,6 +1103,7 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             field_type: self.field_type.map_names_with(map),
             default_value: self.default_value,
             required: self.required,
+            client_source: self.client_source,
             visibility: self.visibility,
             function: self.function.map(|function| function.map_names_with(map)),
             data,
@@ -1112,6 +1116,7 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             && self.annotation.is_none()
             && self.flattened_annotation.is_none()
             && self.default_value.is_none()
+            && self.client_source.is_none()
             && !self.required
             && self.visibility == RecordFieldVisibility::Public
             && self.function.is_none()

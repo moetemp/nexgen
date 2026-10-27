@@ -23,6 +23,13 @@ export enum StreamStatus {
   StreamStatusExpired = 3,
 }
 
+export enum ProducerKind {
+  ProducerKindUnspecified = 0,
+  ProducerKindWorkflow = 1,
+  ProducerKindActivity = 2,
+  ProducerKindClient = 3,
+}
+
 export interface CreateStreamResult {
   stream?: StreamRef;
   created?: boolean;
@@ -161,6 +168,7 @@ export interface AppendRecordsRequest {
   stream?: StreamRef;
   sequence?: Long;
   records?: AppendRecord[];
+  producer?: Producer;
 }
 
 function appendRecordsRequestFromProto(
@@ -170,6 +178,7 @@ function appendRecordsRequestFromProto(
     stream: proto.stream == null ? undefined : streamRefFromProto(proto.stream),
     sequence: proto.sequence ?? undefined,
     records: proto.records?.map((value: any) => appendRecordFromProto(value)),
+    producer: proto.producer == null ? undefined : producerFromProto(proto.producer),
   };
 }
 
@@ -180,6 +189,7 @@ function appendRecordsRequestToProto(
     stream: model.stream == null ? undefined : streamRefToProto(model.stream),
     sequence: model.sequence,
     records: model.records?.map((value) => appendRecordToProto(value)),
+    producer: model.producer == null ? undefined : producerToProto(model.producer),
   };
 }
 
@@ -226,6 +236,40 @@ export const appendRecordTransferTypeConverter = {
 
   toTransferType(value: AppendRecord): streamsample.v1.IAppendRecord {
     return appendRecordToProto(value);
+  },
+};
+export interface Producer {
+  kind?: ProducerKind;
+  id: string;
+  runId?: string;
+}
+
+function producerFromProto(proto: streamsample.v1.IProducer): Producer {
+  return {
+    kind: proto.kind == null ? undefined : (proto.kind as number as ProducerKind),
+    id: requiredField(proto.id === "" ? undefined : proto.id, "Producer", "id"),
+    runId: proto.runId ?? undefined,
+  };
+}
+
+function producerToProto(model: Producer): streamsample.v1.IProducer {
+  return {
+    kind:
+      model.kind == null
+        ? undefined
+        : (model.kind as number as streamsample.v1.ProducerKind),
+    id: requiredField(model.id, "Producer", "id"),
+    runId: model.runId,
+  };
+}
+
+export const producerTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.IProducer): Producer {
+    return producerFromProto(value);
+  },
+
+  toTransferType(value: Producer): streamsample.v1.IProducer {
+    return producerToProto(value);
   },
 };
 export type CloseStreamResponse = Record<string, never>;

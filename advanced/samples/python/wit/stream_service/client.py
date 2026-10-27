@@ -128,6 +128,7 @@ class StreamServiceClientExtension(abc.ABC):
             stream=stream,
             sequence=sequence,
             records=records or [],
+            producer=_support.client_producer(),
         )
         return await self._append_records(request)
 
@@ -261,6 +262,7 @@ class Stream:
             stream=self.stream,
             sequence=sequence,
             records=records or [],
+            producer=_support.client_producer(),
         )
         handle = await self._client._append_records(request)
         return await handle

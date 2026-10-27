@@ -939,11 +939,11 @@ impl<'a> ApiPlanner<'a> {
         model_names: &[String],
     ) -> Result<String> {
         let _target = PythonTargetScope::enter(PythonTarget::Client);
-        if let Some(field) = self.first_sourced_field() {
+        if let Some(field) = self.first_workflow_only_sourced_field() {
             return Err(Error::UnsupportedClientTarget {
                 reason: format!(
-                    "can't fill `{field}` outside a Workflow, since its value comes from \
-                     `@nexus.source`"
+                    "can't fill `{field}` outside a Workflow, since its `@nexus.source` has \
+                     `target=\"workflow\"` and no client source"
                 ),
             });
         }
@@ -990,13 +990,16 @@ impl<'a> ApiPlanner<'a> {
         Ok(output)
     }
 
-    fn first_sourced_field(&self) -> Option<String> {
+    /// The first field whose source fills it only in the workflow target, which the client
+    /// target can't fill.
+    fn first_workflow_only_sourced_field(&self) -> Option<String> {
         self.models.values().find_map(|model| {
             planned_record(self.api_plan, &model.full_name)
                 .fields
                 .iter()
                 .find(|(_, field)| {
                     matches!(field.visibility, RecordFieldVisibility::Sourced { .. })
+                        && field.client_source.is_none()
                 })
                 .map(|(name, _)| format!("{}.{name}", model.name))
         })
@@ -1462,6 +1465,18 @@ impl<'a> ApiPlanner<'a> {
         } else {
             None
         };
+        let client_sourced_fields = match input {
+            Some(PlannedType::Record(record)) => {
+                client_sourced_request_fields(self.api_plan, &self.models, &record.full_name)
+            }
+            _ => Vec::new(),
+        };
+        let client_unpacked_input = match (input, &unpacked_input) {
+            (Some(PlannedType::Record(record)), Some(_)) if !client_sourced_fields.is_empty() => {
+                Some(self.build_target_unpacked_input(&record.full_name, true)?)
+            }
+            _ => None,
+        };
         let output_type_parameters = unpacked_input
             .iter()
             .flat_map(|unpacked_input| &unpacked_input.functions)
@@ -1515,6 +1530,8 @@ impl<'a> ApiPlanner<'a> {
             output_direct_result,
             output_none: operation.output_type().is_none(),
             unpacked_input,
+            client_unpacked_input,
+            client_sourced_fields,
             model_input_type_parameters: model_input_parameters
                 .into_iter()
                 .map(|usage| usage.parameter.name)
@@ -1562,6 +1579,14 @@ impl<'a> ApiPlanner<'a> {
     }
 
     fn build_unpacked_input(&self, input_full_name: &str) -> Result<RenderedUnpackedInput> {
+        self.build_target_unpacked_input(input_full_name, false)
+    }
+
+    fn build_target_unpacked_input(
+        &self,
+        input_full_name: &str,
+        client: bool,
+    ) -> Result<RenderedUnpackedInput> {
         let model = self
             .models
             .get(input_full_name)
@@ -1579,6 +1604,14 @@ impl<'a> ApiPlanner<'a> {
             .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
             .zip(model.fields.iter())
         {
+            if client && let Some(source_expr) = &planned_field.client_source {
+                request_fields.push(RenderedUnpackedRequestField {
+                    attr_name: rendered_field.attr_name.clone(),
+                    value_expr: python_source_call(source_expr),
+                    default_kind: PythonFieldDefaultKind::Required,
+                });
+                continue;
+            }
             if planned_field.visibility != RecordFieldVisibility::Public {
                 continue;
             }
@@ -2756,6 +2789,11 @@ struct RenderedOperation<'a> {
     output_direct_result: bool,
     output_none: bool,
     unpacked_input: Option<RenderedUnpackedInput>,
+    /// The unpacked input of the client target, when a request field has a client source.
+    client_unpacked_input: Option<RenderedUnpackedInput>,
+    /// The request fields that the client target fills from their client source, as
+    /// `(attribute, call)`.
+    client_sourced_fields: Vec<(String, String)>,
     model_input_type_parameters: Vec<String>,
     generic_model_types: bool,
 }
@@ -5743,6 +5781,21 @@ fn render_resource_method_request(
                 output.push_str(&render_request_plan_python(method, &field.value));
                 output.push_str(",\n");
             }
+            if client_target() {
+                for (attr_name, source_call) in &operation.client_sourced_fields {
+                    if fields
+                        .iter()
+                        .any(|field| python_field_name(&field.field_name) == *attr_name)
+                    {
+                        continue;
+                    }
+                    output.push_str("            ");
+                    output.push_str(attr_name);
+                    output.push('=');
+                    output.push_str(source_call);
+                    output.push_str(",\n");
+                }
+            }
         }
         RequestPlan::Source(_) => {
             output.push_str("            value=");
@@ -6904,7 +6957,7 @@ fn render_operation_functions(
     if !has_endpoint(service) {
         return;
     }
-    if let Some(unpacked_input) = &operation.unpacked_input {
+    if let Some(unpacked_input) = target_unpacked_input(operation) {
         output.push('\n');
         if function_unpacked_needs_overloads(&unpacked_input.functions) {
             render_function_unpacked_overloads(output, service, operation, unpacked_input);
@@ -7924,6 +7977,40 @@ enum PythonTarget {
 thread_local! {
     static PYTHON_TARGET: std::cell::Cell<PythonTarget> =
         const { std::cell::Cell::new(PythonTarget::Workflow) };
+}
+
+/// The unpacked input that the current target renders.
+fn target_unpacked_input<'a>(
+    operation: &'a RenderedOperation<'_>,
+) -> Option<&'a RenderedUnpackedInput> {
+    if client_target() && operation.client_unpacked_input.is_some() {
+        operation.client_unpacked_input.as_ref()
+    } else {
+        operation.unpacked_input.as_ref()
+    }
+}
+
+/// The request fields that have a client source, as `(attribute, call)`.
+fn client_sourced_request_fields(
+    api_plan: &PlannedSpec,
+    models: &IndexMap<String, RenderedModel>,
+    record_full_name: &str,
+) -> Vec<(String, String)> {
+    let Some(model) = models.get(record_full_name) else {
+        return Vec::new();
+    };
+    planned_record(api_plan, record_full_name)
+        .fields
+        .iter()
+        .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+        .zip(model.fields.iter())
+        .filter_map(|((_, field), rendered)| {
+            field
+                .client_source
+                .as_ref()
+                .map(|source_expr| (rendered.attr_name.clone(), python_source_call(source_expr)))
+        })
+        .collect()
 }
 
 fn client_target() -> bool {

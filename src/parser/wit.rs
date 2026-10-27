@@ -1230,6 +1230,7 @@ fn build_fields_from_record(
                     field_type,
                     default_value: None,
                     required: false,
+                    client_source: None,
                     visibility: RecordFieldVisibility::Omitted,
                     function: None,
                     data: (),
@@ -1248,7 +1249,17 @@ fn build_fields_from_record(
         let field_default =
             build_field_default(resolve, &field.ty, default_directive, path, &field_context)?;
         let required = !is_optional_type(resolve, &field.ty) && field_default.is_none();
-        let source = build_source_call(&directives, path, &field_context, language)?;
+        let sources = build_source_calls(&directives, path, &field_context, language)?;
+        if sources.client.is_some() && sources.workflow.is_none() && required {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context: field_context,
+                directive: "@nexus.source".to_string(),
+                reason: "a field with only a client source must be an `option`, since the \
+                         workflow target can leave it unset"
+                    .to_string(),
+            });
+        }
         if let Some(api_omit_directive) = api_omit_directive {
             if !api_omit_directive.args.is_empty() {
                 return Err(Error::InvalidWitDirective {
@@ -1258,7 +1269,7 @@ fn build_fields_from_record(
                     reason: "field-level api-omit does not take arguments".to_string(),
                 });
             }
-            if source.is_some() {
+            if sources.is_some() {
                 return Err(Error::InvalidWitDirective {
                     path: path.to_path_buf(),
                     context: field_context,
@@ -1274,7 +1285,7 @@ fn build_fields_from_record(
         let function =
             build_function_field(resolve, owner, &directives, path, &field_context, language)?;
 
-        if source.is_some() && function.is_some() {
+        if sources.is_some() && function.is_some() {
             return Err(Error::ConflictingTypeOverrideFieldProperties {
                 message: context.to_string(),
                 field: proto_field_name,
@@ -1293,7 +1304,9 @@ fn build_fields_from_record(
                 field_type,
                 default_value: field_default,
                 required,
-                visibility: source
+                client_source: sources.client,
+                visibility: sources
+                    .workflow
                     .map(|source_expr| RecordFieldVisibility::Sourced { source_expr })
                     .unwrap_or_else(|| {
                         if api_omit_directive.is_some() {
@@ -1333,6 +1346,7 @@ fn build_fields_from_record(
                         ),
                         default_value: None,
                         required: arg_field.required,
+                        client_source: None,
                         visibility: RecordFieldVisibility::Public,
                         function: None,
                         data: (),
@@ -1836,16 +1850,89 @@ fn default_on_non_enum_error(path: &Path, context: &str) -> Error {
     }
 }
 
-fn build_source_call(
+/// The sources of one field. `workflow` applies in the workflow target, `client` in the client
+/// target. A source with no target fills both.
+#[derive(Default)]
+struct FieldSources {
+    workflow: Option<String>,
+    client: Option<String>,
+}
+
+impl FieldSources {
+    fn is_some(&self) -> bool {
+        self.workflow.is_some() || self.client.is_some()
+    }
+}
+
+fn build_source_calls(
     directives: &[Directive],
     path: &Path,
     context: &str,
     language: Language,
-) -> Result<Option<String>> {
-    let Some(directive) = directive(directives, "source", path, context)? else {
-        return Ok(None);
+) -> Result<FieldSources> {
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.source".to_string(),
+        reason,
     };
+    let mut sources = FieldSources::default();
+    let mut untargeted = false;
+    let mut targeted = false;
+    for directive in directives
+        .iter()
+        .filter(|directive| directive.name == "source")
+    {
+        let target = directive.value("target");
+        let (fills_workflow, fills_client) = match target {
+            None => (true, true),
+            Some("workflow") => (true, false),
+            Some("client") => (false, true),
+            Some(other) => {
+                return Err(invalid(format!(
+                    "`target=\"{other}\"` isn't a target; use `workflow` or `client`"
+                )));
+            }
+        };
+        if target.is_some() {
+            targeted = true;
+        } else {
+            untargeted = true;
+        }
+        if untargeted && targeted {
+            return Err(invalid(
+                "a source with no target fills every target, so it can't be combined with a \
+                 targeted one"
+                    .to_string(),
+            ));
+        }
+        let Some(source_expr) = build_source_call(directive, path, context, language)? else {
+            continue;
+        };
+        let duplicate = (fills_workflow && sources.workflow.is_some())
+            || (fills_client && sources.client.is_some());
+        if duplicate {
+            return Err(invalid(format!(
+                "duplicate source for target `{}`",
+                target.unwrap_or("any")
+            )));
+        }
+        if fills_workflow {
+            sources.workflow = Some(source_expr.clone());
+        }
+        if fills_client {
+            sources.client = Some(source_expr);
+        }
+    }
+    Ok(sources)
+}
 
+fn build_source_call(
+    directive: &Directive,
+    path: &Path,
+    context: &str,
+    language: Language,
+) -> Result<Option<String>> {
     for key in [
         "go-support-import",
         "python-support-import",

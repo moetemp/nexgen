@@ -61,6 +61,7 @@ message AppendRecordsRequest {
     StreamRef stream = 2;
     int64 sequence = 3;
     repeated AppendRecord records = 4;
+    Producer producer = 5;
 }
 
 message AppendRecordsResponse {

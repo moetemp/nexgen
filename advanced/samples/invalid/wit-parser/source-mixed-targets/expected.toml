@@ -1,0 +1,5 @@
+languages = ["python"]
+
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.source", "a source with no target fills every target"]

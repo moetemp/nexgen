@@ -243,6 +243,7 @@ fn resource_result_fields(
                     field_type: TypeSpec::String,
                     default_value: None,
                     required: false,
+                    client_source: None,
                     visibility: RecordFieldVisibility::Public,
                     function: None,
                     data: (),

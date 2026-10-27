@@ -48,7 +48,7 @@ namespace Nexgen.UserService
         [GeneratedCode("nexgen", null)]
         public async Task NotifyAsync(string? reason, IReadOnlyList<string> channels, string sender)
         {
-            var request = new NotifyRequest(UserId, channels, sender) { Reason = reason, Email = Email };
+            var request = new NotifyRequest(UserId, channels, sender) { Reason = reason };
             await RequireNexgenClient().ExecuteNexusOperationAsync(svc => svc.Notify(request)).ConfigureAwait(true);
         }
 

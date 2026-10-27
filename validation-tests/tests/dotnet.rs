@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod support;
 use support::common;
 
-use common::wit_input_path;
+use common::example_input_paths;
 
 const WORKFLOW_SERVICE_EXAMPLE_ID: &str = "workflow-service";
 
@@ -31,10 +31,6 @@ fn stream_descriptor_path(root: &Path) -> PathBuf {
     root.join("advanced/samples/descriptors/stream_service.bin")
 }
 
-fn linked_inputs_path(root: &Path) -> PathBuf {
-    root.join("advanced/samples/inputs/deps")
-}
-
 fn dotnet_root(root: &Path) -> PathBuf {
     root.join("advanced/samples/dotnet")
 }
@@ -47,18 +43,6 @@ fn dotnet_command() -> (MutexGuard<'static, ()>, Command) {
         .env("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", "1")
         .env("DOTNET_NOLOGO", "1");
     (guard, command)
-}
-
-fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
-    let input = wit_input_path(root, example_id);
-    let mut paths = vec![input.clone()];
-    if fs::read_to_string(&input)
-        .unwrap()
-        .contains("use nexus:temporal-types/")
-    {
-        paths.push(linked_inputs_path(root));
-    }
-    paths
 }
 
 fn generate_dotnet_output(root: &Path, example_id: &str, output_path: &Path) {

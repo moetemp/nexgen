@@ -1,0 +1,24 @@
+package temporal:stream-writer@1.0.0;
+
+world writer {
+  export stream-writer;
+}
+
+// A package apart from the stream service, as in Brook. The writer has no endpoint, since the
+// client serves it in process.
+/// @nexus.service-name "streamsample.v1.StreamWriter"
+interface stream-writer {
+  /// @nexus.proto "streamsample.v1.CloseWriterRequest" typescript-import="#streamsample"
+  record close-writer-request {
+    writer-id: option<u64>,
+  }
+
+  /// @nexus.proto "streamsample.v1.CloseWriterResponse" typescript-import="#streamsample"
+  record close-writer-response {
+    /// @nexus.doc "The offset of the newest record the writer wrote. Zero if it wrote none."
+    last-offset: option<s64>,
+  }
+
+  /// @nexus.operation name="CloseWriter"
+  close-writer: func(request: close-writer-request) -> close-writer-response;
+}

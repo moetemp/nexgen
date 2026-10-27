@@ -149,6 +149,16 @@ records are proto-backed, as a stream service's are, on the sample proto in
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
   [`typescript/tests/stream-service.test.ts`](typescript/tests/stream-service.test.ts)
 
+### `stream-writer`
+
+The stream writer, which the client serves in process. It's a package apart from
+the stream service, as in Brook, with no endpoint, on the same sample proto.
+
+- WIT: [`inputs/stream-writer.wit`](inputs/stream-writer.wit)
+- .NET: [`dotnet/wit/stream-writer/`](dotnet/wit/stream-writer/)
+- Python: [`python/wit/stream_writer/`](python/wit/stream_writer/)
+- TypeScript: [`typescript/wit/stream-writer/`](typescript/wit/stream-writer/)
+
 ### `brook-stream-service` and `brook-stream-writer`
 
 Brook's Stream service and writer WIT, byte for byte. They are the nexgen inputs

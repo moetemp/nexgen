@@ -31,6 +31,11 @@ languages = ["python", "typescript", "dotnet"]
 # The sample proto imports the Temporal API messages, so it needs both sets.
 descriptors = ["temporal_api.bin", "stream_service.bin"]
 
+# The stream writer, a package apart from the stream service, as in Brook.
+[stream-writer]
+languages = ["python", "typescript", "dotnet"]
+descriptors = ["temporal_api.bin", "stream_service.bin"]
+
 # Brook's Stream service WIT, byte for byte. Only .NET generates it today, since the other SDKs'
 # proto packages lack the Stream protos in descriptors/brook/.
 [brook-stream-service]

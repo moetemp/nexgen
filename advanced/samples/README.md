@@ -152,7 +152,8 @@ records are proto-backed, as a stream service's are, on the sample proto in
 ### `stream-writer`
 
 The stream writer, which the client serves in process. It's a package apart from
-the stream service, as in Brook, with no endpoint, on the same sample proto.
+the stream service, as in Brook, with no endpoint, on the same sample proto. It
+uses records of the stream service, so its build links `stream-service.wit`.
 
 - WIT: [`inputs/stream-writer.wit`](inputs/stream-writer.wit)
 - .NET: [`dotnet/wit/stream-writer/`](dotnet/wit/stream-writer/)

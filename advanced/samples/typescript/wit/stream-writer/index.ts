@@ -6,4 +6,6 @@ export type {
   CloseWriterResponse,
   CloseWritersRequest,
   CloseWritersResponse,
+  OpenWriterRequest,
+  OpenWriterResponse,
 } from "./models";

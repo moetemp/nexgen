@@ -3,6 +3,141 @@
 import type { streamsample } from "#streamsample";
 import type Long from "long";
 
+function requiredField<T>(
+  value: T | null | undefined,
+  owner: string,
+  field: string,
+): T {
+  if (value == null) {
+    throw new Error(`missing required field ${owner}.${field}`);
+  }
+  return value;
+}
+
+export enum ProducerKind {
+  ProducerKindUnspecified = 0,
+  ProducerKindWorkflow = 1,
+  ProducerKindActivity = 2,
+  ProducerKindClient = 3,
+}
+
+export type OpenWriterResponse = Record<string, never>;
+
+function openWriterResponseFromProto(
+  proto: streamsample.v1.IOpenWriterResponse,
+): OpenWriterResponse {
+  return {};
+}
+
+function openWriterResponseToProto(
+  model: OpenWriterResponse,
+): streamsample.v1.IOpenWriterResponse {
+  return {};
+}
+
+export const openWriterResponseTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.IOpenWriterResponse): OpenWriterResponse {
+    return openWriterResponseFromProto(value);
+  },
+
+  toTransferType(value: OpenWriterResponse): streamsample.v1.IOpenWriterResponse {
+    return openWriterResponseToProto(value);
+  },
+};
+export interface OpenWriterRequest {
+  stream?: StreamRef;
+  producer?: Producer;
+}
+
+function openWriterRequestFromProto(
+  proto: streamsample.v1.IOpenWriterRequest,
+): OpenWriterRequest {
+  return {
+    stream: proto.stream == null ? undefined : streamRefFromProto(proto.stream),
+    producer: proto.producer == null ? undefined : producerFromProto(proto.producer),
+  };
+}
+
+function openWriterRequestToProto(
+  model: OpenWriterRequest,
+): streamsample.v1.IOpenWriterRequest {
+  return {
+    stream: model.stream == null ? undefined : streamRefToProto(model.stream),
+    producer: model.producer == null ? undefined : producerToProto(model.producer),
+  };
+}
+
+export const openWriterRequestTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.IOpenWriterRequest): OpenWriterRequest {
+    return openWriterRequestFromProto(value);
+  },
+
+  toTransferType(value: OpenWriterRequest): streamsample.v1.IOpenWriterRequest {
+    return openWriterRequestToProto(value);
+  },
+};
+export interface StreamRef {
+  id: string;
+  workflowId?: string;
+}
+
+function streamRefFromProto(proto: streamsample.v1.IStreamRef): StreamRef {
+  return {
+    id: requiredField(proto.id === "" ? undefined : proto.id, "StreamRef", "id"),
+    workflowId: proto.workflowId ?? undefined,
+  };
+}
+
+function streamRefToProto(model: StreamRef): streamsample.v1.IStreamRef {
+  return {
+    id: requiredField(model.id, "StreamRef", "id"),
+    workflowId: model.workflowId,
+  };
+}
+
+export const streamRefTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.IStreamRef): StreamRef {
+    return streamRefFromProto(value);
+  },
+
+  toTransferType(value: StreamRef): streamsample.v1.IStreamRef {
+    return streamRefToProto(value);
+  },
+};
+export interface Producer {
+  kind?: ProducerKind;
+  id: string;
+  runId?: string;
+}
+
+function producerFromProto(proto: streamsample.v1.IProducer): Producer {
+  return {
+    kind: proto.kind == null ? undefined : (proto.kind as number as ProducerKind),
+    id: requiredField(proto.id === "" ? undefined : proto.id, "Producer", "id"),
+    runId: proto.runId ?? undefined,
+  };
+}
+
+function producerToProto(model: Producer): streamsample.v1.IProducer {
+  return {
+    kind:
+      model.kind == null
+        ? undefined
+        : (model.kind as number as streamsample.v1.ProducerKind),
+    id: requiredField(model.id, "Producer", "id"),
+    runId: model.runId,
+  };
+}
+
+export const producerTransferTypeConverter = {
+  fromTransferType(value: streamsample.v1.IProducer): Producer {
+    return producerFromProto(value);
+  },
+
+  toTransferType(value: Producer): streamsample.v1.IProducer {
+    return producerToProto(value);
+  },
+};
 export interface CloseWritersResponse {
   failed?: number;
 }

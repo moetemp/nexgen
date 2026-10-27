@@ -26,7 +26,7 @@ from google.protobuf import duration_pb2 as google_dot_protobuf_dot_duration__pb
 from temporalio.api.common.v1 import message_pb2 as temporal_dot_api_dot_common_dot_v1_dot_message__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$streamsample/v1/stream_service.proto\x12\x0fstreamsample.v1\x1a\x1egoogle/protobuf/duration.proto\x1a$temporal/api/common/v1/message.proto\",\n\tStreamRef\x12\n\n\x02id\x18\x01 \x01(\t\x12\x13\n\x0bworkflow_id\x18\x02 \x01(\t\"L\n\x0c\x41ppendRecord\x12\r\n\x05topic\x18\x01 \x01(\t\x12-\n\x04\x62ody\x18\x02 \x01(\x0b\x32\x1f.temporal.api.common.v1.Payload\"\\\n\x0cStreamRecord\x12\x0e\n\x06offset\x18\x01 \x01(\x03\x12\r\n\x05topic\x18\x02 \x01(\t\x12-\n\x04\x62ody\x18\x03 \x01(\x0b\x32\x1f.temporal.api.common.v1.Payload\"\x7f\n\x13\x43reateStreamRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12\'\n\x03ref\x18\x02 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\x12,\n\tretention\x18\x03 \x01(\x0b\x32\x19.google.protobuf.Duration\"\x82\x01\n\x14\x43reateStreamResponse\x12*\n\x06stream\x18\x01 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\x12\x0f\n\x07\x63reated\x18\x02 \x01(\x08\x12-\n\x06status\x18\x03 \x01(\x0e\x32\x1d.streamsample.v1.StreamStatus\"\x97\x01\n\x14\x41ppendRecordsRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12*\n\x06stream\x18\x02 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\x12\x10\n\x08sequence\x18\x03 \x01(\x03\x12.\n\x07records\x18\x04 \x03(\x0b\x32\x1d.streamsample.v1.AppendRecord\"B\n\x15\x41ppendRecordsResponse\x12\x14\n\x0c\x66irst_offset\x18\x01 \x01(\x03\x12\x13\n\x0blast_offset\x18\x02 \x01(\x03\"\x84\x01\n\x12\x43loseStreamRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12*\n\x06stream\x18\x02 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\x12/\n\x06result\x18\x03 \x01(\x0b\x32\x1f.temporal.api.common.v1.Payload\"\x15\n\x13\x43loseStreamResponse\"\xb6\x01\n\x12ReadRecordsRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12*\n\x06stream\x18\x02 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\x12\x13\n\x0b\x66rom_offset\x18\x03 \x01(\x03\x12\x0e\n\x06topics\x18\x04 \x03(\t\x12\x13\n\x0bmax_records\x18\x05 \x01(\x05\x12\'\n\x04wait\x18\x06 \x01(\x0b\x32\x19.google.protobuf.Duration\"h\n\x13ReadRecordsResponse\x12.\n\x07records\x18\x01 \x03(\x0b\x32\x1d.streamsample.v1.StreamRecord\x12\x13\n\x0bnext_offset\x18\x02 \x01(\x03\x12\x0c\n\x04\x64one\x18\x03 \x01(\x08\"V\n\x15\x44\x65scribeStreamRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12*\n\x06stream\x18\x02 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\"[\n\x16\x44\x65scribeStreamResponse\x12\x13\n\x0blast_offset\x18\x01 \x01(\x03\x12,\n\tretention\x18\x02 \x01(\x0b\x32\x19.google.protobuf.Duration\"\x15\n\x13\x43loseWritersRequest\"&\n\x14\x43loseWritersResponse\x12\x0e\n\x06\x66\x61iled\x18\x01 \x01(\x05\"\'\n\x12\x43loseWriterRequest\x12\x11\n\twriter_id\x18\x01 \x01(\x04\"*\n\x13\x43loseWriterResponse\x12\x13\n\x0blast_offset\x18\x01 \x01(\x03*z\n\x0cStreamStatus\x12\x1d\n\x19STREAM_STATUS_UNSPECIFIED\x10\x00\x12\x16\n\x12STREAM_STATUS_OPEN\x10\x01\x12\x18\n\x14STREAM_STATUS_CLOSED\x10\x02\x12\x19\n\x15STREAM_STATUS_EXPIRED\x10\x03\x42\x12\xaa\x02\x0fStreamSample.V1b\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n$streamsample/v1/stream_service.proto\x12\x0fstreamsample.v1\x1a\x1egoogle/protobuf/duration.proto\x1a$temporal/api/common/v1/message.proto\",\n\tStreamRef\x12\n\n\x02id\x18\x01 \x01(\t\x12\x13\n\x0bworkflow_id\x18\x02 \x01(\t\"L\n\x0c\x41ppendRecord\x12\r\n\x05topic\x18\x01 \x01(\t\x12-\n\x04\x62ody\x18\x02 \x01(\x0b\x32\x1f.temporal.api.common.v1.Payload\"\\\n\x0cStreamRecord\x12\x0e\n\x06offset\x18\x01 \x01(\x03\x12\r\n\x05topic\x18\x02 \x01(\t\x12-\n\x04\x62ody\x18\x03 \x01(\x0b\x32\x1f.temporal.api.common.v1.Payload\"S\n\x08Producer\x12+\n\x04kind\x18\x01 \x01(\x0e\x32\x1d.streamsample.v1.ProducerKind\x12\n\n\x02id\x18\x02 \x01(\t\x12\x0e\n\x06run_id\x18\x03 \x01(\t\"\x7f\n\x13\x43reateStreamRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12\'\n\x03ref\x18\x02 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\x12,\n\tretention\x18\x03 \x01(\x0b\x32\x19.google.protobuf.Duration\"\x82\x01\n\x14\x43reateStreamResponse\x12*\n\x06stream\x18\x01 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\x12\x0f\n\x07\x63reated\x18\x02 \x01(\x08\x12-\n\x06status\x18\x03 \x01(\x0e\x32\x1d.streamsample.v1.StreamStatus\"\x97\x01\n\x14\x41ppendRecordsRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12*\n\x06stream\x18\x02 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\x12\x10\n\x08sequence\x18\x03 \x01(\x03\x12.\n\x07records\x18\x04 \x03(\x0b\x32\x1d.streamsample.v1.AppendRecord\"B\n\x15\x41ppendRecordsResponse\x12\x14\n\x0c\x66irst_offset\x18\x01 \x01(\x03\x12\x13\n\x0blast_offset\x18\x02 \x01(\x03\"\x84\x01\n\x12\x43loseStreamRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12*\n\x06stream\x18\x02 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\x12/\n\x06result\x18\x03 \x01(\x0b\x32\x1f.temporal.api.common.v1.Payload\"\x15\n\x13\x43loseStreamResponse\"\xb6\x01\n\x12ReadRecordsRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12*\n\x06stream\x18\x02 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\x12\x13\n\x0b\x66rom_offset\x18\x03 \x01(\x03\x12\x0e\n\x06topics\x18\x04 \x03(\t\x12\x13\n\x0bmax_records\x18\x05 \x01(\x05\x12\'\n\x04wait\x18\x06 \x01(\x0b\x32\x19.google.protobuf.Duration\"h\n\x13ReadRecordsResponse\x12.\n\x07records\x18\x01 \x03(\x0b\x32\x1d.streamsample.v1.StreamRecord\x12\x13\n\x0bnext_offset\x18\x02 \x01(\x03\x12\x0c\n\x04\x64one\x18\x03 \x01(\x08\"V\n\x15\x44\x65scribeStreamRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12*\n\x06stream\x18\x02 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\"[\n\x16\x44\x65scribeStreamResponse\x12\x13\n\x0blast_offset\x18\x01 \x01(\x03\x12,\n\tretention\x18\x02 \x01(\x0b\x32\x19.google.protobuf.Duration\"\x15\n\x13\x43loseWritersRequest\"&\n\x14\x43loseWritersResponse\x12\x0e\n\x06\x66\x61iled\x18\x01 \x01(\x05\"l\n\x11OpenWriterRequest\x12*\n\x06stream\x18\x01 \x01(\x0b\x32\x1a.streamsample.v1.StreamRef\x12+\n\x08producer\x18\x02 \x01(\x0b\x32\x19.streamsample.v1.Producer\"\x14\n\x12OpenWriterResponse\"\'\n\x12\x43loseWriterRequest\x12\x11\n\twriter_id\x18\x01 \x01(\x04\"*\n\x13\x43loseWriterResponse\x12\x13\n\x0blast_offset\x18\x01 \x01(\x03*\x7f\n\x0cProducerKind\x12\x1d\n\x19PRODUCER_KIND_UNSPECIFIED\x10\x00\x12\x1a\n\x16PRODUCER_KIND_WORKFLOW\x10\x01\x12\x1a\n\x16PRODUCER_KIND_ACTIVITY\x10\x02\x12\x18\n\x14PRODUCER_KIND_CLIENT\x10\x03*z\n\x0cStreamStatus\x12\x1d\n\x19STREAM_STATUS_UNSPECIFIED\x10\x00\x12\x16\n\x12STREAM_STATUS_OPEN\x10\x01\x12\x18\n\x14STREAM_STATUS_CLOSED\x10\x02\x12\x19\n\x15STREAM_STATUS_EXPIRED\x10\x03\x42\x12\xaa\x02\x0fStreamSample.V1b\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -34,40 +34,48 @@ _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'streamsample.v1.stream_serv
 if not _descriptor._USE_C_DESCRIPTORS:
   _globals['DESCRIPTOR']._loaded_options = None
   _globals['DESCRIPTOR']._serialized_options = b'\252\002\017StreamSample.V1'
-  _globals['_STREAMSTATUS']._serialized_start=1607
-  _globals['_STREAMSTATUS']._serialized_end=1729
+  _globals['_PRODUCERKIND']._serialized_start=1824
+  _globals['_PRODUCERKIND']._serialized_end=1951
+  _globals['_STREAMSTATUS']._serialized_start=1953
+  _globals['_STREAMSTATUS']._serialized_end=2075
   _globals['_STREAMREF']._serialized_start=127
   _globals['_STREAMREF']._serialized_end=171
   _globals['_APPENDRECORD']._serialized_start=173
   _globals['_APPENDRECORD']._serialized_end=249
   _globals['_STREAMRECORD']._serialized_start=251
   _globals['_STREAMRECORD']._serialized_end=343
-  _globals['_CREATESTREAMREQUEST']._serialized_start=345
-  _globals['_CREATESTREAMREQUEST']._serialized_end=472
-  _globals['_CREATESTREAMRESPONSE']._serialized_start=475
-  _globals['_CREATESTREAMRESPONSE']._serialized_end=605
-  _globals['_APPENDRECORDSREQUEST']._serialized_start=608
-  _globals['_APPENDRECORDSREQUEST']._serialized_end=759
-  _globals['_APPENDRECORDSRESPONSE']._serialized_start=761
-  _globals['_APPENDRECORDSRESPONSE']._serialized_end=827
-  _globals['_CLOSESTREAMREQUEST']._serialized_start=830
-  _globals['_CLOSESTREAMREQUEST']._serialized_end=962
-  _globals['_CLOSESTREAMRESPONSE']._serialized_start=964
-  _globals['_CLOSESTREAMRESPONSE']._serialized_end=985
-  _globals['_READRECORDSREQUEST']._serialized_start=988
-  _globals['_READRECORDSREQUEST']._serialized_end=1170
-  _globals['_READRECORDSRESPONSE']._serialized_start=1172
-  _globals['_READRECORDSRESPONSE']._serialized_end=1276
-  _globals['_DESCRIBESTREAMREQUEST']._serialized_start=1278
-  _globals['_DESCRIBESTREAMREQUEST']._serialized_end=1364
-  _globals['_DESCRIBESTREAMRESPONSE']._serialized_start=1366
-  _globals['_DESCRIBESTREAMRESPONSE']._serialized_end=1457
-  _globals['_CLOSEWRITERSREQUEST']._serialized_start=1459
-  _globals['_CLOSEWRITERSREQUEST']._serialized_end=1480
-  _globals['_CLOSEWRITERSRESPONSE']._serialized_start=1482
-  _globals['_CLOSEWRITERSRESPONSE']._serialized_end=1520
-  _globals['_CLOSEWRITERREQUEST']._serialized_start=1522
-  _globals['_CLOSEWRITERREQUEST']._serialized_end=1561
-  _globals['_CLOSEWRITERRESPONSE']._serialized_start=1563
-  _globals['_CLOSEWRITERRESPONSE']._serialized_end=1605
+  _globals['_PRODUCER']._serialized_start=345
+  _globals['_PRODUCER']._serialized_end=428
+  _globals['_CREATESTREAMREQUEST']._serialized_start=430
+  _globals['_CREATESTREAMREQUEST']._serialized_end=557
+  _globals['_CREATESTREAMRESPONSE']._serialized_start=560
+  _globals['_CREATESTREAMRESPONSE']._serialized_end=690
+  _globals['_APPENDRECORDSREQUEST']._serialized_start=693
+  _globals['_APPENDRECORDSREQUEST']._serialized_end=844
+  _globals['_APPENDRECORDSRESPONSE']._serialized_start=846
+  _globals['_APPENDRECORDSRESPONSE']._serialized_end=912
+  _globals['_CLOSESTREAMREQUEST']._serialized_start=915
+  _globals['_CLOSESTREAMREQUEST']._serialized_end=1047
+  _globals['_CLOSESTREAMRESPONSE']._serialized_start=1049
+  _globals['_CLOSESTREAMRESPONSE']._serialized_end=1070
+  _globals['_READRECORDSREQUEST']._serialized_start=1073
+  _globals['_READRECORDSREQUEST']._serialized_end=1255
+  _globals['_READRECORDSRESPONSE']._serialized_start=1257
+  _globals['_READRECORDSRESPONSE']._serialized_end=1361
+  _globals['_DESCRIBESTREAMREQUEST']._serialized_start=1363
+  _globals['_DESCRIBESTREAMREQUEST']._serialized_end=1449
+  _globals['_DESCRIBESTREAMRESPONSE']._serialized_start=1451
+  _globals['_DESCRIBESTREAMRESPONSE']._serialized_end=1542
+  _globals['_CLOSEWRITERSREQUEST']._serialized_start=1544
+  _globals['_CLOSEWRITERSREQUEST']._serialized_end=1565
+  _globals['_CLOSEWRITERSRESPONSE']._serialized_start=1567
+  _globals['_CLOSEWRITERSRESPONSE']._serialized_end=1605
+  _globals['_OPENWRITERREQUEST']._serialized_start=1607
+  _globals['_OPENWRITERREQUEST']._serialized_end=1715
+  _globals['_OPENWRITERRESPONSE']._serialized_start=1717
+  _globals['_OPENWRITERRESPONSE']._serialized_end=1737
+  _globals['_CLOSEWRITERREQUEST']._serialized_start=1739
+  _globals['_CLOSEWRITERREQUEST']._serialized_end=1778
+  _globals['_CLOSEWRITERRESPONSE']._serialized_start=1780
+  _globals['_CLOSEWRITERRESPONSE']._serialized_end=1822
 # @@protoc_insertion_point(module_scope)

@@ -21,6 +21,25 @@ else:
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class _ProducerKind:
+    ValueType = _typing.NewType("ValueType", _builtins.int)
+    V: _TypeAlias = ValueType  # noqa: Y015
+
+class _ProducerKindEnumTypeWrapper(_enum_type_wrapper._EnumTypeWrapper[_ProducerKind.ValueType], _builtins.type):
+    DESCRIPTOR: _descriptor.EnumDescriptor
+    PRODUCER_KIND_UNSPECIFIED: _ProducerKind.ValueType  # 0
+    PRODUCER_KIND_WORKFLOW: _ProducerKind.ValueType  # 1
+    PRODUCER_KIND_ACTIVITY: _ProducerKind.ValueType  # 2
+    PRODUCER_KIND_CLIENT: _ProducerKind.ValueType  # 3
+
+class ProducerKind(_ProducerKind, metaclass=_ProducerKindEnumTypeWrapper): ...
+
+PRODUCER_KIND_UNSPECIFIED: ProducerKind.ValueType  # 0
+PRODUCER_KIND_WORKFLOW: ProducerKind.ValueType  # 1
+PRODUCER_KIND_ACTIVITY: ProducerKind.ValueType  # 2
+PRODUCER_KIND_CLIENT: ProducerKind.ValueType  # 3
+Global___ProducerKind: _TypeAlias = ProducerKind  # noqa: Y015
+
 class _StreamStatus:
     ValueType = _typing.NewType("ValueType", _builtins.int)
     V: _TypeAlias = ValueType  # noqa: Y015
@@ -110,6 +129,31 @@ class StreamRecord(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___StreamRecord: _TypeAlias = StreamRecord  # noqa: Y015
+
+@_typing.final
+class Producer(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    KIND_FIELD_NUMBER: _builtins.int
+    ID_FIELD_NUMBER: _builtins.int
+    RUN_ID_FIELD_NUMBER: _builtins.int
+    kind: Global___ProducerKind.ValueType
+    id: _builtins.str
+    run_id: _builtins.str
+    def __init__(
+        self,
+        *,
+        kind: Global___ProducerKind.ValueType = ...,
+        id: _builtins.str = ...,
+        run_id: _builtins.str = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["id", b"id", "kind", b"kind", "run_id", b"run_id"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___Producer: _TypeAlias = Producer  # noqa: Y015
 
 @_typing.final
 class CreateStreamRequest(_message.Message):
@@ -400,6 +444,45 @@ class CloseWritersResponse(_message.Message):
     def WhichOneof(self, oneof_group: _Never) -> None: ...
 
 Global___CloseWritersResponse: _TypeAlias = CloseWritersResponse  # noqa: Y015
+
+@_typing.final
+class OpenWriterRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    STREAM_FIELD_NUMBER: _builtins.int
+    PRODUCER_FIELD_NUMBER: _builtins.int
+    @_builtins.property
+    def stream(self) -> Global___StreamRef: ...
+    @_builtins.property
+    def producer(self) -> Global___Producer: ...
+    def __init__(
+        self,
+        *,
+        stream: Global___StreamRef | None = ...,
+        producer: Global___Producer | None = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _typing.Literal["producer", b"producer", "stream", b"stream"]  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["producer", b"producer", "stream", b"stream"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___OpenWriterRequest: _TypeAlias = OpenWriterRequest  # noqa: Y015
+
+@_typing.final
+class OpenWriterResponse(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    def __init__(
+        self,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___OpenWriterResponse: _TypeAlias = OpenWriterResponse  # noqa: Y015
 
 @_typing.final
 class CloseWriterRequest(_message.Message):

@@ -21,6 +21,19 @@ export namespace streamsample {
       body?: temporal.api.common.v1.IPayload | null;
     }
 
+    enum ProducerKind {
+      PRODUCER_KIND_UNSPECIFIED = 0,
+      PRODUCER_KIND_WORKFLOW = 1,
+      PRODUCER_KIND_ACTIVITY = 2,
+      PRODUCER_KIND_CLIENT = 3,
+    }
+
+    interface IProducer {
+      kind?: ProducerKind | null;
+      id?: string | null;
+      runId?: string | null;
+    }
+
     interface ICreateStreamRequest {
       namespace?: string | null;
       ref?: IStreamRef | null;
@@ -90,6 +103,13 @@ export namespace streamsample {
     interface ICloseWritersResponse {
       failed?: number | null;
     }
+
+    interface IOpenWriterRequest {
+      stream?: IStreamRef | null;
+      producer?: IProducer | null;
+    }
+
+    interface IOpenWriterResponse {}
 
     interface ICloseWriterRequest {
       writerId?: Long | null;

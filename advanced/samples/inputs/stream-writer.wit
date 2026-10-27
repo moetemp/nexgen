@@ -5,9 +5,21 @@ world writer {
 }
 
 // A package apart from the stream service, as in Brook. The writer has no endpoint, since the
-// client serves it in process.
+// client serves it in process. It uses records of the stream service, as Brook's writer does.
 /// @nexus.service-name "streamsample.v1.StreamWriter"
 interface stream-writer {
+  use temporal:stream-service/stream-service@1.0.0.{producer, stream-ref};
+
+  /// @nexus.proto "streamsample.v1.OpenWriterRequest" typescript-import="#streamsample"
+  record open-writer-request {
+    %stream: option<stream-ref>,
+    producer: option<producer>,
+  }
+
+  /// @nexus.proto "streamsample.v1.OpenWriterResponse" typescript-import="#streamsample"
+  record open-writer-response {
+  }
+
   /// @nexus.proto "streamsample.v1.CloseWritersRequest" typescript-import="#streamsample"
   record close-writers-request {
   }
@@ -16,6 +28,9 @@ interface stream-writer {
   record close-writers-response {
     failed: option<s32>,
   }
+
+  /// @nexus.operation name="OpenWriter"
+  open-writer: func(request: open-writer-request) -> open-writer-response;
 
   /// @nexus.doc "Drop every open writer, for example at shutdown."
   /// @nexus.operation name="CloseWriters"

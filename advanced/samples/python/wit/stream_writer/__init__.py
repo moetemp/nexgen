@@ -42,6 +42,12 @@ __nexus_operation_registry__: dict[
 ] = {
     (
         "streamsample.v1.StreamWriter",
+        "OpenWriter",
+    ): _NexusOperationInfo(
+        operation=_services.StreamWriter.open_writer,
+    ),
+    (
+        "streamsample.v1.StreamWriter",
         "CloseWriters",
     ): _NexusOperationInfo(
         operation=_services.StreamWriter.close_writers,

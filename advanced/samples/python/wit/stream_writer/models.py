@@ -3,9 +3,209 @@
 from __future__ import annotations
 
 import dataclasses
+import enum
 import typing_extensions
 import streamsample.v1.stream_service_pb2
 import temporalio.converter
+
+
+class ProducerKind(enum.IntEnum):
+    ProducerKindUnspecified = 0
+    ProducerKindWorkflow = 1
+    ProducerKindActivity = 2
+    ProducerKindClient = 3
+
+
+@dataclasses.dataclass(slots=True)
+class OpenWriterRequest:
+    stream: StreamRef | None = None
+    producer: Producer | None = None
+
+
+class _OpenWriterRequestTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        OpenWriterRequest, streamsample.v1.stream_service_pb2.OpenWriterRequest
+    ]
+):
+    transfer_type: type[streamsample.v1.stream_service_pb2.OpenWriterRequest] | None = (
+        streamsample.v1.stream_service_pb2.OpenWriterRequest
+    )
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: streamsample.v1.stream_service_pb2.OpenWriterRequest,
+        type_hint: type[OpenWriterRequest],
+    ) -> OpenWriterRequest:
+        return OpenWriterRequest(
+            stream=_StreamRefTransferTypeConverter().from_transfer_type(
+                value.stream, StreamRef
+            )
+            if value.HasField("stream")
+            else None,
+            producer=_ProducerTransferTypeConverter().from_transfer_type(
+                value.producer, Producer
+            )
+            if value.HasField("producer")
+            else None,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: OpenWriterRequest,
+    ) -> streamsample.v1.stream_service_pb2.OpenWriterRequest:
+        message = streamsample.v1.stream_service_pb2.OpenWriterRequest()
+        if value.stream is not None:
+            message.stream.CopyFrom(
+                _StreamRefTransferTypeConverter().to_transfer_type(value.stream)
+            )
+        if value.producer is not None:
+            message.producer.CopyFrom(
+                _ProducerTransferTypeConverter().to_transfer_type(value.producer)
+            )
+        return message
+
+
+temporalio.converter.transfer_type_convertible(_OpenWriterRequestTransferTypeConverter)(
+    OpenWriterRequest
+)  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True)
+class StreamRef:
+    """Identifies one stream."""
+
+    id: str
+    workflow_id: str | None = None
+
+
+class _StreamRefTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        StreamRef, streamsample.v1.stream_service_pb2.StreamRef
+    ]
+):
+    transfer_type: type[streamsample.v1.stream_service_pb2.StreamRef] | None = (
+        streamsample.v1.stream_service_pb2.StreamRef
+    )
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: streamsample.v1.stream_service_pb2.StreamRef,
+        type_hint: type[StreamRef],
+    ) -> StreamRef:
+        if not value.id:
+            raise ValueError("missing required field StreamRef.id")
+        id = value.id
+        return StreamRef(
+            id=id,
+            workflow_id=value.workflow_id if bool(value.workflow_id) else None,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: StreamRef,
+    ) -> streamsample.v1.stream_service_pb2.StreamRef:
+        message = streamsample.v1.stream_service_pb2.StreamRef()
+        message.id = value.id
+        if value.workflow_id is not None:
+            message.workflow_id = value.workflow_id
+        return message
+
+
+temporalio.converter.transfer_type_convertible(_StreamRefTransferTypeConverter)(
+    StreamRef
+)  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True, kw_only=True)
+class Producer:
+    """Who writes to a stream. The stream writer takes it."""
+
+    kind: ProducerKind | None = None
+    id: str
+    run_id: str | None = None
+
+
+class _ProducerTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        Producer, streamsample.v1.stream_service_pb2.Producer
+    ]
+):
+    transfer_type: type[streamsample.v1.stream_service_pb2.Producer] | None = (
+        streamsample.v1.stream_service_pb2.Producer
+    )
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: streamsample.v1.stream_service_pb2.Producer,
+        type_hint: type[Producer],
+    ) -> Producer:
+        if not value.id:
+            raise ValueError("missing required field Producer.id")
+        id = value.id
+        return Producer(
+            kind=ProducerKind(value.kind) if value.kind != 0 else None,
+            id=id,
+            run_id=value.run_id if bool(value.run_id) else None,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: Producer,
+    ) -> streamsample.v1.stream_service_pb2.Producer:
+        message = streamsample.v1.stream_service_pb2.Producer()
+        if value.kind is not None:
+            message.kind = streamsample.v1.stream_service_pb2.ProducerKind.ValueType(
+                value.kind
+            )
+        message.id = value.id
+        if value.run_id is not None:
+            message.run_id = value.run_id
+        return message
+
+
+temporalio.converter.transfer_type_convertible(_ProducerTransferTypeConverter)(Producer)  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True)
+class OpenWriterResponse:
+    pass
+
+
+class _OpenWriterResponseTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        OpenWriterResponse, streamsample.v1.stream_service_pb2.OpenWriterResponse
+    ]
+):
+    transfer_type: (
+        type[streamsample.v1.stream_service_pb2.OpenWriterResponse] | None
+    ) = streamsample.v1.stream_service_pb2.OpenWriterResponse
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: streamsample.v1.stream_service_pb2.OpenWriterResponse,
+        type_hint: type[OpenWriterResponse],
+    ) -> OpenWriterResponse:
+        return OpenWriterResponse()
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: OpenWriterResponse,
+    ) -> streamsample.v1.stream_service_pb2.OpenWriterResponse:
+        message = streamsample.v1.stream_service_pb2.OpenWriterResponse()
+        return message
+
+
+temporalio.converter.transfer_type_convertible(
+    _OpenWriterResponseTransferTypeConverter
+)(OpenWriterResponse)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)

@@ -3,12 +3,16 @@
 import * as workflow from "@temporalio/workflow";
 import * as nexus from "nexus-rpc";
 import {
+  openWriterResponseTransferTypeConverter,
+  openWriterRequestTransferTypeConverter,
   closeWritersResponseTransferTypeConverter,
   closeWritersRequestTransferTypeConverter,
   closeWriterResponseTransferTypeConverter,
   closeWriterRequestTransferTypeConverter,
 } from "./models";
 import type {
+  OpenWriterResponse,
+  OpenWriterRequest,
   CloseWritersResponse,
   CloseWritersRequest,
   CloseWriterResponse,
@@ -16,6 +20,11 @@ import type {
 } from "./models";
 
 export const streamWriter = nexus.service("streamsample.v1.StreamWriter", {
+  openWriter: nexus.operation<OpenWriterRequest, OpenWriterResponse>({
+    name: "OpenWriter",
+    inputType: { transferTypeConverter: openWriterRequestTransferTypeConverter },
+    outputType: { transferTypeConverter: openWriterResponseTransferTypeConverter },
+  }),
   /**
    * Drop every open writer, for example at shutdown.
    */
@@ -39,6 +48,18 @@ export class StreamWriterClient {
       service: streamWriter,
       endpoint,
     });
+  }
+
+  /**
+   * @param request - Request for the operation.
+   */
+  public async openWriter(
+    request: OpenWriterRequest,
+  ): Promise<workflow.NexusOperationHandle<OpenWriterResponse>> {
+    return await this.client.startOperation(
+      streamWriter.operations.openWriter,
+      request,
+    );
   }
 
   /**

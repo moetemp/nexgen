@@ -17,6 +17,10 @@ namespace Nexgen.StreamWriter
     [NexusService("streamsample.v1.StreamWriter")]
     internal interface IStreamWriter
     {
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("OpenWriter")]
+        OpenWriterResponse OpenWriter(OpenWriterRequest request);
+
         /// <summary>
         /// Drop every open writer, for example at shutdown.
         /// </summary>
@@ -28,6 +32,13 @@ namespace Nexgen.StreamWriter
         [NexusOperation("CloseWriter")]
         CloseWriterResponse CloseWriter(CloseWriterRequest request);
 
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public class OpenWriterOptions
+    {
+        public StreamRef? Stream { get; set; }
+        public Producer? Producer { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -44,6 +55,25 @@ namespace Nexgen.StreamWriter
         public StreamWriterClient(string endpoint)
         {
             _client = Workflow.CreateNexusWorkflowClient<IStreamWriter>(endpoint);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        private async Task<OpenWriterResponse> OpenWriterAsync(OpenWriterRequest request)
+        {
+            var result = await _client.ExecuteNexusOperationAsync<OpenWriterResponse>(svc => svc.OpenWriter(request)).ConfigureAwait(true);
+            return result;
+        }
+
+        /// <param name="options">Options for the operation.</param>
+        [GeneratedCode("nexgen", null)]
+        public Task<OpenWriterResponse> OpenWriterAsync(OpenWriterOptions? options = null)
+        {
+            var request = new OpenWriterRequest()
+            {
+                Stream = options?.Stream,
+                Producer = options?.Producer,
+            };
+            return OpenWriterAsync(request);
         }
 
         /// <summary>

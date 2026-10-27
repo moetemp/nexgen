@@ -31,6 +31,22 @@ interface stream-service {
     body: option<payload>,
   }
 
+  /// @nexus.proto "streamsample.v1.ProducerKind" typescript-import="#streamsample"
+  enum producer-kind {
+    producer-kind-unspecified,
+    producer-kind-workflow,
+    producer-kind-activity,
+    producer-kind-client,
+  }
+
+  /// @nexus.doc "Who writes to a stream. The stream writer takes it."
+  /// @nexus.proto "streamsample.v1.Producer" typescript-import="#streamsample"
+  record producer {
+    kind: option<producer-kind>,
+    id: string,
+    run-id: option<string>,
+  }
+
   /// @nexus.proto "streamsample.v1.StreamStatus" typescript-import="#streamsample"
   enum stream-status {
     stream-status-unspecified,

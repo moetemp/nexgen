@@ -24,6 +24,19 @@ message StreamRecord {
     temporal.api.common.v1.Payload body = 3;
 }
 
+enum ProducerKind {
+    PRODUCER_KIND_UNSPECIFIED = 0;
+    PRODUCER_KIND_WORKFLOW = 1;
+    PRODUCER_KIND_ACTIVITY = 2;
+    PRODUCER_KIND_CLIENT = 3;
+}
+
+message Producer {
+    ProducerKind kind = 1;
+    string id = 2;
+    string run_id = 3;
+}
+
 message CreateStreamRequest {
     string namespace = 1;
     StreamRef ref = 2;
@@ -94,6 +107,14 @@ message CloseWritersRequest {
 
 message CloseWritersResponse {
     int32 failed = 1;
+}
+
+message OpenWriterRequest {
+    StreamRef stream = 1;
+    Producer producer = 2;
+}
+
+message OpenWriterResponse {
 }
 
 message CloseWriterRequest {

@@ -5,9 +5,133 @@
 using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
+using Nexgen.Support;
 
 namespace Nexgen.StreamWriter
 {
+
+    [GeneratedCode("nexgen", null)]
+    public enum ProducerKind
+    {
+        ProducerKindUnspecified = 0,
+        ProducerKindWorkflow = 1,
+        ProducerKindActivity = 2,
+        ProducerKindClient = 3,
+    }
+
+    /// <summary>
+    /// Who writes to a stream. The stream writer takes it.
+    /// </summary>
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(Producer.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record Producer
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="Producer"/> class.
+        /// </summary>
+        public Producer(string id)
+        {
+            Id = id;
+        }
+
+        public ProducerKind? Kind { get; init; }
+        public string Id { get; init; }
+        public string? RunId { get; init; }
+
+        internal static Producer FromTransferType(StreamSample.V1.Producer wire)
+        {
+            return new Producer(wire.Id)
+            {
+                Kind = (int)wire.Kind == 0 ? null : (ProducerKind)wire.Kind,
+                RunId = string.IsNullOrEmpty(wire.RunId) ? null : wire.RunId,
+            };
+        }
+
+        internal StreamSample.V1.Producer ToTransferType()
+        {
+            var proto = new StreamSample.V1.Producer();
+            if (Kind is { } kind)
+            {
+                proto.Kind = (StreamSample.V1.ProducerKind)kind;
+            }
+            proto.Id = Id;
+            if (RunId is { } runId)
+            {
+                proto.RunId = runId;
+            }
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(StreamSample.V1.Producer);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((Producer)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : Producer.FromTransferType((StreamSample.V1.Producer)transferType);
+        }
+
+    }
+
+    /// <summary>
+    /// Identifies one stream.
+    /// </summary>
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(StreamRef.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record StreamRef
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="StreamRef"/> class.
+        /// </summary>
+        public StreamRef(string id)
+        {
+            Id = id;
+        }
+
+        public string Id { get; init; }
+        public string? WorkflowId { get; init; }
+
+        internal static StreamRef FromTransferType(StreamSample.V1.StreamRef wire)
+        {
+            return new StreamRef(wire.Id)
+            {
+                WorkflowId = string.IsNullOrEmpty(wire.WorkflowId) ? null : wire.WorkflowId,
+            };
+        }
+
+        internal StreamSample.V1.StreamRef ToTransferType()
+        {
+            var proto = new StreamSample.V1.StreamRef();
+            proto.Id = Id;
+            if (WorkflowId is { } workflowId)
+            {
+                proto.WorkflowId = workflowId;
+            }
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(StreamSample.V1.StreamRef);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((StreamRef)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : StreamRef.FromTransferType((StreamSample.V1.StreamRef)transferType);
+        }
+
+    }
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(CloseWriterRequest.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
@@ -163,6 +287,85 @@ namespace Nexgen.StreamWriter
 
             /// <summary>Converts a transfer-type value to this model.</summary>
             public object? FromTransferType(object? transferType) => transferType is null ? null : CloseWritersResponse.FromTransferType((StreamSample.V1.CloseWritersResponse)transferType);
+        }
+
+    }
+
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(OpenWriterRequest.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record OpenWriterRequest
+    {
+        public StreamRef? Stream { get; init; }
+        public Producer? Producer { get; init; }
+
+        internal static OpenWriterRequest FromTransferType(StreamSample.V1.OpenWriterRequest wire)
+        {
+            return new OpenWriterRequest()
+            {
+                Stream = wire.Stream == null ? null : StreamRef.FromTransferType(wire.Stream),
+                Producer = wire.Producer == null ? null : Producer.FromTransferType(wire.Producer),
+            };
+        }
+
+        internal StreamSample.V1.OpenWriterRequest ToTransferType()
+        {
+            var proto = new StreamSample.V1.OpenWriterRequest();
+            if (Stream is { } stream)
+            {
+                proto.Stream = (StreamSample.V1.StreamRef)stream.ToTransferType();
+            }
+            if (Producer is { } producer)
+            {
+                proto.Producer = (StreamSample.V1.Producer)producer.ToTransferType();
+            }
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(StreamSample.V1.OpenWriterRequest);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((OpenWriterRequest)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : OpenWriterRequest.FromTransferType((StreamSample.V1.OpenWriterRequest)transferType);
+        }
+
+    }
+
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(OpenWriterResponse.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record OpenWriterResponse
+    {
+        internal static OpenWriterResponse FromTransferType(StreamSample.V1.OpenWriterResponse wire)
+        {
+            return new OpenWriterResponse();
+        }
+
+        internal StreamSample.V1.OpenWriterResponse ToTransferType()
+        {
+            var proto = new StreamSample.V1.OpenWriterResponse();
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(StreamSample.V1.OpenWriterResponse);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((OpenWriterResponse)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : OpenWriterResponse.FromTransferType((StreamSample.V1.OpenWriterResponse)transferType);
         }
 
     }

@@ -87,19 +87,19 @@ namespace Nexgen.StreamWriter
         }
 
         public IReadOnlyList<AppendRecord> Records { get; set; }
-        public long? WriterId { get; set; }
+        public ulong? WriterId { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
     public class CloseWriterOptions
     {
-        public long? WriterId { get; set; }
+        public ulong? WriterId { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
     public class FreeWriterOptions
     {
-        public long? WriterId { get; set; }
+        public ulong? WriterId { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]

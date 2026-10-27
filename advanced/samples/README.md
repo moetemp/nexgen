@@ -148,8 +148,6 @@ Only part of today's output builds, so the samples leave the rest out:
 
 - TypeScript passes a `number` where a resource method's proto request wants a
   `Long`. `tsc` skips the service, but the test still checks its models.
-- .NET plans the writer's `uint64` `writer-id` as a `long`, so the sample
-  project leaves the .NET writer out of the build.
 - The TypeScript writer passes a `number` where its proto request wants a
   `Long`, and returns a resource that it doesn't import as a value. `tsc` skips
   it.

@@ -472,7 +472,7 @@ namespace Nexgen.StreamWriter
     [GeneratedCode("nexgen", null)]
     public record CloseWriterRequest
     {
-        public long? WriterId { get; init; }
+        public ulong? WriterId { get; init; }
 
         internal static CloseWriterRequest FromTransferType(Temporal.Sdk.Streams.V1.CloseWriterRequest wire)
         {
@@ -633,7 +633,7 @@ namespace Nexgen.StreamWriter
     [GeneratedCode("nexgen", null)]
     public record FreeWriterRequest
     {
-        public long? WriterId { get; init; }
+        public ulong? WriterId { get; init; }
 
         internal static FreeWriterRequest FromTransferType(Temporal.Sdk.Streams.V1.FreeWriterRequest wire)
         {
@@ -802,7 +802,7 @@ namespace Nexgen.StreamWriter
         }
 
         public IReadOnlyList<AppendRecord> Records { get; init; }
-        public long? WriterId { get; init; }
+        public ulong? WriterId { get; init; }
 
         internal static WriteRecordsRequest FromTransferType(Temporal.Sdk.Streams.V1.WriteRecordsRequest wire)
         {
@@ -897,7 +897,7 @@ namespace Nexgen.StreamWriter
     [GeneratedCode("nexgen", null)]
     public record WriterResult
     {
-        public long? WriterId { get; init; }
+        public ulong? WriterId { get; init; }
 
         internal static WriterResult FromTransferType(Temporal.Sdk.Streams.V1.OpenWriterResponse wire)
         {

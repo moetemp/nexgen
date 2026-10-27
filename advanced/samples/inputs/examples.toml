@@ -26,10 +26,12 @@ descriptors = "temporal"
 languages = ["python", "dotnet", "typescript"]
 descriptors = "temporal"
 
+# Brook's Stream service WIT, byte for byte. Its records bind to the Stream protos of
+# temporalio/api#895 in descriptors/streams/, which no SDK has yet. Only .NET generates it today.
+# Python and TypeScript panic on the read item's oneof, and Python can't import the protos.
 [stream-service]
-languages = ["python", "typescript", "dotnet"]
-# The sample proto imports the Temporal API messages, so it needs both sets.
-descriptors = ["temporal_api.bin", "stream_service.bin"]
+languages = ["dotnet"]
+descriptors = ["temporal_api.bin", "streams.bin"]
 
 # A System Nexus operation that returns a resource.
 [workflow-handle]

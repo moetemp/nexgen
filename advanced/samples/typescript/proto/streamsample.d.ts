@@ -107,6 +107,7 @@ export namespace streamsample {
     interface IOpenWriterRequest {
       stream?: IStreamRef | null;
       producer?: IProducer | null;
+      maxRetryDuration?: google.protobuf.IDuration | null;
     }
 
     interface IOpenWriterResponse {}

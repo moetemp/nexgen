@@ -39,6 +39,7 @@ namespace Nexgen.StreamWriter
     {
         public StreamRef? Stream { get; set; }
         public Producer? Producer { get; set; }
+        public System.TimeSpan? MaxRetryDuration { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -72,6 +73,7 @@ namespace Nexgen.StreamWriter
             {
                 Stream = options?.Stream,
                 Producer = options?.Producer,
+                MaxRetryDuration = options?.MaxRetryDuration,
             };
             return OpenWriterAsync(request);
         }

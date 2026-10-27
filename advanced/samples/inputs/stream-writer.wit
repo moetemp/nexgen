@@ -8,12 +8,14 @@ world writer {
 // client serves it in process. It uses records of the stream service, as Brook's writer does.
 /// @nexus.service-name "streamsample.v1.StreamWriter"
 interface stream-writer {
+  use nexus:temporal-types/model@1.0.0.{duration};
   use temporal:stream-service/stream-service@1.0.0.{producer, stream-ref};
 
   /// @nexus.proto "streamsample.v1.OpenWriterRequest" typescript-import="#streamsample"
   record open-writer-request {
     %stream: option<stream-ref>,
     producer: option<producer>,
+    max-retry-duration: option<duration>,
   }
 
   /// @nexus.proto "streamsample.v1.OpenWriterResponse" typescript-import="#streamsample"

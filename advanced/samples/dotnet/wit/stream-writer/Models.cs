@@ -297,6 +297,7 @@ namespace Nexgen.StreamWriter
     {
         public StreamRef? Stream { get; init; }
         public Producer? Producer { get; init; }
+        public System.TimeSpan? MaxRetryDuration { get; init; }
 
         internal static OpenWriterRequest FromTransferType(StreamSample.V1.OpenWriterRequest wire)
         {
@@ -304,6 +305,7 @@ namespace Nexgen.StreamWriter
             {
                 Stream = wire.Stream == null ? null : StreamRef.FromTransferType(wire.Stream),
                 Producer = wire.Producer == null ? null : Producer.FromTransferType(wire.Producer),
+                MaxRetryDuration = wire.MaxRetryDuration == null ? null : Nexgen.Support.ProtoExtensions.FromDurationProto(wire.MaxRetryDuration),
             };
         }
 
@@ -317,6 +319,10 @@ namespace Nexgen.StreamWriter
             if (Producer is { } producer)
             {
                 proto.Producer = (StreamSample.V1.Producer)producer.ToTransferType();
+            }
+            if (MaxRetryDuration is { } maxRetryDuration)
+            {
+                proto.MaxRetryDuration = maxRetryDuration.ToProto();
             }
             return proto;
         }

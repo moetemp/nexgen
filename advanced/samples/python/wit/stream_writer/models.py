@@ -5,8 +5,11 @@ from __future__ import annotations
 import dataclasses
 import enum
 import typing_extensions
+import datetime
 import streamsample.v1.stream_service_pb2
 import temporalio.converter
+
+import temporal_support as _support
 
 
 class ProducerKind(enum.IntEnum):
@@ -20,6 +23,7 @@ class ProducerKind(enum.IntEnum):
 class OpenWriterRequest:
     stream: StreamRef | None = None
     producer: Producer | None = None
+    max_retry_duration: datetime.timedelta | None = None
 
 
 class _OpenWriterRequestTransferTypeConverter(
@@ -48,6 +52,9 @@ class _OpenWriterRequestTransferTypeConverter(
             )
             if value.HasField("producer")
             else None,
+            max_retry_duration=_support.duration_from_proto(value.max_retry_duration)
+            if value.HasField("max_retry_duration")
+            else None,
         )
 
     @typing_extensions.override
@@ -63,6 +70,10 @@ class _OpenWriterRequestTransferTypeConverter(
         if value.producer is not None:
             message.producer.CopyFrom(
                 _ProducerTransferTypeConverter().to_transfer_type(value.producer)
+            )
+        if value.max_retry_duration is not None:
+            message.max_retry_duration.CopyFrom(
+                _support.duration_to_proto(value.max_retry_duration)
             )
         return message
 

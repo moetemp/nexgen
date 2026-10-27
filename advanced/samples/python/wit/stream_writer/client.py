@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import collections.abc
 import typing
+import datetime
 import abc
 
 from .models import (
@@ -79,10 +80,12 @@ class StreamWriterClientExtension(abc.ABC):
         *,
         stream: StreamRef | None = None,
         producer: Producer | None = None,
+        max_retry_duration: datetime.timedelta | None = None,
     ) -> collections.abc.Awaitable[OpenWriterResponse,]:
         request = OpenWriterRequest(
             stream=stream,
             producer=producer,
+            max_retry_duration=max_retry_duration,
         )
         return await self._open_writer(request)
 

@@ -52,10 +52,12 @@ class StreamWriterClient:
         *,
         stream: StreamRef | None = None,
         producer: Producer | None = None,
+        max_retry_duration: datetime.timedelta | None = None,
     ) -> temporalio.workflow.NexusOperationHandle[OpenWriterResponse]:
         request = OpenWriterRequest(
             stream=stream,
             producer=producer,
+            max_retry_duration=max_retry_duration,
         )
         return await self._nexus_client.start_operation(
             operation="OpenWriter",

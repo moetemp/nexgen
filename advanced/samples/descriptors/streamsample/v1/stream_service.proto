@@ -112,6 +112,7 @@ message CloseWritersResponse {
 message OpenWriterRequest {
     StreamRef stream = 1;
     Producer producer = 2;
+    google.protobuf.Duration max_retry_duration = 3;
 }
 
 message OpenWriterResponse {

@@ -15,14 +15,16 @@ from .models import (
     OpenWriterRequest,
     WriterResult,
 )
-from ._resources.writer import bind_writer_client
+from ._resources.writer import (
+    Writer,
+    bind_writer_client,
+)
 
 if typing.TYPE_CHECKING:
     from .models import (
         Producer,
         StreamRef,
     )
-    from ._resources import Writer
 
 
 @service(name="streamsample.v1.StreamWriter")

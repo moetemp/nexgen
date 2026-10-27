@@ -663,15 +663,60 @@ fn json_example_input_path(root: &Path, id: &str) -> PathBuf {
     input_root.join(format!("{id}.yaml"))
 }
 fn example_linked_input_paths(root: &Path, input_path: &Path) -> Result<Vec<PathBuf>> {
-    let input = fs::read_to_string(input_path).map_err(|source| NexgenError::ReadFile {
-        path: input_path.to_path_buf(),
+    let input_root = root.join("advanced/samples/inputs");
+    let input = read_example_input(input_path)?;
+    let mut uses_temporal_types = input.contains("use nexus:temporal-types/");
+    let mut inputs = Vec::new();
+    discover_example_input_paths(&input_root, &mut inputs)?;
+    let mut linked = Vec::new();
+    // An input can use an interface of another input, as the stream writer uses the stream service.
+    for path in inputs.into_iter().filter(|path| path != input_path) {
+        let other = read_example_input(&path)?;
+        if uses_interface_of(&input, &other) {
+            uses_temporal_types |= other.contains("use nexus:temporal-types/");
+            linked.push(path);
+        }
+    }
+    let deps = input_root.join("deps");
+    if uses_temporal_types && deps.is_dir() {
+        linked.push(deps);
+    }
+    Ok(linked)
+}
+
+fn read_example_input(path: &Path) -> Result<String> {
+    let input = fs::read_to_string(path).map_err(|source| NexgenError::ReadFile {
+        path: path.to_path_buf(),
         source,
     })?;
-    if !input.contains("use nexus:temporal-types/") {
-        return Ok(Vec::new());
-    }
-    let path = root.join("advanced/samples/inputs/deps");
-    Ok(path.is_dir().then_some(path).into_iter().collect())
+    Ok(input)
+}
+
+// Several inputs share a package such as `temporal:nexus`, so a link needs the used interface too.
+fn uses_interface_of(input: &str, other: &str) -> bool {
+    let Some(package) = wit_package_name(other) else {
+        return false;
+    };
+    other
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("interface "))
+        .filter_map(|rest| rest.split([' ', '{']).next())
+        .any(|interface| {
+            let used = format!("use {package}/{interface}");
+            input.match_indices(&used).any(|(index, _)| {
+                matches!(
+                    input[index + used.len()..].chars().next(),
+                    Some('@' | '.' | ';')
+                )
+            })
+        })
+}
+
+fn wit_package_name(input: &str) -> Option<&str> {
+    let package = input
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("package "))?;
+    package.split(['@', ';']).next()
 }
 fn example_output_path(root: &Path, language: Language, id: &str) -> PathBuf {
     let root = advanced_language_root(root, language);

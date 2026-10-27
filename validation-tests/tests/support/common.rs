@@ -18,7 +18,7 @@ pub fn json_input_path(root: &Path, example_id: &str) -> PathBuf {
     input_root.join(format!("{example_id}.yaml"))
 }
 
-pub fn wit_input_path(root: &Path, example_id: &str) -> PathBuf {
+fn wit_input_paths(root: &Path) -> Vec<PathBuf> {
     fn collect(path: &Path, inputs: &mut Vec<PathBuf>) {
         for entry in fs::read_dir(path).unwrap() {
             let path = entry.unwrap().path();
@@ -35,9 +35,57 @@ pub fn wit_input_path(root: &Path, example_id: &str) -> PathBuf {
     let mut inputs = Vec::new();
     collect(&root.join("advanced/samples/inputs"), &mut inputs);
     inputs
+}
+
+pub fn wit_input_path(root: &Path, example_id: &str) -> PathBuf {
+    wit_input_paths(root)
         .into_iter()
         .find(|path| path.file_stem().is_some_and(|stem| stem == example_id))
         .expect("requested WIT example must exist")
+}
+
+// As in the example build, an input links each input with an interface that it uses, as the
+// stream writer uses the stream service, and `deps` when any of them uses the Temporal types.
+pub fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
+    let input_path = wit_input_path(root, example_id);
+    let input = fs::read_to_string(&input_path).unwrap();
+    let mut uses_temporal_types = input.contains("use nexus:temporal-types/");
+    let mut paths = vec![input_path.clone()];
+    for path in wit_input_paths(root) {
+        let other = fs::read_to_string(&path).unwrap();
+        if path != input_path && uses_interface_of(&input, &other) {
+            uses_temporal_types |= other.contains("use nexus:temporal-types/");
+            paths.push(path);
+        }
+    }
+    if uses_temporal_types {
+        paths.push(root.join("advanced/samples/inputs/deps"));
+    }
+    paths
+}
+
+// Several inputs share a package such as `temporal:nexus`, so a link needs the used interface too.
+fn uses_interface_of(input: &str, other: &str) -> bool {
+    let Some(package) = other
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("package "))
+        .and_then(|package| package.split(['@', ';']).next())
+    else {
+        return false;
+    };
+    other
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("interface "))
+        .filter_map(|rest| rest.split([' ', '{']).next())
+        .any(|interface| {
+            let used = format!("use {package}/{interface}");
+            input.match_indices(&used).any(|(index, _)| {
+                matches!(
+                    input[index + used.len()..].chars().next(),
+                    Some('@' | '.' | ';')
+                )
+            })
+        })
 }
 
 pub fn write_bare_ref_alias_closure(root: &Path) -> PathBuf {

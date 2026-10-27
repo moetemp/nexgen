@@ -21,7 +21,7 @@ mod json_schema_tests;
 const JSON_SCHEMA_TARGET: support::json_schema::toolchain::Target =
     support::json_schema::toolchain::Target::TypeScript;
 
-use common::{json_input_path, wit_input_path, write_bare_ref_alias_closure};
+use common::{example_input_paths, json_input_path, write_bare_ref_alias_closure};
 
 #[test]
 fn typescript_hostile_documentation_is_wrapped_escaped_and_typechecks() {
@@ -258,22 +258,6 @@ fn descriptor_path(root: &Path) -> PathBuf {
 // The descriptor set of the stream-service sample proto.
 fn stream_descriptor_path(root: &Path) -> PathBuf {
     root.join("advanced/samples/descriptors/stream_service.bin")
-}
-
-fn linked_inputs_path(root: &Path) -> PathBuf {
-    root.join("advanced/samples/inputs/deps")
-}
-
-fn example_input_paths(root: &Path, example_id: &str) -> Vec<PathBuf> {
-    let input = wit_input_path(root, example_id);
-    let mut paths = vec![input.clone()];
-    if fs::read_to_string(&input)
-        .unwrap()
-        .contains("use nexus:temporal-types/")
-    {
-        paths.push(linked_inputs_path(root));
-    }
-    paths
 }
 
 fn typescript_root(root: &Path) -> PathBuf {

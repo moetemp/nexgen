@@ -149,7 +149,6 @@ the service, so its build links `stream-service.wit`.
 
 Only part of today's output builds, so the samples leave the rest out:
 
-- Python doesn't generate the service, since it can't import the protos.
 - TypeScript passes a `number` where a resource method's proto request wants a
   `Long`. `tsc` skips the service, but the test still checks its models.
 - .NET plans the writer's `uint64` `writer-id` as a `long`, so the sample
@@ -165,6 +164,8 @@ Only part of today's output builds, so the samples leave the rest out:
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),
   [`dotnet/wit/stream-writer/`](dotnet/wit/stream-writer/),
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
+- Python: [`python/wit/stream_service/`](python/wit/stream_service/),
+  [`python/tests/test_stream_service.py`](python/tests/test_stream_service.py)
 - TypeScript:
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
   [`typescript/wit/stream-writer/`](typescript/wit/stream-writer/),
@@ -232,6 +233,10 @@ perl -pi -e 's/^from temporal\.api\.(stream|streamservice)\./from streamprotos.t
 protoc -I descriptors/streams -I "$API" --csharp_out=dotnet/proto/streams \
   --csharp_opt=base_namespace= $FILES
 ```
+
+The Python examples map these protos to `streamprotos` with
+`python_proto_modules` in [`inputs/examples.toml`](inputs/examples.toml). The
+other `temporal/...` protos keep their `temporalio` modules.
 
 The TypeScript `typescript/proto/streams.d.ts` mirrors the protos with only the
 `I<Message>` interfaces, oneof names and enums, as `protobufjs` declares them.

@@ -823,6 +823,31 @@ enum's name and members, even when its name differs from the protobuf enum's.
 Converters bridge the model and protobuf enum by number, and `@nexus.default`
 continues to name a WIT case.
 
+### Protos That the SDK Doesn't Have
+
+In Python, a proto in `temporal/...` is imported from the `temporalio` package,
+for example `temporalio.api.common.v1.message_pb2`. A proto that the SDK doesn't
+have yet, such as one from an API change that isn't released, needs its own
+module. `--python-proto-module` maps a proto file path prefix, or one `.proto`
+file, to the module that replaces it. Repeat it for each prefix. A prefix
+matches whole path segments, and the longest matching prefix wins. The module
+must be a dotted Python name.
+
+```sh
+nexgen python stream.wit --descriptors stream.bin --output wit/stream \
+  --support-package temporal_support \
+  --python-proto-module temporal/api/stream/=protos.temporal.api.stream \
+  --python-proto-module temporal/api/enums/v1/stream.proto=protos.temporal.api.enums.v1.stream_pb2
+```
+
+With these, `temporal/api/stream/v1/message.proto` is the module
+`protos.temporal.api.stream.v1.message_pb2`. Other `temporal/...` files keep
+their `temporalio` module. In `examples.toml`, an example sets the same map as
+`python_proto_modules`.
+
+TypeScript needs no option. A `.d.ts` file can add the missing namespaces to
+`@temporalio/proto` with `declare module`.
+
 ### Transfer-Type Conversion
 
 ```wit

@@ -1588,8 +1588,45 @@ fn oneof_field_write(oneof: &ProtoOneof, value_expr: &str, required: bool) -> Re
     RenderedWireWrite { lines }
 }
 
+fn mapped_python_module_path(file_name: &str) -> Option<String> {
+    let config = crate::nexgen_config::current();
+    python_module_path_from_mappings(&config.python_proto_modules, file_name)
+}
+
+// The longest matching prefix wins, so one `.proto` file can map apart from its directory.
+fn python_module_path_from_mappings(
+    mappings: &[crate::nexgen_config::ProtoModule],
+    file_name: &str,
+) -> Option<String> {
+    let mapping = mappings
+        .iter()
+        .filter(|mapping| proto_prefix_matches(&mapping.proto_prefix, file_name))
+        .max_by_key(|mapping| mapping.proto_prefix.len())?;
+    let rest = file_name[mapping.proto_prefix.len()..].trim_start_matches('/');
+    let rest = rest.strip_suffix(".proto").map_or_else(
+        || rest.replace('/', "."),
+        |stem| format!("{}_pb2", stem.replace('/', ".")),
+    );
+    Some(if rest.is_empty() {
+        mapping.module.clone()
+    } else {
+        format!("{}.{rest}", mapping.module)
+    })
+}
+
+// A prefix matches whole path segments, so `temporal/api/stream` doesn't match
+// `temporal/api/streamservice/`.
+fn proto_prefix_matches(prefix: &str, file_name: &str) -> bool {
+    file_name
+        .strip_prefix(prefix)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with('/') || prefix.ends_with('/'))
+}
+
 fn python_module_path_for_file_name(file_name: Option<&str>, package: &str) -> Option<String> {
     if let Some(file_name) = file_name {
+        if let Some(module_path) = mapped_python_module_path(file_name) {
+            return Some(module_path);
+        }
         let mut module_path = file_name.replace('/', ".");
         if let Some(stripped) = module_path.strip_suffix(".proto") {
             module_path = format!("{stripped}_pb2");
@@ -1606,5 +1643,70 @@ fn python_module_path_for_file_name(file_name: Option<&str>, package: &str) -> O
         Some(format!("temporalio.{suffix}"))
     } else {
         Some(package.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::python_module_path_from_mappings;
+    use crate::nexgen_config::ProtoModule;
+
+    fn module_path(mappings: &[&str], file_name: &str) -> Option<String> {
+        let mappings = mappings
+            .iter()
+            .map(|value| ProtoModule::parse(value).expect("valid mapping"))
+            .collect::<Vec<_>>();
+        python_module_path_from_mappings(&mappings, file_name)
+    }
+
+    #[test]
+    fn a_proto_prefix_matches_whole_path_segments() {
+        for prefix in ["temporal/api/stream", "temporal/api/stream/"] {
+            let mapping = format!("{prefix}=protos.stream");
+            assert_eq!(
+                module_path(&[&mapping], "temporal/api/stream/v1/message.proto").as_deref(),
+                Some("protos.stream.v1.message_pb2")
+            );
+            assert_eq!(
+                module_path(
+                    &[&mapping],
+                    "temporal/api/streamservice/v1/request_response.proto"
+                ),
+                None
+            );
+        }
+        assert_eq!(
+            module_path(
+                &["temporal/api/enums/v1/stream.proto=protos.stream_pb2"],
+                "temporal/api/enums/v1/stream.proto"
+            )
+            .as_deref(),
+            Some("protos.stream_pb2")
+        );
+    }
+
+    #[test]
+    fn the_longest_proto_prefix_wins() {
+        let mappings = [
+            "temporal/api/=protos",
+            "temporal/api/common/=local.common",
+            "temporal/api/enums/v1/stream.proto=local.stream_pb2",
+        ];
+        assert_eq!(
+            module_path(&mappings, "temporal/api/common/v1/message.proto").as_deref(),
+            Some("local.common.v1.message_pb2")
+        );
+        assert_eq!(
+            module_path(&mappings, "temporal/api/enums/v1/stream.proto").as_deref(),
+            Some("local.stream_pb2")
+        );
+        assert_eq!(
+            module_path(&mappings, "temporal/api/enums/v1/workflow.proto").as_deref(),
+            Some("protos.enums.v1.workflow_pb2")
+        );
+        assert_eq!(
+            module_path(&mappings, "google/protobuf/duration.proto"),
+            None
+        );
     }
 }

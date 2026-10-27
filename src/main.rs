@@ -30,7 +30,7 @@ enum Commands {
     #[command(about = "Generate Java bindings")]
     Java(JavaGenerateArgs),
     #[command(about = "Generate Python bindings")]
-    Python(SupportPackageGenerateArgs),
+    Python(PythonGenerateArgs),
     #[command(alias = "ts", about = "Generate TypeScript bindings (alias: ts)")]
     Typescript(TypescriptGenerateArgs),
     #[cfg(feature = "advanced")]
@@ -86,6 +86,27 @@ struct DotnetGenerateArgs {
     /// Each input module's types live in a namespace below it.
     #[arg(long = "namespace")]
     namespace: Option<String>,
+}
+
+#[derive(Args)]
+struct PythonGenerateArgs {
+    #[command(flatten)]
+    support: SupportPackageGenerateArgs,
+    /// A Python module for protos that `temporalio.api` doesn't have, as `PROTO_PREFIX=MODULE`, for
+    /// example `temporal/api/stream/=protos.temporal.api.stream`. Repeat it for each prefix.
+    #[cfg(feature = "advanced")]
+    #[arg(
+        long = "python-proto-module",
+        value_name = "PROTO_PREFIX=MODULE",
+        value_parser = parse_proto_module
+    )]
+    python_proto_modules: Vec<nexgen::nexgen_config::ProtoModule>,
+}
+
+#[cfg(feature = "advanced")]
+fn parse_proto_module(value: &str) -> Result<nexgen::nexgen_config::ProtoModule, String> {
+    nexgen::nexgen_config::ProtoModule::parse(value)
+        .ok_or_else(|| format!("`{value}` isn't `PROTO_PREFIX=MODULE` with a dotted Python MODULE"))
 }
 
 #[derive(Args)]
@@ -199,21 +220,22 @@ fn main() -> ExitCode {
         Commands::Python(args) => {
             #[cfg(feature = "advanced")]
             {
-                let system_nexus = args.common.system_nexus;
+                let system_nexus = args.support.common.system_nexus;
                 let config = NexgenConfig {
-                    mode: if args.common.generate_native_api {
+                    mode: if args.support.common.generate_native_api {
                         nexgen::generator::GenerationMode::NativeApi
                     } else {
                         nexgen::generator::GenerationMode::DefinitionsOnly
                     },
                     system_nexus,
+                    python_proto_modules: args.python_proto_modules,
                 };
                 let mut request = generate_request(
                     Language::Python,
-                    args.common,
+                    args.support.common,
                     Default::default(),
                     None,
-                    args.support_package,
+                    args.support.support_package,
                 );
                 request.config = config;
                 generate_to_file(&request)
@@ -222,10 +244,10 @@ fn main() -> ExitCode {
             {
                 generate_to_file(&generate_request(
                     Language::Python,
-                    args.common,
+                    args.support.common,
                     Default::default(),
                     None,
-                    args.support_package,
+                    args.support.support_package,
                 ))
             }
         }
@@ -240,6 +262,7 @@ fn main() -> ExitCode {
                         nexgen::generator::GenerationMode::DefinitionsOnly
                     },
                     system_nexus,
+                    python_proto_modules: Vec::new(),
                 };
                 let mut request = generate_request(
                     Language::TypeScript,
@@ -306,6 +329,7 @@ fn generate_request(
                 nexgen::generator::GenerationMode::DefinitionsOnly
             },
             system_nexus: args.system_nexus,
+            python_proto_modules: Vec::new(),
         },
         #[cfg(not(feature = "advanced"))]
         config: Default::default(),

@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 from nexusrpc import Operation, service
+import typing
+import temporalio.workflow
+
 from .models import (
     CloseWriterRequest,
     CloseWriterResponse,
@@ -15,6 +18,10 @@ from .models import (
     WriteRecordsResponse,
     WriterResult,
 )
+from ._resources.writer import bind_writer_client
+
+if typing.TYPE_CHECKING:
+    from ._resources import Writer
 
 
 @service(name="temporal.sdk.streams.v1.StreamWriter")
@@ -48,3 +55,107 @@ class StreamWriter:
         CloseWritersRequest,
         CloseWritersResponse,
     ] = Operation(name="CloseWriters")
+
+
+class StreamWriterClient:
+    def __init__(self, endpoint: str) -> None:
+        self._nexus_client: typing.Any = temporalio.workflow.create_nexus_client(
+            service="temporal.sdk.streams.v1.StreamWriter",
+            endpoint=endpoint,
+        )
+
+    async def open_writer(
+        self,
+        *,
+        stream: StreamRef,
+        failed_tasks: list[int] | None = None,
+        producer: Producer | None = None,
+        max_batch_size: int | None = None,
+        max_retry_duration: datetime.timedelta | None = None,
+        previous_completed_task: WorkflowTaskEpoch | None = None,
+    ) -> Writer:
+        """
+        Args:
+            failed_tasks: Local Activity only. The run's failed or timed out Workflow
+                Tasks.
+            max_batch_size: A write sends at most this many Records in one batch. Zero
+                is 1000.
+            max_retry_duration: How long a write retries a Store failure. Empty is 10 s.
+            previous_completed_task: Local Activity only. The run's last completed
+                Workflow Task.
+        """
+        request = OpenWriterRequest(
+            stream=stream,
+            failed_tasks=failed_tasks or [],
+            producer=producer,
+            max_batch_size=max_batch_size,
+            max_retry_duration=max_retry_duration,
+            previous_completed_task=previous_completed_task,
+        )
+        handle = await self._nexus_client.start_operation(
+            operation="OpenWriter",
+            input=request,
+            output_type=WriterResult,
+        )
+        result = await handle
+        if result.writer_id is None:
+            raise RuntimeError("OpenWriter answered without `writer_id`")
+        resource = Writer(
+            writer_id=result.writer_id,
+        )
+        return bind_writer_client(resource, self._nexus_client)
+
+    async def write_records(
+        self,
+        *,
+        records: list[AppendRecord] | None = None,
+        writer_id: int | None = None,
+    ) -> temporalio.workflow.NexusOperationHandle[WriteRecordsResponse]:
+        request = WriteRecordsRequest(
+            records=records or [],
+            writer_id=writer_id,
+        )
+        return await self._nexus_client.start_operation(
+            operation="WriteRecords",
+            input=request,
+            output_type=WriteRecordsResponse,
+        )
+
+    async def close_writer(
+        self,
+        *,
+        writer_id: int | None = None,
+    ) -> temporalio.workflow.NexusOperationHandle[CloseWriterResponse]:
+        request = CloseWriterRequest(
+            writer_id=writer_id,
+        )
+        return await self._nexus_client.start_operation(
+            operation="CloseWriter",
+            input=request,
+            output_type=CloseWriterResponse,
+        )
+
+    async def free_writer(
+        self,
+        *,
+        writer_id: int | None = None,
+    ) -> temporalio.workflow.NexusOperationHandle[FreeWriterResponse]:
+        request = FreeWriterRequest(
+            writer_id=writer_id,
+        )
+        return await self._nexus_client.start_operation(
+            operation="FreeWriter",
+            input=request,
+            output_type=FreeWriterResponse,
+        )
+
+    async def close_writers(
+        self,
+    ) -> temporalio.workflow.NexusOperationHandle[CloseWritersResponse]:
+        """Drop every open writer, for example at shutdown."""
+        request = CloseWritersRequest()
+        return await self._nexus_client.start_operation(
+            operation="CloseWriters",
+            input=request,
+            output_type=CloseWritersResponse,
+        )

@@ -2,48 +2,72 @@
 
 from __future__ import annotations
 
-from .models import (
-    AppendRecord,
-    CloseWriterRequest,
-    CloseWriterResponse,
-    CloseWritersRequest,
-    CloseWritersResponse,
-    Execution,
-    ExecutionType,
-    FreeWriterRequest,
-    FreeWriterResponse,
-    OpenWriterRequest,
-    Producer,
-    ProducerEpoch,
-    StreamProducerKind,
-    StreamRef,
-    Timestamp,
-    WorkflowTaskEpoch,
-    WriteRecordsRequest,
-    WriteRecordsResponse,
-    WriterResult,
-)
-from .services import StreamWriter
+import collections.abc
+import typing
+
+import nexusrpc
+import temporalio.converter
+from .services import StreamWriterClient
+from . import services as _services
 
 __all__ = [
-    "AppendRecord",
-    "CloseWriterRequest",
-    "CloseWriterResponse",
-    "CloseWritersRequest",
-    "CloseWritersResponse",
-    "Execution",
-    "ExecutionType",
-    "FreeWriterRequest",
-    "FreeWriterResponse",
-    "OpenWriterRequest",
-    "Producer",
-    "ProducerEpoch",
-    "StreamProducerKind",
-    "StreamRef",
-    "Timestamp",
-    "WorkflowTaskEpoch",
-    "WriteRecordsRequest",
-    "WriteRecordsResponse",
-    "WriterResult",
-    "StreamWriter",
+    "StreamWriterClient",
 ]
+
+
+_InputT = typing.TypeVar("_InputT")
+_OutputT = typing.TypeVar("_OutputT")
+
+
+_SerializationContextFactory = collections.abc.Callable[
+    [_InputT], temporalio.converter.SerializationContext
+]
+
+
+class _NexusOperationInfo(typing.Generic[_InputT, _OutputT]):
+    def __init__(
+        self,
+        *,
+        operation: nexusrpc.Operation[_InputT, _OutputT],
+        serialization_context: _SerializationContextFactory[_InputT] | None = None,
+    ) -> None:
+        self.operation: nexusrpc.Operation[_InputT, _OutputT] = operation
+        self.serialization_context: _SerializationContextFactory[_InputT] | None = (
+            serialization_context
+        )
+
+
+__nexus_operation_registry__: dict[
+    tuple[str, str], _NexusOperationInfo[typing.Any, typing.Any]
+] = {
+    (
+        "temporal.sdk.streams.v1.StreamWriter",
+        "OpenWriter",
+    ): _NexusOperationInfo(
+        operation=_services.StreamWriter.open_writer,
+    ),
+    (
+        "temporal.sdk.streams.v1.StreamWriter",
+        "WriteRecords",
+    ): _NexusOperationInfo(
+        operation=_services.StreamWriter.write_records,
+    ),
+    (
+        "temporal.sdk.streams.v1.StreamWriter",
+        "CloseWriter",
+    ): _NexusOperationInfo(
+        operation=_services.StreamWriter.close_writer,
+    ),
+    (
+        "temporal.sdk.streams.v1.StreamWriter",
+        "FreeWriter",
+    ): _NexusOperationInfo(
+        operation=_services.StreamWriter.free_writer,
+    ),
+    (
+        "temporal.sdk.streams.v1.StreamWriter",
+        "CloseWriters",
+    ): _NexusOperationInfo(
+        operation=_services.StreamWriter.close_writers,
+    ),
+}

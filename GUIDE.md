@@ -495,7 +495,9 @@ wrapper (for WIT-direct fields) or proto field presence semantics (for
 proto-backed fields).
 
 In a record with `@nexus.proto`, write a proto `bytes` field as `list<u8>`.
-nexgen generates the field as bytes. In other records, `list<u8>` is a list of
+nexgen generates Python `bytes`, TypeScript `Uint8Array`, Go `[]byte`, or .NET
+`byte[]`. The .NET converters translate between `byte[]` and protobuf
+`ByteString` at the wire boundary. In other records, `list<u8>` is a list of
 integers, like any other `list<T>`.
 
 ---
@@ -1575,9 +1577,11 @@ Type parameters are not currently supported in proto-backed records except in
 Python, .NET, and TypeScript when a field or oneof member maps to Temporal's
 protobuf `Payload` or `Payloads` carrier. When decoding a parameterized Python
 model, concrete type arguments propagate through nested proto-backed records and
-become type hints for single-value `Payload` fields. An unparameterized model
-decodes those fields as `typing.Any`. `Payloads` fields continue to decode as
-untyped sequences.
+become type hints for single-value `Payload` and `Payloads` fields. An
+unparameterized model decodes those fields as `typing.Any`. A generic `Payloads`
+carrier with an empty envelope decodes as `None`; more than one payload raises
+`ValueError` with the field name and payload count. Required carrier fields
+still require a wire envelope.
 
 .NET generic proto-backed records declare an open generic transfer-type
 converter, such as `typeof(Request<,>.TransferTypeConverter)`, which the SDK
@@ -1665,6 +1669,17 @@ type retry-policy = placeholder;
 
 The `placeholder` WIT type is a string alias used when the actual type is
 entirely replaced by language-specific overrides.
+
+Go imports required by an override are collected for both type aliases and
+record fields. For example, this field generates `time.Duration` and imports
+`time` without needing a separate type alias:
+
+```wit
+record timing {
+  /// @nexus.type go="time.Duration"
+  elapsed: u64,
+}
+```
 
 ---
 

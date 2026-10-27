@@ -17,5 +17,5 @@
     "tests/**/*.ts",
     "proto/**/*.d.ts"
   ],
-  "exclude": ["wit/stream-service/**", "wit/stream-writer/**"]
+  "exclude": ["wit/stream-writer/**"]
 }

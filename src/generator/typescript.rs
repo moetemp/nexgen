@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -3130,12 +3131,14 @@ struct RenderedWithArgumentsField {
 #[derive(Debug, Clone, Default)]
 pub(in crate::generator) struct TypeScriptRequirements {
     pub(in crate::generator) long: bool,
+    long_value: bool,
     value_namespace_imports: BTreeSet<String>,
 }
 
 impl TypeScriptRequirements {
     fn merge(&mut self, other: &TypeScriptRequirements) {
         self.long |= other.long;
+        self.long_value |= other.long_value;
         self.value_namespace_imports
             .extend(other.value_namespace_imports.iter().cloned());
     }
@@ -3545,7 +3548,10 @@ fn render_typescript_requirement_imports(
     output: &mut String,
     requirements: &TypeScriptRequirements,
 ) {
-    if requirements.long {
+    // The value import also gives the type, and a second `Long` import would clash with it.
+    if requirements.long_value {
+        output.push_str("import Long from 'long';\n");
+    } else if requirements.long {
         output.push_str("import type Long from 'long';\n");
     }
 }
@@ -4482,10 +4488,11 @@ fn render_resources_module(
     support_package: &str,
     api_plan: &PlannedSpec,
 ) -> String {
+    let mut requirements = requirements.clone();
     let mut body = String::new();
     for service in services {
         for resource in &service.resources {
-            render_resource(&mut body, resource, service);
+            render_resource(&mut body, resource, service, &mut requirements);
             body.push('\n');
         }
     }
@@ -4497,7 +4504,7 @@ fn render_resources_module(
         language_imports,
         &[("workflow", typescript_workflow_module(), false)],
     );
-    render_typescript_requirement_imports(&mut imports, requirements);
+    render_typescript_requirement_imports(&mut imports, &requirements);
     render_type_imports(
         &mut imports,
         "./models",
@@ -5599,7 +5606,12 @@ fn resource_client_require_function_name(resource: &PlannedResource) -> String {
     format!("require{}Client", resource.type_name)
 }
 
-fn render_resource(output: &mut String, resource: &PlannedResource, service: &RenderedService<'_>) {
+fn render_resource(
+    output: &mut String,
+    resource: &PlannedResource,
+    service: &RenderedService<'_>,
+    requirements: &mut TypeScriptRequirements,
+) {
     let client_symbol_name = resource_client_symbol_name(resource);
     if service.endpoint.is_none() {
         output.push_str("const ");
@@ -5684,6 +5696,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                     .expect("bound operation should exist on the resource service");
                 let branchable_params =
                     branchable_request_method_params(method, request_plan, operation);
+                let long_sources = typescript_long_sources(resource, method, operation);
                 let endpoint_expr = None;
                 let client_expr = service
                     .endpoint
@@ -5701,6 +5714,8 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                         request_plan,
                         &branchable_params,
                         true,
+                        &long_sources,
+                        requirements,
                     ));
                 } else {
                     output.push_str(&render_resource_method_operation_body(
@@ -5714,6 +5729,8 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                         request_plan,
                         &branchable_params,
                         false,
+                        &long_sources,
+                        requirements,
                     ));
                 }
             }
@@ -6000,6 +6017,8 @@ fn render_resource_method_operation_body(
     request_plan: &RequestPlan,
     branchable_params: &[String],
     direct_return: bool,
+    long_sources: &BTreeMap<String, LongSource>,
+    requirements: &mut TypeScriptRequirements,
 ) -> String {
     let indent_str = " ".repeat(indent);
     if let Some((param_name, remaining)) = branchable_params.split_first() {
@@ -6020,6 +6039,8 @@ fn render_resource_method_operation_body(
             request_plan,
             remaining,
             direct_return,
+            long_sources,
+            requirements,
         ));
         output.push_str(&indent_str);
         output.push_str("} else {\n");
@@ -6034,13 +6055,15 @@ fn render_resource_method_operation_body(
             request_plan,
             remaining,
             direct_return,
+            long_sources,
+            requirements,
         ));
         output.push_str(&indent_str);
         output.push_str("}\n");
         return output;
     }
 
-    let request_expr = render_request_plan_typescript(request_plan);
+    let request_expr = render_request_plan_typescript(request_plan, long_sources, requirements);
     let mut output = String::new();
     output.push_str(&indent_str);
     output.push_str("const request = ");
@@ -6188,8 +6211,30 @@ fn render_resource_start_operation(
     output.push_str("    );\n");
 }
 
-fn render_request_plan_typescript(plan: &RequestPlan) -> String {
-    render_request_plan(
+fn render_request_plan_typescript(
+    plan: &RequestPlan,
+    long_sources: &BTreeMap<String, LongSource>,
+    requirements: &mut TypeScriptRequirements,
+) -> String {
+    let uses_long = Cell::new(false);
+    let long_value = |name: &str, value: String| {
+        let Some(source) = long_sources.get(name) else {
+            return value;
+        };
+        uses_long.set(true);
+        let unsigned = if source.unsigned { ", true" } else { "" };
+        let converted = if source.list {
+            format!("{value}.map((item) => Long.fromNumber(item{unsigned}))")
+        } else {
+            format!("Long.fromNumber({value}{unsigned})")
+        };
+        if source.optional {
+            format!("{value} == null ? undefined : {converted}")
+        } else {
+            converted
+        }
+    };
+    let rendered = render_request_plan(
         plan,
         typescript_generated_field_name,
         |name, value| format!("{name}: {value}"),
@@ -6200,9 +6245,62 @@ fn render_request_plan_typescript(plan: &RequestPlan) -> String {
                 format!("{{ {} }}", fields.join(", "))
             }
         },
-        |name| format!("this.{}", typescript_generated_field_name(name)),
-        typescript_generated_field_name,
-    )
+        |name| {
+            long_value(
+                name,
+                format!("this.{}", typescript_generated_field_name(name)),
+            )
+        },
+        |name| long_value(name, typescript_generated_field_name(name)),
+    );
+    requirements.long_value |= uses_long.get();
+    rendered
+}
+
+/// A 64-bit resource field or method param, or a list of them.
+#[derive(Debug, Clone, Copy)]
+struct LongSource {
+    optional: bool,
+    list: bool,
+    unsigned: bool,
+}
+
+/// The 64-bit resource fields and method params of a method whose request is proto-backed. They
+/// are numbers, and the proto-backed request has `Long` fields.
+fn typescript_long_sources(
+    resource: &PlannedResource,
+    method: &PlannedResourceMethod,
+    operation: &RenderedOperation<'_>,
+) -> BTreeMap<String, LongSource> {
+    if operation
+        .input
+        .as_ref()
+        .is_none_or(|input| input.transfer_type_converter.is_none())
+    {
+        return BTreeMap::new();
+    }
+    resource
+        .fields
+        .iter()
+        .chain(&method.params)
+        .filter_map(|field| {
+            let (kind, list) = match &field.kind {
+                PlannedType::List(item) => (item.as_ref(), true),
+                kind => (kind, false),
+            };
+            let unsigned = match kind {
+                PlannedType::Int(IntSpec::I64) => false,
+                PlannedType::Int(IntSpec::U64) => true,
+                _ => return None,
+            };
+            let source = LongSource {
+                optional: field.optional,
+                list,
+                unsigned,
+            };
+            Some((field.name.clone(), source))
+        })
+        .collect()
 }
 
 /// The resource that an operation returns, bound to `client` when one is given, or the
@@ -6815,6 +6913,15 @@ mod tests {
         let mut imports = String::new();
         render_typescript_requirement_imports(&mut imports, &requirements);
         assert_eq!(imports, "import type Long from 'long';\n");
+
+        let requirements = TypeScriptRequirements {
+            long: true,
+            long_value: true,
+            ..Default::default()
+        };
+        let mut imports = String::new();
+        render_typescript_requirement_imports(&mut imports, &requirements);
+        assert_eq!(imports, "import Long from 'long';\n");
 
         let mut imports = String::new();
         render_typescript_requirement_imports(&mut imports, &TypeScriptRequirements::default());

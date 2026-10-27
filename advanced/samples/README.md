@@ -146,11 +146,8 @@ the service, so its build links `stream-service.wit`.
 
 Only part of today's output builds, so the samples leave the rest out:
 
-- TypeScript passes a `number` where a resource method's proto request wants a
-  `Long`. `tsc` skips the service, but the test still checks its models.
-- The TypeScript writer passes a `number` where its proto request wants a
-  `Long`, and returns a resource that it doesn't import as a value. `tsc` skips
-  it.
+- The TypeScript writer client, which has no endpoint, returns a resource that
+  it doesn't import as a value. `tsc` skips it.
 - Python doesn't generate the writer, since a caller method's docstring loses
   its indent.
 

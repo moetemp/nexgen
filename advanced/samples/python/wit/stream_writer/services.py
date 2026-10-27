@@ -19,7 +19,10 @@ from .models import (
     WriteRecordsResponse,
     WriterResult,
 )
-from ._resources.writer import bind_writer_client
+from ._resources.writer import (
+    Writer,
+    bind_writer_client,
+)
 
 if typing.TYPE_CHECKING:
     from .models import (
@@ -28,7 +31,6 @@ if typing.TYPE_CHECKING:
         StreamRef,
         WorkflowTaskEpoch,
     )
-    from ._resources import Writer
 
 
 @service(name="temporal.sdk.streams.v1.StreamWriter")

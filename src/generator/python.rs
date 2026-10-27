@@ -5024,7 +5024,7 @@ fn render_endpoint_service_object_unpacked_method(
     output.push_str(":\n");
     render_unpacked_operation_docstring(output, operation, unpacked_input, None);
     for flattened_message in &unpacked_input.flattened_messages {
-        render_flattened_message_setup(output, flattened_message);
+        render_flattened_message_setup(output, "        ", flattened_message);
     }
     output.push_str("        request = ");
     output.push_str(&unpacked_input.model_name);
@@ -7356,7 +7356,7 @@ fn render_unpacked_operation_function(
     }
     render_unpacked_operation_docstring(output, operation, unpacked_input, None);
     for flattened_message in &unpacked_input.flattened_messages {
-        render_flattened_message_setup(output, flattened_message);
+        render_flattened_message_setup(output, "    ", flattened_message);
     }
     output.push_str("    request = ");
     output.push_str(&unpacked_input.model_name);
@@ -7586,7 +7586,7 @@ fn render_function_unpacked_implementation(
         }
     }
     for flattened_message in &unpacked_input.flattened_messages {
-        render_flattened_message_setup(output, flattened_message);
+        render_flattened_message_setup(output, "    ", flattened_message);
     }
 
     output.push_str("    request = ");
@@ -7635,6 +7635,7 @@ fn rendered_function_implementation_renders_field(
 
 fn render_flattened_message_setup(
     output: &mut String,
+    indent: &str,
     flattened_message: &RenderedFlattenedMessage,
 ) {
     let always_construct = flattened_message.required
@@ -7643,26 +7644,30 @@ fn render_flattened_message_setup(
             .iter()
             .any(|field| field.default_kind == PythonFieldDefaultKind::Required);
 
-    output.push_str("    ");
+    output.push_str(indent);
     output.push_str(&flattened_message.local_name);
     output.push_str(" = ");
     if always_construct {
         output.push_str(&flattened_message.model_name);
         output.push_str("(\n");
         for field in &flattened_message.fields {
-            output.push_str("        ");
+            output.push_str(indent);
+            output.push_str("    ");
             output.push_str(&field.attr_name);
             output.push('=');
             output.push_str(&field.value_expr);
             output.push_str(",\n");
         }
-        output.push_str("    )\n");
+        output.push_str(indent);
+        output.push_str(")\n");
         return;
     }
 
     output.push_str("(\n");
-    output.push_str("        None\n");
-    output.push_str("        if ");
+    output.push_str(indent);
+    output.push_str("    None\n");
+    output.push_str(indent);
+    output.push_str("    if ");
     for (index, field) in flattened_message.fields.iter().enumerate() {
         if index > 0 {
             output.push_str(" and ");
@@ -7671,18 +7676,22 @@ fn render_flattened_message_setup(
         output.push_str(" is None");
     }
     output.push_str("\n");
-    output.push_str("        else ");
+    output.push_str(indent);
+    output.push_str("    else ");
     output.push_str(&flattened_message.model_name);
     output.push_str("(\n");
     for field in &flattened_message.fields {
-        output.push_str("            ");
+        output.push_str(indent);
+        output.push_str("        ");
         output.push_str(&field.attr_name);
         output.push('=');
         output.push_str(&field.value_expr);
         output.push_str(",\n");
     }
-    output.push_str("        )\n");
+    output.push_str(indent);
     output.push_str("    )\n");
+    output.push_str(indent);
+    output.push_str(")\n");
 }
 
 fn render_inline_nexus_client(output: &mut String, service: &RenderedService<'_>, indent: &str) {

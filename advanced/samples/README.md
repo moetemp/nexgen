@@ -148,8 +148,6 @@ Only part of today's output builds, so the samples leave the rest out:
 
 - The TypeScript writer client, which has no endpoint, returns a resource that
   it doesn't import as a value. `tsc` skips it.
-- Python doesn't generate the writer's client, since the empty signature of
-  `close-writers` keeps a bare `*`.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)
@@ -157,6 +155,7 @@ Only part of today's output builds, so the samples leave the rest out:
   [`dotnet/wit/stream-writer/`](dotnet/wit/stream-writer/),
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
 - Python: [`python/wit/stream_service/`](python/wit/stream_service/),
+  [`python/wit/stream_writer/`](python/wit/stream_writer/),
   [`python/tests/test_stream_service.py`](python/tests/test_stream_service.py)
 - TypeScript:
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),

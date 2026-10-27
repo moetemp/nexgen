@@ -5174,7 +5174,10 @@ fn render_endpoint_service_object_unpacked_method(
     output.push_str(&operation.attr_name);
     output.push_str("(\n");
     output.push_str("        self,\n");
-    output.push_str("        *,\n");
+    // Python refuses a bare `*` with no keyword parameter after it.
+    if !unpacked_input.parameters.is_empty() {
+        output.push_str("        *,\n");
+    }
     for field in &unpacked_input.parameters {
         output.push_str("        ");
         output.push_str(&field.attr_name);
@@ -7486,7 +7489,9 @@ fn render_unpacked_operation_function(
     }
     render_operation_signature_start(output, &operation.attr_name);
     render_endpoint_parameter(output, service);
-    output.push_str("    *,\n");
+    if !unpacked_input.parameters.is_empty() {
+        output.push_str("    *,\n");
+    }
     for field in &unpacked_input.parameters {
         output.push_str("    ");
         output.push_str(&field.attr_name);
@@ -8023,7 +8028,9 @@ fn render_operation_poll_function(
     }
     output.push('\n');
     render_operation_signature_start(output, &format!("iter_{}", operation.attr_name));
-    output.push_str("    *,\n");
+    if !unpacked_input.parameters.is_empty() {
+        output.push_str("    *,\n");
+    }
     for field in &unpacked_input.parameters {
         output.push_str("    ");
         output.push_str(&field.attr_name);

@@ -725,6 +725,25 @@ fn assert_no_generated_python_diagnostic_suppressions(files: &BTreeMap<PathBuf, 
     }
 }
 
+fn python_example_targets(root: &Path, example_id: &str) -> Vec<String> {
+    let config: toml::Table =
+        fs::read_to_string(root.join("advanced/samples/inputs/examples.toml"))
+            .unwrap()
+            .parse()
+            .unwrap();
+    config
+        .get(example_id)
+        .and_then(|example| example.get("targets"))
+        .and_then(|targets| targets.as_array())
+        .map(|targets| {
+            targets
+                .iter()
+                .filter_map(|target| target.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: &Path) {
     let mut command = Command::new(support::nexgen_binary());
     command
@@ -741,7 +760,12 @@ fn generate_formatted_python_output(root: &Path, example_id: &str, output_path: 
             "--support-package",
             "temporal_support",
         ]);
-    if example_id == PRIMARY_EXAMPLE_ID {
+    // As in the example build, an example's targets apply, and the client target needs System Nexus.
+    let targets = python_example_targets(root, example_id);
+    if !targets.is_empty() {
+        command.args(["--targets", &targets.join(",")]);
+    }
+    if example_id == PRIMARY_EXAMPLE_ID || targets.iter().any(|target| target == "client") {
         command.arg("--system-nexus");
     }
     let status = command.status().unwrap();

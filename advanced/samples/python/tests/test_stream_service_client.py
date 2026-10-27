@@ -20,6 +20,13 @@ from wit.stream_service.models import (
     StreamRecord,
     StreamRef,
 )
+from wit.stream_writer.client import StreamWriterClientExtension
+from wit.stream_writer.models import (
+    CloseWriterRequest,
+    CloseWriterResponse,
+    CloseWritersRequest,
+    CloseWritersResponse,
+)
 
 
 @dataclasses.dataclass
@@ -53,7 +60,7 @@ class FakeNexusClient:
         return result()
 
 
-class FakeClient(StreamServiceClientExtension):
+class FakeClient(StreamServiceClientExtension, StreamWriterClientExtension):
     """Stands in for the SDK client that inherits the generated extensions."""
 
     def __init__(self, answers: dict[str, list[object]]) -> None:
@@ -126,3 +133,28 @@ async def test_a_poll_yields_each_page_until_the_helper_stops() -> None:
         ReadRecordsRequest(stream=ref, from_offset=1),
         ReadRecordsRequest(stream=ref, from_offset=2),
     ]
+
+
+async def test_a_service_with_no_endpoint_is_left_to_the_client() -> None:
+    client = FakeClient({"CloseWriter": [CloseWriterResponse(last_offset=7)]})
+
+    closed = await (await client.close_writer(writer_id=3))
+
+    assert closed.last_offset == 7
+    assert client.calls == [
+        Call(
+            "temporal.sdk.streams.v1.StreamWriter",
+            None,
+            "CloseWriter",
+            CloseWriterRequest(writer_id=3),
+        )
+    ]
+
+
+async def test_an_empty_request_takes_no_arguments() -> None:
+    client = FakeClient({"CloseWriters": [CloseWritersResponse(failed=0)]})
+
+    closed = await (await client.close_writers())
+
+    assert closed.failed == 0
+    assert [call.input for call in client.calls] == [CloseWritersRequest()]

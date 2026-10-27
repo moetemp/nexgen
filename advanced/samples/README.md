@@ -234,3 +234,22 @@ The TypeScript `typescript/proto/streams.d.ts` mirrors the protos with only the
 `I<Message>` interfaces, oneof names and enums, as `protobufjs` declares them.
 It adds them to `@temporalio/proto` with `declare module`, so the generated code
 imports them as it does the other Temporal protos.
+
+### The oneof sample proto
+
+`descriptors/oneofsample/v1/oneof.proto` gives the `proto-oneof` sample a oneof
+with an enum case, which no Temporal API message has. After a change to it,
+rebuild the descriptor set and the bindings with the same tools.
+
+```sh
+cd advanced/samples
+protoc -I descriptors --descriptor_set_out=descriptors/oneofsample.bin \
+  oneofsample/v1/oneof.proto
+protoc -I descriptors --python_out=python --mypy_out=python \
+  oneofsample/v1/oneof.proto
+protoc -I descriptors --csharp_out=dotnet/proto/oneofsample \
+  oneofsample/v1/oneof.proto
+```
+
+`typescript/proto/oneofsample.d.ts` mirrors it by hand, and `package.json` maps
+`#oneofsample` to it.

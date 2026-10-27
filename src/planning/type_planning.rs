@@ -1773,10 +1773,12 @@ interface alerts {
     }
 
     fn plan_single_leaf(spec: ApiSpec) -> PlannedSpec {
-        let descriptors = DescriptorIndex::load(
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("advanced/samples/descriptors/temporal_api.bin"),
-        )
+        let descriptors_root =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("advanced/samples/descriptors");
+        let descriptors = DescriptorIndex::load_many(&[
+            descriptors_root.join("temporal_api.bin"),
+            descriptors_root.join("oneofsample.bin"),
+        ])
         .unwrap();
         let authored_tree = ApiSpecTree {
             root: ApiSpecNode::Leaf(ApiSpecLeaf {

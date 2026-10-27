@@ -40,6 +40,11 @@ fn stream_descriptor_path(root: &Path) -> PathBuf {
     root.join("advanced/samples/descriptors/streams.bin")
 }
 
+// The descriptor set of the proto-oneof sample's own proto.
+fn oneof_descriptor_path(root: &Path) -> PathBuf {
+    root.join("advanced/samples/descriptors/oneofsample.bin")
+}
+
 fn dotnet_root(root: &Path) -> PathBuf {
     root.join("advanced/samples/dotnet")
 }
@@ -64,6 +69,8 @@ fn generate_dotnet_output(root: &Path, example_id: &str, output_path: &Path) {
             descriptor_path(root).to_str().unwrap(),
             "--descriptors",
             stream_descriptor_path(root).to_str().unwrap(),
+            "--descriptors",
+            oneof_descriptor_path(root).to_str().unwrap(),
             "--output",
             output_path.to_str().unwrap(),
             "--native-api",

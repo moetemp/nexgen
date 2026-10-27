@@ -11,6 +11,14 @@ namespace Nexgen.ProtoOneof
 {
 
     [GeneratedCode("nexgen", null)]
+    public enum Shade
+    {
+        ShadeUnspecified = 0,
+        ShadeLight = 1,
+        ShadeDark = 2,
+    }
+
+    [GeneratedCode("nexgen", null)]
     public abstract record ActivitySelection
     {
         private ActivitySelection() { }
@@ -23,6 +31,18 @@ namespace Nexgen.ProtoOneof
     }
 
     [GeneratedCode("nexgen", null)]
+    public abstract record EndpointTargetVariant
+    {
+        private EndpointTargetVariant() { }
+
+        [GeneratedCode("nexgen", null)]
+        public sealed record Worker(Temporalio.Api.Nexus.V1.EndpointTarget.Types.Worker Value) : EndpointTargetVariant;
+
+        [GeneratedCode("nexgen", null)]
+        public sealed record External(Temporalio.Api.Nexus.V1.EndpointTarget.Types.External Value) : EndpointTargetVariant;
+    }
+
+    [GeneratedCode("nexgen", null)]
     public abstract record OutcomeValue<TOutput>
     {
         private OutcomeValue() { }
@@ -32,6 +52,167 @@ namespace Nexgen.ProtoOneof
 
         [GeneratedCode("nexgen", null)]
         public sealed record Failure(System.Exception Value) : OutcomeValue<TOutput>;
+    }
+
+    [GeneratedCode("nexgen", null)]
+    public abstract record PaintPick
+    {
+        private PaintPick() { }
+
+        [GeneratedCode("nexgen", null)]
+        public sealed record Tone(OneofSample.V1.Shade Value) : PaintPick;
+
+        [GeneratedCode("nexgen", null)]
+        public sealed record Name(string Value) : PaintPick;
+    }
+
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(EndpointExternalTarget.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record EndpointExternalTarget
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EndpointExternalTarget"/> class.
+        /// </summary>
+        public EndpointExternalTarget(string url)
+        {
+            Url = url;
+        }
+
+        public string Url { get; init; }
+
+        internal static EndpointExternalTarget FromTransferType(Temporalio.Api.Nexus.V1.EndpointTarget.Types.External wire)
+        {
+            return new EndpointExternalTarget(wire.Url);
+        }
+
+        internal Temporalio.Api.Nexus.V1.EndpointTarget.Types.External ToTransferType()
+        {
+            var proto = new Temporalio.Api.Nexus.V1.EndpointTarget.Types.External();
+            proto.Url = Url;
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(Temporalio.Api.Nexus.V1.EndpointTarget.Types.External);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((EndpointExternalTarget)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : EndpointExternalTarget.FromTransferType((Temporalio.Api.Nexus.V1.EndpointTarget.Types.External)transferType);
+        }
+
+    }
+
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(EndpointTarget.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record EndpointTarget
+    {
+        public EndpointTargetVariant? Variant { get; init; }
+
+        internal static EndpointTarget FromTransferType(Temporalio.Api.Nexus.V1.EndpointTarget wire)
+        {
+            EndpointTargetVariant? variantOneof;
+            switch (wire.VariantCase)
+            {
+                case Temporalio.Api.Nexus.V1.EndpointTarget.VariantOneofCase.Worker:
+                    variantOneof = new EndpointTargetVariant.Worker(wire.Worker);
+                    break;
+                case Temporalio.Api.Nexus.V1.EndpointTarget.VariantOneofCase.External:
+                    variantOneof = new EndpointTargetVariant.External(wire.External);
+                    break;
+                default:
+                    variantOneof = null;
+                    break;
+            }
+
+            return new EndpointTarget()
+            {
+                Variant = variantOneof,
+            };
+        }
+
+        internal Temporalio.Api.Nexus.V1.EndpointTarget ToTransferType()
+        {
+            var proto = new Temporalio.Api.Nexus.V1.EndpointTarget();
+            switch (Variant)
+            {
+                case EndpointTargetVariant.Worker workerCase:
+                    proto.Worker = workerCase.Value;
+                    break;
+                case EndpointTargetVariant.External externalCase:
+                    proto.External = externalCase.Value;
+                    break;
+            }
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(Temporalio.Api.Nexus.V1.EndpointTarget);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((EndpointTarget)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : EndpointTarget.FromTransferType((Temporalio.Api.Nexus.V1.EndpointTarget)transferType);
+        }
+
+    }
+
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(EndpointWorkerTarget.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record EndpointWorkerTarget
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="EndpointWorkerTarget"/> class.
+        /// </summary>
+        public EndpointWorkerTarget(string @namespace, string taskQueue)
+        {
+            Namespace = @namespace;
+            TaskQueue = taskQueue;
+        }
+
+        public string Namespace { get; init; }
+        public string TaskQueue { get; init; }
+
+        internal static EndpointWorkerTarget FromTransferType(Temporalio.Api.Nexus.V1.EndpointTarget.Types.Worker wire)
+        {
+            return new EndpointWorkerTarget(wire.Namespace, wire.TaskQueue);
+        }
+
+        internal Temporalio.Api.Nexus.V1.EndpointTarget.Types.Worker ToTransferType()
+        {
+            var proto = new Temporalio.Api.Nexus.V1.EndpointTarget.Types.Worker();
+            proto.Namespace = Namespace;
+            proto.TaskQueue = TaskQueue;
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(Temporalio.Api.Nexus.V1.EndpointTarget.Types.Worker);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((EndpointWorkerTarget)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : EndpointWorkerTarget.FromTransferType((Temporalio.Api.Nexus.V1.EndpointTarget.Types.Worker)transferType);
+        }
+
     }
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(Outcome<>.TransferTypeConverter))]
@@ -100,6 +281,66 @@ namespace Nexgen.ProtoOneof
 
             /// <summary>Converts a transfer-type value to this model.</summary>
             public object? FromTransferType(object? transferType) => transferType is null ? null : Outcome<TOutput>.FromTransferType((Temporalio.Api.Update.V1.Outcome)transferType);
+        }
+
+    }
+
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(Paint.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record Paint
+    {
+        public PaintPick? Pick { get; init; }
+
+        internal static Paint FromTransferType(OneofSample.V1.Paint wire)
+        {
+            PaintPick? pickOneof;
+            switch (wire.PickCase)
+            {
+                case OneofSample.V1.Paint.PickOneofCase.Tone:
+                    pickOneof = new PaintPick.Tone(wire.Tone);
+                    break;
+                case OneofSample.V1.Paint.PickOneofCase.Name:
+                    pickOneof = new PaintPick.Name(wire.Name);
+                    break;
+                default:
+                    pickOneof = null;
+                    break;
+            }
+
+            return new Paint()
+            {
+                Pick = pickOneof,
+            };
+        }
+
+        internal OneofSample.V1.Paint ToTransferType()
+        {
+            var proto = new OneofSample.V1.Paint();
+            switch (Pick)
+            {
+                case PaintPick.Tone toneCase:
+                    proto.Tone = toneCase.Value;
+                    break;
+                case PaintPick.Name nameCase:
+                    proto.Name = nameCase.Value;
+                    break;
+            }
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(OneofSample.V1.Paint);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((Paint)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : Paint.FromTransferType((OneofSample.V1.Paint)transferType);
         }
 
     }

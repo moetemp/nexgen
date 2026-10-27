@@ -20,7 +20,8 @@ descriptors = "temporal"
 
 [proto-oneof]
 languages = ["python", "dotnet", "typescript"]
-descriptors = "temporal"
+# The sample proto has a oneof with an enum case, which no Temporal API message has.
+descriptors = ["temporal_api.bin", "oneofsample.bin"]
 
 [notification-service]
 languages = ["python", "dotnet", "typescript"]

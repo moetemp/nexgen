@@ -223,7 +223,10 @@ fn dotnet_imports_converters_only_where_unqualified_types_need_them() {
     for example in ["notification-service", "proto-oneof", "workflow-service"] {
         let files = generate_dotnet_files(
             &example_input_paths(&root, example),
-            &[descriptor_path(&root)],
+            &[
+                descriptor_path(&root),
+                root.join("advanced/samples/descriptors/oneofsample.bin"),
+            ],
         );
         let models = &files[&PathBuf::from("Models.cs")];
         assert!(models.contains("Temporalio.Converters.TemporalTransferTypeConverter"));

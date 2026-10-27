@@ -40,6 +40,48 @@ interface proto-oneof {
     run-id: string,
   }
 
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget.Worker"
+  record endpoint-worker-target {
+    namespace: string,
+    task-queue: string,
+  }
+
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget.External"
+  record endpoint-external-target {
+    url: string,
+  }
+
+  // Each case names a proto-bound record, not a scalar.
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget.variant"
+  variant endpoint-target-variant {
+    worker(endpoint-worker-target),
+    external(endpoint-external-target),
+  }
+
+  /// @nexus.proto "temporal.api.nexus.v1.EndpointTarget"
+  record endpoint-target {
+    %variant: option<endpoint-target-variant>,
+  }
+
+  /// @nexus.proto "oneofsample.v1.Shade" typescript-import="#oneofsample"
+  enum shade {
+    shade-unspecified,
+    shade-light,
+    shade-dark,
+  }
+
+  // One case names a proto-bound enum.
+  /// @nexus.proto "oneofsample.v1.Paint.pick" typescript-import="#oneofsample"
+  variant paint-pick {
+    tone(shade),
+    name(string),
+  }
+
+  /// @nexus.proto "oneofsample.v1.Paint" typescript-import="#oneofsample"
+  record paint {
+    pick: option<paint-pick>,
+  }
+
   /// @nexus.proto "temporal.api.workflowservice.v1.PauseActivityRequest"
   record pause-activity-request {
     namespace: string,

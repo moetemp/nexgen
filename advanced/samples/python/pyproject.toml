@@ -21,11 +21,11 @@ pythonpath = ["."]
 [tool.ruff]
 line-length = 88
 target-version = "py310"
-# The protoc output of the stream protos.
-extend-exclude = ["streamprotos"]
+# The protoc output of the sample protos.
+extend-exclude = ["oneofsample", "streamprotos"]
 
 [tool.basedpyright]
-exclude = [".venv", "streamprotos"]
+exclude = [".venv", "oneofsample", "streamprotos"]
 reportAny = false
 reportExplicitAny = false
 reportPrivateUsage = false

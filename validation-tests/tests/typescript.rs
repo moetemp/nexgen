@@ -260,6 +260,11 @@ fn stream_descriptor_path(root: &Path) -> PathBuf {
     root.join("advanced/samples/descriptors/streams.bin")
 }
 
+// The descriptor set of the proto-oneof sample's own proto.
+fn oneof_descriptor_path(root: &Path) -> PathBuf {
+    root.join("advanced/samples/descriptors/oneofsample.bin")
+}
+
 fn typescript_root(root: &Path) -> PathBuf {
     root.join("advanced/samples/typescript")
 }
@@ -358,6 +363,8 @@ fn generate_formatted_typescript_output(root: &Path, example_id: &str, output_pa
             descriptor_path(root).to_str().unwrap(),
             "--descriptors",
             stream_descriptor_path(root).to_str().unwrap(),
+            "--descriptors",
+            oneof_descriptor_path(root).to_str().unwrap(),
             "--support-package",
             "./support",
             "--output",

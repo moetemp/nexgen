@@ -1,0 +1,20 @@
+// A oneof with an enum case, which no Temporal API message has. Only the proto-oneof sample uses
+// it.
+syntax = "proto3";
+
+package oneofsample.v1;
+
+option csharp_namespace = "OneofSample.V1";
+
+enum Shade {
+  SHADE_UNSPECIFIED = 0;
+  SHADE_LIGHT = 1;
+  SHADE_DARK = 2;
+}
+
+message Paint {
+  oneof pick {
+    Shade tone = 1;
+    string name = 2;
+  }
+}

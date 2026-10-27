@@ -152,11 +152,6 @@ make Python import those protos from the sample's own `streamprotos` package.
 The crate doesn't take them, since sdk-python generates the Stream protos into
 `temporalio` and needs the default modules.
 
-Only part of today's output builds, so the sample leaves the rest out:
-
-- TypeScript passes a `number` where a resource method's proto request wants a
-  `Long`. `tsc` skips the service, but the test still checks its models.
-
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)

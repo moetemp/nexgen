@@ -368,6 +368,40 @@ class DescribeStreamResponse(_message.Message):
 Global___DescribeStreamResponse: _TypeAlias = DescribeStreamResponse  # noqa: Y015
 
 @_typing.final
+class CloseWritersRequest(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    def __init__(
+        self,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___CloseWritersRequest: _TypeAlias = CloseWritersRequest  # noqa: Y015
+
+@_typing.final
+class CloseWritersResponse(_message.Message):
+    DESCRIPTOR: _descriptor.Descriptor
+
+    FAILED_FIELD_NUMBER: _builtins.int
+    failed: _builtins.int
+    def __init__(
+        self,
+        *,
+        failed: _builtins.int = ...,
+    ) -> None: ...
+    _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
+    def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
+    _ClearFieldArgType: _TypeAlias = _typing.Literal["failed", b"failed"]  # noqa: Y015
+    def ClearField(self, field_name: _ClearFieldArgType) -> None: ...
+    def WhichOneof(self, oneof_group: _Never) -> None: ...
+
+Global___CloseWritersResponse: _TypeAlias = CloseWritersResponse  # noqa: Y015
+
+@_typing.final
 class CloseWriterRequest(_message.Message):
     DESCRIPTOR: _descriptor.Descriptor
 

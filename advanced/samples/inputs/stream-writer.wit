@@ -8,6 +8,18 @@ world writer {
 // client serves it in process.
 /// @nexus.service-name "streamsample.v1.StreamWriter"
 interface stream-writer {
+  /// @nexus.proto "streamsample.v1.CloseWritersRequest" typescript-import="#streamsample"
+  record close-writers-request {
+  }
+
+  /// @nexus.proto "streamsample.v1.CloseWritersResponse" typescript-import="#streamsample"
+  record close-writers-response {
+    failed: option<s32>,
+  }
+
+  /// @nexus.operation name="CloseWriters"
+  close-writers: func(request: close-writers-request) -> close-writers-response;
+
   /// @nexus.proto "streamsample.v1.CloseWriterRequest" typescript-import="#streamsample"
   record close-writer-request {
     writer-id: option<u64>,

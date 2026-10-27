@@ -85,6 +85,12 @@ export namespace streamsample {
       retention?: google.protobuf.IDuration | null;
     }
 
+    interface ICloseWritersRequest {}
+
+    interface ICloseWritersResponse {
+      failed?: number | null;
+    }
+
     interface ICloseWriterRequest {
       writerId?: Long | null;
     }

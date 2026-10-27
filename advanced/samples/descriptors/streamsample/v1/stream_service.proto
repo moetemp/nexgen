@@ -89,6 +89,13 @@ message DescribeStreamResponse {
     google.protobuf.Duration retention = 2;
 }
 
+message CloseWritersRequest {
+}
+
+message CloseWritersResponse {
+    int32 failed = 1;
+}
+
 message CloseWriterRequest {
     uint64 writer_id = 1;
 }

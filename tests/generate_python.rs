@@ -1004,3 +1004,73 @@ interface models {
         "{models}"
     );
 }
+
+#[test]
+fn python_endpointless_client_indents_its_flattened_setup() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-flattened-caller");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("flattened-caller.wit");
+    let wit = r#"
+package temporal:flattened-caller@1.0.0;
+
+world system { export streams; }
+
+interface streams {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.proto "temporal.api.stream.v1.StreamRef"
+  /// @nexus.flatten-in-api
+  record stream-ref {
+    id: string,
+    /// @nexus.omit
+    owner: placeholder,
+    backend: option<string>,
+  }
+
+  /// @nexus.proto "temporal.api.streamservice.v1.DescribeStreamRequest"
+  record describe-stream-request {
+    %stream: option<stream-ref>,
+    /// @nexus.omit
+    namespace: placeholder,
+  }
+
+  // An empty proto response, so the record declares no fields.
+  /// @nexus.proto "temporal.api.streamservice.v1.CloseStreamResponse"
+  record close-stream-response {}
+
+  describe-stream: func(request: describe-stream-request) -> close-stream-response;
+}
+"#;
+    fs::write(&wit_path, wit).unwrap();
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            ..Default::default()
+        },
+        language: nexgen::language::Language::Python,
+        input_paths: vec![wit_path, linked_inputs_path(&root)],
+        support_package: Some("temporal_support".into()),
+        descriptor_paths: vec![
+            descriptor_path(&root),
+            root.join("advanced/samples/descriptors/streams.bin"),
+        ],
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: None,
+        dotnet_namespace: None,
+        ts_date_time_types: Default::default(),
+    })
+    .unwrap();
+    let services = fs::read_to_string(output_path.join("services.py")).unwrap();
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    // The method body sits one level deeper than a module function body.
+    assert!(
+        services.contains(
+            "        stream = StreamRef(\n            id=id,\n            backend=backend,\n        )\n        request = DescribeStreamRequest(\n"
+        ),
+        "{services}"
+    );
+}

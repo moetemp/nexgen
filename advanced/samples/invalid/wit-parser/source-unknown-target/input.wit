@@ -1,0 +1,13 @@
+package test:source-unknown-target;
+
+world system { export models; }
+
+interface models {
+  type placeholder = string;
+
+  record request {
+    /// @nexus.source target="activity" python="activity_owner()" typescript="activityOwner()"
+    ///   go="ActivityOwner()" dotnet="Context.ActivityOwner()"
+    owner: option<string>,
+  }
+}

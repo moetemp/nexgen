@@ -1,0 +1,15 @@
+package test:source-duplicate-target;
+
+world system { export models; }
+
+interface models {
+  type placeholder = string;
+
+  record request {
+    /// @nexus.source target="workflow" python="first()" typescript="first()" go="First()"
+    ///   dotnet="Context.First()"
+    /// @nexus.source target="workflow" python="second()" typescript="second()" go="Second()"
+    ///   dotnet="Context.Second()"
+    owner: option<string>,
+  }
+}

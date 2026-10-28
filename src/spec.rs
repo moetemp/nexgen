@@ -851,9 +851,39 @@ pub struct RecordFieldSpec<F: TypeFamily = AuthoredFamily> {
     pub field_type: TypeSpec<F>,
     pub default_value: Option<FieldDefaultSpec>,
     pub required: bool,
+    /// The visibility in the Workflow target, and in a language with one target.
     pub visibility: RecordFieldVisibility,
+    /// Set when a `@nexus.source` or `@nexus.api-omit` of the field names a target.
+    pub target_roles: Option<TargetFieldRoles>,
     pub function: Option<FunctionFieldSpec<F>>,
     pub data: F::FieldData,
+}
+
+/// What each generation target does with a field whose `@nexus.source` or `@nexus.api-omit` names
+/// a target. The target code runs a source, so a model never calls it as a default.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TargetFieldRoles {
+    pub workflow: TargetFieldRole,
+    pub client: TargetFieldRole,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetFieldRole {
+    /// The convenience API takes the field as a parameter.
+    Parameter,
+    /// The target code fills the field from a support helper call.
+    Sourced { source_expr: String },
+    /// The call leaves the field unset, so the transport or the server can set it.
+    ApiOmitted,
+}
+
+impl TargetFieldRoles {
+    pub fn role(&self, target: GenerationTarget) -> &TargetFieldRole {
+        match target {
+            GenerationTarget::Workflow => &self.workflow,
+            GenerationTarget::Client => &self.client,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1115,9 +1145,16 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             default_value: self.default_value,
             required: self.required,
             visibility: self.visibility,
+            target_roles: self.target_roles,
             function: self.function.map(|function| function.map_names_with(map)),
             data,
         }
+    }
+
+    /// Whether the convenience API of some target leaves the field out, since a source fills it
+    /// or the call leaves it unset.
+    pub fn api_hidden(&self) -> bool {
+        self.visibility != RecordFieldVisibility::Public || self.target_roles.is_some()
     }
 
     fn is_empty_model_field(&self) -> bool {
@@ -1128,6 +1165,7 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             && self.default_value.is_none()
             && !self.required
             && self.visibility == RecordFieldVisibility::Public
+            && self.target_roles.is_none()
             && self.function.is_none()
     }
 }

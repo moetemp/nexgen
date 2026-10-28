@@ -27,16 +27,16 @@ namespace Nexgen.StreamService
         public StreamStatus? Status { get; }
 
         [GeneratedCode("nexgen", null)]
-        public Task<AppendRecordsResponse> PublishAsync(Producer? producer, long? sequence, IReadOnlyList<AppendRecord<TBody>> records, WorkflowTaskEpoch? previousCompletedTask, IReadOnlyList<long> failedTasks, string? withdrawRun)
+        public Task<AppendRecordsResponse> PublishAsync(IReadOnlyList<AppendRecord<TBody>> records)
         {
-            var request = new AppendRecordsOptions<TBody>(StreamValue, records, failedTasks) { Producer = producer, Sequence = sequence, PreviousCompletedTask = previousCompletedTask, WithdrawRun = withdrawRun };
+            var request = new AppendRecordsOptions<TBody>(StreamValue, records);
             return Operations.AppendRecordsAsync(request);
         }
 
         [GeneratedCode("nexgen", null)]
-        public Task CloseAsync(Producer? producer, object? result, System.Exception? failure, StreamCloseStatus? status, WorkflowTaskEpoch? previousCompletedTask, IReadOnlyList<long> failedTasks)
+        public Task CloseAsync(object? result, System.Exception? failure)
         {
-            var request = new CloseStreamOptions(StreamValue, failedTasks) { Producer = producer, Result = result, Failure = failure, PreviousCompletedTask = previousCompletedTask, Status = status };
+            var request = new CloseStreamOptions(StreamValue) { Result = result, Failure = failure };
             return Operations.CloseStreamAsync(request);
         }
 

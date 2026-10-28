@@ -1003,6 +1003,42 @@ Nexgen prefixes the helper call, but it does not add arguments. The configured
 package supplies the helper. The `@nexus.output-transform` directive is
 different: its value remains a raw expression.
 
+#### Sources for one target
+
+`target="workflow"` or `target="client"` limits a source to one generation
+target, and `@nexus.api-omit` takes the same `target`. In each target, a field
+is one of three things. A source of that target fills it, the call leaves it
+unset, or the convenience API takes it as a parameter.
+
+```wit
+/// @nexus.source target="workflow" python="workflow_producer()"
+/// @nexus.source target="client" python="client_producer()"
+producer: option<producer>,
+
+/// @nexus.api-omit target="workflow"
+/// @nexus.source target="client" python="local_activity_failed_tasks()"
+failed-tasks: list<s64>,
+```
+
+Target code runs a targeted source, never the model, since code of another
+target can build the same model. The convenience function of an operation runs
+the sources of its target before it builds the request. The operations of a
+target also fill each optional or list field that the request leaves unset, so a
+resource method and SDK code get the sources too. A field that SDK code sets
+keeps its value. A source with no target stays the model's default, and the
+client target takes that field as a parameter.
+
+A source may read `definition`, the definition argument of an operation that
+returns a resource with `@nexus.definition`. Only target code has it, so such a
+source must name its target.
+
+Python has both targets. Go, TypeScript and .NET have only the Workflow target,
+so they read the Workflow source and api-omit, and they ignore the client ones.
+Java has no sources. nexgen refuses an unknown target, two sources for one
+target, a source with no target next to a targeted one, a source and an api-omit
+for the same target, and a resource method parameter that names a sourced or
+api-omitted request field.
+
 ### Omitted Fields
 
 Fields annotated with `@nexus.omit` are excluded entirely from the generated
@@ -1028,7 +1064,10 @@ making it a public operation parameter.
 headers: option<header>,
 ```
 
-`@nexus.api-omit` cannot be combined with `@nexus.omit` or `@nexus.source`.
+`@nexus.api-omit` cannot be combined with `@nexus.omit` or `@nexus.source`. A
+targeted api-omit can be combined with a source for the other target, as in
+[Sources for one target](#sources-for-one-target). A required field can't be
+api-omitted, since the call would leave it unset, but a list or a map can.
 
 ### Flattened Records
 
@@ -1526,8 +1565,10 @@ The methods of the resource take the RPC options too. The Workflow operations
 raise `ValueError` when either option is set, since the options apply to calls
 outside a Workflow only.
 
-The client target has no sources yet, so a `@nexus.source` field is a parameter
-of the client call.
+A `@nexus.source` with no target is the model's default, which can read the
+Workflow context, so the client call takes that field as a parameter. A source
+with `target="client"` fills the field in the client target. See
+[Sources for one target](#sources-for-one-target).
 
 ---
 
@@ -1887,7 +1928,7 @@ Cannot be combined with `@nexus.source`, `@nexus.type`, `@nexus.function`,
 ### @nexus.source
 
 **Placement:** Record field (within a `@nexus.proto` record) **Syntax:**
-`@nexus.source python="<helper-call>" typescript="<helper-call>" go="<helper-call>" dotnet="<helper-call>"`
+`@nexus.source [target="workflow|client"] python="<helper-call>" typescript="<helper-call>" go="<helper-call>" dotnet="<helper-call>"`
 
 Provides a field value through a helper in the package specified by
 `--support-package`. The field is not an argument in operation convenience APIs.
@@ -1902,7 +1943,8 @@ namespace: string,
 
 The sample's Python model uses `_support.workflow_namespace` as its default
 factory. Go calls `support.WorkflowNamespace(ctx)`. Both helpers come from the
-configured support package.
+configured support package. `target` limits a source to one generation target.
+See [Sources for one target](#sources-for-one-target).
 
 Cannot be combined with `@nexus.default`.
 

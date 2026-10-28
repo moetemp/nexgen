@@ -24,6 +24,11 @@ import { Stream } from "../wit/stream-service/resources.ts";
 const startOperation = vi.hoisted(() => vi.fn());
 vi.mock("@temporalio/workflow", () => ({
   createNexusServiceClient: () => ({ startOperation }),
+  workflowInfo: () => ({
+    workflowId: "chat-1",
+    firstExecutionRunId: "r1",
+    runId: "r2",
+  }),
 }));
 
 // A body goes through the payload converter of the Workflow.
@@ -149,7 +154,7 @@ describe("stream-service generated output", () => {
     expectTypeOf(stream).toEqualTypeOf<Stream<Turn>>();
     expectTypeOf(page).toEqualTypeOf<ReadRecordsResponse<Turn>>();
     // The type info of the started operation decodes the answer with the body type.
-    const [operation] = startOperation.mock.calls[0];
+    const [operation] = startOperation.mock.lastCall!;
     const decoded = operation.outputType.transferTypeConverter.fromTransferType({
       records: [
         {
@@ -159,21 +164,22 @@ describe("stream-service generated output", () => {
         },
       ],
     });
-    expect(decoded.records[0].item.value.body).toEqual(new Turn("model"));
+    expect(decoded.records[0].item.value.body).toStrictEqual(new Turn("model"));
   });
 
-  test("takes the body type of a create from the definition", async () => {
+  test("takes the body type and the sources of a create from the definition", async () => {
     startOperation.mockResolvedValue({
-      result: async () => ({ stream: { id: "stream-1" }, created: true }),
+      result: async () => ({ stream: { id: "chat-1:r1:turns" }, created: true }),
     });
 
-    const stream = await createStream(
-      { name: "turns", type: turnType },
-      { streamId: "stream-1" },
-    );
+    const stream = await createStream({ name: "turns", type: turnType }, {});
 
     expectTypeOf(stream).toEqualTypeOf<Stream<Turn>>();
     expect(stream.bodyType).toBe(turnType);
+    // The Workflow sources give the id from the definition, and the owner from the run.
+    const [, request] = startOperation.mock.lastCall!;
+    expect(request.streamId).toBe("chat-1:r1:turns");
+    expect(request.owner).toEqual({ id: "wf:r2", runId: "r2" });
   });
 
   test("passes an enum number that it doesn't know through", () => {

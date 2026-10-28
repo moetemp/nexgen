@@ -1,0 +1,1 @@
+`@nexus.source` and `@nexus.api-omit` take `target="workflow"` or `target="client"`. Target code runs a targeted source, and the operations of each target fill the fields that a request leaves unset. A source may read the `definition` argument of a call. Go, TypeScript and .NET read the Workflow ones.

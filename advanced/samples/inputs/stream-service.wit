@@ -190,13 +190,20 @@ interface stream-service {
   /// @nexus.doc "Create a Stream, or get the one that exists, which keeps its Retention."
   /// @nexus.proto "temporal.api.streamservice.v1.CreateStreamRequest"
   record create-stream-request {
-    /// @nexus.doc "Required on Redis and memory. On native, empty asks the server for an id."
+    /// @nexus.doc "The id of the Stream. Required, and never empty."
+    /// @nexus.source target="workflow" python="workflow_stream_id(definition)"
+    ///   typescript="workflowStreamId(definition)"
+    ///   dotnet="StreamWorkflowContext.StreamId(definition)"
     stream-id: string,
     /// @nexus.doc "The age after which a Record is dropped. Empty is the Store default."
     retention: option<duration>,
     /// @nexus.doc "Retry run only. The previous run, whose Records this withdraws."
+    /// @nexus.api-omit
     withdraw-run: option<string>,
     /// @nexus.doc "The Workflow run that owns the Stream. The Workflow transport sets it."
+    /// @nexus.source target="workflow" python="workflow_owner()" typescript="workflowOwner()"
+    ///   dotnet="StreamWorkflowContext.Owner()"
+    /// @nexus.api-omit target="client"
     owner: option<producer>,
     /// @nexus.doc "The Stream's ref, with the owner fields."
     %ref: option<stream-ref>,
@@ -227,14 +234,28 @@ interface stream-service {
     %stream: stream-ref,
     records: list<append-record>,
     /// @nexus.doc "Local Activity only. The run's failed or timed out Workflow Tasks."
+    /// @nexus.api-omit target="workflow"
+    /// @nexus.source target="client" python="local_activity_failed_tasks()"
+    ///   typescript="localActivityFailedTasks()"
+    ///   dotnet="StreamActivityContext.LocalActivityFailedTasks()"
     failed-tasks: list<s64>,
     /// @nexus.doc "Required outside a Workflow. In a Workflow the transport sets it."
+    /// @nexus.source target="workflow" python="workflow_producer()"
+    ///   typescript="workflowProducer()" dotnet="StreamWorkflowContext.Producer()"
+    /// @nexus.source target="client" python="client_producer()" typescript="clientProducer()"
+    ///   dotnet="StreamActivityContext.Producer()"
     producer: option<producer>,
     /// @nexus.doc "The batch number in this epoch, 1 or more. It is part of the dedupe key."
+    /// @nexus.api-omit
     sequence: option<s64>,
     /// @nexus.doc "Local Activity only. The run's last completed Workflow Task."
+    /// @nexus.api-omit target="workflow"
+    /// @nexus.source target="client" python="local_activity_previous_completed_task()"
+    ///   typescript="localActivityPreviousCompletedTask()"
+    ///   dotnet="StreamActivityContext.LocalActivityPreviousCompletedTask()"
     previous-completed-task: option<workflow-task-epoch>,
     /// @nexus.doc "Retry run only. The previous run, whose Records this withdraws."
+    /// @nexus.api-omit
     withdraw-run: option<string>,
     /// @nexus.omit
     namespace: placeholder,
@@ -256,13 +277,21 @@ interface stream-service {
   record close-stream-request {
     %stream: stream-ref,
     /// @nexus.doc "Workflow only. The run's failed or timed out Workflow Tasks."
+    /// @nexus.api-omit
     failed-tasks: list<s64>,
+    /// @nexus.source target="workflow" python="workflow_producer()"
+    ///   typescript="workflowProducer()" dotnet="StreamWorkflowContext.Producer()"
+    /// @nexus.source target="client" python="client_producer()" typescript="clientProducer()"
+    ///   dotnet="StreamActivityContext.Producer()"
     producer: option<producer>,
     %result: option<payload>,
     failure: option<failure>,
-    /// @nexus.doc "Empty is completed, or failed with a failure. A caller may set canceled."
+    // The Store gives canceled for a failure with canceled_failure_info, so the API leaves it out.
+    /// @nexus.doc "Empty is completed, failed with a failure, or canceled with a cancel."
+    /// @nexus.api-omit
     status: option<stream-close-status>,
     /// @nexus.doc "Workflow only. The previous completed Workflow Task of the run."
+    /// @nexus.api-omit
     previous-completed-task: option<workflow-task-epoch>,
     /// @nexus.omit
     namespace: placeholder,
@@ -352,25 +381,11 @@ interface stream-service {
 
     /// @nexus.doc "Publish Records. The answer has the first and the last offset."
     /// @nexus.operation "append-records"
-    publish: func(
-      producer: option<producer>,
-      sequence: option<s64>,
-      records: list<append-record>,
-      previous-completed-task: option<workflow-task-epoch>,
-      failed-tasks: list<s64>,
-      withdraw-run: option<string>,
-    ) -> append-records-response;
+    publish: func(records: list<append-record>) -> append-records-response;
 
     /// @nexus.doc "Close the Stream. Readers drain what is left, then end."
     /// @nexus.operation "close-stream"
-    close: func(
-      producer: option<producer>,
-      %result: option<payload>,
-      failure: option<failure>,
-      status: option<stream-close-status>,
-      previous-completed-task: option<workflow-task-epoch>,
-      failed-tasks: list<s64>,
-    );
+    close: func(%result: option<payload>, failure: option<failure>);
 
     /// @nexus.doc "Read one page of Records. The poll iterator reads them all."
     /// @nexus.operation "read-records"

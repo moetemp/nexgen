@@ -244,6 +244,7 @@ fn resource_result_fields(
                     default_value: None,
                     required: false,
                     visibility: RecordFieldVisibility::Public,
+                    target_roles: None,
                     function: None,
                     data: (),
                 },

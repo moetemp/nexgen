@@ -3,6 +3,8 @@ import type { google, temporal } from "@temporalio/proto";
 import * as workflow from "@temporalio/workflow";
 import type Long from "long";
 
+import type { Producer } from "../wit/stream-service/models";
+
 function int64ToNumber(
   value: Long | number | string | object | null | undefined,
 ): number {
@@ -459,4 +461,20 @@ export function definitionTypeArguments(
   definition: StreamDefinition<unknown>,
 ): (common.TypeInfo<any> | undefined)[] {
   return [definition.type];
+}
+
+/** The id of the Workflow's own Stream of this definition. */
+export function workflowStreamId(definition: StreamDefinition<unknown>): string {
+  const info = workflow.workflowInfo();
+  return `${info.workflowId}:${info.firstExecutionRunId}:${definition.name}`;
+}
+
+export function workflowOwner(): Producer {
+  const runId = workflow.workflowInfo().runId;
+  return { id: `wf:${runId}`, runId };
+}
+
+export function workflowProducer(): Producer {
+  const runId = workflow.workflowInfo().runId;
+  return { id: `wf:${runId}`, runId };
 }

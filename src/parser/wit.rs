@@ -1154,7 +1154,9 @@ fn build_fields_from_record(
             .unwrap_or(&field.name)
             .to_string();
         let omit_directive = directive(&directives, "omit", path, &field_context)?;
-        let api_omit_directive = directive(&directives, "api-omit", path, &field_context)?;
+        let api_omit_directive = directives
+            .iter()
+            .find(|directive| directive.name() == "api-omit");
         let proto_field_name =
             directive_value(&directives, "proto-field", path, &field_context, "value")?
                 .unwrap_or_else(|| field.name.to_snake_case());
@@ -1236,6 +1238,7 @@ fn build_fields_from_record(
                     default_value: None,
                     required: false,
                     visibility: RecordFieldVisibility::Omitted,
+                    target_roles: None,
                     function: None,
                     data: (),
                 },
@@ -1253,25 +1256,13 @@ fn build_fields_from_record(
         let field_default =
             build_field_default(resolve, &field.ty, default_directive, path, &field_context)?;
         let required = !is_optional_type(resolve, &field.ty) && field_default.is_none();
-        let source = build_source_call(&directives, path, &field_context, language)?;
-        if let Some(api_omit_directive) = api_omit_directive {
-            if !api_omit_directive.args.is_empty() {
-                return Err(Error::InvalidWitDirective {
-                    path: path.to_path_buf(),
-                    context: field_context,
-                    directive: "@nexus.api-omit".to_string(),
-                    reason: "field-level api-omit does not take arguments".to_string(),
-                });
-            }
-            if source.is_some() {
-                return Err(Error::InvalidWitDirective {
-                    path: path.to_path_buf(),
-                    context: field_context,
-                    directive: "@nexus.api-omit".to_string(),
-                    reason: "cannot be combined with `@nexus.source`".to_string(),
-                });
-            }
-        }
+        let sources = build_source_calls(&directives, path, &field_context, language)?;
+        let api_omits = build_api_omits(&directives, path, &field_context)?;
+        // An empty list or map is unset, so the API can omit it.
+        let unset_allowed =
+            !required || matches!(field_type, TypeSpec::List(_) | TypeSpec::Map(..));
+        let (visibility, target_roles) =
+            field_target_roles(sources, api_omits, unset_allowed, path, &field_context)?;
         let annotation =
             directive(&directives, "type", path, &field_context)?.map(directive_language_string);
         let flattened_annotation = directive(&directives, "flattened-type", path, &field_context)?
@@ -1279,7 +1270,13 @@ fn build_fields_from_record(
         let function =
             build_function_field(resolve, owner, &directives, path, &field_context, language)?;
 
-        if source.is_some() && function.is_some() {
+        let sourced = matches!(visibility, RecordFieldVisibility::Sourced { .. })
+            || target_roles.as_ref().is_some_and(|roles| {
+                [&roles.workflow, &roles.client]
+                    .iter()
+                    .any(|role| matches!(role, TargetFieldRole::Sourced { .. }))
+            });
+        if sourced && function.is_some() {
             return Err(Error::ConflictingTypeOverrideFieldProperties {
                 message: context.to_string(),
                 field: proto_field_name,
@@ -1298,15 +1295,8 @@ fn build_fields_from_record(
                 field_type,
                 default_value: field_default,
                 required,
-                visibility: source
-                    .map(|source_expr| RecordFieldVisibility::Sourced { source_expr })
-                    .unwrap_or_else(|| {
-                        if api_omit_directive.is_some() {
-                            RecordFieldVisibility::ApiOmitted
-                        } else {
-                            RecordFieldVisibility::Public
-                        }
-                    }),
+                visibility,
+                target_roles,
                 function,
                 data: (),
             },
@@ -1339,6 +1329,7 @@ fn build_fields_from_record(
                         default_value: None,
                         required: arg_field.required,
                         visibility: RecordFieldVisibility::Public,
+                        target_roles: None,
                         function: None,
                         data: (),
                     },
@@ -1841,16 +1832,191 @@ fn default_on_non_enum_error(path: &Path, context: &str) -> Error {
     }
 }
 
-fn build_source_call(
+/// The `@nexus.source` calls of one field. A source with no target fills the field in every
+/// target, as the model's default.
+#[derive(Default)]
+struct FieldSources {
+    untargeted: Option<String>,
+    workflow: Option<String>,
+    client: Option<String>,
+}
+
+/// The targets in which `@nexus.api-omit` leaves a field unset.
+#[derive(Default)]
+struct FieldApiOmits {
+    untargeted: bool,
+    workflow: bool,
+    client: bool,
+}
+
+/// The target that a `@nexus.source` or `@nexus.api-omit` names, or `None` for every target.
+fn directive_target(
+    directive: &Directive,
+    path: &Path,
+    context: &str,
+) -> Result<Option<GenerationTarget>> {
+    let Some(target) = directive.value("target") else {
+        return Ok(None);
+    };
+    match target {
+        "workflow" => Ok(Some(GenerationTarget::Workflow)),
+        "client" => Ok(Some(GenerationTarget::Client)),
+        other => Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: format!("@nexus.{}", directive.name()),
+            reason: format!("`target=\"{other}\"` isn't a target. Use `workflow` or `client`"),
+        }),
+    }
+}
+
+fn build_source_calls(
     directives: &[Directive],
     path: &Path,
     context: &str,
     language: Language,
-) -> Result<Option<String>> {
-    let Some(directive) = directive(directives, "source", path, context)? else {
-        return Ok(None);
+) -> Result<FieldSources> {
+    let invalid = |reason: &str| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.source".to_string(),
+        reason: reason.to_string(),
     };
+    let mut sources = FieldSources::default();
+    let source_directives = directives
+        .iter()
+        .filter(|directive| directive.name() == "source")
+        .collect::<Vec<_>>();
+    let targets = source_directives
+        .iter()
+        .map(|directive| directive_target(directive, path, context))
+        .collect::<Result<Vec<_>>>()?;
+    if targets.contains(&None) && targets.len() > 1 {
+        return Err(invalid(
+            "a source with no target fills every target, so it can't be combined with another \
+             source",
+        ));
+    }
+    for (directive, target) in source_directives.into_iter().zip(targets) {
+        let slot = match target {
+            None => &mut sources.untargeted,
+            Some(GenerationTarget::Workflow) => &mut sources.workflow,
+            Some(GenerationTarget::Client) => &mut sources.client,
+        };
+        if slot.is_some() {
+            return Err(invalid("a field can have one source for each target"));
+        }
+        *slot = build_source_call(directive, path, context, language)?;
+    }
+    Ok(sources)
+}
 
+fn build_api_omits(directives: &[Directive], path: &Path, context: &str) -> Result<FieldApiOmits> {
+    let invalid = |reason: &str| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.api-omit".to_string(),
+        reason: reason.to_string(),
+    };
+    let mut omits = FieldApiOmits::default();
+    let mut count = 0;
+    for directive in directives
+        .iter()
+        .filter(|directive| directive.name() == "api-omit")
+    {
+        count += 1;
+        if directive.args.keys().any(|key| key != "target") {
+            return Err(invalid("field-level api-omit takes only `target`"));
+        }
+        let slot = match directive_target(directive, path, context)? {
+            None => &mut omits.untargeted,
+            Some(GenerationTarget::Workflow) => &mut omits.workflow,
+            Some(GenerationTarget::Client) => &mut omits.client,
+        };
+        if *slot {
+            return Err(invalid("duplicate directive"));
+        }
+        *slot = true;
+    }
+    if omits.untargeted && count > 1 {
+        return Err(invalid(
+            "an api-omit with no target applies to every target, so it can't be combined with \
+             another api-omit",
+        ));
+    }
+    Ok(omits)
+}
+
+/// The visibility of a field in the Workflow target, and its role in each target when a source or
+/// an api-omit names a target.
+fn field_target_roles(
+    sources: FieldSources,
+    api_omits: FieldApiOmits,
+    unset_allowed: bool,
+    path: &Path,
+    context: &str,
+) -> Result<(RecordFieldVisibility, Option<TargetFieldRoles>)> {
+    let invalid = |reason: &str| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.api-omit".to_string(),
+        reason: reason.to_string(),
+    };
+    let any_omit = api_omits.untargeted || api_omits.workflow || api_omits.client;
+    let any_source =
+        sources.untargeted.is_some() || sources.workflow.is_some() || sources.client.is_some();
+    if api_omits.untargeted && any_source {
+        return Err(invalid("cannot be combined with `@nexus.source`"));
+    }
+    if sources.untargeted.is_some() && any_omit {
+        return Err(invalid("cannot be combined with `@nexus.source`"));
+    }
+    if (api_omits.workflow && sources.workflow.is_some())
+        || (api_omits.client && sources.client.is_some())
+    {
+        return Err(invalid(
+            "cannot be combined with a `@nexus.source` for the same target",
+        ));
+    }
+    if any_omit && !unset_allowed {
+        return Err(invalid(
+            "a required field can't be omitted from the API, since the call would leave it unset",
+        ));
+    }
+    if let Some(source_expr) = sources.untargeted {
+        return Ok((RecordFieldVisibility::Sourced { source_expr }, None));
+    }
+    if api_omits.untargeted {
+        return Ok((RecordFieldVisibility::ApiOmitted, None));
+    }
+    let role = |source: Option<String>, omitted: bool| match (source, omitted) {
+        (Some(source_expr), _) => TargetFieldRole::Sourced { source_expr },
+        (None, true) => TargetFieldRole::ApiOmitted,
+        (None, false) => TargetFieldRole::Parameter,
+    };
+    let roles = TargetFieldRoles {
+        workflow: role(sources.workflow, api_omits.workflow),
+        client: role(sources.client, api_omits.client),
+    };
+    if roles.workflow == TargetFieldRole::Parameter && roles.client == TargetFieldRole::Parameter {
+        return Ok((RecordFieldVisibility::Public, None));
+    }
+    let visibility = match &roles.workflow {
+        TargetFieldRole::Parameter => RecordFieldVisibility::Public,
+        TargetFieldRole::Sourced { source_expr } => RecordFieldVisibility::Sourced {
+            source_expr: source_expr.clone(),
+        },
+        TargetFieldRole::ApiOmitted => RecordFieldVisibility::ApiOmitted,
+    };
+    Ok((visibility, Some(roles)))
+}
+
+fn build_source_call(
+    directive: &Directive,
+    path: &Path,
+    context: &str,
+    language: Language,
+) -> Result<Option<String>> {
     for key in [
         "go-support-import",
         "python-support-import",
@@ -4038,6 +4204,44 @@ interface generic-service {
                 full_name: "stream-service.body-t".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn a_targeted_source_or_api_omit_gives_each_target_its_role() {
+        let spec = crate::parser::load_api_spec_from_wit_for_language_with_inputs(
+            Language::Python,
+            &[
+                root().join("advanced/samples/inputs/stream-service.wit"),
+                linked_inputs_path(),
+            ],
+        )
+        .unwrap();
+        let fields = &spec.types["stream-service.append-records-request"];
+        let crate::spec::TypeDeclSpec::Record(record) = &fields.declaration else {
+            panic!("the append request is a record");
+        };
+        let roles = |name: &str| record.fields[name].target_roles.clone().unwrap();
+        let sourced = |source_expr: &str| crate::spec::TargetFieldRole::Sourced {
+            source_expr: source_expr.to_string(),
+        };
+
+        assert_eq!(roles("producer").workflow, sourced("workflow_producer()"));
+        assert_eq!(roles("producer").client, sourced("client_producer()"));
+        assert_eq!(
+            roles("failed_tasks").workflow,
+            crate::spec::TargetFieldRole::ApiOmitted
+        );
+        assert_eq!(
+            roles("failed_tasks").client,
+            sourced("local_activity_failed_tasks()")
+        );
+        // The Workflow role is the visibility, which a language with one target reads.
+        assert_eq!(
+            record.fields["failed_tasks"].visibility,
+            crate::spec::RecordFieldVisibility::ApiOmitted
+        );
+        // An api-omit with no target keeps the plain visibility.
+        assert_eq!(record.fields["sequence"].target_roles, None);
     }
 
     #[test]

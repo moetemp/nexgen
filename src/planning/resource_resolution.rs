@@ -394,6 +394,7 @@ fn resolve_resource_method(
                 ),
             });
         }
+        reject_parameters_of_hidden_fields(spec, service, resource, method, operation)?;
         return Ok(ResolvedResourceMethodSpec {
             name: method.name.clone(),
             doc: method.doc.clone(),
@@ -429,6 +430,9 @@ fn resolve_resource_method(
         0 => ResolvedResourceMethodBinding::Stub,
         1 => {
             let (operation_name, request_plan) = matching_operations.pop().expect("len checked");
+            if let Some(operation) = service.operation(&operation_name) {
+                reject_parameters_of_hidden_fields(spec, service, resource, method, operation)?;
+            }
             ResolvedResourceMethodBinding::Operation {
                 operation_name,
                 request_plan,
@@ -456,6 +460,46 @@ fn resolve_resource_method(
         result: method.result.clone(),
         binding,
     })
+}
+
+/// A method parameter that names a request field that a source fills, or that the API omits,
+/// would have no effect.
+fn reject_parameters_of_hidden_fields(
+    spec: &ApiSpec<SelectedFamily>,
+    service: &ServiceSpec<SelectedFamily>,
+    resource: &ResourceSpec<SelectedFamily>,
+    method: &ResourceMethodSpec<SelectedFamily>,
+    operation: &OperationSpec<SelectedFamily>,
+) -> Result<()> {
+    let record = match operation.input_type() {
+        Some(TypeSpec::Record(record)) => spec.record(record.as_str()),
+        Some(TypeSpec::External(ExternalTypeSpec::Proto(proto))) => {
+            spec.record_for_proto(proto.as_str())
+        }
+        _ => None,
+    };
+    let Some(record) = record else {
+        return Ok(());
+    };
+    for param in &method.params {
+        if record.fields.values().any(|field| {
+            field.name == param.name
+                && field.visibility != RecordFieldVisibility::Omitted
+                && field.api_hidden()
+        }) {
+            return Err(Error::InvalidResourceMethod {
+                service: service.name.clone(),
+                resource: resource.name.to_upper_camel_case(),
+                method: method.name.to_string(),
+                reason: format!(
+                    "parameter `{}` names a request field that a `@nexus.source` fills or that \
+                     `@nexus.api-omit` leaves unset",
+                    param.name
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn resource_method_result_matches_operation(
@@ -719,7 +763,7 @@ fn build_record_field_info(
 ) -> Result<MessageFieldInfo> {
     let api_name = field.name.clone();
     let required = field.required;
-    let hidden = matches!(field.visibility, RecordFieldVisibility::Sourced { .. });
+    let hidden = field.api_hidden();
     let message_name = api_field_message_name(&field.field_type, spec);
     Ok(MessageFieldInfo {
         proto_name: field_name.to_string(),
@@ -761,7 +805,10 @@ fn build_message_field_info(
         .unwrap_or_else(|| proto_name.to_kebab_case());
     let required = record.is_some_and(|record| record.field_required(proto_name));
     let hidden = record.is_some_and(|record| {
-        record.field_omitted(proto_name) || record.field_source(proto_name).is_some()
+        record
+            .fields
+            .get(proto_name)
+            .is_some_and(RecordFieldSpec::api_hidden)
     });
     let message_name = field_message_name(field, descriptors);
     let field_type = record

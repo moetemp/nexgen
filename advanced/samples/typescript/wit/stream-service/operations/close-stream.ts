@@ -3,13 +3,29 @@
 import * as workflow from "@temporalio/workflow";
 import { streamService } from "../services";
 import type { CloseStreamResponse, CloseStreamRequest } from "../models";
+import * as support from "../../../support/temporal_model_converters";
+
+type CloseStreamInput = CloseStreamRequest extends infer Input
+  ? Input extends unknown
+    ? Omit<Input, "failedTasks" | "previousCompletedTask" | "producer" | "status"> & {
+        failedTasks?: never;
+        previousCompletedTask?: never;
+        producer?: never;
+        status?: never;
+      }
+    : never
+  : never;
 
 /**
  * @param request - Request for the operation.
  */
 export async function closeStream(
-  request: CloseStreamRequest,
+  requestInput: CloseStreamInput,
 ): Promise<workflow.NexusOperationHandle<CloseStreamResponse>> {
+  const request = {
+    ...requestInput,
+    producer: support.workflowProducer(),
+  } as CloseStreamRequest;
   const client = workflow.createNexusServiceClient({
     service: streamService,
     endpoint: "__temporal_system",

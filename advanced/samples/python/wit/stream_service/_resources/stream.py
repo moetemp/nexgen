@@ -16,14 +16,11 @@ from ..models import (
     CloseStreamResponse,
     DescribeStreamRequest,
     DescribeStreamResponse,
-    Producer,
     ReadRecordsRequest,
     ReadRecordsResponse,
-    StreamCloseStatus,
     StreamReadStart,
     StreamRef,
     StreamStatus,
-    WorkflowTaskEpoch,
 )
 import temporal_support as _support
 
@@ -52,12 +49,7 @@ class Stream(typing.Generic[BodyT]):
 
     async def publish(
         self,
-        producer: Producer | None = None,
-        sequence: int | None = None,
         records: list[AppendRecord[BodyT]] | None = None,
-        previous_completed_task: WorkflowTaskEpoch | None = None,
-        failed_tasks: list[int] | None = None,
-        withdraw_run: str | None = None,
         *,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
@@ -65,12 +57,7 @@ class Stream(typing.Generic[BodyT]):
         """Publish Records. The answer has the first and the last offset."""
         request = AppendRecordsRequest(
             stream=self.stream,
-            producer=producer,
-            sequence=sequence,
             records=records or [],
-            previous_completed_task=previous_completed_task,
-            failed_tasks=failed_tasks or [],
-            withdraw_run=withdraw_run,
         )
         return await self._ops()._stream_service_append_records(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
@@ -78,12 +65,8 @@ class Stream(typing.Generic[BodyT]):
 
     async def close(
         self,
-        producer: Producer | None = None,
         result: typing.Any | None = None,
         failure: BaseException | None = None,
-        status: StreamCloseStatus | None = None,
-        previous_completed_task: WorkflowTaskEpoch | None = None,
-        failed_tasks: list[int] | None = None,
         *,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
@@ -91,12 +74,8 @@ class Stream(typing.Generic[BodyT]):
         """Close the Stream. Readers drain what is left, then end."""
         request = CloseStreamRequest(
             stream=self.stream,
-            producer=producer,
             result=result,
             failure=failure,
-            previous_completed_task=previous_completed_task,
-            failed_tasks=failed_tasks or [],
-            status=status,
         )
         _ = await self._ops()._stream_service_close_stream(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
@@ -269,6 +248,8 @@ class WorkflowStreamService:
 async def _append_records(
     request: AppendRecordsRequest[BodyT],
 ) -> temporalio.workflow.NexusOperationHandle[AppendRecordsResponse,]:
+    if request.producer is None:
+        request = dataclasses.replace(request, producer=_support.workflow_producer())
     nexus_client = temporalio.workflow.create_nexus_client(
         service="temporal.api.streamservice.v1.StreamService",
         endpoint="__temporal_system",
@@ -284,31 +265,12 @@ async def append_records(
     *,
     stream: StreamRef,
     records: list[AppendRecord[BodyT]] | None = None,
-    failed_tasks: list[int] | None = None,
-    producer: Producer | None = None,
-    sequence: int | None = None,
-    previous_completed_task: WorkflowTaskEpoch | None = None,
-    withdraw_run: str | None = None,
 ) -> temporalio.workflow.NexusOperationHandle[AppendRecordsResponse,]:
-    """Append one batch. Workflow code makes the call from a Local Activity.
-
-    Args:
-        failed_tasks: Local Activity only. The run's failed or timed out Workflow Tasks.
-        producer: Required outside a Workflow. In a Workflow the transport sets it.
-        sequence: The batch number in this epoch, 1 or more. It is part of the dedupe
-            key.
-        previous_completed_task: Local Activity only. The run's last completed Workflow
-            Task.
-        withdraw_run: Retry run only. The previous run, whose Records this withdraws.
-    """
+    """Append one batch. Workflow code makes the call from a Local Activity."""
     request = AppendRecordsRequest(
         stream=stream,
         records=records or [],
-        failed_tasks=failed_tasks or [],
-        producer=producer,
-        sequence=sequence,
-        previous_completed_task=previous_completed_task,
-        withdraw_run=withdraw_run,
+        producer=_support.workflow_producer(),
     )
     return await _append_records(request)
 
@@ -316,6 +278,8 @@ async def append_records(
 async def _close_stream(
     request: CloseStreamRequest,
 ) -> temporalio.workflow.NexusOperationHandle[CloseStreamResponse,]:
+    if request.producer is None:
+        request = dataclasses.replace(request, producer=_support.workflow_producer())
     nexus_client = temporalio.workflow.create_nexus_client(
         service="temporal.api.streamservice.v1.StreamService",
         endpoint="__temporal_system",
@@ -330,28 +294,14 @@ async def _close_stream(
 async def close_stream(
     *,
     stream: StreamRef,
-    failed_tasks: list[int] | None = None,
-    producer: Producer | None = None,
     result: typing.Any | None = None,
     failure: BaseException | None = None,
-    status: StreamCloseStatus | None = None,
-    previous_completed_task: WorkflowTaskEpoch | None = None,
 ) -> temporalio.workflow.NexusOperationHandle[CloseStreamResponse,]:
-    """
-    Args:
-        failed_tasks: Workflow only. The run's failed or timed out Workflow Tasks.
-        status: Empty is completed, or failed with a failure. A caller may set canceled.
-        previous_completed_task: Workflow only. The previous completed Workflow Task of
-            the run.
-    """
     request = CloseStreamRequest(
         stream=stream,
-        failed_tasks=failed_tasks or [],
-        producer=producer,
+        producer=_support.workflow_producer(),
         result=result,
         failure=failure,
-        status=status,
-        previous_completed_task=previous_completed_task,
     )
     return await _close_stream(request)
 

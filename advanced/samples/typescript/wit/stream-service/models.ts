@@ -186,7 +186,7 @@ export const executionTransferTypeConverter = {
 };
 export interface CreateStreamRequest {
   /**
-   * Required on Redis and memory. On native, empty asks the server for an id.
+   * The id of the Stream. Required, and never empty.
    */
   streamId: string;
   /**
@@ -668,7 +668,7 @@ export interface CloseStreamRequest {
   result?: common.Payload;
   failure?: Error;
   /**
-   * Empty is completed, or failed with a failure. A caller may set canceled.
+   * Empty is completed, failed with a failure, or canceled with a cancel.
    */
   status?: StreamCloseStatus;
   /**

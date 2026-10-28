@@ -18,15 +18,30 @@ function requiredField<T>(
   return value;
 }
 
+type CreateStreamInput = CreateStreamRequest extends infer Input
+  ? Input extends unknown
+    ? Omit<Input, "owner" | "streamId" | "withdrawRun"> & {
+        owner?: never;
+        streamId?: never;
+        withdrawRun?: never;
+      }
+    : never
+  : never;
+
 /**
  * @param definition - Gives the type arguments of the resource.
  * @param request - Request for the operation.
  */
 export async function createStream<BodyT>(
   definition: StreamDefinition<BodyT>,
-  request: CreateStreamRequest,
+  requestInput: CreateStreamInput,
 ): Promise<Stream<BodyT>> {
   const [bodyType] = support.definitionTypeArguments(definition);
+  const request = {
+    ...requestInput,
+    streamId: support.workflowStreamId(definition),
+    owner: support.workflowOwner(),
+  } as CreateStreamRequest;
   const client = workflow.createNexusServiceClient({
     service: streamService,
     endpoint: "__temporal_system",

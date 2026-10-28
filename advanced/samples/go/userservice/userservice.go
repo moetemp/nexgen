@@ -175,6 +175,7 @@ func Notify(ctx workflow.Context, opts NotifyOptions) workflow.Future {
 type NotifyAllOptions struct {
 }
 
+// Notify every user.
 func NotifyAll(ctx workflow.Context, opts NotifyAllOptions) workflow.Future {
 	return notifyAll(ctx, notifyAllRequest{})
 }

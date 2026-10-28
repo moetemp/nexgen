@@ -15,6 +15,9 @@ export const userService = nexus.service("UserService", {
   getUser: nexus.operation<GetUserRequest, User>({ name: "GetUser" }),
   updateEmail: nexus.operation<UpdateEmailRequest, User>({ name: "UpdateEmail" }),
   notify: nexus.operation<NotifyRequest, void>({ name: "Notify" }),
+  /**
+   * Notify every user.
+   */
   notifyAll: nexus.operation<NotifyAllRequest, void>({ name: "NotifyAll" }),
 });
 
@@ -62,6 +65,8 @@ export class UserServiceClient {
   }
 
   /**
+   * Notify every user.
+   *
    * @param request - Request for the operation.
    */
   public async notifyAll(

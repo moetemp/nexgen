@@ -75,7 +75,7 @@ namespace Nexgen.DotNetExamples.Tests
 
         // A newer server can send a Stream status that this code doesn't know.
         [Fact]
-        public void UnknownEnumNumberPassesThrough()
+        public void UnknownEnumNumberDecodesAsTheFallbackCase()
         {
             var converter = CreateSdkConverter(typeof(StreamServiceExample.DescribeStreamResponse));
             var wire = new WireDescribeStreamResponse
@@ -85,10 +85,7 @@ namespace Nexgen.DotNetExamples.Tests
 
             var decoded = Assert.IsType<StreamServiceExample.DescribeStreamResponse>(
                 converter.FromTransferType(wire));
-            Assert.Equal((StreamServiceExample.StreamStatus)9, decoded.Status);
-            var encoded = Assert.IsType<WireDescribeStreamResponse>(
-                converter.ToTransferType(decoded));
-            Assert.Equal((Streams::Temporalio.Api.Enums.V1.StreamStatus)9, encoded.Status);
+            Assert.Equal(StreamServiceExample.StreamStatus.StreamStatusUnspecified, decoded.Status);
         }
     }
 }

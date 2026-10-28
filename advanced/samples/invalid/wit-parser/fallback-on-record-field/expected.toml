@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.fallback", "field `text`", "is only supported on enum cases"]

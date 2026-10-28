@@ -1,0 +1,5 @@
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.fallback", "case `severity-unspecified`", "does not take arguments"]

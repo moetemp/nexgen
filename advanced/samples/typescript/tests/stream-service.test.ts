@@ -6,6 +6,7 @@ import { describe, expect, test } from "vitest";
 import {
   type ReadRecordsResponse,
   StreamCloseStatus,
+  StreamStatus,
   describeStreamResponseTransferTypeConverter,
   readRecordsRequestTransferTypeConverter,
   readRecordsResponseTransferTypeConverter,
@@ -88,7 +89,7 @@ describe("stream-service generated output", () => {
     ).toBe("stream-1");
   });
 
-  test("passes an enum number that it doesn't know through", () => {
+  test("decodes an enum number that it doesn't know as the fallback case", () => {
     // A newer server can send a Stream status that this code doesn't know.
     const proto: temporal.api.streamservice.v1.IDescribeStreamResponse = {
       status: 9 as temporal.api.enums.v1.StreamStatus,
@@ -96,9 +97,6 @@ describe("stream-service generated output", () => {
 
     const model = describeStreamResponseTransferTypeConverter.fromTransferType(proto);
 
-    expect(model.status).toBe(9);
-    expect(
-      describeStreamResponseTransferTypeConverter.toTransferType(model).status,
-    ).toBe(9);
+    expect(model.status).toBe(StreamStatus.StreamStatusUnspecified);
   });
 });

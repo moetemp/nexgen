@@ -69,6 +69,8 @@ replaced without deleting these authored helpers.
   proto-backed type roundtrip example for focused native/proto conversion
   coverage, including retry policies, activity options, durations, task queues,
   and priority.
+- [`batch-service`](samples/inputs/batch-service.wit): a resource method that
+  takes its items as arguments and returns one field of the response.
 - [`worker-shutdown`](samples/inputs/worker-shutdown.wit): a proto-backed
   request that flattens two fields of one field, and copies sibling fields into
   the others.

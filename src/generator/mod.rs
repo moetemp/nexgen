@@ -17,7 +17,7 @@ use crate::planning::{PlannedFamily, PlannedSpec, PlannedType};
 use crate::spec::{ApiSpec, RecordSpec};
 use crate::spec::{ApiSpecNode, ApiSpecTree};
 
-pub(crate) use resource_plan::render_request_plan;
+pub(crate) use resource_plan::{render_request_plan, return_response_field};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GeneratedOutputLayout {

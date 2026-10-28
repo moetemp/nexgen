@@ -5,6 +5,7 @@
 using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Temporalio.Workflows;
 using Nexgen.Support;
@@ -27,10 +28,12 @@ namespace Nexgen.StreamService
         public StreamStatus? Status { get; }
 
         [GeneratedCode("nexgen", null)]
-        public Task<AppendRecordsResponse> PublishAsync(IReadOnlyList<AppendRecord<TBody>> records)
+        public async Task<long> PublishAsync(params TBody[] values)
         {
-            var request = new AppendRecordsOptions<TBody>(StreamValue, records);
-            return Operations.AppendRecordsAsync(request);
+            var recordsValue = values.Select(value => new AppendRecord<TBody>(value)).ToList();
+            var request = new AppendRecordsOptions<TBody>(StreamValue, recordsValue);
+            var response = await Operations.AppendRecordsAsync(request).ConfigureAwait(true);
+            return response.LastOffset ?? 0L;
         }
 
         [GeneratedCode("nexgen", null)]

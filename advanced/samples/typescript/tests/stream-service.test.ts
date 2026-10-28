@@ -184,6 +184,28 @@ describe("stream-service generated output", () => {
     expect(request.ref).toStrictEqual({ backend: undefined, id: "chat-1:r1:turns" });
   });
 
+  test("wraps each published value, and returns the last offset", async () => {
+    startOperation
+      .mockResolvedValueOnce({
+        result: async () => ({
+          firstOffset: Long.fromNumber(4),
+          lastOffset: Long.fromNumber(5),
+        }),
+      })
+      .mockResolvedValueOnce({ result: async () => ({}) });
+    const stream = new Stream<string>({ id: "s1" }, undefined, undefined);
+
+    const lastOffset = await stream.publish("a", "b");
+    const [, request] = startOperation.mock.calls.at(-1)!;
+    const empty = await stream.publish();
+
+    expectTypeOf(lastOffset).toEqualTypeOf<Long>();
+    expect(lastOffset.toNumber()).toBe(5);
+    expect(request.records).toStrictEqual([{ body: "a" }, { body: "b" }]);
+    // `lastOffset` has no presence on the wire, so an empty publish answers zero.
+    expect(empty).toBe(Long.ZERO);
+  });
+
   test("passes an enum number that it doesn't know through", () => {
     // A newer server can send a Stream status that this code doesn't know.
     const proto: temporal.api.streamservice.v1.IDescribeStreamResponse = {

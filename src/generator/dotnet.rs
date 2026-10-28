@@ -13,7 +13,7 @@ use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedProtoType, PlannedResource,
     PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
-    PlannedSpec, PlannedType, operation_input_model,
+    PlannedSpec, PlannedType, operation_input_model, resource_method_result_field, unwrapped_field,
 };
 use crate::planning::{
     PlannedResourceHolderField, RequestPlan, RequestPlanField, RequestPlanSource,
@@ -268,12 +268,18 @@ impl<'a> ApiPlanner<'a> {
         }
         let module_imports = self.namespaces.module_imports(self.api_plan);
         imports.extend(module_imports.iter().map(String::as_str));
-        let mut output = generated_file_prelude(namespace, &imports);
+        let mut body = String::new();
         for service in &self.api_plan.services {
             for resource in &service.resources {
-                self.render_resource(&mut output, service, &resource.data);
+                self.render_resource(&mut body, service, &resource.data);
             }
         }
+        // A method wraps the unwrapped items of a list with `Select`.
+        if body.contains(".Select(value => ") {
+            imports.insert(3, "System.Linq");
+        }
+        let mut output = generated_file_prelude(namespace, &imports);
+        output.push_str(&body);
         close_namespace(&mut output);
         output
     }
@@ -567,17 +573,20 @@ impl<'a> ApiPlanner<'a> {
                 .find(|operation| operation.name == *operation_name),
             PlannedResourceMethodBindingSpec::Stub => None,
         };
-        let return_type = self.resource_method_task_return_type(method);
+        let result_field = self.resource_method_result_field(method);
+        let return_type = match &result_field {
+            Some((field_type, _)) => format!("Task<{field_type}>"),
+            None => self.resource_method_task_return_type(method),
+        };
+        let bound = matches!(
+            method.binding,
+            PlannedResourceMethodBindingSpec::Operation { .. }
+        );
         output.push_str("    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
         output.push_str("    public ");
-        if service.endpoint.is_none()
-            && matches!(
-                method.binding,
-                PlannedResourceMethodBindingSpec::Operation { .. }
-            )
-        {
+        if bound && (service.endpoint.is_none() || result_field.is_some()) {
             output.push_str("async ");
         }
         output.push_str(&return_type);
@@ -585,13 +594,62 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(&csharp_type_name(&method.name));
         output.push_str("Async");
         output.push('(');
+        // A list of a record with `@nexus.unwrap` takes the record's field. A local wraps each
+        // item in the record.
+        let mut unwrap_locals = Vec::new();
+        let mut renamed_params = BTreeMap::new();
         for (index, param) in method.params.iter().enumerate() {
             if index > 0 {
                 output.push_str(", ");
             }
-            output.push_str(&self.resource_field_type(&param.kind, param.optional));
-            output.push(' ');
-            output.push_str(&csharp_parameter_name(&param.name));
+            let varargs = method
+                .varargs
+                .as_deref()
+                .filter(|_| index + 1 == method.params.len());
+            let item = match &param.kind {
+                PlannedType::List(item) if !param.optional => Some(item.as_ref()),
+                _ => None,
+            };
+            let unwrapped = item.and_then(|item| unwrapped_field(self.api_plan, item));
+            let param_type = match (item, unwrapped) {
+                (Some(item), Some((_, field))) => {
+                    let field_type = self.resource_field_type(&field.field_type, !field.required);
+                    let model = self.dotnet_value_type(item);
+                    let property = field_property_name(field);
+                    let constructor = if field.required {
+                        format!("new {model}(value)")
+                    } else {
+                        format!("new {model} {{ {property} = value }}")
+                    };
+                    unwrap_locals.push((param.name.clone(), varargs, constructor));
+                    renamed_params.insert(param.name.clone(), format!("{}-value", param.name));
+                    field_type
+                }
+                (Some(item), None) => self.dotnet_value_type(item),
+                (None, _) => self.resource_field_type(&param.kind, param.optional),
+            };
+            match (varargs, item) {
+                (Some(name), Some(_)) => {
+                    if unwrapped.is_none() {
+                        renamed_params.insert(param.name.clone(), name.to_string());
+                    }
+                    output.push_str("params ");
+                    output.push_str(&param_type);
+                    output.push_str("[] ");
+                    output.push_str(&csharp_parameter_name(name));
+                }
+                (None, Some(_)) => {
+                    output.push_str("IReadOnlyList<");
+                    output.push_str(&param_type);
+                    output.push_str("> ");
+                    output.push_str(&csharp_parameter_name(&param.name));
+                }
+                _ => {
+                    output.push_str(&param_type);
+                    output.push(' ');
+                    output.push_str(&csharp_parameter_name(&param.name));
+                }
+            }
         }
         output.push(')');
         match &method.binding {
@@ -602,17 +660,28 @@ impl<'a> ApiPlanner<'a> {
             } => {
                 let operation =
                     operation.expect("bound resource operation should exist on the service");
-                let request_plan = &with_resource_property_names(request_plan, type_name);
+                let request_plan = &with_renamed_method_params(
+                    &with_resource_property_names(request_plan, type_name),
+                    &renamed_params,
+                );
                 output.push_str("\n    {\n");
+                for (name, varargs, constructor) in &unwrap_locals {
+                    output.push_str(&format!(
+                        "        var {} = {}.Select(value => {constructor}).ToList();\n",
+                        csharp_parameter_name(&format!("{name}-value")),
+                        csharp_parameter_name(varargs.unwrap_or(name)),
+                    ));
+                }
+                let mut body = String::new();
                 if service.endpoint.is_none() {
                     self.render_resource_method_inline_operation_body(
-                        output,
+                        &mut body,
                         operation,
                         request_plan,
                     );
                 } else {
                     render_resource_method_operation_body(
-                        output,
+                        &mut body,
                         service,
                         operation,
                         request_plan,
@@ -621,6 +690,26 @@ impl<'a> ApiPlanner<'a> {
                         None,
                     );
                 }
+                // The body ends in the return of the response, which the field replaces.
+                if let Some((_, value)) = &result_field
+                    && let Some(index) = body.rfind("        return ")
+                {
+                    let call = body[index + "        return ".len()..]
+                        .trim_end()
+                        .trim_end_matches(';')
+                        .trim_start_matches("await ")
+                        .to_string();
+                    let call = if call.ends_with(".ConfigureAwait(true)") {
+                        call
+                    } else {
+                        format!("{call}.ConfigureAwait(true)")
+                    };
+                    body.truncate(index);
+                    body.push_str(&format!(
+                        "        var response = await {call};\n        return {value};\n"
+                    ));
+                }
+                output.push_str(&body);
                 output.push_str("    }\n\n");
             }
             PlannedResourceMethodBindingSpec::Stub => {
@@ -1683,6 +1772,39 @@ impl<'a> ApiPlanner<'a> {
         } else {
             base
         }
+    }
+
+    /// The type and the expression of the response field that a method returns. A field with no
+    /// presence gives its zero value when the response leaves it unset.
+    fn resource_method_result_field(
+        &self,
+        method: &PlannedResourceMethod,
+    ) -> Option<(String, String)> {
+        let (_, _, field, optional) = resource_method_result_field(self.api_plan, method)?;
+        let kind = match &field.field_type {
+            PlannedType::Option(inner) => inner.as_ref(),
+            kind => kind,
+        };
+        let base = self.dotnet_field_kind_type(kind);
+        let zero = (!optional && !field.required)
+            .then(|| match base.as_str() {
+                "long" => Some("0L"),
+                "int" | "short" | "sbyte" | "byte" | "ushort" => Some("0"),
+                "uint" => Some("0U"),
+                "ulong" => Some("0UL"),
+                "double" => Some("0D"),
+                "float" => Some("0F"),
+                "bool" => Some("false"),
+                "string" => Some("\"\""),
+                _ => None,
+            })
+            .flatten();
+        let property = field_property_name(field);
+        Some(match zero {
+            Some(zero) => (base, format!("response.{property} ?? {zero}")),
+            None if field.required => (base, format!("response.{property}")),
+            None => (nullable_type(&base), format!("response.{property}")),
+        })
     }
 
     fn resource_method_task_return_type(&self, method: &PlannedResourceMethod) -> String {
@@ -4501,6 +4623,30 @@ fn resource_property_name(type_name: &str, field_name: &str) -> String {
 // System.Text.Json binds each constructor parameter to the property of the same name.
 fn resource_parameter_name(type_name: &str, field_name: &str) -> String {
     csharp_parameter_name(&resource_property_name(type_name, field_name))
+}
+
+/// Points the method parameters of a request plan at other names, such as the local that wraps
+/// the items of a list.
+fn with_renamed_method_params(plan: &RequestPlan, names: &BTreeMap<String, String>) -> RequestPlan {
+    match plan {
+        RequestPlan::Source(RequestPlanSource::MethodParam(name)) if names.contains_key(name) => {
+            RequestPlan::Source(RequestPlanSource::MethodParam(names[name].clone()))
+        }
+        RequestPlan::Construct {
+            message_name,
+            fields,
+        } => RequestPlan::Construct {
+            message_name: message_name.clone(),
+            fields: fields
+                .iter()
+                .map(|field| RequestPlanField {
+                    value: with_renamed_method_params(&field.value, names),
+                    ..field.clone()
+                })
+                .collect(),
+        },
+        RequestPlan::Source(_) => plan.clone(),
+    }
 }
 
 fn with_resource_property_names(plan: &RequestPlan, type_name: &str) -> RequestPlan {

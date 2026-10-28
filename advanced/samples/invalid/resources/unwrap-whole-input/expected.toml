@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit"
+contains = ["operation `AddItems` takes", "as its whole input, which `@nexus.unwrap` unwraps"]

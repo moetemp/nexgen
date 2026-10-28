@@ -117,6 +117,7 @@ interface stream-service {
   /// @nexus.doc "One Record to append."
   /// @nexus.proto "temporal.api.stream.v1.AppendRecord"
   ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
+  /// @nexus.unwrap
   record append-record {
     /// @nexus.doc "The value. It goes through the payload codec."
     body: body-t,
@@ -404,8 +405,10 @@ interface stream-service {
   resource %stream {
     constructor(%stream: stream-ref, created: option<bool>, status: option<stream-status>);
 
-    /// @nexus.doc "Publish Records. The answer has the first and the last offset."
+    /// @nexus.doc "Publish values. The answer is the offset of the last one."
     /// @nexus.operation "append-records"
+    /// @nexus.varargs name="values"
+    /// @nexus.result-field "last-offset"
     publish: func(records: list<append-record>) -> append-records-response;
 
     /// @nexus.doc "Close the Stream. Readers drain what is left, then end."

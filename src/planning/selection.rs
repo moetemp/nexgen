@@ -292,6 +292,7 @@ mod tests {
                     source: None,
                     experimental: false,
                     flatten_in_api: false,
+                    unwrap: false,
                     fields: indexmap::IndexMap::from([(
                         "callback".to_string(),
                         RecordFieldSpec {

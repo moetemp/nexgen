@@ -19,6 +19,7 @@ use crate::planning::{
     PlannedResourceField, PlannedResourceHolder, PlannedResourceMethod,
     PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind, PlannedSpec, PlannedType,
     message_model_name, operation_input_model, operation_output_direct_result,
+    resource_method_result_field, unwrapped_field,
 };
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{
@@ -1541,12 +1542,18 @@ impl<'a> ApiPlanner<'a> {
         operations_object: bool,
     ) {
         let result_annotation = self.python_resource_method_result_annotation(method);
+        let result_field = self.python_resource_method_result_field(method);
+        let param_exprs = self.resource_method_param_exprs(method);
         output.push_str("    async def ");
         output.push_str(&python_field_name(&method.name));
         output.push_str("(\n");
         self.render_resource_method_params(output, method, operations_object);
         output.push_str("    ) -> ");
-        output.push_str(&result_annotation);
+        output.push_str(
+            result_field
+                .as_ref()
+                .map_or(&result_annotation, |(annotation, _)| annotation),
+        );
         output.push_str(":\n");
         render_python_docstring(output, "        ", method.doc.as_deref(), &[], None, false);
 
@@ -1557,30 +1564,47 @@ impl<'a> ApiPlanner<'a> {
                     .find(|bound_operation| bound_operation.operation.name == operation_name)
                     .map(|bound_operation| bound_operation.operation)
                     .expect("bound resource operation should be rendered in the same module");
+                let mut body = String::new();
                 if operations_object {
                     render_resource_method_operations_body(
-                        output,
+                        &mut body,
                         service,
                         method,
                         operation,
                         &result_annotation,
+                        &param_exprs,
                     );
                 } else if service.endpoint.is_none() {
                     render_resource_method_inline_operation_body(
-                        output,
+                        &mut body,
                         service,
                         method,
                         operation,
                         &result_annotation,
+                        &param_exprs,
                     );
                 } else {
                     render_resource_method_operation_body(
-                        output,
+                        &mut body,
                         method,
                         operation,
                         &result_annotation,
+                        &param_exprs,
                     );
                 }
+                // The body ends in the return of the response, which the field replaces.
+                if let Some((_, expr)) = &result_field
+                    && let Some(index) = body.rfind("        return await ")
+                {
+                    body.replace_range(
+                        index..index + "        return await ".len(),
+                        "        response = await ",
+                    );
+                    body.push_str("        return ");
+                    body.push_str(expr);
+                    body.push('\n');
+                }
+                output.push_str(&body);
             }
             PlannedResourceMethodBindingSpec::Stub => {
                 output.push_str("        raise NotImplementedError(");
@@ -1603,27 +1627,39 @@ impl<'a> ApiPlanner<'a> {
         rpc_options: bool,
     ) {
         output.push_str("        self,\n");
+        let mut params = method.params.as_slice();
+        // The items of the last list come first, and every other parameter is keyword-only.
+        if let (Some(name), Some((last, rest))) = (&method.varargs, params.split_last())
+            && let Some(item) = resource_method_list_param(last)
+        {
+            output.push_str("        *");
+            output.push_str(&python_field_name(name));
+            output.push_str(": ");
+            output.push_str(&self.python_resource_item_annotation(item));
+            output.push_str(",\n");
+            params = rest;
+        }
         // Python refuses a parameter without a default after one with a default, and WIT
         // allows any order, so such a method takes keyword arguments only.
         let has_default = |param: &PlannedResourceField| {
             param.optional || resource_method_list_param(param).is_some()
         };
-        let keyword_only = method
-            .params
-            .iter()
-            .skip_while(|param| !has_default(param))
-            .any(|param| !has_default(param));
+        let keyword_only = method.varargs.is_none()
+            && params
+                .iter()
+                .skip_while(|param| !has_default(param))
+                .any(|param| !has_default(param));
         if keyword_only {
             output.push_str("        *,\n");
         }
-        for param in &method.params {
+        for param in params {
             output.push_str("        ");
             output.push_str(&python_field_name(&param.name));
             output.push_str(": ");
             if let Some(value) = resource_method_list_param(param) {
                 // A list request field defaults to empty, as in the standalone wrapper.
                 output.push_str("list[");
-                output.push_str(&self.python_resource_value_annotation(value));
+                output.push_str(&self.python_resource_item_annotation(value));
                 output.push_str("] | None = None");
             } else {
                 output.push_str(&self.python_resource_field_annotation(
@@ -1638,8 +1674,99 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(",\n");
         }
         if rpc_options {
-            render_rpc_option_parameters(output, "        ", keyword_only);
+            render_rpc_option_parameters(
+                output,
+                "        ",
+                keyword_only || method.varargs.is_some(),
+            );
         }
+    }
+
+    /// The type of an item of a list parameter. A record with `@nexus.unwrap` is its one field.
+    fn python_resource_item_annotation(&self, item: &PlannedType) -> String {
+        match unwrapped_field(self.api_plan, item) {
+            Some((_, field)) => {
+                self.python_resource_field_annotation(&field.field_type, !field.required, None)
+            }
+            None => self.python_resource_value_annotation(item),
+        }
+    }
+
+    /// The request values of a method's list parameters. The items of `@nexus.varargs` are a
+    /// tuple, and each item of a record with `@nexus.unwrap` is wrapped in its record.
+    fn resource_method_param_exprs(
+        &self,
+        method: &PlannedResourceMethod,
+    ) -> BTreeMap<String, String> {
+        method
+            .params
+            .iter()
+            .enumerate()
+            .filter_map(|(index, param)| {
+                let item = resource_method_list_param(param)?;
+                let varargs = method
+                    .varargs
+                    .as_deref()
+                    .filter(|_| index + 1 == method.params.len());
+                let source = match varargs {
+                    Some(name) => python_field_name(name),
+                    None => format!("{} or []", python_field_name(&param.name)),
+                };
+                let wrap = unwrapped_field(self.api_plan, item).and_then(|(key, _)| {
+                    let PlannedType::Record(record) = item else {
+                        return None;
+                    };
+                    let model = self.models.get(&record.full_name)?;
+                    let attr = self.model_field_attr(&record.full_name, key)?;
+                    Some((model.name.clone(), attr))
+                });
+                let expr = match (wrap, varargs) {
+                    (Some((model, attr)), _) => {
+                        format!("[{model}({attr}=value) for value in {source}]")
+                    }
+                    (None, Some(_)) => format!("list({source})"),
+                    (None, None) => source,
+                };
+                Some((param.name.clone(), expr))
+            })
+            .collect()
+    }
+
+    /// The attribute of a record field in the rendered model, by key.
+    fn model_field_attr(&self, full_name: &str, key: &str) -> Option<String> {
+        let record = self.api_plan.record(full_name)?;
+        let model = self.models.get(full_name)?;
+        record
+            .fields
+            .iter()
+            .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+            .zip(&model.fields)
+            .find(|((name, _), _)| name.as_str() == key)
+            .map(|(_, field)| field.attr_name.clone())
+    }
+
+    /// The annotation and the expression of the response field that a method returns. A field
+    /// with no presence gives its zero value when the response leaves it unset.
+    fn python_resource_method_result_field(
+        &self,
+        method: &PlannedResourceMethod,
+    ) -> Option<(String, String)> {
+        let (record, key, field, optional) = resource_method_result_field(self.api_plan, method)?;
+        let attr = self.model_field_attr(&record.full_name, key)?;
+        let kind = match &field.field_type {
+            PlannedType::Option(inner) => inner.as_ref(),
+            kind => kind,
+        };
+        let zero = (!optional && !field.required)
+            .then(|| python_zero_value(kind))
+            .flatten();
+        let returns_absence = !field.required && zero.is_none();
+        let annotation = self.python_resource_field_annotation(kind, returns_absence, None);
+        let expr = match zero {
+            Some(zero) => format!("response.{attr} or {zero}"),
+            None => format!("response.{attr}"),
+        };
+        Some((annotation, expr))
     }
 
     /// The iterator of a method whose operation polls. The class serves every generated target,
@@ -1697,7 +1824,8 @@ impl<'a> ApiPlanner<'a> {
             None,
             false,
         );
-        render_resource_method_request(output, method, operation, request_plan);
+        let param_exprs = self.resource_method_param_exprs(method);
+        render_resource_method_request(output, operation, request_plan, &param_exprs);
         let type_args = operation.runtime_type_args("self.");
         let response = if targets.client {
             vec![format!(
@@ -7087,11 +7215,12 @@ fn render_resource_method_operations_body(
     method: &PlannedResourceMethod,
     operation: &RenderedOperation<'_>,
     result_annotation: &str,
+    param_exprs: &BTreeMap<String, String>,
 ) {
     let PlannedResourceMethodBindingSpec::Operation { request_plan, .. } = &method.binding else {
         return;
     };
-    render_resource_method_request(output, method, operation, request_plan);
+    render_resource_method_request(output, operation, request_plan, param_exprs);
     if result_annotation != "None" {
         output.push_str("        return await self._ops().");
     } else if operation.output_none {
@@ -7231,6 +7360,7 @@ fn render_resource_method_inline_operation_body(
     method: &PlannedResourceMethod,
     operation: &RenderedOperation<'_>,
     result_annotation: &str,
+    param_exprs: &BTreeMap<String, String>,
 ) {
     let PlannedResourceMethodBindingSpec::Operation {
         request_plan,
@@ -7241,7 +7371,7 @@ fn render_resource_method_inline_operation_body(
         return;
     };
 
-    render_resource_method_request(output, method, operation, request_plan);
+    render_resource_method_request(output, operation, request_plan, param_exprs);
     render_inline_operation_call(
         output,
         service,
@@ -7375,11 +7505,11 @@ fn render_inline_operation_call(
 
 fn render_resource_method_request(
     output: &mut String,
-    method: &PlannedResourceMethod,
     operation: &RenderedOperation<'_>,
     request_plan: &RequestPlan,
+    param_exprs: &BTreeMap<String, String>,
 ) {
-    let request_expr = render_request_plan_python(method, request_plan);
+    let request_expr = render_request_plan_python(request_plan, param_exprs);
     output.push_str("        request = ");
     if let Some(unpacked_input) = &operation.unpacked_input {
         output.push_str(&unpacked_input.model_name);
@@ -7393,7 +7523,7 @@ fn render_resource_method_request(
                 output.push_str("            ");
                 output.push_str(&python_field_name(&field.field_name));
                 output.push('=');
-                output.push_str(&render_request_plan_python(method, &field.value));
+                output.push_str(&render_request_plan_python(&field.value, param_exprs));
                 output.push_str(",\n");
             }
         }
@@ -7432,6 +7562,7 @@ fn render_resource_method_operation_body(
     method: &PlannedResourceMethod,
     operation: &RenderedOperation<'_>,
     result_annotation: &str,
+    param_exprs: &BTreeMap<String, String>,
 ) {
     let PlannedResourceMethodBindingSpec::Operation {
         request_plan,
@@ -7442,7 +7573,7 @@ fn render_resource_method_operation_body(
         return;
     };
 
-    render_resource_method_request(output, method, operation, request_plan);
+    render_resource_method_request(output, operation, request_plan, param_exprs);
     render_workflow_operation_call(
         output,
         operation,
@@ -7485,17 +7616,15 @@ fn render_workflow_operation_call(
     }
 }
 
-fn render_request_plan_python(method: &PlannedResourceMethod, plan: &RequestPlan) -> String {
+fn render_request_plan_python(
+    plan: &RequestPlan,
+    param_exprs: &BTreeMap<String, String>,
+) -> String {
     let render_method_param = |name: &str| {
-        let is_list = method
-            .params
-            .iter()
-            .any(|param| param.name == name && resource_method_list_param(param).is_some());
-        if is_list {
-            format!("{} or []", python_field_name(name))
-        } else {
-            python_field_name(name)
-        }
+        param_exprs
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| python_field_name(name))
     };
     render_request_plan(
         plan,
@@ -7512,6 +7641,18 @@ fn render_request_plan_python(method: &PlannedResourceMethod, plan: &RequestPlan
         |name| format!("self.{}", python_field_name(name)),
         render_method_param,
     )
+}
+
+/// The value of a proto field with no presence that the response leaves unset.
+fn python_zero_value(kind: &PlannedType) -> Option<&'static str> {
+    match kind {
+        PlannedType::Int(_) => Some("0"),
+        PlannedType::Float => Some("0.0"),
+        PlannedType::Bool => Some("False"),
+        PlannedType::String => Some("\"\""),
+        PlannedType::Bytes => Some("b\"\""),
+        _ => None,
+    }
 }
 
 fn resource_method_list_param(param: &PlannedResourceField) -> Option<&PlannedType> {

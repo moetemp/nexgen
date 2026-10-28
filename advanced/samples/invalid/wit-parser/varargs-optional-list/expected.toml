@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["needs a method whose last parameter is a list, not an `option`"]

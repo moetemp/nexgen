@@ -1,0 +1,5 @@
+languages = ["python"]
+
+[error]
+kind = "invalid-resource-method"
+contains = ["returns a field of the response, but operation `AddItems` has an output transform"]

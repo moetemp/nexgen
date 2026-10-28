@@ -86,6 +86,10 @@ namespace Nexgen.DotNetExamples.Tests
             StreamServiceExample.Operations.CreateStreamAsync(
                 new Nexgen.Support.StreamDefinition<Turn>("turns"));
 
+        // A publish takes the values, and answers the offset of the last one.
+        private static Task<long> PublishTurns(StreamServiceExample.Stream<Turn> stream) =>
+            stream.PublishAsync(new Turn("user"), new Turn("model"));
+
         // The create takes the backend of the ref as an option, and the ref copies the id.
         private static Task<StreamServiceExample.Stream<Turn>> CreateTurnsOnBackend() =>
             StreamServiceExample.Operations.CreateStreamAsync(

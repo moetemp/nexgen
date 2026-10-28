@@ -107,6 +107,8 @@ pub(crate) struct ResolvedResourceMethodSpec {
     pub(crate) doc: SelectedTextSpec,
     pub(crate) params: Vec<ResourceFieldSpec<SelectedFamily>>,
     pub(crate) result: Option<ResourceResultSpec<SelectedFamily>>,
+    pub(crate) varargs: Option<String>,
+    pub(crate) result_field: Option<String>,
     pub(crate) binding: ResolvedResourceMethodBinding,
 }
 
@@ -397,11 +399,14 @@ fn resolve_resource_method(
             });
         }
         reject_parameters_of_hidden_fields(spec, service, resource, method, operation)?;
+        reject_result_field_of_transformed_output(service, resource, method, operation)?;
         return Ok(ResolvedResourceMethodSpec {
             name: method.name.clone(),
             doc: method.doc.clone(),
             params: method.params.clone(),
             result: method.result.clone(),
+            varargs: method.varargs.clone(),
+            result_field: method.result_field.clone(),
             binding: ResolvedResourceMethodBinding::Operation {
                 operation_name: operation.name.clone(),
                 request_plan,
@@ -434,6 +439,7 @@ fn resolve_resource_method(
             let (operation_name, request_plan) = matching_operations.pop().expect("len checked");
             if let Some(operation) = service.operation(&operation_name) {
                 reject_parameters_of_hidden_fields(spec, service, resource, method, operation)?;
+                reject_result_field_of_transformed_output(service, resource, method, operation)?;
             }
             ResolvedResourceMethodBinding::Operation {
                 operation_name,
@@ -460,8 +466,32 @@ fn resolve_resource_method(
         doc: method.doc.clone(),
         params: method.params.clone(),
         result: method.result.clone(),
+        varargs: method.varargs.clone(),
+        result_field: method.result_field.clone(),
         binding,
     })
+}
+
+/// A method that returns one field of the response reads the response, so its operation can't
+/// transform the response into another value.
+fn reject_result_field_of_transformed_output(
+    service: &ServiceSpec<SelectedFamily>,
+    resource: &ResourceSpec<SelectedFamily>,
+    method: &ResourceMethodSpec<SelectedFamily>,
+    operation: &OperationSpec<SelectedFamily>,
+) -> Result<()> {
+    if method.result_field.is_some() && operation.output_transform.is_some() {
+        return Err(Error::InvalidResourceMethod {
+            service: service.name.clone(),
+            resource: resource.name.to_upper_camel_case(),
+            method: method.name.to_string(),
+            reason: format!(
+                "returns a field of the response, but operation `{}` has an output transform",
+                operation.name
+            ),
+        });
+    }
+    Ok(())
 }
 
 /// A method parameter that names a request field that a source fills, or that the API omits,
@@ -519,6 +549,9 @@ fn resource_method_result_matches_operation(
         TypeSpec::External(ExternalTypeSpec::Proto(proto_name)) => {
             operation_output_ref(operation) == Some(proto_name.as_str())
                 || operation_output_resource_message_name(operation) == Some(proto_name.as_str())
+        }
+        TypeSpec::Record(record) => {
+            matches!(operation.output_type(), Some(TypeSpec::Record(output)) if output == record)
         }
         _ => false,
     }

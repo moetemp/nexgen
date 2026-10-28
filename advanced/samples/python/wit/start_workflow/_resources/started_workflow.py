@@ -19,7 +19,7 @@ from ..models import (
 class StartedWorkflow:
     namespace: str
     workflow_id: str
-    run_id: str | None
+    run_id: str | None = None
 
     async def cancel(
         self,
@@ -50,6 +50,20 @@ class StartedWorkflow:
         self,
     ) -> str:
         raise NotImplementedError("started-workflow.get_result is not yet implemented")
+
+
+def started_workflow(
+    *,
+    namespace: str,
+    workflow_id: str,
+    run_id: str | None = None,
+) -> StartedWorkflow:
+    """A handle on an existing ``StartedWorkflow``, with no call."""
+    return StartedWorkflow(
+        namespace=namespace,
+        workflow_id=workflow_id,
+        run_id=run_id,
+    )
 
 
 async def _cancel_workflow(

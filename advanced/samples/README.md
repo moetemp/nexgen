@@ -195,7 +195,9 @@ Local Activity. The Stream and the writer are generic in the record body type
 create of a Stream takes a definition, which is a type of the sample support
 code, since no SDK has `StreamDefinition` yet. The requests take a source for
 each target, which the sample support code gives in place of Brook's runtime.
-The create takes the backend of the Stream's ref, and the ref copies the id.
+The create takes the backend of the Stream's ref, and the ref copies the id. In
+Python, the factory `stream` builds a handle from an id or a ref with no call,
+and a handle passes as its ref.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)

@@ -157,6 +157,8 @@ pub(crate) struct PlannedResource {
     /// The SDK type that gives the type arguments, with its import.
     pub(crate) definition: SelectedTextSpec,
     pub(crate) fields: Vec<PlannedResourceField>,
+    /// The constructor parameter whose fields the factory takes, if any.
+    pub(crate) flatten: Option<crate::spec::ResourceFlattenSpec>,
     pub(crate) methods: Vec<PlannedResourceMethod>,
 }
 

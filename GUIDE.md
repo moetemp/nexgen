@@ -22,6 +22,7 @@ of `@nexus` directives.
   - [Resource Declaration](#resource-declaration)
   - [Name-Binding: How Resource Methods Find Operations](#name-binding-how-resource-methods-find-operations)
   - [Resource Return Binding](#resource-return-binding)
+  - [Resource Factories](#resource-factories)
   - [Edge Cases and Error Conditions](#edge-cases-and-error-conditions)
 - [Proto-Backed Models](#proto-backed-models)
   - [Transfer-Type Conversion](#transfer-type-conversion)
@@ -740,6 +741,47 @@ record create-job-result {
 result = await handle  # CreateJobResponse
 return CreateJobResult(job=Job(job_id=result.job_id), created=result.created)
 ```
+
+### Resource Factories
+
+Python gives each resource a factory, which builds a handle on an existing
+resource with no call. The client extension has it as a method, and the Workflow
+package has it as a function. It takes the definition of a resource with
+`@nexus.definition`, or its runtime types, and then the constructor fields by
+keyword. The client's handle calls through that client, and a Workflow's handle
+calls the operations of the code that runs it.
+
+`@nexus.flatten-in-api` on the resource makes the factory take some fields of
+one constructor parameter's record in place of the parameter. With `keep=true`,
+the factory also takes the whole value, and a call gives either the value or the
+required promoted fields.
+
+```wit
+/// @nexus.flatten-in-api param="stream" fields="id backend" keep=true
+resource %stream {
+  constructor(%stream: stream-ref, created: option<bool>, status: option<stream-status>);
+}
+```
+
+```python
+stream = client.stream(Turns, id="chat-1:turns", backend="redis")
+same = client.stream(Turns, stream=StreamRef(id="chat-1:turns", backend="redis"))
+```
+
+The factory has no sibling fields, so it takes no `fill`. It must promote every
+required field of the record. The other refusals of a field's flatten apply too.
+The factory's name must not be the name of another client method, or of another
+function or module of the Workflow package. An optional resource field defaults
+to `None`. A dataclass with a required field after an optional one takes its
+fields by keyword.
+
+**A resource as data.** A resource with one required field of a proto-backed
+record, and no other required field, gets a transfer converter. Its wire form is
+that record, so a handle can be an argument or a result. In Python the parameter
+type gives the type arguments of a decoded handle, as in `Stream[Turn]`, and the
+handle takes the operations of the code that runs it. TypeScript, .NET and Go
+keep their constructors, and .NET passes a handle in the JSON form of its
+properties.
 
 ### Edge Cases and Error Conditions
 
@@ -2218,15 +2260,20 @@ The referenced helper must be available from the package specified by
 
 ### @nexus.flatten-in-api
 
-**Placement:** Record type (with `@nexus.proto`), or a field whose type is such
-a record **Syntax:** `@nexus.flatten-in-api` (no arguments) on a record,
+**Placement:** Record type (with `@nexus.proto`), a field whose type is such a
+record, or a resource **Syntax:** `@nexus.flatten-in-api` (no arguments) on a
+record,
 `@nexus.flatten-in-api fields="<field> ..." fill="<field>=<sibling> ..."` on a
-field
+field,
+`@nexus.flatten-in-api param="<parameter>" fields="<field> ..." keep=true` on a
+resource
 
 Flattens the record's fields into the parent record's generated API surface
 instead of creating a nested model. On a field, it flattens only the fields that
 `fields` names, and `fill` copies sibling fields into the record. See
-[Flattening some fields of one field](#flattening-some-fields-of-one-field).
+[Flattening some fields of one field](#flattening-some-fields-of-one-field). On
+a resource, it flattens one constructor parameter in the factory. See
+[Resource Factories](#resource-factories).
 
 ```wit
 /// @nexus.proto "temporal.api.sdk.v1.UserMetadata"

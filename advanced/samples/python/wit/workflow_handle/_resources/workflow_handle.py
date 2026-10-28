@@ -9,7 +9,7 @@ import dataclasses
 class WorkflowHandle:
     namespace: str
     workflow_id: str
-    run_id: str | None
+    run_id: str | None = None
     _operations: object | None = dataclasses.field(
         default=None, repr=False, compare=False, kw_only=True
     )

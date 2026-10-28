@@ -1,0 +1,5 @@
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit"
+contains = ["doesn't promote its required field `workflow_id`"]

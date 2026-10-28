@@ -5,7 +5,10 @@ from __future__ import annotations
 import collections.abc
 import dataclasses
 import typing
+import typing_extensions
 import datetime
+import streamprotos.temporal.api.stream.v1.message_pb2
+import temporalio.converter
 import temporalio.workflow
 
 from ..models import (
@@ -21,8 +24,12 @@ from ..models import (
     StreamReadStart,
     StreamRef,
     StreamStatus,
+    _StreamRefTransferTypeConverter,
 )
 import temporal_support as _support
+
+if typing.TYPE_CHECKING:
+    import temporal_support
 
 
 BodyT = typing.TypeVar("BodyT")
@@ -34,8 +41,8 @@ class Stream(typing.Generic[BodyT]):
 
     body_type: type[BodyT] = dataclasses.field(repr=False, compare=False)
     stream: StreamRef
-    created: bool | None
-    status: StreamStatus | None
+    created: bool | None = None
+    status: StreamStatus | None = None
     _operations: _StreamServiceOperations | None = dataclasses.field(
         default=None, repr=False, compare=False, kw_only=True
     )
@@ -153,6 +160,68 @@ class Stream(typing.Generic[BodyT]):
         return await self._ops()._stream_service_describe_stream(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
         )
+
+
+def stream(
+    definition: type[temporal_support.StreamDefinition[BodyT]],
+    *,
+    id: str | None = None,
+    stream: StreamRef | None = None,
+    backend: str | None = None,
+    created: bool | None = None,
+    status: StreamStatus | None = None,
+) -> Stream[BodyT]:
+    """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``stream``."""
+    (body_type,) = _support.definition_type_arguments(definition)
+    if stream is None:
+        if id is None:
+            raise TypeError("pass id or stream")
+        stream = StreamRef(id=id, backend=backend)
+    elif id is not None or backend is not None:
+        raise TypeError("pass id and backend, or stream, not both")
+    return Stream(
+        body_type=body_type,
+        stream=stream,
+        created=created,
+        status=status,
+    )
+
+
+class _StreamTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        Stream[BodyT], streamprotos.temporal.api.stream.v1.message_pb2.StreamRef
+    ]
+):
+    """Passes a ``Stream`` as its ``stream``. A decoded handle takes the operations of the
+    code that runs it.
+    """
+
+    transfer_type: (
+        type[streamprotos.temporal.api.stream.v1.message_pb2.StreamRef] | None
+    ) = streamprotos.temporal.api.stream.v1.message_pb2.StreamRef
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: streamprotos.temporal.api.stream.v1.message_pb2.StreamRef,
+        type_hint: type[Stream[BodyT]],
+    ) -> Stream[BodyT]:
+        (body_type,) = typing.get_args(type_hint) or (typing.Any,)
+        return Stream(
+            body_type=typing.cast(type[BodyT], body_type),
+            stream=_StreamRefTransferTypeConverter().from_transfer_type(
+                value, StreamRef
+            ),
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self, value: Stream[BodyT]
+    ) -> streamprotos.temporal.api.stream.v1.message_pb2.StreamRef:
+        return _StreamRefTransferTypeConverter().to_transfer_type(value.stream)
+
+
+temporalio.converter.transfer_type_convertible(_StreamTransferTypeConverter)(Stream)  # pyright: ignore[reportUnusedCallResult]
 
 
 class _StreamServiceOperations(typing.Protocol):

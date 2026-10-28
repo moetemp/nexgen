@@ -14,6 +14,7 @@ from ._resources.user import rename
 from .operations.set_profile import set_profile
 from .operations.record_sync import record_sync
 from ._resources.user import deactivate
+from ._resources.user import user
 
 __all__ = [
     "deactivate",
@@ -22,6 +23,7 @@ __all__ = [
     "rename",
     "set_profile",
     "update_email",
+    "user",
 ]
 
 

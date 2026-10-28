@@ -19,7 +19,7 @@ class Feed:
     """The Workflows of one query."""
 
     namespace: str
-    query: str | None
+    query: str | None = None
     _operations: _FeedServiceOperations | None = dataclasses.field(
         default=None, repr=False, compare=False, kw_only=True
     )

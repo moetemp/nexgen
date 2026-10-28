@@ -328,6 +328,70 @@ interface models {
 }
 
 #[test]
+fn python_resource_with_a_required_field_after_an_optional_one_is_keyword_only() {
+    let temp_dir = unique_output_path("python-resource-keyword-only");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("jobs.wit");
+    let wit = r#"
+package test:jobs@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  resource job {
+    constructor(label: option<string>, id: string);
+  }
+
+  type job-result = own<job>;
+
+  record start-job-request {
+    label: option<string>,
+    id: string,
+  }
+
+  start-job: func(request: start-job-request) -> job-result;
+}
+"#;
+    fs::write(&wit_path, wit).unwrap();
+    let output_path = temp_dir.join("output");
+    generate_to_file(&GenerateRequest {
+        config: nexgen::nexgen_config::NexgenConfig {
+            mode: nexgen::generator::GenerationMode::NativeApi,
+            ..Default::default()
+        },
+        language: nexgen::language::Language::Python,
+        input_paths: vec![wit_path],
+        support_package: Some("temporal_support".into()),
+        descriptor_paths: Vec::new(),
+        output_path: output_path.clone(),
+        format: false,
+        java_package_name: None,
+        ts_date_time_types: Default::default(),
+        dotnet_namespace: None,
+    })
+    .unwrap();
+    let files = read_python_package_files(&output_path);
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    let job = &files[&PathBuf::from("_resources/job.py")];
+    assert!(
+        job.contains("@dataclasses.dataclass(kw_only=True)\nclass Job:"),
+        "{job}"
+    );
+    assert!(
+        job.contains("    label: str | None = None\n    id: str\n"),
+        "{job}"
+    );
+    // The Workflow factory takes the fields by keyword, and the package exports it.
+    assert!(
+        job.contains("def job(\n    *,\n    label: str | None = None,\n    id: str,\n) -> Job:")
+    );
+    assert!(!job.contains("TransferTypeConverter"), "{job}");
+    assert!(files[&PathBuf::from("__init__.py")].contains("from ._resources.job import job\n"));
+}
+
+#[test]
 fn python_proto_helpers_use_the_supplied_support_module() {
     let root = project_root();
     let spec = nexgen::parser::load_api_spec_from_wit_for_language_with_inputs(

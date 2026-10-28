@@ -97,6 +97,7 @@ pub(crate) struct ResolvedResourceSpec {
     pub(crate) type_parameters: Vec<crate::spec::TypeParameterSpec>,
     pub(crate) definition: SelectedTextSpec,
     pub(crate) fields: Vec<ResourceFieldSpec<SelectedFamily>>,
+    pub(crate) flatten: Option<crate::spec::ResourceFlattenSpec>,
     pub(crate) methods: Vec<ResolvedResourceMethodSpec>,
 }
 
@@ -331,6 +332,7 @@ fn resolve_resource_methods(
         type_parameters: resource.type_parameters.clone(),
         definition: resource.definition.clone(),
         fields: resource.fields.clone(),
+        flatten: resource.flatten.clone(),
         methods,
     })
 }

@@ -68,6 +68,7 @@ class StreamWriterClientExtension(abc.ABC):
             if StreamWriterClientExtension in base.__mro__:
                 continue
             for name in (
+                "writer",
                 "open_writer",
                 "write_records",
                 "close_writer",
@@ -292,4 +293,17 @@ class StreamWriterClientExtension(abc.ABC):
         request = CloseWritersRequest()
         return await self._stream_writer_close_writers(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
+
+    def writer(
+        self,
+        body_type: type[BodyT],
+        *,
+        writer_id: int,
+    ) -> Writer[BodyT]:
+        """A handle on an existing ``Writer``, with no call."""
+        return Writer(
+            body_type=body_type,
+            writer_id=writer_id,
+            _operations=self,
         )

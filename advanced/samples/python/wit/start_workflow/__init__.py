@@ -12,12 +12,16 @@ from .operations.start_workflow import start_workflow
 from ._resources.started_workflow import restart_workflow
 from ._resources.started_workflow import cancel_workflow
 from .operations.signal_with_start import signal_with_start
+from ._resources.started_workflow import started_workflow
+from ._resources.signal_result import signal_result
 
 __all__ = [
     "cancel_workflow",
     "restart_workflow",
+    "signal_result",
     "signal_with_start",
     "start_workflow",
+    "started_workflow",
 ]
 
 

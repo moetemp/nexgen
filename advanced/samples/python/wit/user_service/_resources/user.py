@@ -9,12 +9,23 @@ from ..models import (
     NotifyRequest,
     UpdateEmailRequest,
 )
+import temporal_support as _support
 
 
 @dataclasses.dataclass
 class User:
     user_id: str
     email: str
+    # Not a dataclass field, so the default converter doesn't
+    # encode it, and equality ignores it.
+    _operations: typing.ClassVar[_UserServiceOperations | None] = None
+
+    def _ops(self) -> _UserServiceOperations:
+        # A handle built by hand, or decoded from data, takes the
+        # operations of the code that runs it.
+        if self._operations is not None:
+            return self._operations
+        return _support.current_operations(workflow=None)
 
     async def update_email(
         self,
@@ -24,17 +35,7 @@ class User:
             user_id=self.user_id,
             email=email,
         )
-        nexus_client = getattr(self, "_nexus_client")
-        handle = await nexus_client.start_operation(
-            operation="UpdateEmail",
-            input=request,
-            output_type=User,
-        )
-        resource = await handle
-        return bind_user_client(
-            resource,
-            nexus_client,
-        )
+        return await self._ops()._user_service_update_email(request)
 
     async def notify(
         self,
@@ -49,7 +50,59 @@ class User:
             channels=channels or [],
             sender=sender,
         )
-        nexus_client = getattr(self, "_nexus_client")
+        await self._ops()._user_service_notify(request)
+
+
+def bind_user_operations(
+    resource: User,
+    operations: _UserServiceOperations,
+) -> User:
+    bound = dataclasses.replace(resource)
+    object.__setattr__(bound, "_operations", operations)
+    return bound
+
+
+class _UserServiceOperations(typing.Protocol):
+    """The operations of ``UserService`` that ``User`` calls."""
+
+    async def _user_service_update_email(
+        self,
+        request: UpdateEmailRequest,
+    ) -> User: ...
+
+    async def _user_service_notify(
+        self,
+        request: NotifyRequest,
+    ) -> None: ...
+
+
+class WorkflowUserService:
+    """The operations of ``UserService`` that ``User`` calls in Workflow code."""
+
+    def __init__(self, nexus_client: typing.Any) -> None:
+        self._nexus_client: typing.Any = nexus_client
+
+    async def _user_service_update_email(
+        self,
+        request: UpdateEmailRequest,
+    ) -> User:
+        nexus_client = self._nexus_client
+        handle = await nexus_client.start_operation(
+            operation="UpdateEmail",
+            input=request,
+            output_type=User,
+        )
+        resource = await handle
+        return bind_user_client(
+            resource,
+            nexus_client,
+        )
+
+    async def _user_service_notify(
+        self,
+        request: NotifyRequest,
+    ) -> None:
+        nexus_client = self._nexus_client
         handle = await nexus_client.start_operation(
             operation="Notify",
             input=request,
@@ -61,5 +114,4 @@ def bind_user_client(
     resource: User,
     nexus_client: typing.Any,
 ) -> User:
-    setattr(resource, "_nexus_client", nexus_client)
-    return resource
+    return bind_user_operations(resource, WorkflowUserService(nexus_client))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import typing
 
 
 @dataclasses.dataclass
@@ -10,5 +11,15 @@ class WorkflowHandle:
     namespace: str
     workflow_id: str
     run_id: str | None
+    # Not a dataclass field, so the default converter doesn't
+    # encode it, and equality ignores it.
+    _operations: typing.ClassVar[object | None] = None
 
-    pass
+
+def bind_workflow_handle_operations(
+    resource: WorkflowHandle,
+    operations: object,
+) -> WorkflowHandle:
+    bound = dataclasses.replace(resource)
+    object.__setattr__(bound, "_operations", operations)
+    return bound

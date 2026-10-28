@@ -31,8 +31,8 @@ async def _create_stream(
         raise RuntimeError("CreateStream answered without `stream`")
     return Stream(
         stream=result.stream,
-        created=result.created or None,
-        status=result.status or None,
+        created=result.created,
+        status=result.status,
     )
 
 

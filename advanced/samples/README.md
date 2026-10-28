@@ -75,11 +75,14 @@ required input model or returned by an operation.
 
 ### `workflow-handle`
 
-A System Nexus operation that returns a resource.
+A System Nexus operation that returns a resource. Python generates only the
+client target, so its package has no Workflow code, and the sourced `namespace`
+is a parameter.
 
 - WIT: [`inputs/workflow-handle.wit`](inputs/workflow-handle.wit)
 - .NET: [`dotnet/wit/workflow-handle/`](dotnet/wit/workflow-handle/)
-- Python: [`python/wit/workflow_handle/`](python/wit/workflow_handle/)
+- Python: [`python/wit/workflow_handle/`](python/wit/workflow_handle/),
+  [`python/tests/test_client_target.py`](python/tests/test_client_target.py)
 - TypeScript:
   [`typescript/wit/workflow-handle/`](typescript/wit/workflow-handle/)
 
@@ -152,11 +155,15 @@ make Python import those protos from the sample's own `streamprotos` package.
 The crate doesn't take them, since sdk-python generates the Stream protos into
 `temporalio` and needs the default modules.
 
+Python generates both targets, so one `Stream` class serves Workflow code and
+clients.
+
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
 - Python: [`python/wit/stream_service/`](python/wit/stream_service/),
-  [`python/tests/test_stream_service.py`](python/tests/test_stream_service.py)
+  [`python/tests/test_stream_service.py`](python/tests/test_stream_service.py),
+  [`python/tests/test_client_target.py`](python/tests/test_client_target.py)
 - TypeScript:
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
   [`typescript/tests/stream-service.test.ts`](typescript/tests/stream-service.test.ts)

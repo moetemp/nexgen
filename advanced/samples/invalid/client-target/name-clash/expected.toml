@@ -1,0 +1,6 @@
+languages = ["python"]
+targets = ["client"]
+
+[error]
+kind = "client-target-name-conflict"
+contains = ["`describe`", "`OrderService`", "`UserService`"]

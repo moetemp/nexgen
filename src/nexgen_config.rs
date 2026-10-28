@@ -11,6 +11,25 @@ use crate::generator::GenerationMode;
 pub struct NexgenConfig {
     pub mode: GenerationMode,
     pub system_nexus: bool,
+    pub targets: GenerationTargets,
+}
+
+/// The code that calls the generated API. The models are the same for each target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GenerationTargets {
+    /// Workflow code.
+    pub workflow: bool,
+    /// Code outside a Workflow, through a client class that inherits a generated extension.
+    pub client: bool,
+}
+
+impl Default for GenerationTargets {
+    fn default() -> Self {
+        Self {
+            workflow: true,
+            client: false,
+        }
+    }
 }
 
 impl Default for NexgenConfig {
@@ -18,6 +37,7 @@ impl Default for NexgenConfig {
         Self {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: false,
+            targets: GenerationTargets::default(),
         }
     }
 }
@@ -50,7 +70,7 @@ impl Drop for NexgenConfigScope {
 
 #[cfg(test)]
 mod tests {
-    use super::{NexgenConfig, current, scope};
+    use super::{GenerationTargets, NexgenConfig, current, scope};
     use crate::generator::GenerationMode;
 
     #[test]
@@ -58,6 +78,7 @@ mod tests {
         let outer = NexgenConfig {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
+            targets: GenerationTargets::default(),
         };
         {
             let _outer_scope = scope(outer);
@@ -77,6 +98,7 @@ mod tests {
         let config = NexgenConfig {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
+            targets: GenerationTargets::default(),
         };
         {
             let _scope = scope(config);

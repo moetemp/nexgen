@@ -1,0 +1,1 @@
+`--targets client` generates a Python client extension for each service, with the operations of the Workflow target as methods that return the result. With the client target, one resource class serves both targets, through an operations object that each target supplies.

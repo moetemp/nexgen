@@ -2,8 +2,10 @@
 system_nexus = true
 descriptors = "temporal"
 
+# Python also gets the client target, which takes a generic operation too.
 [multi-operation-service]
 system_nexus = true
+targets = ["workflow", "client"]
 descriptors = "temporal"
 
 [generic-models]
@@ -29,13 +31,20 @@ descriptors = "temporal"
 
 # Brook's Stream service WIT. Its records bind to the Stream protos of temporalio/api#895 in
 # descriptors/streams/, which no SDK has yet. So only this copy has the python-import attributes,
-# which make Python import those protos from the sample's own streamprotos package.
+# which make Python import those protos from the sample's own streamprotos package. Python also
+# gets the client target, so one Stream class serves Workflow code and clients.
 [stream-service]
 languages = ["python", "typescript", "dotnet"]
+targets = ["workflow", "client"]
 descriptors = ["temporal_api.bin", "streams.bin"]
 
-# A System Nexus operation that returns a resource.
+# A service with no endpoint. Python also gets the client target.
+[user-service]
+targets = ["workflow", "client"]
+
+# A System Nexus operation that returns a resource. Python gets only the client target.
 [workflow-handle]
 languages = ["python", "dotnet", "typescript"]
 system_nexus = true
+targets = ["client"]
 descriptors = "temporal"

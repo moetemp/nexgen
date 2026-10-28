@@ -1,0 +1,6 @@
+languages = ["typescript", "go", "dotnet"]
+targets = ["client"]
+
+[error]
+kind = "unsupported-client-target"
+contains = ["the client target is only for Python so far, not for"]

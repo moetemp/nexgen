@@ -30,6 +30,7 @@ of `@nexus` directives.
   - [Flattened Records](#flattened-records)
   - [Output Transforms](#output-transforms)
 - [Function References](#function-references)
+- [Generation Targets](#generation-targets)
 - [Directive Glossary](#directive-glossary)
 
 ---
@@ -1468,6 +1469,55 @@ descriptor replaces signature-derived typing.
 | `varargs`                | Treat a final list-shaped signature parameter as `*args`.              | Generates positional overloads plus list-form `args`.      |
 | `param`                  | Disambiguate which final parameter is the varargs list.                | Required when the signature has more than one parameter.   |
 | `typescript-drop-prefix` | Remove implicit receiver/context parameters from TypeScript inference. | TypeScript omits the prefix from inferred argument tuples. |
+
+---
+
+## Generation Targets
+
+`--targets` sets the code that calls the generated API. Repeat the flag, or
+separate the targets with commas.
+
+- `workflow`, the default, is the API for Workflow code.
+- `client` writes `client.py`, the same API for code outside a Workflow. So far
+  only Python has it, and only with `--native-api`. With `client` alone, the
+  package has no Workflow code. Its `__init__.py` keeps the operation registry,
+  so a client finds the serialization context of each operation.
+
+`client.py` has a `<Service>ClientExtension` for each service. A client class
+inherits one or more extensions and implements `_create_nexus_client`. That
+method returns an object with the `start_operation` of the Workflow Nexus
+client. A service with no `@nexus.endpoint` gets `endpoint=None`, and the client
+serves it. A call returns the result of the operation.
+
+```python
+class Client(StreamServiceClientExtension, WorkflowHandleServiceClientExtension):
+    def _create_nexus_client(self, *, service, endpoint):
+        ...  # for example, start a standalone Nexus operation
+
+stream = await Client().create_stream(stream_id="s1")
+await stream.publish(records=records)
+```
+
+Each operation also has a private method that takes the request, such as
+`_stream_service_create_stream`. Its name has the service name, so the private
+methods of two services can't clash. Two services of one package can't have an
+operation of the same name, and nexgen refuses them. An extension also refuses a
+client class that gets one of its public names from another base, because Python
+would use one of the two with no error.
+
+With the client target, one resource class serves both targets. A resource calls
+its operations through the object in its private `_operations` attribute. It
+isn't a dataclass field, so a resource still converts as data. A client call
+puts the client there with the generated `bind_<resource>_operations`. The
+`<Service>Client` of a service with no endpoint puts the Workflow operations of
+its Nexus client there. A resource with no operations, such as one that you
+build from its fields, calls `current_operations(workflow=...)` of the support
+package. In Workflow code, the helper returns `workflow()`, the Workflow
+operations of a service with an endpoint. Outside a Workflow, it returns the
+current client.
+
+The client target has no sources yet, so a `@nexus.source` field is a parameter
+of the client call.
 
 ---
 

@@ -471,6 +471,7 @@ pub(crate) fn generate_files_from_planned_tree(
     options: GenerateFilesOptions,
 ) -> Result<GeneratedFiles> {
     let mode = crate::nexgen_config::current().mode;
+    validate_targets(language)?;
     let mut generated = match language {
         Language::Dotnet => dotnet::generate(
             tree,
@@ -495,6 +496,22 @@ pub(crate) fn generate_files_from_planned_tree(
         Vec::new()
     };
     Ok(generated)
+}
+
+/// So far only Python has the client target, and only for the native API.
+fn validate_targets(language: Language) -> Result<()> {
+    let config = crate::nexgen_config::current();
+    if !config.targets.client {
+        return Ok(());
+    }
+    let reason = if language != Language::Python {
+        format!("is only for Python so far, not for {language}")
+    } else if config.mode != GenerationMode::NativeApi {
+        "needs `--native-api`".to_string()
+    } else {
+        return Ok(());
+    };
+    Err(Error::UnsupportedClientTarget { reason })
 }
 
 fn generate_go_tree(

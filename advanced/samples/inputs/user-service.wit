@@ -39,5 +39,6 @@ interface user-service {
   get-user: func(request: get-user-request) -> user-result;
   update-email: func(request: update-email-request) -> user-result;
   notify: func(request: notify-request);
+  /// @nexus.doc "Notify every user."
   notify-all: func(request: notify-all-request);
 }

@@ -29,6 +29,9 @@ namespace Nexgen.UserService
         [NexusOperation("Notify")]
         void Notify(NotifyRequest request);
 
+        /// <summary>
+        /// Notify every user.
+        /// </summary>
         [GeneratedCode("nexgen", null)]
         [NexusOperation("NotifyAll")]
         void NotifyAll();
@@ -150,6 +153,9 @@ namespace Nexgen.UserService
             return NotifyAsync(request);
         }
 
+        /// <summary>
+        /// Notify every user.
+        /// </summary>
         [GeneratedCode("nexgen", null)]
         public async Task NotifyAllAsync()
         {

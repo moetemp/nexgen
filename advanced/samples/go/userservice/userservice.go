@@ -57,6 +57,9 @@ func (m notifyRequest) GetEmail() *bool {
 	return m.Email
 }
 
+type notifyAllRequest struct {
+}
+
 // --- Resources ---
 
 type User struct {
@@ -102,6 +105,12 @@ func updateEmail(ctx workflow.Context, request updateEmailRequest) workflow.Futu
 func notify(ctx workflow.Context, request notifyRequest) workflow.Future {
 	c := workflow.NewNexusClient("user-service", "UserService")
 	fut := c.ExecuteOperation(ctx, "Notify", request, workflow.NexusOperationOptions{})
+	return fut
+}
+
+func notifyAll(ctx workflow.Context, request notifyAllRequest) workflow.Future {
+	c := workflow.NewNexusClient("user-service", "UserService")
+	fut := c.ExecuteOperation(ctx, "NotifyAll", request, workflow.NexusOperationOptions{})
 	return fut
 }
 
@@ -161,4 +170,11 @@ func Notify(ctx workflow.Context, opts NotifyOptions) workflow.Future {
 		Sender:   opts.Sender,
 		Email:    email,
 	})
+}
+
+type NotifyAllOptions struct {
+}
+
+func NotifyAll(ctx workflow.Context, opts NotifyAllOptions) workflow.Future {
+	return notifyAll(ctx, notifyAllRequest{})
 }

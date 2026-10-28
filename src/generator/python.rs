@@ -3523,6 +3523,16 @@ fn body_uses_python_symbol(body: &str, symbol: &str) -> bool {
     })
 }
 
+fn body_calls_python_symbol(body: &str, symbol: &str) -> bool {
+    let call = format!("{symbol}(");
+    body.match_indices(&call).any(|(index, _)| {
+        !body[..index]
+            .chars()
+            .next_back()
+            .is_some_and(|character| is_python_identifier_char(character) || character == '.')
+    })
+}
+
 fn used_python_symbol_imports(body: &str, candidates: &[String]) -> Vec<String> {
     // A name in a docstring is prose, so it needs no import.
     let code = body
@@ -4199,7 +4209,11 @@ fn render_service_module(
     let used_type_checking_model_names =
         used_python_symbol_imports(&endpoint_client_body, &type_checking_model_names);
     let resource_names = resource_modules.keys().cloned().collect::<Vec<_>>();
-    let used_resource_names = used_python_symbol_imports(&endpoint_client_body, &resource_names);
+    // A method that builds a returned resource calls its class, which needs a runtime import.
+    let (runtime_resource_names, used_resource_names): (Vec<_>, Vec<_>) =
+        used_python_symbol_imports(&endpoint_client_body, &resource_names)
+            .into_iter()
+            .partition(|name| body_calls_python_symbol(&endpoint_client_body, name));
     let needs_temporalio_workflow_runtime = endpoint_client_body.contains("temporalio.workflow.");
     let needs_temporalio_workflow_type_checking = false;
     let needs_type_checking_imports = needs_temporalio_workflow_type_checking
@@ -4255,6 +4269,14 @@ fn render_service_module(
             .entry(module_name.clone())
             .or_default()
             .insert(resource_type_name.clone());
+    }
+    for name in &runtime_resource_names {
+        if let Some(module_name) = resource_modules.get(name) {
+            resource_imports_by_module
+                .entry(module_name.clone())
+                .or_default()
+                .insert(name.clone());
+        }
     }
     for service in &endpoint_services {
         for resource in &service.resources {

@@ -18,10 +18,10 @@ from .models import (
     WriteRecordsResponse,
     WriterResult,
 )
-from ._resources.writer import bind_writer_client
-
-if typing.TYPE_CHECKING:
-    from ._resources import Writer
+from ._resources.writer import (
+    Writer,
+    bind_writer_client,
+)
 
 
 @service(name="temporal.sdk.streams.v1.StreamWriter")

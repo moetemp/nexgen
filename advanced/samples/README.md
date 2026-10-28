@@ -159,7 +159,8 @@ Only part of today's output builds, so the samples leave the rest out:
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
 - Python: [`python/wit/stream_service/`](python/wit/stream_service/),
   [`python/wit/stream_writer/`](python/wit/stream_writer/),
-  [`python/tests/test_stream_service.py`](python/tests/test_stream_service.py)
+  [`python/tests/test_stream_service.py`](python/tests/test_stream_service.py),
+  [`python/tests/test_stream_writer.py`](python/tests/test_stream_writer.py)
 - TypeScript:
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
   [`typescript/wit/stream-writer/`](typescript/wit/stream-writer/),

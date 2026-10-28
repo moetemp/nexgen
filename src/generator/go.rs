@@ -12,8 +12,9 @@ use crate::generator::{
 use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedJsonType, PlannedProtoType, PlannedProtoTypeInfo, PlannedResource,
-    PlannedResourceMethodBindingSpec as PlannedResourceMethodBinding,
+    PlannedResourceMethod, PlannedResourceMethodBindingSpec as PlannedResourceMethodBinding,
     PlannedResourceMethodResultKind as PlannedResourceMethodResult, PlannedSpec, PlannedType,
+    resource_method_result_field, unwrapped_field,
 };
 use crate::spec::{
     AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSpec, FieldDefaultSpec, FlagsSpec,
@@ -4626,6 +4627,37 @@ fn resolve_resource_value_type_with_struct_flag(
 /// ```
 ///
 /// Methods bound to `Stub` emit a panic placeholder.
+/// The response type of a method that answers one field of the response, and the statements
+/// that set the method's future. An unset optional scalar gives Go's zero value.
+fn go_resource_method_result_field(
+    method: &PlannedResourceMethod,
+    operation: &RenderedOperation<'_>,
+    api_plan: &PlannedSpec,
+    package: &GoPackageContext,
+    visibility: &GoVisibility,
+) -> Option<(String, String)> {
+    let (_, _, field, _) = resource_method_result_field(api_plan, method)?;
+    let response_type = visibility.rewrite_go_expr(operation.output_type.as_ref()?);
+    let field_name = go_field_name(&field.name);
+    let kind = planned_field_kind(&field.field_type, api_plan);
+    let field_type = resolve_resource_field_kind(&kind, !field.required, package);
+    let value = match public_default_punning_zero_for_field(&kind, &field_type) {
+        Some(_) => format!(
+            concat!(
+                "\t\tvar value {}\n",
+                "\t\tif response.{field_name} != nil {{\n",
+                "\t\t\tvalue = *response.{field_name}\n",
+                "\t\t}}\n",
+                "\t\tresultSettable.Set(value, nil)\n",
+            ),
+            visibility.rewrite_go_expr(field_type.trim_start_matches('*')),
+            field_name = field_name,
+        ),
+        None => format!("\t\tresultSettable.Set(response.{field_name}, nil)\n"),
+    };
+    Some((response_type, value))
+}
+
 fn render_resource_methods(
     output: &mut String,
     service: &RenderedService<'_>,
@@ -4666,17 +4698,63 @@ fn render_resource_methods(
                 output.push_str(&method_name);
                 output.push_str("(ctx ");
                 output.push_str(&package.workflow_context_type());
-                for param in &method.params {
+                // A list of a record with `@nexus.unwrap` takes the record's field. A local
+                // wraps each item in the record.
+                let mut unwrap_locals = Vec::new();
+                let mut renamed_params = BTreeMap::new();
+                for (index, param) in method.params.iter().enumerate() {
                     if primary_varargs_function.is_some_and(|primary| primary.name == param.name) {
                         continue;
                     }
+                    let varargs = method
+                        .varargs
+                        .as_deref()
+                        .filter(|_| index + 1 == method.params.len());
+                    let param_name =
+                        go_unexported_name(&go_field_name(varargs.unwrap_or(&param.name)));
                     output.push_str(", ");
-                    output.push_str(&go_unexported_name(&go_field_name(&param.name)));
+                    output.push_str(&param_name);
                     output.push(' ');
                     let param_kind = planned_field_kind(&param.kind, api_plan);
                     let internal_type =
                         resolve_resource_field_kind(&param_kind, param.optional, package);
-                    let param_type = if param.optional
+                    let item = match &param.kind {
+                        PlannedType::List(item) if !param.optional => Some(item.as_ref()),
+                        _ => None,
+                    };
+                    let unwrapped = item.and_then(|item| {
+                        let (_, field) = unwrapped_field(api_plan, item)?;
+                        let PlannedType::Record(record) = item else {
+                            return None;
+                        };
+                        let model = api_plan.record(&record.full_name)?;
+                        let field_kind = planned_field_kind(&field.field_type, api_plan);
+                        let field_type =
+                            resolve_resource_field_kind(&field_kind, !field.required, package);
+                        Some((
+                            visibility.adjusted_model_name(record_message_key(model), &model.name),
+                            go_field_name(&field.name),
+                            field_type,
+                        ))
+                    });
+                    let param_type = if let Some((model, field_name, field_type)) = unwrapped {
+                        let local =
+                            format!("{}Value", go_unexported_name(&go_field_name(&param.name)));
+                        let value = if field_type.starts_with('*') {
+                            "&value"
+                        } else {
+                            "value"
+                        };
+                        unwrap_locals.push((
+                            local.clone(),
+                            param_name.clone(),
+                            model,
+                            field_name,
+                            value,
+                        ));
+                        renamed_params.insert(param.name.clone(), local);
+                        format!("[]{field_type}")
+                    } else if param.optional
                         && public_default_punning_zero_for_field(&param_kind, &internal_type)
                             .is_some()
                     {
@@ -4684,7 +4762,19 @@ fn render_resource_methods(
                     } else {
                         internal_type
                     };
-                    output.push_str(&visibility.rewrite_go_expr(&param_type));
+                    if varargs.is_some() {
+                        renamed_params
+                            .entry(param.name.clone())
+                            .or_insert(param_name);
+                        output.push_str("...");
+                        output.push_str(
+                            &visibility.rewrite_go_expr(
+                                param_type.strip_prefix("[]").unwrap_or(&param_type),
+                            ),
+                        );
+                    } else {
+                        output.push_str(&visibility.rewrite_go_expr(&param_type));
+                    }
                 }
                 if let Some(primary) = primary_varargs_function {
                     output.push_str(", ");
@@ -4716,6 +4806,21 @@ fn render_resource_methods(
                     name_var
                 });
 
+                for (local, source, model, field_name, value) in &unwrap_locals {
+                    output.push_str(&format!(
+                        concat!(
+                            "\t{local} := make([]{model}, len({source}))\n",
+                            "\tfor i, value := range {source} {{\n",
+                            "\t\t{local}[i] = {model}{{{field_name}: {value}}}\n",
+                            "\t}}\n",
+                        ),
+                        local = local,
+                        model = model,
+                        source = source,
+                        field_name = field_name,
+                        value = value,
+                    ));
+                }
                 for param in method.params.iter().filter(|param| param.optional) {
                     let kind = planned_field_kind(&param.kind, api_plan);
                     let internal = resolve_resource_field_kind(&kind, true, package);
@@ -4747,6 +4852,8 @@ fn render_resource_methods(
                             .is_some_and(|primary| primary.name == param.name)
                         {
                             function_name_var.clone().unwrap()
+                        } else if let Some(renamed) = renamed_params.get(&param.name) {
+                            renamed.clone()
                         } else if param.optional {
                             let kind = planned_field_kind(&param.kind, api_plan);
                             let internal = resolve_resource_field_kind(&kind, true, package);
@@ -4796,6 +4903,27 @@ fn render_resource_methods(
                     request_expr = format!("{prefix}, {}: args}}", args_param.field_name);
                 }
 
+                if let Some((response_type, value)) = go_resource_method_result_field(
+                    method, operation, api_plan, package, visibility,
+                ) {
+                    // The method answers one field of the response, in a future of its own.
+                    output.push_str(&format!(
+                        "\tfut := {}(ctx, {request_expr})\n",
+                        operation.func_name
+                    ));
+                    output.push_str("\tresult, resultSettable := workflow.NewFuture(ctx)\n");
+                    output.push_str("\tworkflow.Go(ctx, func(ctx workflow.Context) {\n");
+                    output.push_str(&format!("\t\tvar response {response_type}\n"));
+                    output.push_str(concat!(
+                        "\t\tif err := fut.Get(ctx, &response); err != nil {\n",
+                        "\t\t\tresultSettable.SetError(err)\n",
+                        "\t\t\treturn\n",
+                        "\t\t}\n",
+                    ));
+                    output.push_str(&value);
+                    output.push_str("\t})\n\treturn result\n}\n");
+                    continue;
+                }
                 output.push_str("\treturn ");
                 output.push_str(&operation.func_name);
                 output.push_str("(ctx, ");

@@ -23,6 +23,7 @@ of `@nexus` directives.
   - [Name-Binding: How Resource Methods Find Operations](#name-binding-how-resource-methods-find-operations)
   - [Resource Return Binding](#resource-return-binding)
   - [Resource Factories](#resource-factories)
+  - [Items, Wrapped Values and One Result Field](#items-wrapped-values-and-one-result-field)
   - [Edge Cases and Error Conditions](#edge-cases-and-error-conditions)
 - [Proto-Backed Models](#proto-backed-models)
   - [Transfer-Type Conversion](#transfer-type-conversion)
@@ -676,7 +677,8 @@ request = CancelWorkflowRequest(
 
 After field matching, the generator also filters candidates by return type. If
 the method returns `own<user>`, only operations that also return `own<user>` (or
-the equivalent proto type) are considered.
+the equivalent proto type) are considered. A method that returns a record binds
+to an operation that returns the same record.
 
 **Disambiguation by name:**
 
@@ -782,6 +784,56 @@ type gives the type arguments of a decoded handle, as in `Stream[Turn]`, and the
 handle takes the operations of the code that runs it. TypeScript, .NET and Go
 keep their constructors, and .NET passes a handle in the JSON form of its
 properties.
+
+### Items, Wrapped Values and One Result Field
+
+Three directives shape a resource method's call without changing its request or
+its wire.
+
+```wit
+/// @nexus.unwrap
+record append-record {
+  body: body-t,
+}
+
+resource %stream {
+  /// @nexus.operation "append-records"
+  /// @nexus.varargs name="values"
+  /// @nexus.result-field "last-offset"
+  publish: func(records: list<append-record>) -> append-records-response;
+}
+```
+
+```python
+async def publish(self, *values: BodyT, rpc_metadata=..., rpc_timeout=...) -> int:
+    request = AppendRecordsRequest(
+        stream=self.stream, records=[AppendRecord(body=value) for value in values]
+    )
+    response = await self._ops()._stream_service_append_records(request, ...)
+    return response.last_offset or 0
+```
+
+- `@nexus.unwrap` goes on a record with one field that isn't omitted. A resource
+  method takes that field's type in place of the record, and wraps each value in
+  the record when it builds the request. The model keeps the record. Operation
+  functions keep the record too.
+- `@nexus.varargs` goes on a resource method whose last parameter is a list. The
+  method takes the list's items as positional arguments. `name` gives the API
+  name of that parameter, since name binding uses its WIT name. Python takes
+  `*values` and makes the other parameters keyword-only, TypeScript takes
+  `...values`, .NET takes `params T[] values`, and Go takes `values ...T`.
+- `@nexus.result-field` makes the method return one field of the response
+  record. An `option` field of a proto with no presence returns its zero value
+  when the response leaves it unset, so `publish` returns `0` for an empty
+  publish. A field with presence returns its absence. Go returns the zero value
+  for both.
+
+nexgen refuses `@nexus.unwrap` on a record with another number of fields, with
+`@nexus.flatten-in-api`, or on a whole operation input. It refuses
+`@nexus.varargs` on a method whose last parameter isn't a list, on an operation,
+or with a `name` of another parameter. It refuses `@nexus.result-field` that
+names no field of the response, on a method whose result isn't a record, or with
+an output transform on the operation.
 
 ### Edge Cases and Error Conditions
 
@@ -2129,6 +2181,36 @@ converted to UpperCamelCase is used (e.g., `signal-with-start-workflow` becomes
 /// @nexus.operation name="SignalWithStartWorkflowExecution"
 signal-with-start-workflow: func(...) -> ...;
 ```
+
+---
+
+### @nexus.unwrap
+
+**Placement:** Record type with one field that isn't omitted **Syntax:**
+`@nexus.unwrap` (no arguments)
+
+A resource method takes the record's field in place of the record. See
+[Items, Wrapped Values and One Result Field](#items-wrapped-values-and-one-result-field).
+
+---
+
+### @nexus.varargs
+
+**Placement:** Resource method whose last parameter is a list **Syntax:**
+`@nexus.varargs name="<api-name>"`
+
+The method takes the list's items as positional arguments. See
+[Items, Wrapped Values and One Result Field](#items-wrapped-values-and-one-result-field).
+
+---
+
+### @nexus.result-field
+
+**Placement:** Resource method whose result is a record **Syntax:**
+`@nexus.result-field "<field>"`
+
+The method returns that field of the response. See
+[Items, Wrapped Values and One Result Field](#items-wrapped-values-and-one-result-field).
 
 ---
 

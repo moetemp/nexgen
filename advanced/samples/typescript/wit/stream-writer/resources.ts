@@ -5,7 +5,6 @@ import * as workflow from "@temporalio/workflow";
 import type Long from "long";
 import type {
   WriteRecordsResponse,
-  AppendRecord,
   CloseWriterResponse,
   FreeWriterResponse,
 } from "./models";
@@ -21,10 +20,11 @@ export class Writer<BodyT = unknown> {
     public readonly bodyType?: common.TypeInfo<BodyT>,
   ) {}
 
-  public async writeRecords(
-    records: AppendRecord<BodyT>[],
-  ): Promise<WriteRecordsResponse> {
-    const request = { writerId: this.writerId, records: records };
+  public async writeRecords(records: BodyT[]): Promise<WriteRecordsResponse> {
+    const request = {
+      writerId: this.writerId,
+      records: records.map((value) => ({ body: value })),
+    };
     const handle = await requireWriterClient(this).startOperation(
       streamWriter.operations.writeRecords,
       request,

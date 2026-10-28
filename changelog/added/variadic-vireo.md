@@ -1,0 +1,1 @@
+`@nexus.varargs`, `@nexus.unwrap` and `@nexus.result-field` turn a resource method such as `publish(records: list<append-record>) -> append-records-response` into `publish(*values) -> int`, in Python, TypeScript, .NET and Go. A resource method can also return a WIT record that its operation returns.

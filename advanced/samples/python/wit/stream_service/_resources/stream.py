@@ -56,19 +56,19 @@ class Stream(typing.Generic[BodyT]):
 
     async def publish(
         self,
-        records: list[AppendRecord[BodyT]] | None = None,
-        *,
+        *values: BodyT,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
-    ) -> AppendRecordsResponse:
-        """Publish Records. The answer has the first and the last offset."""
+    ) -> int:
+        """Publish values. The answer is the offset of the last one."""
         request = AppendRecordsRequest(
             stream=self.stream,
-            records=records or [],
+            records=[AppendRecord(body=value) for value in values],
         )
-        return await self._ops()._stream_service_append_records(
+        response = await self._ops()._stream_service_append_records(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
         )
+        return response.last_offset or 0
 
     async def close(
         self,

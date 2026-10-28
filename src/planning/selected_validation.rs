@@ -143,6 +143,22 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
             validate_resource_flatten(spec, resource, flatten, &invalid)?;
         }
     }
+    // A whole operation input is the request, so it can't be one of its own fields.
+    for service in &spec.services {
+        for operation in &service.operations {
+            if let Some(TypeSpec::Record(record)) = &operation.input
+                && spec
+                    .record(record.as_str())
+                    .is_some_and(|record| record.unwrap)
+            {
+                return Err(invalid(format!(
+                    "operation `{}` takes `{record}` as its whole input, which `@nexus.unwrap` \
+                     unwraps",
+                    operation.name
+                )));
+            }
+        }
+    }
 
     // A record that holds a resource builds it from the record's message, with no type argument.
     let generic_resources = spec

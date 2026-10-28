@@ -48,3 +48,30 @@ where
         }
     }
 }
+
+/// Makes each `return await <call>;` of a method body keep the response in `response`, and
+/// return `value` of it instead. A call may span lines, up to the `;` at its own indent.
+pub(crate) fn return_response_field(body: &str, declaration: &str, value: &str) -> String {
+    let mut output = String::new();
+    let mut open_indent = None::<String>;
+    for line in body.lines() {
+        let indent = &line[..line.len() - line.trim_start().len()];
+        let line = match line.trim_start().strip_prefix("return await ") {
+            Some(call) if open_indent.is_none() => {
+                open_indent = Some(indent.to_string());
+                format!("{indent}{declaration}{call}")
+            }
+            _ => line.to_string(),
+        };
+        output.push_str(&line);
+        output.push('\n');
+        if let Some(open) = &open_indent
+            && line.ends_with(';')
+            && (line.starts_with(&format!("{open}{declaration}")) || indent == open)
+        {
+            output.push_str(&format!("{open}return {value};\n"));
+            open_indent = None;
+        }
+    }
+    output
+}

@@ -131,6 +131,21 @@ sourced maps. Native tests exercise conversions through the generated APIs.
   [`typescript/wit/proto-backed-showcase/`](typescript/wit/proto-backed-showcase/),
   [`typescript/tests/proto-backed-showcase.test.ts`](typescript/tests/proto-backed-showcase.test.ts)
 
+### `batch-service`
+
+A resource method that takes its items as arguments, wraps each in a record, and
+returns one field of the response. The field is JSON, so it keeps its absence.
+
+- WIT: [`inputs/batch-service.wit`](inputs/batch-service.wit)
+- .NET: [`dotnet/wit/batch-service/`](dotnet/wit/batch-service/),
+  [`dotnet/tests/GeneratedApiCompileChecks.cs`](dotnet/tests/GeneratedApiCompileChecks.cs)
+- Go: [`go/batchservice/`](go/batchservice/),
+  [`go/tests/batchservice_test.go`](go/tests/batchservice_test.go)
+- Python: [`python/wit/batch_service/`](python/wit/batch_service/),
+  [`python/tests/test_batch_service.py`](python/tests/test_batch_service.py)
+- TypeScript: [`typescript/wit/batch-service/`](typescript/wit/batch-service/),
+  [`typescript/tests/batch-service.test.ts`](typescript/tests/batch-service.test.ts)
+
 ### `worker-shutdown`
 
 A request that flattens two fields of its worker heartbeat. The call takes the
@@ -197,7 +212,8 @@ code, since no SDK has `StreamDefinition` yet. The requests take a source for
 each target, which the sample support code gives in place of Brook's runtime.
 The create takes the backend of the Stream's ref, and the ref copies the id. In
 Python, the factory `stream` builds a handle from an id or a ref with no call,
-and a handle passes as its ref.
+and a handle passes as its ref. `publish` takes the values, and returns the
+offset of the last one.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)

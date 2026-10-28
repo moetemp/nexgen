@@ -1,0 +1,30 @@
+package test:unwrap-whole-input@1.0.0;
+
+world system { export batch-service; }
+
+/// @nexus.endpoint "batches"
+interface batch-service {
+  /// @nexus.unwrap
+  record batch-item {
+    value: string,
+  }
+
+  resource batch {
+    constructor(batch-id: string);
+
+    // A whole operation input is the request, not one of its fields.
+    add-items: func(items: list<batch-item>) -> add-items-response;
+  }
+
+  record add-items-request {
+    batch-id: string,
+    items: list<batch-item>,
+    label: option<string>,
+  }
+
+  record add-items-response {
+    last-item-id: option<string>,
+  }
+
+  add-items: func(request: batch-item) -> add-items-response;
+}

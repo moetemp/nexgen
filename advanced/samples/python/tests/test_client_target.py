@@ -158,11 +158,11 @@ async def test_a_created_stream_calls_its_operations_through_the_client() -> Non
     )
 
     stream = await client.create_stream(Texts, id="s1")
-    appended = await stream.publish(records=[AppendRecord(body="hi")])
+    last_offset = await stream.publish("hi")
 
     # The response sets `created` to False, and the handle keeps it.
     assert stream.created is False
-    assert appended.last_offset == 2
+    assert last_offset == 2
     assert client.calls == [
         Call(
             STREAM_SERVICE,
@@ -382,7 +382,7 @@ async def test_an_activity_append_takes_the_producer_of_its_attempt(
         body_type=str, stream=ref, created=None, status=None, _operations=client
     )
 
-    _ = await stream.publish(records=[AppendRecord(body="hi")])
+    _ = await stream.publish("hi")
 
     # The resource method leaves the producer unset, so the client's source fills it.
     assert [call.input for call in client.calls] == [
@@ -392,6 +392,32 @@ async def test_an_activity_append_takes_the_producer_of_its_attempt(
             producer=Producer(id="act:r1:a1", run_id="r1"),
         )
     ]
+
+
+async def test_a_publish_wraps_each_value_and_returns_the_last_offset() -> None:
+    ref = StreamRef(id="s1")
+    client = FakeClient(
+        {
+            "AppendRecords": [
+                AppendRecordsResponse(first_offset=4, last_offset=5),
+                AppendRecordsResponse(),
+            ]
+        }
+    )
+    stream = Stream(body_type=str, stream=ref, _operations=client)
+
+    last_offset = await stream.publish("a", "b")
+    empty = await stream.publish()
+
+    _ = assert_type(last_offset, int)
+    assert last_offset == 5
+    assert [call.input for call in client.calls][0] == AppendRecordsRequest(
+        stream=ref,
+        records=[AppendRecord(body="a"), AppendRecord(body="b")],
+        producer=Producer(id="client:sample"),
+    )
+    # `last_offset` has no presence on the wire, so an empty publish answers 0.
+    assert empty == 0
 
 
 async def test_an_append_keeps_the_producer_that_sdk_code_sets() -> None:

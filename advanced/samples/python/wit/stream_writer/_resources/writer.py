@@ -41,7 +41,7 @@ class Writer(typing.Generic[BodyT]):
 
     async def write_records(
         self,
-        records: list[AppendRecord[BodyT]] | None = None,
+        records: list[BodyT] | None = None,
         *,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
@@ -49,7 +49,7 @@ class Writer(typing.Generic[BodyT]):
         """Write Records at once. The answer has the first and the last offset."""
         request = WriteRecordsRequest(
             writer_id=self.writer_id,
-            records=records or [],
+            records=[AppendRecord(body=value) for value in records or []],
         )
         return await self._ops()._stream_writer_write_records(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout

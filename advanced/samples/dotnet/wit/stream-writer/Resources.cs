@@ -5,6 +5,7 @@
 using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Temporalio.Workflows;
 using Nexgen.Support;
@@ -36,9 +37,10 @@ namespace Nexgen.StreamWriter
         }
 
         [GeneratedCode("nexgen", null)]
-        public async Task<WriteRecordsResponse> WriteRecordsAsync(IReadOnlyList<AppendRecord<TBody>> records)
+        public async Task<WriteRecordsResponse> WriteRecordsAsync(IReadOnlyList<TBody> records)
         {
-            var request = new WriteRecordsRequest<TBody>(records) { WriterId = WriterId };
+            var recordsValue = records.Select(value => new AppendRecord<TBody>(value)).ToList();
+            var request = new WriteRecordsRequest<TBody>(recordsValue) { WriterId = WriterId };
             var client = Workflow.CreateNexusWorkflowClient("temporal.sdk.streams.v1.StreamWriter", RequireNexgenClient().Options);
             return await client.ExecuteNexusOperationAsync<WriteRecordsResponse>("WriteRecords", request).ConfigureAwait(true);
         }

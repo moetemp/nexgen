@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using Temporalio.Workflows;
+using BatchServiceExample = Nexgen.BatchService;
 using StartWorkflowExample = Nexgen.StartWorkflowService;
 using WorkerShutdownExample = Nexgen.WorkerShutdownService;
 
@@ -28,6 +29,10 @@ namespace Nexgen.DotNetExamples.Tests
                 {
                     WorkflowStartDelay = TimeSpan.FromSeconds(1),
                 });
+
+        // An add takes the values, and answers the id of the last item, which can be absent.
+        internal static Task<string?> AddItemsAsync() =>
+            new BatchServiceExample.Batch("b1").AddItemsAsync("x", "y");
 
         // The shutdown takes the SDK fields of the heartbeat. The heartbeat copies the worker
         // fields of the request.

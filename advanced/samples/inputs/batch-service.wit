@@ -1,0 +1,41 @@
+package temporal:batch-service@1.0.0;
+
+world system {
+  export batch-service;
+}
+
+/// @nexus.endpoint "batches"
+interface batch-service {
+  /// @nexus.unwrap
+  record batch-item {
+    value: string,
+  }
+
+  resource batch {
+    constructor(batch-id: string);
+
+    /// @nexus.doc "Add values to the batch. The answer is the id of the last item, if any."
+    /// @nexus.varargs name="values"
+    /// @nexus.result-field "last-item-id"
+    add-items: func(items: list<batch-item>) -> add-items-response;
+  }
+
+  type batch-result = own<batch>;
+
+  record open-batch-request {
+    batch-id: string,
+  }
+
+  record add-items-request {
+    batch-id: string,
+    items: list<batch-item>,
+  }
+
+  record add-items-response {
+    last-item-id: option<string>,
+    count: u32,
+  }
+
+  open-batch: func(request: open-batch-request) -> batch-result;
+  add-items: func(request: add-items-request) -> add-items-response;
+}

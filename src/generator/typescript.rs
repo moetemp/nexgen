@@ -11,18 +11,18 @@ use crate::generator::proto::typescript as typescript_proto;
 use crate::generator::proto::typescript::{
     model_typescript_interface_ref, typescript_replacement_type_name,
 };
-use crate::generator::render_request_plan;
 use crate::generator::{
     ExternalModelBackend, GeneratedFileMap, GeneratedFileOrigin, GeneratedFiles, GenerationMode,
     TsDateTimeTypes,
 };
+use crate::generator::{render_request_plan, return_response_field};
 use crate::language::Language;
 use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
     PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
     PlannedResourceMethod, PlannedResourceMethodBindingSpec, PlannedResourceMethodResultKind,
     PlannedSpec, PlannedType, PlannedWireFieldBinding, operation_input_model,
-    operation_output_direct_result,
+    operation_output_direct_result, resource_method_result_field, unwrapped_field,
 };
 use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{
@@ -4884,7 +4884,12 @@ fn render_resources_module(
             ("common", "@temporalio/common", true),
         ],
     );
-    render_typescript_requirement_imports(&mut imports, requirements);
+    // A zero 64-bit result reads `Long.ZERO`, so the module needs the value.
+    if body.contains("Long.ZERO") {
+        imports.push_str("import Long from 'long';\n");
+    } else {
+        render_typescript_requirement_imports(&mut imports, requirements);
+    }
     render_value_imports(
         &mut imports,
         "./models",
@@ -6116,31 +6121,60 @@ fn render_resource(
         output.push_str("  public async ");
         output.push_str(&typescript_generated_field_name(&method.name));
         output.push_str("(\n");
+        let result_field = typescript_resource_method_result_field(method, method_long, api_plan);
+        let param_exprs = typescript_resource_method_param_exprs(method, api_plan);
         // TypeScript refuses an optional parameter before a required one, and WIT allows
         // any order, so such a parameter takes `undefined` explicitly.
         let last_required = method.params.iter().rposition(|param| !param.optional);
         for (index, param) in method.params.iter().enumerate() {
             let before_required = last_required.is_some_and(|last| index < last);
+            let item = match &param.kind {
+                PlannedType::List(item) if !param.optional && param.function.is_none() => Some(
+                    typescript_resource_item_annotation(item, method_long, api_plan),
+                ),
+                _ => None,
+            };
             output.push_str("    ");
+            if let (Some(name), Some(item)) = (
+                method
+                    .varargs
+                    .as_deref()
+                    .filter(|_| index + 1 == method.params.len()),
+                &item,
+            ) {
+                output.push_str("...");
+                output.push_str(&typescript_generated_field_name(name));
+                output.push_str(": ");
+                output.push_str(&typescript_array_annotation(item));
+                output.push_str(",\n");
+                continue;
+            }
             output.push_str(&typescript_generated_field_name(&param.name));
             if param.optional && !before_required {
                 output.push('?');
             }
             output.push_str(": ");
-            output.push_str(&typescript_resource_field_annotation(
-                &param.kind,
-                false,
-                param.function.as_ref(),
-                method_long,
-                api_plan,
-            ));
+            match &item {
+                Some(item) => output.push_str(&typescript_array_annotation(item)),
+                None => output.push_str(&typescript_resource_field_annotation(
+                    &param.kind,
+                    false,
+                    param.function.as_ref(),
+                    method_long,
+                    api_plan,
+                )),
+            }
             if param.optional && before_required {
                 output.push_str(" | undefined");
             }
             output.push_str(",\n");
         }
         output.push_str("  ): Promise<");
-        output.push_str(&result_annotation);
+        output.push_str(
+            result_field
+                .as_ref()
+                .map_or(&result_annotation, |(annotation, _)| annotation),
+        );
         output.push_str("> {\n");
         match &method.binding {
             PlannedResourceMethodBindingSpec::Operation {
@@ -6160,32 +6194,26 @@ fn render_resource(
                     .endpoint
                     .is_none()
                     .then(|| format!("{}(this)", resource_client_require_function_name(resource)));
-                if *direct_return {
-                    output.push_str(&render_resource_method_operation_body(
-                        4,
-                        service,
-                        resource,
-                        operation,
-                        endpoint_expr,
-                        client_expr,
-                        &result_annotation,
-                        request_plan,
-                        &branchable_params,
-                        true,
-                    ));
-                } else {
-                    output.push_str(&render_resource_method_operation_body(
-                        4,
-                        service,
-                        resource,
-                        operation,
-                        endpoint_expr,
-                        client_expr,
-                        &result_annotation,
-                        request_plan,
-                        &branchable_params,
-                        false,
-                    ));
+                let body = render_resource_method_operation_body(
+                    4,
+                    service,
+                    resource,
+                    operation,
+                    endpoint_expr,
+                    client_expr,
+                    &result_annotation,
+                    request_plan,
+                    &param_exprs,
+                    &branchable_params,
+                    *direct_return,
+                );
+                match &result_field {
+                    Some((_, value)) => output.push_str(&return_response_field(
+                        &body,
+                        "const response = await ",
+                        value,
+                    )),
+                    None => output.push_str(&body),
                 }
             }
             PlannedResourceMethodBindingSpec::Stub => {
@@ -6520,6 +6548,7 @@ fn render_resource_method_operation_body(
     client_expr: Option<String>,
     result_annotation: &str,
     request_plan: &RequestPlan,
+    param_exprs: &BTreeMap<String, String>,
     branchable_params: &[String],
     direct_return: bool,
 ) -> String {
@@ -6540,6 +6569,7 @@ fn render_resource_method_operation_body(
             client_expr.clone(),
             result_annotation,
             request_plan,
+            param_exprs,
             remaining,
             direct_return,
         ));
@@ -6554,6 +6584,7 @@ fn render_resource_method_operation_body(
             client_expr,
             result_annotation,
             request_plan,
+            param_exprs,
             remaining,
             direct_return,
         ));
@@ -6562,7 +6593,7 @@ fn render_resource_method_operation_body(
         return output;
     }
 
-    let request_expr = render_request_plan_typescript(request_plan);
+    let request_expr = render_request_plan_typescript(request_plan, param_exprs);
     let mut output = String::new();
     output.push_str(&indent_str);
     output.push_str("const request = ");
@@ -6713,7 +6744,10 @@ fn render_resource_start_operation(
     output.push_str("    );\n");
 }
 
-fn render_request_plan_typescript(plan: &RequestPlan) -> String {
+fn render_request_plan_typescript(
+    plan: &RequestPlan,
+    param_exprs: &BTreeMap<String, String>,
+) -> String {
     render_request_plan(
         plan,
         typescript_generated_field_name,
@@ -6726,8 +6760,99 @@ fn render_request_plan_typescript(plan: &RequestPlan) -> String {
             }
         },
         |name| format!("this.{}", typescript_generated_field_name(name)),
-        typescript_generated_field_name,
+        |name| {
+            param_exprs
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| typescript_generated_field_name(name))
+        },
     )
+}
+
+/// The type of an item of a list parameter. A record with `@nexus.unwrap` is its one field.
+fn typescript_resource_item_annotation(
+    item: &PlannedType,
+    long: bool,
+    api_plan: &PlannedSpec,
+) -> String {
+    match unwrapped_field(api_plan, item) {
+        Some((_, field)) => typescript_resource_field_annotation(
+            &field.field_type,
+            !field.required,
+            None,
+            long,
+            api_plan,
+        ),
+        None => typescript_resource_value_annotation(item, long, api_plan),
+    }
+}
+
+/// The request values of a method's list parameters that differ from the parameter. The items of
+/// `@nexus.varargs` take the API name, and each item of a record with `@nexus.unwrap` is wrapped
+/// in its record.
+fn typescript_resource_method_param_exprs(
+    method: &PlannedResourceMethod,
+    api_plan: &PlannedSpec,
+) -> BTreeMap<String, String> {
+    method
+        .params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, param)| {
+            let PlannedType::List(item) = &param.kind else {
+                return None;
+            };
+            let source = method
+                .varargs
+                .as_deref()
+                .filter(|_| index + 1 == method.params.len())
+                .unwrap_or(&param.name);
+            let source = typescript_generated_field_name(source);
+            let expr = match unwrapped_field(api_plan, item) {
+                Some((_, field)) => {
+                    let name = typescript_generated_field_name(&field.name);
+                    let member = if name == "value" {
+                        name
+                    } else {
+                        format!("{name}: value")
+                    };
+                    format!("{source}.map((value) => ({{ {member} }}))")
+                }
+                None => source,
+            };
+            Some((param.name.clone(), expr))
+        })
+        .collect()
+}
+
+/// The annotation and the expression of the response field that a method returns. A field
+/// with no presence gives its zero value when the response leaves it unset.
+fn typescript_resource_method_result_field(
+    method: &PlannedResourceMethod,
+    long: bool,
+    api_plan: &PlannedSpec,
+) -> Option<(String, String)> {
+    let (_, _, field, optional) = resource_method_result_field(api_plan, method)?;
+    let kind = match &field.field_type {
+        PlannedType::Option(inner) => inner.as_ref(),
+        kind => kind,
+    };
+    let base = typescript_resource_field_annotation(kind, false, None, long, api_plan);
+    let zero = (!optional && !field.required)
+        .then(|| match kind {
+            PlannedType::Int(_) if base == "Long" => Some("Long.ZERO"),
+            PlannedType::Int(_) | PlannedType::Float => Some("0"),
+            PlannedType::Bool => Some("false"),
+            PlannedType::String => Some("\"\""),
+            _ => None,
+        })
+        .flatten();
+    let name = typescript_generated_field_name(&field.name);
+    Some(match zero {
+        Some(zero) => (base, format!("response.{name} ?? {zero}")),
+        None if field.required => (base, format!("response.{name}")),
+        None => (format!("{base} | undefined"), format!("response.{name}")),
+    })
 }
 
 /// The resource that an operation returns, bound to `client` when one is given, or the

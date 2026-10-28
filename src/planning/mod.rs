@@ -90,6 +90,47 @@ pub(crate) fn operation_input_model(
     }
 }
 
+/// The one field of a record with `@nexus.unwrap`, by key. The convenience API takes it in place
+/// of the record.
+pub(crate) fn unwrapped_field<'a>(
+    api_plan: &'a PlannedSpec,
+    planned_type: &PlannedType,
+) -> Option<(&'a str, &'a crate::spec::RecordFieldSpec<PlannedFamily>)> {
+    let TypeSpec::Record(record) = planned_type else {
+        return None;
+    };
+    api_plan
+        .record(&record.full_name)
+        .filter(|record| record.unwrap)?
+        .fields
+        .iter()
+        .find(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+        .map(|(key, field)| (key.as_str(), field))
+}
+
+/// The response field that a resource method returns, by key, and whether the method returns
+/// its absence. A field with no presence returns its zero value in place of absence.
+pub(crate) fn resource_method_result_field<'a>(
+    api_plan: &'a PlannedSpec,
+    method: &PlannedResourceMethod,
+) -> Option<(
+    &'a RecordSpec<PlannedFamily>,
+    &'a str,
+    &'a crate::spec::RecordFieldSpec<PlannedFamily>,
+    bool,
+)> {
+    let key = method.result_field.as_deref()?;
+    let PlannedResourceMethodResultKind::Value(TypeSpec::Record(record)) =
+        &method.result.as_ref()?.kind
+    else {
+        return None;
+    };
+    let record = api_plan.record(&record.full_name)?;
+    let (key, field) = record.fields.get_key_value(key)?;
+    let optional = !field.required && field.data.has_presence != Some(false);
+    Some((record, key.as_str(), field, optional))
+}
+
 pub(crate) fn planned_type_is_model_shaped(planned_type: &PlannedType) -> bool {
     matches!(
         planned_type,
@@ -176,6 +217,10 @@ pub(crate) struct PlannedResourceMethod {
     pub(crate) doc: Option<String>,
     pub(crate) params: Vec<PlannedResourceField>,
     pub(crate) result: Option<PlannedResourceMethodResult>,
+    /// The API name of the last parameter, whose items the method takes as positional arguments.
+    pub(crate) varargs: Option<String>,
+    /// The key of the response field that the method returns.
+    pub(crate) result_field: Option<String>,
     pub(crate) binding: PlannedResourceMethodBindingSpec,
 }
 

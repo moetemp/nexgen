@@ -1,0 +1,17 @@
+package test:resource-not-proto-backed@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  // The factory can't flatten a record that no proto backs.
+  /// @nexus.flatten-in-api param="execution" fields="workflow-id"
+  resource run {
+    constructor(execution: workflow-execution);
+  }
+}

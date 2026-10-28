@@ -13,6 +13,7 @@ from ._resources.stream import append_records
 from ._resources.stream import close_stream
 from ._resources.stream import read_records
 from ._resources.stream import describe_stream
+from ._resources.stream import stream
 
 __all__ = [
     "append_records",
@@ -20,6 +21,7 @@ __all__ = [
     "create_stream",
     "describe_stream",
     "read_records",
+    "stream",
 ]
 
 

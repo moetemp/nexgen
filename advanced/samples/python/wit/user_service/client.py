@@ -53,6 +53,7 @@ class UserServiceClientExtension(abc.ABC):
             if UserServiceClientExtension in base.__mro__:
                 continue
             for name in (
+                "user",
                 "get_user",
                 "update_email",
                 "notify",
@@ -222,3 +223,16 @@ class UserServiceClientExtension(abc.ABC):
         return await self._user_service_notify_all(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
         )
+
+    def user(
+        self,
+        *,
+        user_id: str,
+        email: str,
+    ) -> User:
+        """A handle on an existing ``User``, with no call."""
+        resource = User(
+            user_id=user_id,
+            email=email,
+        )
+        return bind_user_operations(resource, self)

@@ -1,0 +1,1 @@
+Python gives each resource a factory, on the client and in the Workflow package, which builds a handle with no call. `@nexus.flatten-in-api param="..." fields="..." keep=true` on a resource makes the factory take fields of one constructor parameter. An optional resource field defaults to `None`, and a resource with one proto-backed record field passes as that record.

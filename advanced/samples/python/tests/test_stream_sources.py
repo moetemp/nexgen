@@ -9,6 +9,9 @@ import pytest
 import temporalio.workflow
 
 import temporal_support
+from typing_extensions import assert_type
+import wit.stream_service as stream_service
+from wit.stream_service._resources import Stream
 from wit.stream_service.models import (
     CreateStreamRequest,
     CreateStreamResult,
@@ -71,3 +74,14 @@ async def test_a_workflow_create_fills_its_sources(
         )
     ]
     assert stream.body_type is str
+
+
+def test_a_workflow_factory_builds_a_handle_on_the_run_operations() -> None:
+    handle = stream_service.stream(Turns, id="chat-1:r1:turns", backend="redis")
+
+    _ = assert_type(handle, Stream[str])
+    assert handle == Stream(
+        body_type=str, stream=StreamRef(id="chat-1:r1:turns", backend="redis")
+    )
+    # A handle with no operations of its own calls those of the code that runs it.
+    assert handle._operations is None

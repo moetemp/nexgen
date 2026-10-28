@@ -16,6 +16,7 @@ from .operations.record_sync import record_sync
 from ._resources.user import deactivate
 from .operations.update_notification_settings import update_notification_settings
 from .operations.get_sync_settings import get_sync_settings
+from ._resources.user import user
 
 __all__ = [
     "deactivate",
@@ -26,6 +27,7 @@ __all__ = [
     "set_profile",
     "update_email",
     "update_notification_settings",
+    "user",
 ]
 
 

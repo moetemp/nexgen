@@ -50,7 +50,10 @@ class WorkflowHandleServiceClientExtension(abc.ABC):
         for base in cls.__mro__:
             if WorkflowHandleServiceClientExtension in base.__mro__:
                 continue
-            for name in ("start_workflow",):
+            for name in (
+                "workflow_handle",
+                "start_workflow",
+            ):
                 if name in base.__dict__:
                     raise TypeError(
                         f"{cls.__qualname__} gets {name} from {base.__qualname__} and from WorkflowHandleServiceClientExtension"
@@ -120,3 +123,18 @@ class WorkflowHandleServiceClientExtension(abc.ABC):
         return await self._workflow_handle_service_start_workflow(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
         )
+
+    def workflow_handle(
+        self,
+        *,
+        namespace: str,
+        workflow_id: str,
+        run_id: str | None = None,
+    ) -> WorkflowHandle:
+        """A handle on an existing ``WorkflowHandle``, with no call."""
+        resource = WorkflowHandle(
+            namespace=namespace,
+            workflow_id=workflow_id,
+            run_id=run_id,
+        )
+        return bind_workflow_handle_operations(resource, self)

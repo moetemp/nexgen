@@ -8,6 +8,18 @@ import dataclasses
 @dataclasses.dataclass
 class SignalResult:
     namespace: str
-    started: bool | None
+    started: bool | None = None
 
     pass
+
+
+def signal_result(
+    *,
+    namespace: str,
+    started: bool | None = None,
+) -> SignalResult:
+    """A handle on an existing ``SignalResult``, with no call."""
+    return SignalResult(
+        namespace=namespace,
+        started=started,
+    )

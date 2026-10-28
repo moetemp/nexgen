@@ -22,6 +22,7 @@ from .models import (
     ReadRecordsResponse,
     StreamReadStart,
     StreamRef,
+    StreamStatus,
 )
 from ._resources import Stream
 from ._resources.stream import bind_stream_operations
@@ -73,6 +74,7 @@ class StreamServiceClientExtension(abc.ABC):
             if StreamServiceClientExtension in base.__mro__:
                 continue
             for name in (
+                "stream",
                 "create_stream",
                 "append_records",
                 "close_stream",
@@ -393,3 +395,29 @@ class StreamServiceClientExtension(abc.ABC):
         return await self._stream_service_describe_stream(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
         )
+
+    def stream(
+        self,
+        definition: type[temporal_support.StreamDefinition[BodyT]],
+        *,
+        id: str | None = None,
+        stream: StreamRef | None = None,
+        backend: str | None = None,
+        created: bool | None = None,
+        status: StreamStatus | None = None,
+    ) -> Stream[BodyT]:
+        """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``stream``."""
+        (body_type,) = _support.definition_type_arguments(definition)
+        if stream is None:
+            if id is None:
+                raise TypeError("pass id or stream")
+            stream = StreamRef(id=id, backend=backend)
+        elif id is not None or backend is not None:
+            raise TypeError("pass id and backend, or stream, not both")
+        resource = Stream(
+            body_type=body_type,
+            stream=stream,
+            created=created,
+            status=status,
+        )
+        return bind_stream_operations(resource, self)

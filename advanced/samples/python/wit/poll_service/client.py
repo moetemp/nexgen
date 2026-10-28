@@ -159,6 +159,7 @@ class FeedServiceClientExtension(abc.ABC):
             if FeedServiceClientExtension in base.__mro__:
                 continue
             for name in (
+                "feed",
                 "open_feed",
                 "list_feed",
             ):
@@ -290,3 +291,16 @@ class FeedServiceClientExtension(abc.ABC):
             if next_request is None:
                 return
             request = next_request
+
+    def feed(
+        self,
+        *,
+        namespace: str,
+        query: str | None = None,
+    ) -> Feed:
+        """A handle on an existing ``Feed``, with no call."""
+        resource = Feed(
+            namespace=namespace,
+            query=query,
+        )
+        return bind_feed_operations(resource, self)

@@ -1,0 +1,21 @@
+package test:factory-name-clash@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  // The client's factory of `start-job` has the name of the `start_job` of `job`.
+  resource start-job {
+    constructor(id: string);
+  }
+
+  record job-request {
+    id: string,
+  }
+
+  record job-response {
+    id: string,
+  }
+
+  job: async func(request: job-request) -> job-response;
+}

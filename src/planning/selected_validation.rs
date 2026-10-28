@@ -9,7 +9,7 @@ use crate::error::{Error, Result};
 use crate::spec::{
     ApiSpec, ApiSpecLeaf, CompilerPass, ExternalTypeSpec, FieldFlattenSpec, FunctionArgsSpec,
     FunctionResultSpec, OperationSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec,
-    ResourceSpec, SelectedFamily, ServiceSpec, TargetFieldRole, TypeSpec,
+    ResourceFlattenSpec, ResourceSpec, SelectedFamily, ServiceSpec, TargetFieldRole, TypeSpec,
 };
 
 pub(crate) struct SelectedValidationPass;
@@ -138,6 +138,11 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
             }
         }
     }
+    for resource in spec.services.iter().flat_map(|service| &service.resources) {
+        if let Some(flatten) = &resource.flatten {
+            validate_resource_flatten(spec, resource, flatten, &invalid)?;
+        }
+    }
 
     // A record that holds a resource builds it from the record's message, with no type argument.
     let generic_resources = spec
@@ -163,18 +168,15 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
     Ok(())
 }
 
-/// A field-level flatten promotes fields of a proto-backed record, and the call must be able to
-/// give every required field of that record.
-fn validate_field_flatten(
-    spec: &ApiSpec<SelectedFamily>,
-    parent: &RecordSpec<SelectedFamily>,
-    field_name: &str,
-    field: &RecordFieldSpec<SelectedFamily>,
-    flatten: &FieldFlattenSpec,
+/// The proto-backed record whose fields a flatten promotes. A record that flattens all of its
+/// fields already can't flatten some of them.
+fn flattened_proto_record<'a>(
+    spec: &'a ApiSpec<SelectedFamily>,
+    field_type: &TypeSpec<SelectedFamily>,
+    context: &str,
     invalid: &dyn Fn(String) -> Error,
-) -> Result<()> {
-    let context = format!("record `{}` field `{field_name}`", parent.full_name);
-    let nested = match field.field_type.without_option() {
+) -> Result<&'a RecordSpec<SelectedFamily>> {
+    let nested = match field_type.without_option() {
         TypeSpec::Record(record) => spec.record(record.as_str()),
         TypeSpec::External(ExternalTypeSpec::Proto(proto)) => spec.record_for_proto(proto.as_str()),
         _ => None,
@@ -190,6 +192,75 @@ fn validate_field_flatten(
             nested.full_name
         )));
     }
+    Ok(nested)
+}
+
+/// A resource's flatten promotes fields of one constructor parameter's record in the factory. The
+/// factory has no fills, so it must promote every required field of that record.
+fn validate_resource_flatten(
+    spec: &ApiSpec<SelectedFamily>,
+    resource: &ResourceSpec<SelectedFamily>,
+    flatten: &ResourceFlattenSpec,
+    invalid: &dyn Fn(String) -> Error,
+) -> Result<()> {
+    let context = format!("resource `{}` parameter `{}`", resource.name, flatten.param);
+    let Some(param) = resource
+        .fields
+        .iter()
+        .find(|field| field.name == flatten.param)
+    else {
+        return Err(invalid(format!(
+            "{context} isn't a parameter of the constructor"
+        )));
+    };
+    let nested = flattened_proto_record(spec, &param.field_type, &context, invalid)?;
+    for key in &flatten.fields {
+        let Some(promoted) = nested
+            .fields
+            .get(key)
+            .filter(|field| field.visibility != RecordFieldVisibility::Omitted)
+        else {
+            return Err(invalid(format!(
+                "{context} promotes `{key}`, which `{}` omits",
+                nested.full_name
+            )));
+        };
+        if let Some(other) = resource
+            .fields
+            .iter()
+            .find(|field| field.name != flatten.param && field.name == promoted.name)
+        {
+            return Err(invalid(format!(
+                "{context} promotes `{key}`, whose name `{}` is also the name of parameter `{}`",
+                promoted.name, other.name
+            )));
+        }
+    }
+    if let Some((key, _)) = nested.fields.iter().find(|(key, field)| {
+        field.required
+            && field.visibility != RecordFieldVisibility::Omitted
+            && !flatten.fields.contains(key)
+    }) {
+        return Err(invalid(format!(
+            "{context} flattens fields of `{}`, but doesn't promote its required field `{key}`",
+            nested.full_name
+        )));
+    }
+    Ok(())
+}
+
+/// A field-level flatten promotes fields of a proto-backed record, and the call must be able to
+/// give every required field of that record.
+fn validate_field_flatten(
+    spec: &ApiSpec<SelectedFamily>,
+    parent: &RecordSpec<SelectedFamily>,
+    field_name: &str,
+    field: &RecordFieldSpec<SelectedFamily>,
+    flatten: &FieldFlattenSpec,
+    invalid: &dyn Fn(String) -> Error,
+) -> Result<()> {
+    let context = format!("record `{}` field `{field_name}`", parent.full_name);
+    let nested = flattened_proto_record(spec, &field.field_type, &context, invalid)?;
     if field.api_hidden() {
         return Err(invalid(format!(
             "{context} flattens fields, so it can't have a source or an api-omit too"

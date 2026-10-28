@@ -224,6 +224,45 @@ async def test_a_create_takes_the_ref_fields_as_parameters() -> None:
     assert (wire.ref.id, wire.ref.backend) == ("s1", "redis")
 
 
+async def test_a_factory_builds_a_handle_with_no_call() -> None:
+    client = FakeClient({"DescribeStream": [DescribeStreamResponse(last_offset=5)]})
+
+    by_id = client.stream(Turns, id="s1", backend="redis")
+    by_ref = client.stream(Turns, stream=StreamRef(id="s2"))
+
+    _ = assert_type(by_id, Stream[Turn])
+    assert by_id == Stream(body_type=Turn, stream=StreamRef(id="s1", backend="redis"))
+    assert by_id.body_type is Turn
+    assert by_ref.stream == StreamRef(id="s2")
+    assert client.calls == []
+    # The handle calls through the client that built it.
+    _ = await by_id.describe()
+    assert [call.operation for call in client.calls] == ["DescribeStream"]
+
+
+def test_a_factory_takes_the_ref_fields_or_the_ref() -> None:
+    client = FakeClient({})
+
+    with pytest.raises(TypeError, match="pass id or stream"):
+        _ = client.stream(Turns)
+    with pytest.raises(TypeError, match="not both"):
+        _ = client.stream(Turns, id="s1", stream=StreamRef(id="s1"))
+
+
+async def test_a_handle_passes_as_its_ref() -> None:
+    converter = temporalio.converter.DataConverter.default
+    stream = Stream(body_type=Turn, stream=StreamRef(id="s1"), created=True)
+
+    (payload,) = await converter.encode([stream])
+    (decoded,) = await converter.decode([payload], [Stream[Turn]])
+
+    # The wire form is the ref, and the parameter type gives the body type. Only a create's
+    # handle has `created`.
+    assert payload.metadata["messageType"] == b"temporal.api.stream.v1.StreamRef"
+    assert decoded == Stream(body_type=Turn, stream=StreamRef(id="s1"))
+    assert decoded.body_type is Turn
+
+
 async def test_a_client_call_returns_the_result() -> None:
     client = FakeClient({"DescribeStream": [DescribeStreamResponse(last_offset=5)]})
 

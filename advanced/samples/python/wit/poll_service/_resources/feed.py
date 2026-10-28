@@ -19,7 +19,7 @@ class Feed:
     """The Workflows of one query."""
 
     namespace: str
-    query: str | None
+    query: str | None = None
     # Not a dataclass field, so the default converter doesn't
     # encode it, and equality ignores it.
     _operations: typing.ClassVar[_FeedServiceOperations | None] = None

@@ -10,7 +10,7 @@ import typing
 class WorkflowHandle:
     namespace: str
     workflow_id: str
-    run_id: str | None
+    run_id: str | None = None
     # Not a dataclass field, so the default converter doesn't
     # encode it, and equality ignores it.
     _operations: typing.ClassVar[object | None] = None

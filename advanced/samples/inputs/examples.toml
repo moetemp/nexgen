@@ -41,7 +41,7 @@ descriptors = ["temporal_api.bin", "streams.bin"]
 "temporal/sdk/streams/" = "streamprotos.temporal.sdk.streams"
 
 # Brook's writer WIT, byte for byte. It uses records of stream-service, and Brook's runtime proto.
-# Python doesn't generate it yet, since a caller method's docstring loses its indent.
+# Python doesn't generate it yet, since its caller doesn't import every type that it uses.
 [stream-writer]
 languages = ["typescript", "dotnet"]
 descriptors = ["temporal_api.bin", "streams.bin"]

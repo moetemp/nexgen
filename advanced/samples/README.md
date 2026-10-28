@@ -149,8 +149,8 @@ the service, so its build links `stream-service.wit`.
 
 Only part of today's output builds, so the samples leave the rest out:
 
-- Python doesn't generate the writer, since a caller method's docstring loses
-  its indent.
+- Python doesn't generate the writer yet, since its caller doesn't import every
+  type that it uses.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)

@@ -20,6 +20,7 @@ from .models import (
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
+    StreamErrorDetails,
     StreamReadStart,
     StreamRecord,
     StreamRef,
@@ -28,6 +29,7 @@ from .models import (
 from ._resources import Stream
 import temporal_support as _support
 from ._poll import PollIterator
+from .errors import stream_error
 
 if typing.TYPE_CHECKING:
     import temporal_support
@@ -111,27 +113,33 @@ class StreamServiceClientExtension(abc.ABC):
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> Stream[BodyT]:
-        nexus_client = self._create_nexus_client(
-            service="temporal.api.streamservice.v1.StreamService",
-            endpoint="__temporal_system",
-            rpc_metadata=rpc_metadata,
-            rpc_timeout=rpc_timeout,
-        )
-        handle = await nexus_client.start_operation(
-            operation="CreateStream",
-            input=request,
-            output_type=CreateStreamResult,
-        )
-        result = await handle
-        if result.stream is None:
-            raise RuntimeError("CreateStream answered without `stream`")
-        return Stream(
-            body_type=body_type,
-            stream=result.stream,
-            created=result.created,
-            status=result.status,
-            _operations=self,
-        )
+        try:
+            nexus_client = self._create_nexus_client(
+                service="temporal.api.streamservice.v1.StreamService",
+                endpoint="__temporal_system",
+                rpc_metadata=rpc_metadata,
+                rpc_timeout=rpc_timeout,
+            )
+            handle = await nexus_client.start_operation(
+                operation="CreateStream",
+                input=request,
+                output_type=CreateStreamResult,
+            )
+            result = await handle
+            if result.stream is None:
+                raise RuntimeError("CreateStream answered without `stream`")
+            return Stream(
+                body_type=body_type,
+                stream=result.stream,
+                created=result.created,
+                status=result.status,
+                _operations=self,
+            )
+        except Exception as err:
+            details = _support.error_details(err, StreamErrorDetails)
+            if details is None:
+                raise
+            raise stream_error(details, str(err)) from err
 
     def create_stream(
         self,
@@ -185,18 +193,24 @@ class StreamServiceClientExtension(abc.ABC):
                 request,
                 previous_completed_task=_support.local_activity_previous_completed_task(),
             )
-        nexus_client = self._create_nexus_client(
-            service="temporal.api.streamservice.v1.StreamService",
-            endpoint="__temporal_system",
-            rpc_metadata=rpc_metadata,
-            rpc_timeout=rpc_timeout,
-        )
-        handle = await nexus_client.start_operation(
-            operation="AppendRecords",
-            input=request,
-            output_type=AppendRecordsResponse,
-        )
-        return await handle
+        try:
+            nexus_client = self._create_nexus_client(
+                service="temporal.api.streamservice.v1.StreamService",
+                endpoint="__temporal_system",
+                rpc_metadata=rpc_metadata,
+                rpc_timeout=rpc_timeout,
+            )
+            handle = await nexus_client.start_operation(
+                operation="AppendRecords",
+                input=request,
+                output_type=AppendRecordsResponse,
+            )
+            return await handle
+        except Exception as err:
+            details = _support.error_details(err, StreamErrorDetails)
+            if details is None:
+                raise
+            raise stream_error(details, str(err)) from err
 
     async def append_records(
         self,
@@ -227,18 +241,24 @@ class StreamServiceClientExtension(abc.ABC):
     ) -> CloseStreamResponse:
         if request.producer is None:
             request = dataclasses.replace(request, producer=_support.client_producer())
-        nexus_client = self._create_nexus_client(
-            service="temporal.api.streamservice.v1.StreamService",
-            endpoint="__temporal_system",
-            rpc_metadata=rpc_metadata,
-            rpc_timeout=rpc_timeout,
-        )
-        handle = await nexus_client.start_operation(
-            operation="CloseStream",
-            input=request,
-            output_type=CloseStreamResponse,
-        )
-        return await handle
+        try:
+            nexus_client = self._create_nexus_client(
+                service="temporal.api.streamservice.v1.StreamService",
+                endpoint="__temporal_system",
+                rpc_metadata=rpc_metadata,
+                rpc_timeout=rpc_timeout,
+            )
+            handle = await nexus_client.start_operation(
+                operation="CloseStream",
+                input=request,
+                output_type=CloseStreamResponse,
+            )
+            return await handle
+        except Exception as err:
+            details = _support.error_details(err, StreamErrorDetails)
+            if details is None:
+                raise
+            raise stream_error(details, str(err)) from err
 
     async def close_stream(
         self,
@@ -267,18 +287,24 @@ class StreamServiceClientExtension(abc.ABC):
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse[BodyT]:
-        nexus_client = self._create_nexus_client(
-            service="temporal.api.streamservice.v1.StreamService",
-            endpoint="__temporal_system",
-            rpc_metadata=rpc_metadata,
-            rpc_timeout=rpc_timeout,
-        )
-        handle = await nexus_client.start_operation(
-            operation="ReadRecords",
-            input=request,
-            output_type=ReadRecordsResponse[body_type],
-        )
-        return await handle
+        try:
+            nexus_client = self._create_nexus_client(
+                service="temporal.api.streamservice.v1.StreamService",
+                endpoint="__temporal_system",
+                rpc_metadata=rpc_metadata,
+                rpc_timeout=rpc_timeout,
+            )
+            handle = await nexus_client.start_operation(
+                operation="ReadRecords",
+                input=request,
+                output_type=ReadRecordsResponse[body_type],
+            )
+            return await handle
+        except Exception as err:
+            details = _support.error_details(err, StreamErrorDetails)
+            if details is None:
+                raise
+            raise stream_error(details, str(err)) from err
 
     async def read_records(
         self,
@@ -375,18 +401,24 @@ class StreamServiceClientExtension(abc.ABC):
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> DescribeStreamResponse:
-        nexus_client = self._create_nexus_client(
-            service="temporal.api.streamservice.v1.StreamService",
-            endpoint="__temporal_system",
-            rpc_metadata=rpc_metadata,
-            rpc_timeout=rpc_timeout,
-        )
-        handle = await nexus_client.start_operation(
-            operation="DescribeStream",
-            input=request,
-            output_type=DescribeStreamResponse,
-        )
-        return await handle
+        try:
+            nexus_client = self._create_nexus_client(
+                service="temporal.api.streamservice.v1.StreamService",
+                endpoint="__temporal_system",
+                rpc_metadata=rpc_metadata,
+                rpc_timeout=rpc_timeout,
+            )
+            handle = await nexus_client.start_operation(
+                operation="DescribeStream",
+                input=request,
+                output_type=DescribeStreamResponse,
+            )
+            return await handle
+        except Exception as err:
+            details = _support.error_details(err, StreamErrorDetails)
+            if details is None:
+                raise
+            raise stream_error(details, str(err)) from err
 
     async def describe_stream(
         self,

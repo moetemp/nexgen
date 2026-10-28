@@ -1,0 +1,29 @@
+package test:error-two-enums@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  // Each operation of an interface converts the failures of one error enum.
+  /// @nexus.error details="job-error-details" field="reason" base="job-error"
+  ///   python-base="temporalio.exceptions.ApplicationError"
+  enum job-error-reason {
+    job-error-reason-unspecified,
+    /// @nexus.error
+    job-error-reason-missing,
+  }
+
+  record job-error-details { reason: option<job-error-reason>, note: option<string> }
+
+  /// @nexus.error details="queue-error-details" field="reason" base="queue-error"
+  ///   python-base="temporalio.exceptions.ApplicationError"
+  enum queue-error-reason {
+    queue-error-reason-unspecified,
+  }
+
+  record queue-error-details { reason: option<queue-error-reason> }
+
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}

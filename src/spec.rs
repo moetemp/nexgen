@@ -960,6 +960,36 @@ pub struct EnumSpec<F: TypeFamily = AuthoredFamily> {
     pub full_name: String,
     pub values: Vec<EnumValueSpec>,
     pub source: Option<ExternalTypeSourceSpec<F>>,
+    /// Set by `@nexus.error`, which makes an exception class per case of a failed call.
+    pub error: Option<EnumErrorSpec<F>>,
+}
+
+/// An error enum. A failed call carries one of its cases in a details record, and the generated
+/// code raises the class of that case.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumErrorSpec<F: TypeFamily = AuthoredFamily> {
+    /// The record that carries the case in a failed call, by full name.
+    pub details: String,
+    /// The key of the details field that holds the case.
+    pub field: String,
+    /// The stem of the base class, such as `stream-error`.
+    pub base: String,
+    /// The SDK class that the base class extends, with its import. A language with none gets no
+    /// classes.
+    pub base_type: F::Text,
+    /// The cases that get a class of their own, in order.
+    pub cases: Vec<EnumErrorCaseSpec<F>>,
+}
+
+/// A case of an error enum with a class of its own.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EnumErrorCaseSpec<F: TypeFamily = AuthoredFamily> {
+    /// The wire name of the case.
+    pub value: String,
+    /// Whether a retry of the call can succeed.
+    pub retryable: bool,
+    /// The class name that `name` gives in place of the derived one.
+    pub name: F::Text,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1162,6 +1192,21 @@ impl<F: TypeFamily> EnumSpec<F> {
             full_name: self.full_name,
             values: self.values,
             source: self.source.map(|source| source.map_names_with(map)),
+            error: self.error.map(|error| EnumErrorSpec {
+                details: error.details,
+                field: error.field,
+                base: error.base,
+                base_type: map.map_text(error.base_type),
+                cases: error
+                    .cases
+                    .into_iter()
+                    .map(|case| EnumErrorCaseSpec {
+                        value: case.value,
+                        retryable: case.retryable,
+                        name: map.map_text(case.name),
+                    })
+                    .collect(),
+            }),
         }
     }
 }

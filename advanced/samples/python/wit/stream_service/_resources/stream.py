@@ -22,6 +22,7 @@ from ..models import (
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
+    StreamErrorDetails,
     StreamReadStart,
     StreamRecord,
     StreamRef,
@@ -30,6 +31,7 @@ from ..models import (
 )
 import temporal_support as _support
 from .._poll import PollIterator
+from ..errors import stream_error
 
 if typing.TYPE_CHECKING:
     import temporal_support
@@ -292,8 +294,14 @@ class WorkflowStreamService:
     ) -> AppendRecordsResponse:
         if rpc_metadata is not None or rpc_timeout is not None:
             raise ValueError("RPC options apply to calls outside a Workflow")
-        handle = await _append_records(request)
-        return await handle
+        try:
+            handle = await _append_records(request)
+            return await handle
+        except Exception as err:
+            details = _support.error_details(err, StreamErrorDetails)
+            if details is None:
+                raise
+            raise stream_error(details, str(err)) from err
 
     async def _stream_service_close_stream(
         self,
@@ -304,8 +312,14 @@ class WorkflowStreamService:
     ) -> CloseStreamResponse:
         if rpc_metadata is not None or rpc_timeout is not None:
             raise ValueError("RPC options apply to calls outside a Workflow")
-        handle = await _close_stream(request)
-        return await handle
+        try:
+            handle = await _close_stream(request)
+            return await handle
+        except Exception as err:
+            details = _support.error_details(err, StreamErrorDetails)
+            if details is None:
+                raise
+            raise stream_error(details, str(err)) from err
 
     async def _stream_service_read_records(
         self,
@@ -317,8 +331,14 @@ class WorkflowStreamService:
     ) -> ReadRecordsResponse[BodyT]:
         if rpc_metadata is not None or rpc_timeout is not None:
             raise ValueError("RPC options apply to calls outside a Workflow")
-        handle = await _read_records(request, body_type)
-        return await handle
+        try:
+            handle = await _read_records(request, body_type)
+            return await handle
+        except Exception as err:
+            details = _support.error_details(err, StreamErrorDetails)
+            if details is None:
+                raise
+            raise stream_error(details, str(err)) from err
 
     async def _stream_service_describe_stream(
         self,
@@ -329,8 +349,14 @@ class WorkflowStreamService:
     ) -> DescribeStreamResponse:
         if rpc_metadata is not None or rpc_timeout is not None:
             raise ValueError("RPC options apply to calls outside a Workflow")
-        handle = await _describe_stream(request)
-        return await handle
+        try:
+            handle = await _describe_stream(request)
+            return await handle
+        except Exception as err:
+            details = _support.error_details(err, StreamErrorDetails)
+            if details is None:
+                raise
+            raise stream_error(details, str(err)) from err
 
 
 async def _append_records(

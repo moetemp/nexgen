@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["case `job-error-reason-missing` needs `@nexus.error` on the enum too"]

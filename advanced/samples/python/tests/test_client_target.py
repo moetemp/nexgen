@@ -23,6 +23,7 @@ import wit.workflow_handle as workflow_handle
 from wit.stream_service._resources import Stream
 from wit.stream_service._resources.stream import WorkflowStreamService
 from wit.stream_service.client import StreamServiceClientExtension
+from wit.stream_service.errors import StreamNotFoundError
 from wit.stream_service.models import (
     AppendRecord,
     AppendRecordsRequest,
@@ -37,6 +38,8 @@ from wit.stream_service.models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamData,
+    StreamErrorDetails,
+    StreamErrorReason,
     StreamItemData,
     StreamRecord,
     StreamRef,
@@ -333,6 +336,24 @@ async def test_workflow_code_defers_the_close_of_a_block(
     # The run closes the Stream at its end, or keeps it open for a retry run.
     assert client.calls == []
     assert temporal_support.deferred_closes("r9") == [stream]
+
+
+async def test_a_failed_call_raises_the_class_of_its_reason() -> None:
+    details = StreamErrorDetails(reason=StreamErrorReason.StreamErrorReasonNotFound)
+    failure = temporalio.exceptions.ApplicationError("no stream", details)
+    client = FakeClient({"DescribeStream": [failure]})
+
+    with pytest.raises(StreamNotFoundError, match="no stream") as raised:
+        _ = await client.describe_stream(stream=StreamRef(id="s1"))
+
+    assert raised.value.__cause__ is failure
+
+
+async def test_a_call_with_no_reason_raises_its_own_error() -> None:
+    client = FakeClient({"DescribeStream": [RuntimeError("connection lost")]})
+
+    with pytest.raises(RuntimeError, match="connection lost"):
+        _ = await client.describe_stream(stream=StreamRef(id="s1"))
 
 
 async def test_a_client_call_returns_the_result() -> None:

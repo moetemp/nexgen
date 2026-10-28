@@ -23,11 +23,11 @@ use crate::planning::{
 };
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{
-    AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec,
-    FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, LanguageImportSpec,
-    LanguageImportStyle, ModulePath, OperationSpec, RecordFieldSpec, RecordFieldVisibility,
-    RecordSpec, SelectedTextSpec, TargetFieldRole, TypeDeclSpec, TypeReplacementSpec, TypeSpec,
-    VariantSpec,
+    AliasTypeSpec, EnumErrorSpec, EnumSpec, EnumValueSpec, ExternalTypeSourceSpec,
+    ExternalTypeSpec, FlagsSpec, FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec,
+    LanguageImportSpec, LanguageImportStyle, ModulePath, OperationSpec, RecordFieldSpec,
+    RecordFieldVisibility, RecordSpec, SelectedTextSpec, TargetFieldRole, TypeDeclSpec,
+    TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 
@@ -511,6 +511,15 @@ impl<'a> ApiPlanner<'a> {
                         .iter()
                         .map(|resource| resource.data.clone())
                         .collect(),
+                    error_conversion: python_error_enum(api_plan).map(|(error, _)| {
+                        PythonErrorConversion {
+                            details_model: api_plan
+                                .record(&error.details)
+                                .map(|record| record.name.clone())
+                                .unwrap_or_default(),
+                            function: error.base.to_snake_case(),
+                        }
+                    }),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -703,6 +712,13 @@ impl<'a> ApiPlanner<'a> {
             }),
         )? {
             files.insert("models.py", models_source, module_origin.clone())?;
+        }
+        if let Some(errors) = self.render_errors_module() {
+            files.insert(
+                "errors.py",
+                errors,
+                GeneratedFileOrigin::fixed("generated Python error classes"),
+            )?;
         }
         if !resource_names.is_empty() {
             files.insert(
@@ -915,6 +931,12 @@ impl<'a> ApiPlanner<'a> {
         }
         render_support_import(&mut output, &body, self.support_package, false);
         render_poll_iterator_import(&mut output, &body, "._poll");
+        render_error_function_import(
+            &mut output,
+            &body,
+            ".errors",
+            &services.iter().collect::<Vec<_>>(),
+        );
         render_definition_type_checking_imports(
             &mut output,
             &body,
@@ -1113,6 +1135,7 @@ impl<'a> ApiPlanner<'a> {
         }
         render_support_import(&mut output, &body, support_package, false);
         render_poll_iterator_import(&mut output, &body, ".._poll");
+        render_error_function_import(&mut output, &body, "..errors", &[service]);
         render_definition_type_checking_imports(&mut output, &body, resource.definition.value());
         if !body.is_empty() {
             output.push('\n');
@@ -1197,6 +1220,126 @@ impl<'a> ApiPlanner<'a> {
             );
             self.render_resource_poll_method(output, service, method, bound_operations, targets);
         }
+    }
+
+    /// Renders `errors.py`, with a class per case of the interface's error enum under one base,
+    /// and the function that gives the class of a failed call's details.
+    fn render_errors_module(&self) -> Option<String> {
+        let (error, enumeration) = python_error_enum(self.api_plan)?;
+        let sdk_base = error.base_type.value()?;
+        let details = self.api_plan.record(&error.details)?;
+        let field = self.model_field_attr(&error.details, &error.field)?;
+        let enum_name = &enumeration.name;
+        let member = |wire_name: &str| {
+            let value = enumeration
+                .values
+                .iter()
+                .find(|value| value.wire_name == wire_name)
+                .map(|value| value.name.clone())
+                .unwrap_or_default();
+            format!("{enum_name}.{value}")
+        };
+        let unspecified = enumeration
+            .values
+            .iter()
+            .find(|value| value.number == 0)
+            .map(|value| format!("{enum_name}.{}", value.name))?;
+        let base_class = error.base.to_upper_camel_case();
+        let stem = error.base.strip_suffix("-error").unwrap_or(&error.base);
+        let prefix = format!("{}-", enumeration_wit_name(enumeration));
+        let mut body = String::new();
+        body.push_str(&format!("class {base_class}({sdk_base}):\n"));
+        let doc = format!(
+            "A failed call, with its ``{enum_name}``. A reason with no class of its own raises \
+             this class."
+        );
+        render_python_docstring(&mut body, "    ", Some(&doc), &[], None, false);
+        body.push_str(&format!(
+            concat!(
+                "\n    _retryable: typing.ClassVar[bool] = False\n\n",
+                "    def __init__(\n",
+                "        self,\n",
+                "        message: str,\n",
+                "        *,\n",
+                "        {field}: {enum_name} = {unspecified},\n",
+                "    ) -> None:\n",
+                "        super().__init__(\n",
+                "            message,\n",
+                "            {details}({field}={field}),\n",
+                "            type=type(self).__name__,\n",
+                "            non_retryable=not self._retryable,\n",
+                "        )\n",
+                "        self.{field}: {enum_name} = {field}\n",
+            ),
+            field = field,
+            enum_name = enum_name,
+            unspecified = unspecified,
+            details = details.name,
+        ));
+        let mut classes = Vec::new();
+        for case in &error.cases {
+            let class = case.name.value().map(str::to_string).unwrap_or_else(|| {
+                format!(
+                    "{}{}Error",
+                    stem.to_upper_camel_case(),
+                    case.value
+                        .strip_prefix(&prefix)
+                        .unwrap_or(&case.value)
+                        .to_upper_camel_case()
+                )
+            });
+            body.push_str(&format!("\n\nclass {class}({base_class}):\n"));
+            render_python_docstring(
+                &mut body,
+                "    ",
+                Some(&format!("The error of ``{}``.", member(&case.value))),
+                &[],
+                None,
+                false,
+            );
+            if case.retryable {
+                body.push_str("\n    _retryable: typing.ClassVar[bool] = True\n");
+            }
+            classes.push((member(&case.value), class));
+        }
+        let map_name = format!("_{}S", error.base.to_shouty_snake_case());
+        body.push_str(&format!(
+            "\n\n{map_name}: dict[{enum_name}, type[{base_class}]] = {{\n"
+        ));
+        for (member, class) in &classes {
+            body.push_str(&format!("    {member}: {class},\n"));
+        }
+        body.push_str("}\n");
+        let function = error.base.to_snake_case();
+        body.push_str(&format!(
+            concat!(
+                "\n\ndef {function}(details: {details}, message: str) -> {base_class}:\n",
+                "    \"\"\"The error of the reason in the details of a failed call. A reason with \
+                 no class of its\n",
+                "    own, or one that this code doesn't know, gives ``{base_class}``.\n",
+                "    \"\"\"\n",
+                "    {field} = details.{field} or {unspecified}\n",
+                "    return {map_name}.get({field}, {base_class})(message, {field}={field})\n",
+            ),
+            function = function,
+            details = details.name,
+            base_class = base_class,
+            field = field,
+            unspecified = unspecified,
+            map_name = map_name,
+        ));
+        let mut output = String::new();
+        render_generated_file_header(&mut output);
+        output.push_str("\nimport typing\n\n");
+        if let Some((module, _)) = sdk_base.rsplit_once('.') {
+            output.push_str(&format!("import {module}\n\n"));
+        }
+        output.push_str(&format!(
+            "from .models import {}, {enum_name}\n\n\n",
+            details.name
+        ));
+        output.push_str(&body);
+        Some(output)
     }
 
     /// Renders the factory of a resource, which builds a handle with no call. The client's factory
@@ -3615,6 +3758,16 @@ struct RenderedService<'a> {
     delay_load_temporalio_workflow: bool,
     operations: Vec<RenderedOperation<'a>>,
     resources: Vec<PlannedResource>,
+    /// How the operations objects turn a failed call into the class of its error enum.
+    error_conversion: Option<PythonErrorConversion>,
+}
+
+/// The details model of an interface's error enum, and the function that gives the error class
+/// of a failed call's details.
+#[derive(Debug, Clone)]
+struct PythonErrorConversion {
+    details_model: String,
+    function: String,
 }
 
 #[derive(Debug)]
@@ -4710,6 +4863,81 @@ fn resource_type_variable_names(resource: &PlannedResource) -> Vec<String> {
         .iter()
         .map(|parameter| parameter.name.clone())
         .collect()
+}
+
+/// The interface's error enum, when Python has a base class for it.
+fn python_error_enum(
+    api_plan: &PlannedSpec,
+) -> Option<(&EnumErrorSpec<PlannedFamily>, &EnumSpec<PlannedFamily>)> {
+    api_plan
+        .types
+        .values()
+        .find_map(|entry| match &entry.declaration {
+            TypeDeclSpec::Enum(enumeration) => enumeration
+                .error
+                .as_ref()
+                .filter(|error| error.base_type.value().is_some())
+                .map(|error| (error, enumeration)),
+            _ => None,
+        })
+}
+
+/// The WIT name of an enum, whose prefix its cases repeat.
+fn enumeration_wit_name(enumeration: &EnumSpec<PlannedFamily>) -> &str {
+    enumeration
+        .full_name
+        .rsplit_once('.')
+        .map_or(enumeration.full_name.as_str(), |(_, name)| name)
+}
+
+/// Wraps the call of an operations object in a `try`, which raises the class of the failed
+/// call's error reason from the original error. Other errors propagate.
+fn render_error_conversion(
+    output: &mut String,
+    indent: &str,
+    call: &str,
+    conversion: Option<&PythonErrorConversion>,
+) {
+    let Some(conversion) = conversion else {
+        output.push_str(call);
+        return;
+    };
+    output.push_str(&format!("{indent}try:\n"));
+    for line in call.lines() {
+        if line.is_empty() {
+            output.push('\n');
+        } else {
+            output.push_str(&format!("    {line}\n"));
+        }
+    }
+    output.push_str(&format!(
+        concat!(
+            "{indent}except Exception as err:\n",
+            "{indent}    details = _support.error_details(err, {details})\n",
+            "{indent}    if details is None:\n",
+            "{indent}        raise\n",
+            "{indent}    raise {function}(details, str(err)) from err\n",
+        ),
+        indent = indent,
+        details = conversion.details_model,
+        function = conversion.function,
+    ));
+}
+
+/// Imports the error function of the interface, when the body converts failures.
+fn render_error_function_import(
+    output: &mut String,
+    body: &str,
+    module: &str,
+    services: &[&RenderedService<'_>],
+) {
+    if let Some(conversion) = services
+        .iter()
+        .find_map(|service| service.error_conversion.as_ref())
+        && body.contains(&format!("raise {}(details", conversion.function))
+    {
+        output.push_str(&format!("from {module} import {}\n", conversion.function));
+    }
 }
 
 /// The name of a resource's factory, on the client and in the Workflow package.
@@ -7382,10 +7610,11 @@ fn render_workflow_operations_class(
         output.push_str(
             "            raise ValueError(\"RPC options apply to calls outside a Workflow\")\n",
         );
+        let mut call = String::new();
         if service.endpoint.is_none() {
             render_source_fills(output, "        ", operation, GenerationTarget::Workflow);
             render_inline_operation_call(
-                output,
+                &mut call,
                 service,
                 operation,
                 operation_returns_direct(operation),
@@ -7395,13 +7624,14 @@ fn render_workflow_operations_class(
             );
         } else {
             render_workflow_operation_call(
-                output,
+                &mut call,
                 operation,
                 operation_returns_direct(operation),
                 &result_annotation,
                 "",
             );
         }
+        render_error_conversion(output, "        ", &call, service.error_conversion.as_ref());
     }
 }
 
@@ -9376,6 +9606,23 @@ fn render_client_operation_method(
         operation,
         GenerationTarget::Client,
     );
+    let mut call = String::new();
+    render_client_operation_call(&mut call, service, operation);
+    render_error_conversion(
+        output,
+        target.body_indent(),
+        &call,
+        service.error_conversion.as_ref(),
+    );
+}
+
+/// The call of a client operation method, after its source fills.
+fn render_client_operation_call(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) {
+    let target = PythonTarget::Client;
     render_inline_nexus_client(output, target, service);
     // `output_type` names the generic model with no type arguments, so the cast adds them.
     let cast_handle = operation.generic_model_types && !operation_returns_direct(operation);

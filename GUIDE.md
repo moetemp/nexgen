@@ -31,6 +31,7 @@ of `@nexus` directives.
   - [Sourced Fields](#sourced-fields)
   - [Omitted Fields](#omitted-fields)
   - [Flattened Records](#flattened-records)
+  - [Error Enums](#error-enums)
   - [Output Transforms](#output-transforms)
 - [Function References](#function-references)
 - [Generation Targets](#generation-targets)
@@ -1270,6 +1271,54 @@ the type. The field can't have a source or an api-omit too, and its record can't
 flatten all of its fields already. Go puts the promoted fields in the options
 struct of the operation. Java doesn't generate proto-backed models.
 
+### Error Enums
+
+`@nexus.error` on an enum makes an exception class per case of a failed call.
+`details` and `field` name the record and its field that carry the case in a
+failed call, and `base` gives the stem of the class names. `<language>-base`
+names the SDK class that the base class extends, and a language with none gets
+no classes.
+
+```wit
+/// @nexus.proto "temporal.api.enums.v1.StreamErrorReason"
+/// @nexus.error details="stream-error-details" field="reason" base="stream-error"
+///   python-base="temporalio.exceptions.ApplicationError"
+///   typescript-base="ApplicationFailure" typescript-base-import="@temporalio/common"
+///   dotnet-base="Temporalio.Exceptions.ApplicationFailureException"
+enum stream-error-reason {
+  stream-error-reason-unspecified,
+  /// @nexus.error
+  stream-error-reason-not-found,
+  /// @nexus.error retryable=true
+  stream-error-reason-storage,
+  stream-error-reason-sequence,
+}
+```
+
+- The base class is `StreamError` in Python and TypeScript, and
+  `StreamException` in .NET. Each case with `@nexus.error` gets a subclass whose
+  name is the stem, the case without the enum's prefix, and the suffix, such as
+  `StreamNotFoundError`. `name` or `<language>-name` on a case gives another
+  name.
+- A case with no class, and a case that this code doesn't know, raise the base
+  class, which keeps the reason's number.
+- Each class is non-retryable, except a case with `retryable=true`. Its failure
+  type is the class name, and its details hold the details record, so it
+  survives an Activity.
+- Python gives `errors.py` with `stream_error(details, message)`, TypeScript
+  gives `errors.ts` with `streamError(details, message)`, and .NET gives
+  `Errors.cs` with `StreamErrors.From(details, message)`.
+- In Python, each operations object of the interface converts a failure. It
+  reads the details with `_support.error_details(err, StreamErrorDetails)`, and
+  raises the class of the reason from the original error. Other errors
+  propagate. TypeScript and .NET convert with their client targets. Go and Java
+  ignore the directive with a warning.
+
+nexgen refuses an enum `@nexus.error` with no `details`, `field` or `base`, a
+`details` that isn't a record of the interface, a `field` that doesn't hold the
+enum, a case `@nexus.error` with none on the enum, two cases with one class
+name, and two error enums in one interface.
+
 ### Output Transforms
 
 An operation annotated with `@nexus.output-transform` transforms the raw
@@ -2218,6 +2267,17 @@ converted to UpperCamelCase is used (e.g., `signal-with-start-workflow` becomes
 /// @nexus.operation name="SignalWithStartWorkflowExecution"
 signal-with-start-workflow: func(...) -> ...;
 ```
+
+---
+
+### @nexus.error
+
+**Placement:** Enum, and each case that gets a class **Syntax:**
+`@nexus.error details="<record>" field="<field>" base="<stem>" <language>-base="<class>"`
+on the enum, `@nexus.error [retryable=true] [name="<class>"]` on a case
+
+Makes an exception class per case of a failed call. See
+[Error Enums](#error-enums).
 
 ---
 

@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit"
+contains = ["both have `@nexus.error`, but an interface has one error enum"]

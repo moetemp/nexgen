@@ -491,7 +491,7 @@ pub(crate) fn generate_files_from_planned_tree(
         language => Err(Error::UnsupportedLanguage { language }),
     }?;
     generated.warnings = if mode == GenerationMode::NativeApi {
-        generation_warnings_for_tree(tree)
+        generation_warnings_for_tree(tree, language)
     } else {
         Vec::new()
     };
@@ -574,8 +574,21 @@ pub fn generate_source_with_mode(
     })
 }
 
-fn generation_warnings(plan: &PlannedSpec) -> Vec<String> {
-    plan.services
+fn generation_warnings(plan: &PlannedSpec, language: Language) -> Vec<String> {
+    // Go and Java have no generated call that converts a failure.
+    let error_enums = plan
+        .types
+        .values()
+        .filter_map(|entry| match &entry.declaration {
+            crate::spec::TypeDeclSpec::Enum(enumeration) if enumeration.error.is_some() => {
+                Some(enumeration.full_name.as_str())
+            }
+            _ => None,
+        })
+        .filter(|_| matches!(language, Language::Go | Language::Java))
+        .map(|name| format!("`@nexus.error` on `{name}` has no effect in {language}"));
+    error_enums
+        .chain(plan.services
         .iter()
         .flat_map(|service| {
             service.resources.iter().flat_map(|resource| {
@@ -592,24 +605,27 @@ fn generation_warnings(plan: &PlannedSpec) -> Vec<String> {
                     })
                 })
             })
-        })
+        }))
         .collect()
 }
 
-fn generation_warnings_for_tree(tree: &ApiSpecTree<PlannedFamily>) -> Vec<String> {
-    fn collect(node: &ApiSpecNode<PlannedFamily>, warnings: &mut Vec<String>) {
+fn generation_warnings_for_tree(
+    tree: &ApiSpecTree<PlannedFamily>,
+    language: Language,
+) -> Vec<String> {
+    fn collect(node: &ApiSpecNode<PlannedFamily>, language: Language, warnings: &mut Vec<String>) {
         match node {
-            ApiSpecNode::Leaf(leaf) => warnings.extend(generation_warnings(&leaf.spec)),
+            ApiSpecNode::Leaf(leaf) => warnings.extend(generation_warnings(&leaf.spec, language)),
             ApiSpecNode::Branch(branch) => {
                 for child in branch.children.values() {
-                    collect(child, warnings);
+                    collect(child, language, warnings);
                 }
             }
         }
     }
 
     let mut warnings = Vec::new();
-    collect(&tree.root, &mut warnings);
+    collect(&tree.root, language, &mut warnings);
     warnings
 }
 

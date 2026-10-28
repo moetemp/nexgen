@@ -1691,6 +1691,60 @@ fn go_field_flatten_fills_from_options_and_a_sourced_sibling() {
 }
 
 #[test]
+fn go_warns_that_an_error_enum_has_no_effect() {
+    let temp_dir = unique_output_path("go-error-enum");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("jobs.wit");
+    fs::write(
+        &wit_path,
+        r#"package test:jobs@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  /// @nexus.error details="job-error-details" field="reason" base="job-error"
+  ///   python-base="temporalio.exceptions.ApplicationError"
+  enum job-error-reason {
+    job-error-reason-unspecified,
+    /// @nexus.error
+    job-error-reason-missing,
+  }
+
+  record job-error-details { reason: option<job-error-reason> }
+
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("output");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
+        .args([
+            "go",
+            wit_path.to_str().unwrap(),
+            "--support-package",
+            "example.com/nexgen/support",
+            "--native-api",
+            "--output",
+            output_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    assert!(
+        stderr.contains("`@nexus.error` on `job-service.job-error-reason` has no effect in go"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
 fn go_rejects_inputs_flattening_to_the_same_module_file() {
     // Two distinct input files -- `full_name.json` at the root and
     // `full/name.json` in a subdirectory -- flatten to the same Go module file

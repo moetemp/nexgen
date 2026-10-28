@@ -1,0 +1,20 @@
+package test:error-without-base@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  // The classes need the stem of their names.
+  /// @nexus.error details="job-error-details" field="reason"
+  enum job-error-reason {
+    job-error-reason-unspecified,
+    /// @nexus.error
+    job-error-reason-missing,
+  }
+
+  record job-error-details { reason: option<job-error-reason>, note: option<string> }
+
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}

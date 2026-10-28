@@ -1,0 +1,23 @@
+package test:error-class-name-clash@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  // Two cases can't give one class.
+  /// @nexus.error details="job-error-details" field="reason" base="job-error"
+  ///   python-base="temporalio.exceptions.ApplicationError"
+  enum job-error-reason {
+    job-error-reason-unspecified,
+    /// @nexus.error name="JobGoneError"
+    job-error-reason-missing,
+    /// @nexus.error name="JobGoneError"
+    job-error-reason-deleted,
+  }
+
+  record job-error-details { reason: option<job-error-reason>, note: option<string> }
+
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}

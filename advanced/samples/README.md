@@ -215,7 +215,7 @@ Python, the factory `stream` builds a handle from an id or a ref with no call,
 and a handle passes as its ref. `publish` takes the values, and returns the
 offset of the last one. The read iterator yields each Record, and its
 `next_request` resumes after the last one. `async with` and `await using` close
-a Stream.
+a Stream. A failed call raises the class of its `StreamErrorReason`.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)

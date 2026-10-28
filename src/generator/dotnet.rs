@@ -21,8 +21,8 @@ use crate::planning::{
 };
 use crate::spec::{
     AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec,
-    FunctionFieldSpec, IntSpec, OperationSpec, RecordFieldSpec, RecordSpec, ServiceSpec, TypeSpec,
-    VariantSpec,
+    FunctionFieldSpec, IntSpec, OperationSpec, RecordFieldSpec, RecordSpec, ServiceSpec,
+    TypeDeclSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 
@@ -2614,6 +2614,13 @@ fn generate_leaf(
             module_origin.clone(),
         )?;
     }
+    if let Some(errors) = render_errors_file(api_plan, &namespace) {
+        files.insert(
+            "Errors.cs",
+            errors,
+            GeneratedFileOrigin::fixed("generated .NET error classes"),
+        )?;
+    }
     if api_plan
         .services
         .iter()
@@ -2953,6 +2960,170 @@ fn dotnet_source_expr(source_expr: &str, support_namespace: Option<&str>) -> Str
         "{}({arguments}",
         qualify_dotnet_support_reference(helper, support_namespace)
     )
+}
+
+/// Renders `Errors.cs`, with a class per case of the interface's error enum under one base, and
+/// the static class that gives the class of a failed call's details.
+fn render_errors_file(api_plan: &PlannedSpec, namespace: &str) -> Option<String> {
+    let (error, enumeration) =
+        api_plan
+            .types
+            .values()
+            .find_map(|entry| match &entry.declaration {
+                TypeDeclSpec::Enum(enumeration) => enumeration
+                    .error
+                    .as_ref()
+                    .filter(|error| error.base_type.value().is_some())
+                    .map(|error| (error, enumeration)),
+                _ => None,
+            })?;
+    let sdk_base = error.base_type.value()?;
+    let details = api_plan.record(&error.details)?;
+    let property = field_property_name(details.fields.get(&error.field)?);
+    let enum_name = csharp_type_name(&enumeration.name);
+    let member = |wire_name: &str| {
+        let value = enumeration
+            .values
+            .iter()
+            .find(|value| value.wire_name == wire_name)
+            .map(|value| value.name.clone())
+            .unwrap_or_default();
+        format!("{enum_name}.{value}")
+    };
+    let unspecified = enumeration
+        .values
+        .iter()
+        .find(|value| value.number == 0)
+        .map(|value| format!("{enum_name}.{}", value.name))?;
+    let stem = error
+        .base
+        .strip_suffix("-error")
+        .unwrap_or(&error.base)
+        .to_upper_camel_case();
+    let base_class = format!("{stem}Exception");
+    let wit_name = enumeration
+        .full_name
+        .rsplit_once('.')
+        .map_or(enumeration.full_name.as_str(), |(_, name)| name);
+    let prefix = format!("{wit_name}-");
+    let details_name = csharp_type_name(&details.name);
+    let mut output = generated_file_prelude(namespace, &["System.CodeDom.Compiler"]);
+    output.push_str(&format!(
+        concat!(
+            "/// <summary>\n",
+            "/// A failed call, with its <see cref=\"{enum_name}\"/>.",
+            " A reason with no class of its own\n",
+            "/// throws this class.\n",
+            "/// </summary>\n",
+            "{attribute}\n",
+            "public class {base_class} : {sdk_base}\n",
+            "{{\n",
+            "    /// <summary>\n",
+            "    /// Initializes a new instance of the <see cref=\"{base_class}\"/> class.\n",
+            "    /// </summary>\n",
+            "    public {base_class}(string message, {enum_name} reason = {unspecified})\n",
+            "        : this(message, reason, nameof({base_class}), true)\n",
+            "    {{\n",
+            "    }}\n",
+            "\n",
+            "    /// <summary>\n",
+            "    /// Initializes a new instance with the",
+            " type name and the retryability of a class.\n",
+            "    /// </summary>\n",
+            "    protected {base_class}(string message, {enum_name}",
+            " reason, string errorType, bool nonRetryable)\n",
+            "        : base(message, errorType, nonRetryable, new",
+            " object[] {{ new {details} {{ {property} = reason }} }})\n",
+            "    {{\n",
+            "        Reason = reason;\n",
+            "    }}\n",
+            "\n",
+            "    /// <summary>\n",
+            "    /// Gets the reason of the failed call.\n",
+            "    /// </summary>\n",
+            "    public {enum_name} Reason {{ get; }}\n",
+            "}}\n",
+        ),
+        enum_name = enum_name,
+        attribute = GENERATED_CODE_ATTRIBUTE,
+        base_class = base_class,
+        sdk_base = sdk_base,
+        unspecified = unspecified,
+        details = details_name,
+        property = property,
+    ));
+    let mut arms = Vec::new();
+    for case in &error.cases {
+        let class = case.name.value().map(str::to_string).unwrap_or_else(|| {
+            format!(
+                "{stem}{}Exception",
+                case.value
+                    .strip_prefix(&prefix)
+                    .unwrap_or(&case.value)
+                    .to_upper_camel_case()
+            )
+        });
+        let member = member(&case.value);
+        output.push_str(&format!(
+            concat!(
+                "\n/// <summary>\n",
+                "/// The error of <see cref=\"{member}\"/>.\n",
+                "/// </summary>\n",
+                "{attribute}\n",
+                "public class {class} : {base_class}\n",
+                "{{\n",
+                "    /// <summary>\n",
+                "    /// Initializes a new instance of the <see cref=\"{class}\"/> class.\n",
+                "    /// </summary>\n",
+                "    public {class}(string message)\n",
+                "        : base(message, {member}, nameof({class}), {non_retryable})\n",
+                "    {{\n",
+                "    }}\n",
+                "}}\n",
+            ),
+            member = member,
+            attribute = GENERATED_CODE_ATTRIBUTE,
+            class = class,
+            base_class = base_class,
+            non_retryable = !case.retryable,
+        ));
+        arms.push(format!("            {member} => new {class}(message),\n"));
+    }
+    output.push_str(&format!(
+        concat!(
+            "\n/// <summary>\n",
+            "/// Gives the exception of the reason of a failed call.\n",
+            "/// </summary>\n",
+            "{attribute}\n",
+            "public static class {stem}Errors\n",
+            "{{\n",
+            "    /// <summary>\n",
+            "    /// The exception of the reason in the details",
+            " of a failed call. A reason with no class\n",
+            "    /// of its own, or one that this code doesn't",
+            " know, gives <see cref=\"{base_class}\"/>.\n",
+            "    /// </summary>\n",
+            "    public static {base_class} From({details} details, string message)\n",
+            "    {{\n",
+            "        var reason = details.{property} ?? {unspecified};\n",
+            "        return reason switch\n",
+            "        {{\n",
+            "{arms}",
+            "            _ => new {base_class}(message, reason),\n",
+            "        }};\n",
+            "    }}\n",
+            "}}\n",
+        ),
+        attribute = GENERATED_CODE_ATTRIBUTE,
+        stem = stem,
+        base_class = base_class,
+        details = details_name,
+        property = property,
+        unspecified = unspecified,
+        arms = arms.concat(),
+    ));
+    close_namespace(&mut output);
+    Some(output)
 }
 
 fn generated_file_prelude(namespace: &str, imports: &[&str]) -> String {

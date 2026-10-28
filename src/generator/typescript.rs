@@ -29,7 +29,7 @@ use crate::spec::{
     AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec,
     FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, IntSpec, LanguageImportSpec,
     LanguageImportStyle, ModulePath, OperationSpec, RecordFieldSpec, RecordFieldVisibility,
-    RecordSpec, SelectedTextSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
+    RecordSpec, SelectedTextSpec, TypeDeclSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 
@@ -3656,6 +3656,17 @@ fn render_module_files(
     for name in external_models.model_value_exports(models, services.is_empty()) {
         index_exports.push(format!("export {{ {name} }} from './models';"));
     }
+    if let Some((errors, names)) = render_errors_module(api_plan) {
+        index_exports.push(format!(
+            "export {{ {} }} from './errors';",
+            names.join(", ")
+        ));
+        files.insert(
+            "errors.ts",
+            errors,
+            GeneratedFileOrigin::fixed("generated TypeScript error classes"),
+        )?;
+    }
     files.insert(
         "index.ts",
         if mode == GenerationMode::NativeApi {
@@ -6281,6 +6292,155 @@ fn render_resource(
         output.push_str("  return client;\n");
         output.push_str("}\n");
     }
+}
+
+/// Renders `errors.ts`, with a class per case of the interface's error enum under one base, and
+/// the function that gives the class of a failed call's details. It returns the exported names.
+fn render_errors_module(api_plan: &PlannedSpec) -> Option<(String, Vec<String>)> {
+    let (error, enumeration) =
+        api_plan
+            .types
+            .values()
+            .find_map(|entry| match &entry.declaration {
+                TypeDeclSpec::Enum(enumeration) => enumeration
+                    .error
+                    .as_ref()
+                    .filter(|error| error.base_type.value().is_some())
+                    .map(|error| (error, enumeration)),
+                _ => None,
+            })?;
+    let sdk_base = error.base_type.value()?;
+    let details = api_plan.record(&error.details)?;
+    let field = typescript_generated_field_name(&details.fields.get(&error.field)?.name);
+    let enum_name = &enumeration.name;
+    let member = |wire_name: &str| {
+        let value = enumeration
+            .values
+            .iter()
+            .find(|value| value.wire_name == wire_name)
+            .map(|value| value.name.clone())
+            .unwrap_or_default();
+        format!("{enum_name}.{value}")
+    };
+    let unspecified = enumeration
+        .values
+        .iter()
+        .find(|value| value.number == 0)
+        .map(|value| format!("{enum_name}.{}", value.name))?;
+    let base_class = error.base.to_upper_camel_case();
+    let stem = error.base.strip_suffix("-error").unwrap_or(&error.base);
+    let wit_name = enumeration
+        .full_name
+        .rsplit_once('.')
+        .map_or(enumeration.full_name.as_str(), |(_, name)| name);
+    let prefix = format!("{wit_name}-");
+    let mut output = String::from(GENERATED_HEADER);
+    output.push_str("\n\n");
+    output.push_str(&format!(
+        "import {{ {sdk_base} }} from {};\n",
+        typescript_string_literal(error.base_type.import().unwrap_or("@temporalio/common"))
+    ));
+    output.push_str(&format!(
+        "import {{ type {}, {enum_name} }} from \"./models\";\n\n",
+        details.name
+    ));
+    output.push_str(&format!(
+        concat!(
+            "/**\n",
+            " * A failed call, with its `{enum_name}`. A reason with no class of its own raises\n",
+            " * this class.\n",
+            " */\n",
+            "export class {base_class} extends {sdk_base} {{\n",
+            "  public constructor(\n",
+            "    message: string,\n",
+            "    public readonly {field}: {enum_name} = {unspecified},\n",
+            "    type: string = \"{base_class}\",\n",
+            "    nonRetryable: boolean = true,\n",
+            "  ) {{\n",
+            "    const details: {details} = {{ {field} }};\n",
+            "    super(message, type, nonRetryable, [details]);\n",
+            "  }}\n",
+            "}}\n",
+        ),
+        enum_name = enum_name,
+        base_class = base_class,
+        sdk_base = sdk_base,
+        field = field,
+        unspecified = unspecified,
+        details = details.name,
+    ));
+    let mut names = vec![base_class.clone()];
+    let mut classes = Vec::new();
+    for case in &error.cases {
+        let class = case.name.value().map(str::to_string).unwrap_or_else(|| {
+            format!(
+                "{}{}Error",
+                stem.to_upper_camel_case(),
+                case.value
+                    .strip_prefix(&prefix)
+                    .unwrap_or(&case.value)
+                    .to_upper_camel_case()
+            )
+        });
+        let member = member(&case.value);
+        output.push_str(&format!(
+            concat!(
+                "\n/** The error of `{member}`. */\n",
+                "export class {class} extends {base_class} {{\n",
+                "  public constructor(message: string, {field}: {enum_name} = {member}) {{\n",
+                "    super(message, {field}, \"{class}\", {non_retryable});\n",
+                "  }}\n",
+                "}}\n",
+            ),
+            member = member,
+            class = class,
+            base_class = base_class,
+            field = field,
+            enum_name = enum_name,
+            non_retryable = !case.retryable,
+        ));
+        names.push(class.clone());
+        classes.push((member, class));
+    }
+    let map_name = format!("{}S", error.base.to_shouty_snake_case());
+    let function = error.base.to_lower_camel_case();
+    output.push_str(&format!(
+        concat!(
+            "\nconst {map_name}: Partial<\n",
+            "  Record<{enum_name}, new (message: string, {field}: {enum_name}) => {base_class}>\n",
+            "> = {{\n",
+        ),
+        map_name = map_name,
+        enum_name = enum_name,
+        field = field,
+        base_class = base_class,
+    ));
+    for (member, class) in &classes {
+        output.push_str(&format!("  [{member}]: {class},\n"));
+    }
+    output.push_str("};\n");
+    output.push_str(&format!(
+        concat!(
+            "\n/**\n",
+            " * The error of the reason in the details of",
+            " a failed call. A reason with no class of\n",
+            " * its own, or one that this code doesn't know, gives `{base_class}`.\n",
+            " */\n",
+            "export function {function}(details: {details}, message: string): {base_class} {{\n",
+            "  const {field} = details.{field} ?? {unspecified};\n",
+            "  const ErrorClass = {map_name}[{field}] ?? {base_class};\n",
+            "  return new ErrorClass(message, {field});\n",
+            "}}\n",
+        ),
+        base_class = base_class,
+        function = function,
+        details = details.name,
+        field = field,
+        unspecified = unspecified,
+        map_name = map_name,
+    ));
+    names.push(function);
+    Some((output, names))
 }
 
 fn typescript_resource_method_result_annotation(

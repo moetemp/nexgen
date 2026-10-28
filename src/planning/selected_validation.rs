@@ -178,6 +178,23 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
             }
         }
     }
+    // Each operation of an interface converts the failures of its one error enum.
+    let error_enums = spec
+        .types
+        .values()
+        .filter_map(|entry| match &entry.declaration {
+            crate::spec::TypeDeclSpec::Enum(enumeration) if enumeration.error.is_some() => {
+                Some(enumeration.full_name.as_str())
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    if let [first, second, ..] = error_enums.as_slice() {
+        return Err(invalid(format!(
+            "`{first}` and `{second}` both have `@nexus.error`, but an interface has one error \
+             enum"
+        )));
+    }
     // A whole operation input is the request, so it can't be one of its own fields.
     for service in &spec.services {
         for operation in &service.operations {

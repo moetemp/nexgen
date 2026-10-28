@@ -104,6 +104,30 @@ namespace Nexgen.DotNetExamples.Tests
                 new Nexgen.Support.StreamDefinition<Turn>("turns"),
                 new StreamServiceExample.CreateStreamOptions { Backend = "redis" });
 
+        [Fact]
+        public void EachReasonGivesItsExceptionAndRetryability()
+        {
+            StreamServiceExample.StreamException From(StreamServiceExample.StreamErrorReason reason) =>
+                StreamServiceExample.StreamErrors.From(
+                    new StreamServiceExample.StreamErrorDetails { Reason = reason }, "failed");
+
+            var notFound = From(StreamServiceExample.StreamErrorReason.StreamErrorReasonNotFound);
+            var storage = From(StreamServiceExample.StreamErrorReason.StreamErrorReasonStorage);
+            var sequence = From(StreamServiceExample.StreamErrorReason.StreamErrorReasonSequence);
+            var unknown = From((StreamServiceExample.StreamErrorReason)99);
+
+            Assert.IsType<StreamServiceExample.StreamNotFoundException>(notFound);
+            Assert.Equal("StreamNotFoundException", notFound.ErrorType);
+            Assert.True(notFound.NonRetryable);
+            // A storage failure can pass on a retry.
+            Assert.IsType<StreamServiceExample.StreamStorageException>(storage);
+            Assert.False(storage.NonRetryable);
+            // A reason with no class, or one that this code doesn't know, gives the base class.
+            Assert.IsType<StreamServiceExample.StreamException>(sequence);
+            Assert.IsType<StreamServiceExample.StreamException>(unknown);
+            Assert.Equal((StreamServiceExample.StreamErrorReason)99, unknown.Reason);
+        }
+
         // A newer server can send a Stream status that this code doesn't know.
         [Fact]
         public void UnknownEnumNumberPassesThrough()

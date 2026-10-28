@@ -1,0 +1,21 @@
+package test:error-details-field-of-another-type@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  // `note` holds a string, not the reason.
+  /// @nexus.error details="job-error-details" field="note" base="job-error"
+  ///   python-base="temporalio.exceptions.ApplicationError"
+  enum job-error-reason {
+    job-error-reason-unspecified,
+    /// @nexus.error
+    job-error-reason-missing,
+  }
+
+  record job-error-details { reason: option<job-error-reason>, note: option<string> }
+
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}

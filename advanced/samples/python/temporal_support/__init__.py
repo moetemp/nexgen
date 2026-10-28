@@ -4,6 +4,7 @@ from .closing import ResourceCall as ResourceCall
 from .closing import deferred_closes as deferred_closes
 from .closing import exit_close as exit_close
 from .definitions import StreamDefinition as StreamDefinition
+from .errors import error_details as error_details
 from .definitions import definition_type_arguments as definition_type_arguments
 from .operations import *  # noqa: F401,F403
 from .poll import next_page_request as next_page_request

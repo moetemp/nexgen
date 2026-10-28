@@ -41,10 +41,15 @@ descriptors = ["temporal_api.bin", "streams.bin"]
 "temporal/sdk/streams/" = "streamprotos.temporal.sdk.streams"
 
 # Brook's writer WIT, byte for byte. It uses records of stream-service, and Brook's runtime proto.
-# Python doesn't generate it yet, since its caller doesn't import every type that it uses.
 [stream-writer]
-languages = ["typescript", "dotnet"]
+languages = ["python", "typescript", "dotnet"]
 descriptors = ["temporal_api.bin", "streams.bin"]
+
+[stream-writer.python_proto_modules]
+"temporal/api/stream/" = "streamprotos.temporal.api.stream"
+"temporal/api/streamservice/" = "streamprotos.temporal.api.streamservice"
+"temporal/api/enums/v1/stream.proto" = "streamprotos.temporal.api.enums.v1.stream_pb2"
+"temporal/sdk/streams/" = "streamprotos.temporal.sdk.streams"
 
 # A System Nexus operation that returns a resource.
 [workflow-handle]

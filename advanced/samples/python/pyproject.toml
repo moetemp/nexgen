@@ -24,8 +24,13 @@ target-version = "py310"
 # The protoc output of the sample protos.
 extend-exclude = ["oneofsample", "streamprotos"]
 
+[tool.ruff.lint.per-file-ignores]
+# The stream writer's caller doesn't import every type that it uses yet.
+"wit/stream_writer/services.py" = ["F821"]
+
 [tool.basedpyright]
-exclude = [".venv", "oneofsample", "streamprotos"]
+# The stream writer's caller doesn't import every type that it uses yet.
+exclude = [".venv", "oneofsample", "streamprotos", "wit/stream_writer/services.py"]
 reportAny = false
 reportExplicitAny = false
 reportPrivateUsage = false

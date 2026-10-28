@@ -149,8 +149,8 @@ the service, so its build links `stream-service.wit`.
 
 Only part of today's output builds, so the samples leave the rest out:
 
-- Python doesn't generate the writer yet, since its caller doesn't import every
-  type that it uses.
+- The Python writer's caller doesn't import every type that it uses, so the
+  Python checks skip its `services.py`.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)
@@ -158,6 +158,7 @@ Only part of today's output builds, so the samples leave the rest out:
   [`dotnet/wit/stream-writer/`](dotnet/wit/stream-writer/),
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
 - Python: [`python/wit/stream_service/`](python/wit/stream_service/),
+  [`python/wit/stream_writer/`](python/wit/stream_writer/),
   [`python/tests/test_stream_service.py`](python/tests/test_stream_service.py)
 - TypeScript:
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),

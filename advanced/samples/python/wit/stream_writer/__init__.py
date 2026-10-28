@@ -7,12 +7,9 @@ import typing
 
 import nexusrpc
 import temporalio.converter
-from .services import StreamWriterClient
 from . import services as _services
 
-__all__ = [
-    "StreamWriterClient",
-]
+__all__ = []
 
 
 _InputT = typing.TypeVar("_InputT")

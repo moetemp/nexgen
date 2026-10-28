@@ -1,7 +1,7 @@
 import Long from "long";
 import { expect, test, vi } from "vitest";
 
-import { StreamWriterClient } from "../wit/stream-writer/index.ts";
+import { StreamWriterClient } from "../wit/stream-writer/services.ts";
 import { Writer } from "../wit/stream-writer/resources.ts";
 
 const startOperation = vi.hoisted(() => vi.fn());

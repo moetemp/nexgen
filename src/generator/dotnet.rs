@@ -2632,6 +2632,16 @@ fn generate_leaf(
             module_origin,
         )?;
     }
+    // Only an SDK calls an internal package. Its tests see it through `InternalsVisibleTo`.
+    if api_plan.services.iter().any(|service| service.internal) {
+        files.map_contents(|path, contents| {
+            if path.ends_with("SystemNexusWorkflowOutboundInterceptor.cs") {
+                contents.to_string()
+            } else {
+                mark_dotnet_internal(contents)
+            }
+        });
+    }
     Ok(DotnetGenerationResult {
         files,
         warnings: Vec::new(),
@@ -2960,6 +2970,37 @@ fn dotnet_source_expr(source_expr: &str, support_namespace: Option<&str>) -> Str
         "{}({arguments}",
         qualify_dotnet_support_reference(helper, support_namespace)
     )
+}
+
+/// Makes each type of a namespace `internal` in place of `public`. Its members stay public, so
+/// they are internal through their type.
+fn mark_dotnet_internal(source: &str) -> String {
+    let kinds = [
+        "class ",
+        "record ",
+        "enum ",
+        "interface ",
+        "struct ",
+        "static ",
+        "sealed ",
+        "abstract ",
+        "partial ",
+        "readonly ",
+    ];
+    let mut output = source
+        .lines()
+        .map(|line| match line.strip_prefix("    public ") {
+            Some(rest) if kinds.iter().any(|kind| rest.starts_with(kind)) => {
+                format!("    internal {rest}")
+            }
+            _ => line.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    if source.ends_with('\n') {
+        output.push('\n');
+    }
+    output
 }
 
 /// Renders `Errors.cs`, with a class per case of the interface's error enum under one base, and

@@ -11,6 +11,7 @@ world writer {
 
 /// @nexus.service-name "temporal.sdk.streams.v1.StreamWriter"
 /// @nexus.experimental
+/// @nexus.internal
 interface stream-writer {
   use nexus:temporal-types/model@1.0.0.{duration, placeholder};
   use temporal:nexus/stream-service@1.0.0.{

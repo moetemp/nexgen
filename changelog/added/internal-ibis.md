@@ -1,0 +1,1 @@
+`@nexus.internal` on an interface marks a service that only an SDK calls. Its Python package exports nothing, its TypeScript package has no `index.ts` and marks each declaration `@internal`, and its .NET types are `internal`.

@@ -14,7 +14,7 @@ namespace Nexgen.StreamWriter
 {
 
     [GeneratedCode("nexgen", null)]
-    public class Writer<TBody>
+    internal class Writer<TBody>
     {
         public Writer(ulong writerId)
         {

@@ -16,6 +16,7 @@ function requiredField<T>(
   return value;
 }
 
+/** @internal */
 export enum ExecutionType {
   ExecutionTypeUnspecified = 0,
   ExecutionTypeWorkflow = 1,
@@ -23,6 +24,7 @@ export enum ExecutionType {
   ExecutionTypeNexusOperation = 3,
 }
 
+/** @internal */
 export enum StreamProducerKind {
   StreamProducerKindUnspecified = 0,
   StreamProducerKindWorkflow = 1,
@@ -32,6 +34,7 @@ export enum StreamProducerKind {
   StreamProducerKindStandaloneActivity = 5,
 }
 
+/** @internal */
 export interface WriterResult {
   writerId?: Long;
 }
@@ -52,6 +55,7 @@ function writerResultToProto(
   };
 }
 
+/** @internal */
 export const writerResultTransferTypeConverter = {
   fromTransferType(value: temporal.sdk.streams.v1.IOpenWriterResponse): WriterResult {
     return writerResultFromProto(value);
@@ -61,6 +65,7 @@ export const writerResultTransferTypeConverter = {
     return writerResultToProto(value);
   },
 };
+/** @internal */
 export interface OpenWriterRequest {
   stream: StreamRef;
   /**
@@ -124,6 +129,7 @@ function openWriterRequestToProto(
   };
 }
 
+/** @internal */
 export const openWriterRequestTransferTypeConverter = {
   fromTransferType(
     value: temporal.sdk.streams.v1.IOpenWriterRequest,
@@ -135,6 +141,7 @@ export const openWriterRequestTransferTypeConverter = {
     return openWriterRequestToProto(value);
   },
 };
+/** @internal */
 export interface StreamRef {
   /**
    * The Stream id. 1 to 4096 bytes after encoding.
@@ -166,6 +173,7 @@ function streamRefToProto(model: StreamRef): temporal.api.stream.v1.IStreamRef {
   };
 }
 
+/** @internal */
 export const streamRefTransferTypeConverter = {
   fromTransferType(value: temporal.api.stream.v1.IStreamRef): StreamRef {
     return streamRefFromProto(value);
@@ -175,6 +183,7 @@ export const streamRefTransferTypeConverter = {
     return streamRefToProto(value);
   },
 };
+/** @internal */
 export interface Execution {
   type?: ExecutionType;
   /**
@@ -206,6 +215,7 @@ function executionToProto(model: Execution): temporal.api.common.v1.IExecution {
   };
 }
 
+/** @internal */
 export const executionTransferTypeConverter = {
   fromTransferType(value: temporal.api.common.v1.IExecution): Execution {
     return executionFromProto(value);
@@ -215,6 +225,7 @@ export const executionTransferTypeConverter = {
     return executionToProto(value);
   },
 };
+/** @internal */
 export interface Producer {
   /**
    * Stable across attempts. The proposal gives the form per kind.
@@ -249,6 +260,7 @@ function producerToProto(model: Producer): temporal.api.stream.v1.IProducer {
   };
 }
 
+/** @internal */
 export const producerTransferTypeConverter = {
   fromTransferType(value: temporal.api.stream.v1.IProducer): Producer {
     return producerFromProto(value);
@@ -258,6 +270,7 @@ export const producerTransferTypeConverter = {
     return producerToProto(value);
   },
 };
+/** @internal */
 export interface ProducerEpoch {
   /**
    * The started event id of the Workflow Task.
@@ -317,6 +330,7 @@ function producerEpochToProto(
   };
 }
 
+/** @internal */
 export const producerEpochTransferTypeConverter = {
   fromTransferType(value: temporal.api.stream.v1.IProducerEpoch): ProducerEpoch {
     return producerEpochFromProto(value);
@@ -326,6 +340,7 @@ export const producerEpochTransferTypeConverter = {
     return producerEpochToProto(value);
   },
 };
+/** @internal */
 export interface Timestamp {
   seconds?: Long;
   nanos?: number;
@@ -345,6 +360,7 @@ function timestampToProto(model: Timestamp): google.protobuf.ITimestamp {
   };
 }
 
+/** @internal */
 export const timestampTransferTypeConverter = {
   fromTransferType(value: google.protobuf.ITimestamp): Timestamp {
     return timestampFromProto(value);
@@ -354,6 +370,7 @@ export const timestampTransferTypeConverter = {
     return timestampToProto(value);
   },
 };
+/** @internal */
 export interface WorkflowTaskEpoch {
   startedEventId?: Long;
   attempt?: number;
@@ -382,6 +399,7 @@ function workflowTaskEpochToProto(
   };
 }
 
+/** @internal */
 export const workflowTaskEpochTransferTypeConverter = {
   fromTransferType(
     value: temporal.api.stream.v1.IWorkflowTaskEpoch,
@@ -393,6 +411,7 @@ export const workflowTaskEpochTransferTypeConverter = {
     return workflowTaskEpochToProto(value);
   },
 };
+/** @internal */
 export interface WriteRecordsResponse {
   /**
    * The offset of the first Record. Zero when the request has no Record.
@@ -422,6 +441,7 @@ function writeRecordsResponseToProto(
   };
 }
 
+/** @internal */
 export const writeRecordsResponseTransferTypeConverter = {
   fromTransferType(
     value: temporal.sdk.streams.v1.IWriteRecordsResponse,
@@ -435,6 +455,7 @@ export const writeRecordsResponseTransferTypeConverter = {
     return writeRecordsResponseToProto(value);
   },
 };
+/** @internal */
 export interface WriteRecordsRequest<BodyT> {
   records?: AppendRecord<BodyT>[];
   writerId?: Long;
@@ -468,6 +489,7 @@ function writeRecordsRequestToProto<BodyT>(
   };
 }
 
+/** @internal */
 export const writeRecordsRequestTransferTypeConverter = {
   fromTransferType<BodyT>(
     value: temporal.sdk.streams.v1.IWriteRecordsRequest,
@@ -482,6 +504,7 @@ export const writeRecordsRequestTransferTypeConverter = {
   },
 };
 
+/** @internal */
 export function createWriteRecordsRequestTransferTypeConverter<BodyT>(
   typeInfo: {
     bodyT?: common.TypeInfo<BodyT, any>;
@@ -499,6 +522,7 @@ export function createWriteRecordsRequestTransferTypeConverter<BodyT>(
     },
   };
 }
+/** @internal */
 export interface AppendRecord<BodyT> {
   /**
    * The value. It goes through the payload codec.
@@ -531,6 +555,7 @@ function appendRecordToProto<BodyT>(
   };
 }
 
+/** @internal */
 export const appendRecordTransferTypeConverter = {
   fromTransferType<BodyT>(
     value: temporal.api.stream.v1.IAppendRecord,
@@ -545,6 +570,7 @@ export const appendRecordTransferTypeConverter = {
   },
 };
 
+/** @internal */
 export function createAppendRecordTransferTypeConverter<BodyT>(
   typeInfo: {
     bodyT?: common.TypeInfo<BodyT, any>;
@@ -562,6 +588,7 @@ export function createAppendRecordTransferTypeConverter<BodyT>(
     },
   };
 }
+/** @internal */
 export interface CloseWriterResponse {
   /**
    * The offset of the newest Record the writer wrote. Zero if it wrote none.
@@ -585,6 +612,7 @@ function closeWriterResponseToProto(
   };
 }
 
+/** @internal */
 export const closeWriterResponseTransferTypeConverter = {
   fromTransferType(
     value: temporal.sdk.streams.v1.ICloseWriterResponse,
@@ -598,6 +626,7 @@ export const closeWriterResponseTransferTypeConverter = {
     return closeWriterResponseToProto(value);
   },
 };
+/** @internal */
 export interface CloseWriterRequest {
   writerId?: Long;
 }
@@ -618,6 +647,7 @@ function closeWriterRequestToProto(
   };
 }
 
+/** @internal */
 export const closeWriterRequestTransferTypeConverter = {
   fromTransferType(
     value: temporal.sdk.streams.v1.ICloseWriterRequest,
@@ -631,6 +661,7 @@ export const closeWriterRequestTransferTypeConverter = {
     return closeWriterRequestToProto(value);
   },
 };
+/** @internal */
 export type FreeWriterResponse = Record<string, never>;
 
 function freeWriterResponseFromProto(
@@ -645,6 +676,7 @@ function freeWriterResponseToProto(
   return {};
 }
 
+/** @internal */
 export const freeWriterResponseTransferTypeConverter = {
   fromTransferType(
     value: temporal.sdk.streams.v1.IFreeWriterResponse,
@@ -658,6 +690,7 @@ export const freeWriterResponseTransferTypeConverter = {
     return freeWriterResponseToProto(value);
   },
 };
+/** @internal */
 export interface FreeWriterRequest {
   writerId?: Long;
 }
@@ -678,6 +711,7 @@ function freeWriterRequestToProto(
   };
 }
 
+/** @internal */
 export const freeWriterRequestTransferTypeConverter = {
   fromTransferType(
     value: temporal.sdk.streams.v1.IFreeWriterRequest,
@@ -689,6 +723,7 @@ export const freeWriterRequestTransferTypeConverter = {
     return freeWriterRequestToProto(value);
   },
 };
+/** @internal */
 export interface CloseWritersResponse {
   /**
    * The writers that had failed.
@@ -712,6 +747,7 @@ function closeWritersResponseToProto(
   };
 }
 
+/** @internal */
 export const closeWritersResponseTransferTypeConverter = {
   fromTransferType(
     value: temporal.sdk.streams.v1.ICloseWritersResponse,
@@ -725,6 +761,7 @@ export const closeWritersResponseTransferTypeConverter = {
     return closeWritersResponseToProto(value);
   },
 };
+/** @internal */
 export type CloseWritersRequest = Record<string, never>;
 
 function closeWritersRequestFromProto(
@@ -739,6 +776,7 @@ function closeWritersRequestToProto(
   return {};
 }
 
+/** @internal */
 export const closeWritersRequestTransferTypeConverter = {
   fromTransferType(
     value: temporal.sdk.streams.v1.ICloseWritersRequest,

@@ -11,7 +11,7 @@ namespace Nexgen.StreamWriter
 {
 
     [GeneratedCode("nexgen", null)]
-    public enum ExecutionType
+    internal enum ExecutionType
     {
         ExecutionTypeUnspecified = 0,
         ExecutionTypeWorkflow = 1,
@@ -20,7 +20,7 @@ namespace Nexgen.StreamWriter
     }
 
     [GeneratedCode("nexgen", null)]
-    public enum StreamProducerKind
+    internal enum StreamProducerKind
     {
         StreamProducerKindUnspecified = 0,
         StreamProducerKindWorkflow = 1,
@@ -35,7 +35,7 @@ namespace Nexgen.StreamWriter
     /// </summary>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(AppendRecord<>.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record AppendRecord<TBody>
+    internal record AppendRecord<TBody>
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="AppendRecord{TBody}"/> class.
@@ -89,7 +89,7 @@ namespace Nexgen.StreamWriter
     /// </summary>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(Execution.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record Execution
+    internal record Execution
     {
         public ExecutionType? Type { get; init; }
         /// <summary>
@@ -151,7 +151,7 @@ namespace Nexgen.StreamWriter
     /// </summary>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(Producer.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record Producer
+    internal record Producer
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="Producer"/> class.
@@ -223,7 +223,7 @@ namespace Nexgen.StreamWriter
     /// </summary>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(ProducerEpoch.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record ProducerEpoch
+    internal record ProducerEpoch
     {
         /// <summary>
         /// The started event id of the Workflow Task.
@@ -306,7 +306,7 @@ namespace Nexgen.StreamWriter
     /// </summary>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(StreamRef.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record StreamRef
+    internal record StreamRef
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="StreamRef"/> class.
@@ -372,7 +372,7 @@ namespace Nexgen.StreamWriter
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(Timestamp.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record Timestamp
+    internal record Timestamp
     {
         public long? Seconds { get; init; }
         public int? Nanos { get; init; }
@@ -422,7 +422,7 @@ namespace Nexgen.StreamWriter
     /// </summary>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(WorkflowTaskEpoch.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record WorkflowTaskEpoch
+    internal record WorkflowTaskEpoch
     {
         public long? StartedEventId { get; init; }
         public int? Attempt { get; init; }
@@ -475,7 +475,7 @@ namespace Nexgen.StreamWriter
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(CloseWriterRequest.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record CloseWriterRequest
+    internal record CloseWriterRequest
     {
         public ulong? WriterId { get; init; }
 
@@ -516,7 +516,7 @@ namespace Nexgen.StreamWriter
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(CloseWriterResponse.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record CloseWriterResponse
+    internal record CloseWriterResponse
     {
         /// <summary>
         /// The offset of the newest Record the writer wrote. Zero if it wrote none.
@@ -560,7 +560,7 @@ namespace Nexgen.StreamWriter
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(CloseWritersRequest.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record CloseWritersRequest
+    internal record CloseWritersRequest
     {
         internal static CloseWritersRequest FromTransferType(Temporal.Sdk.Streams.V1.CloseWritersRequest wire)
         {
@@ -592,7 +592,7 @@ namespace Nexgen.StreamWriter
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(CloseWritersResponse.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record CloseWritersResponse
+    internal record CloseWritersResponse
     {
         /// <summary>
         /// The writers that had failed.
@@ -636,7 +636,7 @@ namespace Nexgen.StreamWriter
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(FreeWriterRequest.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record FreeWriterRequest
+    internal record FreeWriterRequest
     {
         public ulong? WriterId { get; init; }
 
@@ -677,7 +677,7 @@ namespace Nexgen.StreamWriter
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(FreeWriterResponse.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record FreeWriterResponse
+    internal record FreeWriterResponse
     {
         internal static FreeWriterResponse FromTransferType(Temporal.Sdk.Streams.V1.FreeWriterResponse wire)
         {
@@ -712,7 +712,7 @@ namespace Nexgen.StreamWriter
     /// </summary>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(OpenWriterRequest.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record OpenWriterRequest
+    internal record OpenWriterRequest
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="OpenWriterRequest"/> class.
@@ -796,7 +796,7 @@ namespace Nexgen.StreamWriter
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(WriteRecordsRequest<>.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record WriteRecordsRequest<TBody>
+    internal record WriteRecordsRequest<TBody>
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="WriteRecordsRequest{TBody}"/> class.
@@ -847,7 +847,7 @@ namespace Nexgen.StreamWriter
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(WriteRecordsResponse.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record WriteRecordsResponse
+    internal record WriteRecordsResponse
     {
         /// <summary>
         /// The offset of the first Record. Zero when the request has no Record.
@@ -900,7 +900,7 @@ namespace Nexgen.StreamWriter
 
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(WriterResult.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record WriterResult
+    internal record WriterResult
     {
         public ulong? WriterId { get; init; }
 

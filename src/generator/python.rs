@@ -6427,16 +6427,25 @@ fn render_package_init(
     _resource_names: &[String],
     resource_operation_owners: &BTreeMap<String, String>,
     support_package: &str,
-    _api_plan: &PlannedSpec,
+    api_plan: &PlannedSpec,
     _model_hoists: Option<&PythonModelHoists>,
     root_package_imports: &RootPackageImports,
     workflow_target: bool,
 ) -> String {
+    // Only an SDK calls an internal package, through its modules, so the package exports nothing.
+    // It keeps the registry, where a client looks up serialization contexts.
+    let internal = api_plan.services.iter().any(|service| service.internal);
+    let empty_root_package_imports = RootPackageImports::new();
+    let (model_names, root_package_imports) = if internal {
+        (&[][..], &empty_root_package_imports)
+    } else {
+        (model_names, root_package_imports)
+    };
     // Without the Workflow target, the package has the models and the registry, since a client
     // looks up serialization contexts there.
     let services_with_functions = services
         .iter()
-        .filter(|_| workflow_target)
+        .filter(|_| workflow_target && !internal)
         .collect::<Vec<_>>();
     let operation_function_names = services_with_functions
         .iter()

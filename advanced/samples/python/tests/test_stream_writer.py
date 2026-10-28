@@ -8,7 +8,6 @@ from temporalio import workflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
-import wit.stream_writer as stream_writer
 import wit.stream_writer.models as stream_writer_models
 import wit.stream_writer.services as stream_writer_services
 
@@ -68,7 +67,8 @@ class StreamWriterHandler:
 class StreamWriterCallerWorkflow:
     @workflow.run
     async def run(self) -> int | None:
-        service = stream_writer.StreamWriterClient("stream-writer")
+        # The package is internal, so the service object comes from its module.
+        service = stream_writer_services.StreamWriterClient("stream-writer")
         writer = await service.open_writer(
             str, stream=stream_writer_models.StreamRef(id="s1")
         )

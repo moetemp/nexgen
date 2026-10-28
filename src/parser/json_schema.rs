@@ -6083,6 +6083,7 @@ fn build_service(
             .and_then(Value::as_bool)
             .unwrap_or(false),
         delay_load_temporalio_workflow: false,
+        internal: false,
         operations,
         resources: Vec::new(),
         data: (),

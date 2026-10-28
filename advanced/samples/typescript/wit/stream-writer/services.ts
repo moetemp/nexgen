@@ -43,6 +43,7 @@ function requiredField<T>(
 
 /**
  * @experimental This API is experimental and subject to change.
+ * @internal
  */
 export const streamWriter = nexus.service("temporal.sdk.streams.v1.StreamWriter", {
   openWriter: nexus.operation<OpenWriterRequest, WriterResult>({
@@ -77,6 +78,7 @@ export const streamWriter = nexus.service("temporal.sdk.streams.v1.StreamWriter"
 
 /**
  * @experimental This API is experimental and subject to change.
+ * @internal
  */
 export class StreamWriterClient {
   private readonly client: workflow.NexusServiceClient<typeof streamWriter>;

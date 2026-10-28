@@ -1,0 +1,20 @@
+package temporal:internal-service@1.0.0;
+
+world system {
+  export internal-service;
+}
+
+/// @nexus.endpoint "internal"
+/// @nexus.internal
+interface internal-service {
+  record flush-request {
+    writer-id: string,
+  }
+
+  record flush-response {
+    flushed: u32,
+  }
+
+  /// @nexus.doc "Flush one writer. Only an SDK calls it."
+  flush: func(request: flush-request) -> flush-response;
+}

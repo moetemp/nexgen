@@ -12,6 +12,7 @@ import { streamWriter } from "./services";
 
 const writerClient = Symbol("nexgen.Writer.client");
 
+/** @internal */
 export class Writer<BodyT = unknown> {
   [writerClient]: workflow.NexusServiceClient<typeof streamWriter> | undefined;
 
@@ -51,6 +52,7 @@ export class Writer<BodyT = unknown> {
   }
 }
 
+/** @internal */
 export function bindWriterClient<BodyT>(
   resource:
     | Writer<BodyT>

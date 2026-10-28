@@ -22,6 +22,8 @@
     <Compile Include="../wit/proto-generic/Models.cs" Link="GeneratedProtoGeneric/Models.cs" />
     <Compile Include="../wit/stream-service/*.cs" Link="GeneratedStreamService/%(Filename)%(Extension)" />
     <Compile Include="../StreamSupport/*.cs" Link="StreamSupport/%(Filename)%(Extension)" />
+    <!-- The package is internal, so the tests compile their own copy, as an SDK's tests see it. -->
+    <Compile Include="../wit/internal-service/*.cs" Link="GeneratedInternalService/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

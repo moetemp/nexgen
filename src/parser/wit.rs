@@ -3173,6 +3173,17 @@ fn build_service(
     let experimental = experimental_directive(&directives, path, &context)?;
     let delay_load_temporalio_workflow =
         delay_load_temporalio_workflow_directive(&directives, path, &context)?;
+    let internal = match directive(&directives, "internal", path, &context)? {
+        Some(internal) if !internal.args.is_empty() => {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context,
+                directive: "@nexus.internal".to_string(),
+                reason: "takes no arguments".to_string(),
+            });
+        }
+        internal => internal.is_some(),
+    };
 
     let operations = interface
         .functions
@@ -3209,6 +3220,7 @@ fn build_service(
         experimental,
         deprecated: false,
         delay_load_temporalio_workflow,
+        internal,
         operations,
         resources,
         data: (),
@@ -4847,6 +4859,20 @@ interface generic-service {
         // The field is named by its key, which is the proto field name.
         assert_eq!(publish.result_field.as_deref(), Some("last_offset"));
         assert!(append_record.unwrap);
+    }
+
+    #[test]
+    fn an_internal_interface_marks_its_service() {
+        let load = |sample: &str| {
+            crate::parser::load_api_spec_from_wit_for_language_with_inputs(
+                Language::Python,
+                &[root().join(format!("advanced/samples/inputs/{sample}.wit"))],
+            )
+            .unwrap()
+        };
+
+        assert!(load("internal-service").services[0].internal);
+        assert!(!load("user-service").services[0].internal);
     }
 
     #[test]

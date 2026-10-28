@@ -44,7 +44,7 @@ namespace Nexgen.StreamWriter
     }
 
     [GeneratedCode("nexgen", null)]
-    public class OpenWriterOptions
+    internal class OpenWriterOptions
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="OpenWriterOptions"/> class.
@@ -76,7 +76,7 @@ namespace Nexgen.StreamWriter
     }
 
     [GeneratedCode("nexgen", null)]
-    public class WriteRecordsOptions<TBody>
+    internal class WriteRecordsOptions<TBody>
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="WriteRecordsOptions{TBody}"/> class.
@@ -91,13 +91,13 @@ namespace Nexgen.StreamWriter
     }
 
     [GeneratedCode("nexgen", null)]
-    public class CloseWriterOptions
+    internal class CloseWriterOptions
     {
         public ulong? WriterId { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
-    public class FreeWriterOptions
+    internal class FreeWriterOptions
     {
         public ulong? WriterId { get; set; }
     }
@@ -106,7 +106,7 @@ namespace Nexgen.StreamWriter
     /// Calls the <c>temporal.sdk.streams.v1.StreamWriter</c> service's operations from a workflow.
     /// </summary>
     [GeneratedCode("nexgen", null)]
-    public class StreamWriterClient
+    internal class StreamWriterClient
     {
         private readonly NexusWorkflowClient<IStreamWriter> _client;
 

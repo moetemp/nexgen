@@ -3667,19 +3667,23 @@ fn render_module_files(
             GeneratedFileOrigin::fixed("generated TypeScript error classes"),
         )?;
     }
-    files.insert(
-        "index.ts",
-        if mode == GenerationMode::NativeApi {
-            render_index_module(services, &index_model_names, &index_exports)
-        } else {
-            render_definitions_only_index_module(
-                services,
-                has_models_module,
-                &rendered_support.root_exports,
-            )
-        },
-        module_origin.clone(),
-    )?;
+    // Only an SDK calls an internal package, through its modules, so it has no barrel.
+    let internal = api_plan.services.iter().any(|service| service.internal);
+    if !internal {
+        files.insert(
+            "index.ts",
+            if mode == GenerationMode::NativeApi {
+                render_index_module(services, &index_model_names, &index_exports)
+            } else {
+                render_definitions_only_index_module(
+                    services,
+                    has_models_module,
+                    &rendered_support.root_exports,
+                )
+            },
+            module_origin.clone(),
+        )?;
+    }
     if has_models_module {
         files.insert("models.ts", models_source, module_origin.clone())?;
     }
@@ -3785,6 +3789,15 @@ fn render_module_files(
         rendered_support.files,
         GeneratedFileOrigin::fixed("generated TypeScript external-model runtime"),
     )?;
+    if internal {
+        files.map_contents(|path, contents| {
+            if path.extension().is_some_and(|extension| extension == "ts") {
+                mark_typescript_internal(contents)
+            } else {
+                contents.to_string()
+            }
+        });
+    }
     Ok(files)
 }
 
@@ -6303,6 +6316,42 @@ fn render_resource(
         output.push_str("  return client;\n");
         output.push_str("}\n");
     }
+}
+
+/// Marks each top-level declaration of an internal package `@internal`, so `stripInternal` drops
+/// it from the published types.
+fn mark_typescript_internal(source: &str) -> String {
+    let mut lines = Vec::<String>::new();
+    for line in source.lines() {
+        let declaration = line.starts_with("export ")
+            && !line.starts_with("export {")
+            && !line.starts_with("export type {")
+            && !line.starts_with("export *");
+        if declaration {
+            match lines.last() {
+                Some(last) if last.starts_with("/** ") && last.ends_with(" */") => {
+                    let summary = last["/** ".len()..last.len() - " */".len()].to_string();
+                    lines.pop();
+                    lines.extend([
+                        "/**".to_string(),
+                        format!(" * {summary}"),
+                        " * @internal".to_string(),
+                        " */".to_string(),
+                    ]);
+                }
+                Some(last) if last == " */" => {
+                    lines.insert(lines.len() - 1, " * @internal".to_string());
+                }
+                _ => lines.push("/** @internal */".to_string()),
+            }
+        }
+        lines.push(line.to_string());
+    }
+    let mut output = lines.join("\n");
+    if source.ends_with('\n') {
+        output.push('\n');
+    }
+    output
 }
 
 /// Renders `errors.ts`, with a class per case of the interface's error enum under one base, and

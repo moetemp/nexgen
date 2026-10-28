@@ -361,6 +361,36 @@ fn assert_showcase_features(mode: &str, generation_mode: nexgen::generator::Gene
 }
 
 #[test]
+fn java_warns_that_an_internal_service_has_no_effect() {
+    let root = project_root();
+    let temp_dir = unique_output_path("java-internal-service");
+    let output_path = temp_dir.join("example");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_nexgen"))
+        .args([
+            "java",
+            root.join("advanced/samples/inputs/internal-service.wit")
+                .to_str()
+                .unwrap(),
+            "--output",
+            output_path.to_str().unwrap(),
+            "--package-name",
+            "com.example",
+            "--native-api",
+        ])
+        .output()
+        .unwrap();
+    let _ = fs::remove_dir_all(temp_dir);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    assert!(
+        stderr.contains("`@nexus.internal` on `InternalService` has no effect in java"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
 fn java_json_definitions_examples_render_expected_features() {
     assert_showcase_features(
         "definitions",

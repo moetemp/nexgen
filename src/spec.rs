@@ -602,6 +602,8 @@ pub struct ServiceSpec<F: TypeFamily = AuthoredFamily> {
     /// target-idiomatic marker and documentation syntax.
     pub deprecated: bool,
     pub delay_load_temporalio_workflow: bool,
+    /// Set by `@nexus.internal`. Only an SDK calls the service, so its package exports nothing.
+    pub internal: bool,
     pub operations: Vec<OperationSpec<F>>,
     pub resources: Vec<ResourceSpec<F>>,
     pub data: F::ServiceData,
@@ -635,6 +637,7 @@ impl<F: TypeFamily> ServiceSpec<F> {
             experimental: self.experimental,
             deprecated: self.deprecated,
             delay_load_temporalio_workflow: self.delay_load_temporalio_workflow,
+            internal: self.internal,
             operations: self
                 .operations
                 .into_iter()

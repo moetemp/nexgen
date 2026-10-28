@@ -19,17 +19,18 @@ import { closeStream } from "./operations/close-stream";
 import { readRecords } from "./operations/read-records";
 import { describeStream } from "./operations/describe-stream";
 
-export class Stream {
+export class Stream<BodyT = unknown> {
   public constructor(
     public readonly stream: StreamRef,
     public readonly created: boolean | undefined,
     public readonly status: StreamStatus | undefined,
+    public readonly bodyType?: common.TypeInfo<BodyT>,
   ) {}
 
   public async publish(
     producer: Producer | undefined,
     sequence: Long | undefined,
-    records: AppendRecord[],
+    records: AppendRecord<BodyT>[],
     previousCompletedTask: WorkflowTaskEpoch | undefined,
     failedTasks: Long[],
     withdrawRun?: string,
@@ -74,7 +75,7 @@ export class Stream {
     maxRecords?: number,
     wait?: common.Duration,
     createWait?: common.Duration,
-  ): Promise<ReadRecordsResponse> {
+  ): Promise<ReadRecordsResponse<BodyT>> {
     const request = {
       stream: this.stream,
       fromOffset: fromOffset,
@@ -83,7 +84,7 @@ export class Stream {
       wait: wait,
       createWait: createWait,
     };
-    const handle = await readRecords(request);
+    const handle = await readRecords(request, this.bodyType);
     return await handle.result();
   }
 

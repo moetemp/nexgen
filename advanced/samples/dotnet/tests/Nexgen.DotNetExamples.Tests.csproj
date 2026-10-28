@@ -20,6 +20,7 @@
     <Compile Include="../wit/notification-service/Models.cs" Link="GeneratedNotificationService/Models.cs" />
     <Compile Include="../wit/proto-oneof/Models.cs" Link="GeneratedProtoOneof/Models.cs" />
     <Compile Include="../wit/proto-generic/Models.cs" Link="GeneratedProtoGeneric/Models.cs" />
+    <Compile Include="../wit/stream-service/*.cs" Link="GeneratedStreamService/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>

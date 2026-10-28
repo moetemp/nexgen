@@ -454,6 +454,7 @@ impl ApiSpecTransform<OperationLoweredFamily, PlannedFamily> for TypePlanningMap
                 name: name.to_string(),
                 doc: None,
                 type_name: name.to_upper_camel_case(),
+                type_parameters: Vec::new(),
                 fields: Vec::new(),
                 methods: Vec::new(),
             })
@@ -705,6 +706,9 @@ impl<'a> TypePlanningContext<'a> {
                     &self.spec,
                     operation.data.output_resource_return.as_ref(),
                 ),
+                runtime_type_parameters: operation_runtime_type_parameters(
+                    &self.spec, service, operation,
+                ),
             },
         })
     }
@@ -900,6 +904,7 @@ impl<'a> TypePlanningContext<'a> {
             name: resource.name.clone(),
             doc: resource.doc.value().map(str::to_string),
             type_name: resource.name.to_upper_camel_case(),
+            type_parameters: resource.type_parameters.clone(),
             fields: resource
                 .fields
                 .iter()
@@ -1352,6 +1357,48 @@ fn plan_operation_resource_return(
     })
 }
 
+/// An operation that returns a generic resource takes each of the resource's type parameters. One
+/// that a method of a generic resource binds takes the parameters that only its output uses.
+fn operation_runtime_type_parameters(
+    spec: &ApiSpec<OperationLoweredFamily>,
+    service: &ServiceSpec<OperationLoweredFamily>,
+    operation: &OperationSpec<OperationLoweredFamily>,
+) -> Vec<crate::spec::TypeParameterSpec> {
+    if let Some(resource_return) = &operation.data.output_resource_return {
+        return service
+            .resource(&resource_return.resource_name)
+            .map(|resource| resource.type_parameters.clone())
+            .unwrap_or_default();
+    }
+    let bound = service.resources.iter().any(|resource| {
+        !resource.type_parameters.is_empty()
+            && resource.data.resolved.as_ref().is_some_and(|resolved| {
+                resolved.methods.iter().any(|method| {
+                    matches!(
+                        &method.binding,
+                        ResolvedResourceMethodBinding::Operation { operation_name, .. }
+                            if *operation_name == operation.name
+                    )
+                })
+            })
+    });
+    if !bound {
+        return Vec::new();
+    }
+    let input = operation
+        .input_type()
+        .map(|input| spec.type_parameters_through_protos(input))
+        .unwrap_or_default();
+    operation
+        .output_type()
+        .map(|output| spec.type_parameters_through_protos(output))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|usage| !input.contains(usage))
+        .map(|usage| usage.parameter)
+        .collect()
+}
+
 pub(crate) struct TypePlanningPass<'a> {
     imports: BTreeMap<ModulePath, BTreeMap<ModulePath, BTreeSet<String>>>,
     descriptors: &'a DescriptorIndex,
@@ -1697,6 +1744,42 @@ interface alerts {
     }
 
     #[test]
+    fn operations_of_a_generic_resource_take_the_types_that_their_requests_cant_give() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let spec = crate::parser::load_api_spec_from_wit_for_language_with_inputs(
+            Language::Python,
+            &[
+                root.join("advanced/samples/inputs/stream-service.wit"),
+                root.join("advanced/samples/inputs/deps"),
+            ],
+        )
+        .unwrap();
+        let plan = plan_single_leaf_in_mode(spec, super::super::PlanningMode::NativeApi);
+        let runtime_type_parameters = |name: &str| {
+            plan.services[0]
+                .operation(name)
+                .expect("the stream service has the operation")
+                .data
+                .runtime_type_parameters
+                .iter()
+                .map(|parameter| parameter.full_name.clone())
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            runtime_type_parameters("CreateStream"),
+            ["stream-service.body-t"]
+        );
+        assert_eq!(
+            runtime_type_parameters("ReadRecords"),
+            ["stream-service.body-t"]
+        );
+        // An append request carries its values, so the call needs no runtime type.
+        assert!(runtime_type_parameters("AppendRecords").is_empty());
+        assert!(runtime_type_parameters("DescribeStream").is_empty());
+    }
+
+    #[test]
     fn grouped_oneof_plans_as_an_ordinary_variant_field() {
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let spec = crate::parser::load_api_spec_from_wit_for_language_with_inputs(
@@ -1810,10 +1893,16 @@ interface alerts {
     }
 
     fn plan_single_leaf(spec: ApiSpec) -> PlannedSpec {
-        let descriptors = DescriptorIndex::load(
-            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("advanced/samples/descriptors/temporal_api.bin"),
-        )
+        plan_single_leaf_in_mode(spec, super::super::PlanningMode::DefinitionsOnly)
+    }
+
+    fn plan_single_leaf_in_mode(spec: ApiSpec, mode: super::super::PlanningMode) -> PlannedSpec {
+        let descriptors_root =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("advanced/samples/descriptors");
+        let descriptors = DescriptorIndex::load_many(&[
+            descriptors_root.join("temporal_api.bin"),
+            descriptors_root.join("streams.bin"),
+        ])
         .unwrap();
         let authored_tree = ApiSpecTree {
             root: ApiSpecNode::Leaf(ApiSpecLeaf {
@@ -1823,12 +1912,9 @@ interface alerts {
                 spec: super::super::select_spec(spec, Language::Python),
             }),
         };
-        let resource_resolved = super::super::ResourceResolutionPass::new(
-            &descriptors,
-            super::super::PlanningMode::DefinitionsOnly,
-        )
-        .apply(authored_tree)
-        .unwrap();
+        let resource_resolved = super::super::ResourceResolutionPass::new(&descriptors, mode)
+            .apply(authored_tree)
+            .unwrap();
         let operation_bound = super::super::OperationBindingPass::new()
             .apply(resource_resolved)
             .unwrap();

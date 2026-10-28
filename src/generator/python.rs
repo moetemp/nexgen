@@ -825,7 +825,12 @@ impl<'a> ApiPlanner<'a> {
         let mut body = String::new();
         let type_parameters = operations
             .iter()
-            .flat_map(|operation| operation.model_input_type_parameters.iter())
+            .flat_map(|operation| {
+                operation
+                    .model_input_type_parameters
+                    .iter()
+                    .chain(&operation.runtime_type_arguments)
+            })
             .collect::<BTreeSet<_>>();
         for parameter in &type_parameters {
             body.push_str(parameter);
@@ -956,6 +961,16 @@ impl<'a> ApiPlanner<'a> {
             );
             body.push_str("\n\n");
         }
+        let type_variables = resource_type_variable_names(resource);
+        for name in &type_variables {
+            body.push_str(name);
+            body.push_str(" = typing.TypeVar(");
+            body.push_str(&python_string_literal(name));
+            body.push_str(")\n");
+        }
+        if !type_variables.is_empty() {
+            body.push_str("\n\n");
+        }
         let targets = crate::nexgen_config::current().targets;
         self.render_resource(&mut body, service, resource, bound_operations, targets);
         if targets.client {
@@ -1080,8 +1095,21 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("@dataclasses.dataclass\n");
         output.push_str("class ");
         output.push_str(&resource.type_name);
+        if !resource.type_parameters.is_empty() {
+            output.push_str("(typing.Generic[");
+            output.push_str(&resource_type_variable_names(resource).join(", "));
+            output.push_str("])");
+        }
         output.push_str(":\n");
         render_python_docstring(output, "    ", resource.doc.as_deref(), &[], None, false);
+        // The data converter decodes the generic values of a response with these types.
+        for name in resource_type_variable_names(resource) {
+            output.push_str("    ");
+            output.push_str(&python_runtime_type_argument_name(&name));
+            output.push_str(": type[");
+            output.push_str(&name);
+            output.push_str("] = dataclasses.field(repr=False, compare=False)\n");
+        }
         for field in &resource.fields {
             output.push_str("    ");
             output.push_str(&python_field_name(&field.name));
@@ -1276,21 +1304,22 @@ impl<'a> ApiPlanner<'a> {
             false,
         );
         render_resource_method_request(output, method, operation, request_plan);
+        let type_args = operation.runtime_type_args("self.");
         let response = if targets.client {
             vec![format!(
-                "response = await self._ops().{}(request)",
+                "response = await self._ops().{}(request{type_args})",
                 client_operation_name(service, operation)
             )]
         } else if service.endpoint.is_none() {
             vec![
                 "nexus_client = getattr(self, \"_nexus_client\")".to_string(),
-                nexus_client_start_line("nexus_client", operation),
+                nexus_client_start_line("nexus_client", operation, "self."),
                 "response = await handle".to_string(),
             ]
         } else {
             vec![
                 format!(
-                    "handle = await {}(request)",
+                    "handle = await {}(request{type_args})",
                     request_operation_function_name(operation)
                 ),
                 "response = await handle".to_string(),
@@ -1368,8 +1397,16 @@ impl<'a> ApiPlanner<'a> {
                 .model_type_annotation(value)
                 .expect("external resource value annotation should exist"),
             PlannedType::Flags(flags_type) => flags_type.name.clone(),
-            PlannedType::Variant(variant_type) => variant_type.name.clone(),
-            PlannedType::Record(record) => record.model_name.clone(),
+            PlannedType::Variant(variant_type) => python_generic_record_annotation(
+                &variant_type.name,
+                &self
+                    .api_plan
+                    .variant_type_parameters(&variant_type.full_name),
+            ),
+            PlannedType::Record(record) => python_generic_record_annotation(
+                &record.model_name,
+                &self.api_plan.record_type_parameters(&record.full_name),
+            ),
             PlannedType::Resource(resource) => resource.type_name.clone(),
             PlannedType::Option(inner) | PlannedType::List(inner) => {
                 format!(
@@ -1528,12 +1565,22 @@ impl<'a> ApiPlanner<'a> {
             .output_type()
             .map(|output| self.api_plan.type_parameters(output))
             .unwrap_or_default();
-        let generic_model_types =
-            !model_input_parameters.is_empty() || !model_output_parameters.is_empty();
+        let runtime_type_arguments = operation
+            .data
+            .runtime_type_parameters
+            .iter()
+            .map(|parameter| parameter.name.clone())
+            .collect::<Vec<_>>();
+        // The start call casts the handle when `output_type` names a generic model with no type
+        // arguments.
+        let generic_model_types = model_output_parameters
+            .iter()
+            .any(|usage| !runtime_type_arguments.contains(&usage.parameter.name));
         let model_output_only_parameters = model_output_parameters
             .into_iter()
             .filter(|usage| !model_input_identities.contains(usage.parameter.full_name.as_str()))
             .map(|usage| usage.parameter.name)
+            .filter(|name| !runtime_type_arguments.contains(name))
             .collect::<BTreeSet<_>>();
         let output_annotation_default =
             erase_python_type_parameters(&output_annotation_default, &model_output_only_parameters);
@@ -1545,7 +1592,12 @@ impl<'a> ApiPlanner<'a> {
                         .holder
                         .as_ref()
                         .map(|holder| holder.model_name.clone())
-                        .unwrap_or_else(|| resource.resource_type_name.clone())
+                        .unwrap_or_else(|| {
+                            python_type_annotation_with_arguments(
+                                &resource.resource_type_name,
+                                &runtime_type_arguments,
+                            )
+                        })
                 })
             })
             .unwrap_or_else(|| output_annotation_default.clone());
@@ -1618,6 +1670,15 @@ impl<'a> ApiPlanner<'a> {
             ),
             _ => output_ref.clone(),
         };
+        let output_record_type_parameters = match operation.output_type() {
+            Some(PlannedType::Record(record)) => self
+                .api_plan
+                .record_type_parameters(&record.full_name)
+                .into_iter()
+                .map(|usage| usage.parameter.name)
+                .collect(),
+            _ => Vec::new(),
+        };
         Ok(RenderedOperation {
             name: operation.name.as_str(),
             wire_name: operation.wire_name.as_str(),
@@ -1656,6 +1717,8 @@ impl<'a> ApiPlanner<'a> {
                 .map(|usage| usage.parameter.name)
                 .collect(),
             generic_model_types,
+            runtime_type_arguments,
+            output_record_type_parameters,
         })
     }
 
@@ -2921,9 +2984,68 @@ struct RenderedOperation<'a> {
     client_unpacked_input: Option<RenderedUnpackedInput>,
     model_input_type_parameters: Vec<String>,
     generic_model_types: bool,
+    /// The type parameters that the call takes as runtime types, by TypeVar name.
+    runtime_type_arguments: Vec<String>,
+    /// The type parameters of a record output, in order.
+    output_record_type_parameters: Vec<String>,
 }
 
 impl RenderedOperation<'_> {
+    /// The `output_type` of the start call. The data converter decodes a generic output with the
+    /// runtime types in it. `receiver` is `self.` in a resource method.
+    fn output_type_expr_for(&self, receiver: &str) -> String {
+        if !self
+            .output_record_type_parameters
+            .iter()
+            .any(|name| self.runtime_type_arguments.contains(name))
+        {
+            return self.output_type_expr.clone();
+        }
+        let arguments = self
+            .output_record_type_parameters
+            .iter()
+            .map(|name| {
+                if self.runtime_type_arguments.contains(name) {
+                    format!("{receiver}{}", python_runtime_type_argument_name(name))
+                } else {
+                    "typing.Any".to_string()
+                }
+            })
+            .collect::<Vec<_>>();
+        python_type_annotation_with_arguments(&self.output_type_expr, &arguments)
+    }
+
+    /// The runtime type arguments that a call passes on after its request.
+    fn runtime_type_args(&self, receiver: &str) -> String {
+        self.runtime_type_arguments
+            .iter()
+            .map(|name| format!(", {receiver}{}", python_runtime_type_argument_name(name)))
+            .collect()
+    }
+
+    /// The parameters of the runtime type arguments, one line each at `indent`.
+    fn render_runtime_type_parameters(&self, output: &mut String, indent: &str) {
+        for name in &self.runtime_type_arguments {
+            output.push_str(indent);
+            output.push_str(&python_runtime_type_argument_name(name));
+            output.push_str(": type[");
+            output.push_str(name);
+            output.push_str("],\n");
+        }
+    }
+
+    /// The bindings of the runtime type arguments in a returned resource.
+    fn render_runtime_type_bindings(&self, output: &mut String, indent: &str) {
+        for name in &self.runtime_type_arguments {
+            let argument = python_runtime_type_argument_name(name);
+            output.push_str(indent);
+            output.push_str(&argument);
+            output.push('=');
+            output.push_str(&argument);
+            output.push_str(",\n");
+        }
+    }
+
     /// The poll helper, when the target gets the poll.
     fn poll_next(&self, target: GenerationTarget) -> Option<&str> {
         self.poll_next_expr
@@ -3489,6 +3611,23 @@ fn python_generic_record_annotation(
     }
 }
 
+fn python_type_annotation_with_arguments(name: &str, arguments: &[String]) -> String {
+    if arguments.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name}[{}]", arguments.join(", "))
+    }
+}
+
+/// The runtime type argument of a type parameter, such as `body_type` for `BodyT`.
+fn python_runtime_type_argument_name(type_var: &str) -> String {
+    let stem = type_var
+        .strip_suffix('T')
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or(type_var);
+    format!("{}_type", stem.to_snake_case())
+}
+
 fn python_erased_generic_record_annotation(
     model_name: &str,
     parameters: &[crate::spec::TypeParameterUsage],
@@ -3790,6 +3929,14 @@ fn workflow_function_names(operation: &RenderedOperation<'_>) -> Vec<String> {
 
 fn operation_key(service_name: &str, operation_name: &str) -> String {
     format!("{service_name}::{operation_name}")
+}
+
+fn resource_type_variable_names(resource: &PlannedResource) -> Vec<String> {
+    resource
+        .type_parameters
+        .iter()
+        .map(|parameter| parameter.name.clone())
+        .collect()
 }
 
 fn resource_module_name(resource: &PlannedResource) -> String {
@@ -4527,6 +4674,27 @@ fn render_service_module(
             endpoint_client_body.push('\n');
         }
     }
+    let endpoint_client_type_parameters = endpoint_services
+        .iter()
+        .flat_map(|service| &service.operations)
+        .flat_map(|operation| {
+            operation
+                .model_input_type_parameters
+                .iter()
+                .chain(&operation.runtime_type_arguments)
+        })
+        .filter(|name| body_uses_python_symbol(&endpoint_client_body, name))
+        .collect::<BTreeSet<_>>();
+    if !endpoint_client_type_parameters.is_empty() {
+        let mut definitions = String::from("\n");
+        for name in endpoint_client_type_parameters {
+            definitions.push_str(name);
+            definitions.push_str(" = typing.TypeVar(");
+            definitions.push_str(&python_string_literal(name));
+            definitions.push_str(")\n");
+        }
+        endpoint_client_body.insert_str(0, &definitions);
+    }
     let runtime_model_names = endpoint_services
         .iter()
         .flat_map(|service| {
@@ -4757,13 +4925,18 @@ fn render_operation_module(
     }
 
     let mut body = String::new();
-    for parameter in &operation.model_input_type_parameters {
+    let type_parameters = operation
+        .model_input_type_parameters
+        .iter()
+        .chain(&operation.runtime_type_arguments)
+        .collect::<BTreeSet<_>>();
+    for parameter in &type_parameters {
         body.push_str(parameter);
         body.push_str(" = typing.TypeVar(");
         body.push_str(&python_string_literal(parameter));
         body.push_str(")\n");
     }
-    if !operation.model_input_type_parameters.is_empty() {
+    if !type_parameters.is_empty() {
         body.push_str("\n\n");
     }
     if let Some(unpacked_input) = &operation.unpacked_input
@@ -5381,6 +5554,7 @@ fn render_endpoint_service_object_poll_method(
     output.push_str(&poll_function_name(&operation.attr_name));
     output.push_str("(\n");
     output.push_str("        self,\n");
+    operation.render_runtime_type_parameters(output, "        ");
     if let Some(unpacked_input) = &operation.unpacked_input {
         if !unpacked_input.parameters.is_empty() {
             output.push_str("        *,\n");
@@ -5434,7 +5608,7 @@ fn render_endpoint_service_object_poll_method(
         output.push_str("        )\n");
     }
     let response = [
-        nexus_client_start_line("self._nexus_client", operation),
+        nexus_client_start_line("self._nexus_client", operation, ""),
         "response = await handle".to_string(),
     ];
     render_poll_loop(output, "        ", &response, next_expr);
@@ -5464,6 +5638,7 @@ fn render_endpoint_service_object_operation_method(
         output.push_str(&input.annotation);
         output.push_str(",\n");
     }
+    operation.render_runtime_type_parameters(output, "        ");
     output.push_str("    ) -> ");
     output.push_str(&operation_public_return_annotation(service, operation));
     output.push_str(":\n");
@@ -5485,6 +5660,7 @@ fn render_endpoint_service_object_unpacked_method(
     output.push_str(&operation.attr_name);
     output.push_str("(\n");
     output.push_str("        self,\n");
+    operation.render_runtime_type_parameters(output, "        ");
     // Python refuses a bare `*` with no keyword parameter after it.
     if !unpacked_input.parameters.is_empty() {
         output.push_str("        *,\n");
@@ -5542,7 +5718,7 @@ fn render_endpoint_service_object_operation_body(
             output.push_str(operation_input_wire_expr(operation));
             output.push_str(",\n");
             output.push_str("            output_type=");
-            output.push_str(&operation.output_type_expr);
+            output.push_str(&operation.output_type_expr_for(""));
             output.push_str(",\n");
             output.push_str("        )\n");
             if operation.output_module_path.as_deref() == Some("._resources") {
@@ -5573,7 +5749,7 @@ fn render_endpoint_service_object_operation_body(
         output.push_str(",\n");
         if !operation.output_none {
             output.push_str("            output_type=");
-            output.push_str(&operation.output_type_expr);
+            output.push_str(&operation.output_type_expr_for(""));
             output.push_str(",\n");
         }
         output.push_str("        )\n");
@@ -5588,6 +5764,7 @@ fn render_endpoint_service_object_operation_body(
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
+            operation.render_runtime_type_bindings(output, "            ");
             for binding in &resource_return.bindings {
                 output.push_str("            ");
                 output.push_str(&python_field_name(&binding.field_name));
@@ -5620,7 +5797,7 @@ fn render_endpoint_service_object_operation_body(
     output.push_str(",\n");
     if !operation.output_none {
         output.push_str("            output_type=");
-        output.push_str(&operation.output_type_expr);
+        output.push_str(&operation.output_type_expr_for(""));
         output.push_str(",\n");
     }
     output.push_str("        )\n");
@@ -5991,15 +6168,19 @@ fn render_resource_client_binder(
     resource: &PlannedResource,
     operations_class: Option<&str>,
 ) {
+    let resource_annotation = python_type_annotation_with_arguments(
+        &resource.type_name,
+        &resource_type_variable_names(resource),
+    );
     output.push_str("def ");
     output.push_str(&resource_client_bind_function_name(resource));
     output.push_str("(\n");
     output.push_str("    resource: ");
-    output.push_str(&resource.type_name);
+    output.push_str(&resource_annotation);
     output.push_str(",\n");
     output.push_str("    nexus_client: typing.Any,\n");
     output.push_str(") -> ");
-    output.push_str(&resource.type_name);
+    output.push_str(&resource_annotation);
     output.push_str(":\n");
     if let Some(operations_class) = operations_class {
         output.push_str("    return ");
@@ -6025,14 +6206,18 @@ fn render_resource_operations_binder(
     } else {
         operations_protocol_name(service)
     };
+    let resource_annotation = python_type_annotation_with_arguments(
+        &resource.type_name,
+        &resource_type_variable_names(resource),
+    );
     output.push_str("def ");
     output.push_str(&resource_operations_bind_function_name(resource));
     output.push_str("(\n    resource: ");
-    output.push_str(&resource.type_name);
+    output.push_str(&resource_annotation);
     output.push_str(",\n    operations: ");
     output.push_str(&protocol);
     output.push_str(",\n) -> ");
-    output.push_str(&resource.type_name);
+    output.push_str(&resource_annotation);
     output.push_str(":\n");
     output.push_str("    bound = dataclasses.replace(resource)\n");
     output.push_str("    object.__setattr__(bound, \"_operations\", operations)\n");
@@ -6116,7 +6301,9 @@ fn render_resource_method_operations_body(
         output.push_str("        _ = await self._ops().");
     }
     output.push_str(&client_operation_name(service, operation));
-    output.push_str("(request)\n");
+    output.push_str("(request");
+    output.push_str(&operation.runtime_type_args("self."));
+    output.push_str(")\n");
 }
 
 /// The operations that a resource's methods call, as a `typing.Protocol` that each target's
@@ -6188,6 +6375,7 @@ fn render_workflow_operations_class(
                 operation_returns_direct(operation),
                 &result_annotation,
                 "self._nexus_client",
+                "",
             );
         } else {
             render_workflow_operation_call(
@@ -6195,6 +6383,7 @@ fn render_workflow_operations_class(
                 operation,
                 operation_returns_direct(operation),
                 &result_annotation,
+                "",
             );
         }
     }
@@ -6222,6 +6411,7 @@ fn render_operations_method_signature(
         output.push_str(operation_input_annotation(operation));
         output.push_str(",\n");
     }
+    operation.render_runtime_type_parameters(output, "        ");
     output.push_str("    ) -> ");
     output.push_str(&result_annotation);
     output.push(':');
@@ -6252,10 +6442,12 @@ fn render_resource_method_inline_operation_body(
         *direct_return,
         result_annotation,
         "getattr(self, \"_nexus_client\")",
+        "self.",
     );
 }
 
 /// Starts the operation of a service with no endpoint through a bound Nexus client, from a method.
+/// `receiver` holds the runtime type arguments.
 fn render_inline_operation_call(
     output: &mut String,
     service: &RenderedService<'_>,
@@ -6263,6 +6455,7 @@ fn render_inline_operation_call(
     direct_return: bool,
     result_annotation: &str,
     nexus_client_expr: &str,
+    receiver: &str,
 ) {
     output.push_str("        nexus_client = ");
     output.push_str(nexus_client_expr);
@@ -6278,6 +6471,7 @@ fn render_inline_operation_call(
             output,
             operation,
             operation_input_wire_expr(operation),
+            receiver,
         );
         return;
     }
@@ -6289,6 +6483,7 @@ fn render_inline_operation_call(
                 output,
                 operation,
                 operation_input_wire_expr(operation),
+                receiver,
             );
             if operation.output_module_path.as_deref() == Some("._resources") {
                 output.push_str("        resource = await handle\n");
@@ -6317,6 +6512,7 @@ fn render_inline_operation_call(
             output,
             operation,
             operation_input_wire_expr(operation),
+            receiver,
         );
         if let Some(transform_expr) = &operation.output_transform_expr {
             output.push_str("        result = await handle\n");
@@ -6329,6 +6525,7 @@ fn render_inline_operation_call(
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
+            operation.render_runtime_type_bindings(output, "            ");
             for binding in &resource_return.bindings {
                 output.push_str("            ");
                 output.push_str(&python_field_name(&binding.field_name));
@@ -6356,7 +6553,12 @@ fn render_inline_operation_call(
     }
 
     output.push_str("        handle = await ");
-    render_resource_nexus_start_operation(output, operation, operation_input_wire_expr(operation));
+    render_resource_nexus_start_operation(
+        output,
+        operation,
+        operation_input_wire_expr(operation),
+        receiver,
+    );
     if result_annotation == "None" {
         output.push_str("        await handle\n");
     } else {
@@ -6401,6 +6603,7 @@ fn render_resource_nexus_start_operation(
     output: &mut String,
     operation: &RenderedOperation<'_>,
     input_expr: &str,
+    receiver: &str,
 ) {
     output.push_str("nexus_client.start_operation(\n");
     output.push_str("            operation=");
@@ -6411,7 +6614,7 @@ fn render_resource_nexus_start_operation(
     output.push_str(",\n");
     if !operation.output_none {
         output.push_str("            output_type=");
-        output.push_str(&operation.output_type_expr);
+        output.push_str(&operation.output_type_expr_for(receiver));
         output.push_str(",\n");
     }
     output.push_str("        )\n");
@@ -6433,31 +6636,40 @@ fn render_resource_method_operation_body(
     };
 
     render_resource_method_request(output, method, operation, request_plan);
-    render_workflow_operation_call(output, operation, *direct_return, result_annotation);
+    render_workflow_operation_call(
+        output,
+        operation,
+        *direct_return,
+        result_annotation,
+        "self.",
+    );
 }
 
-/// Calls the Workflow function of an operation from a method.
+/// Calls the Workflow function of an operation from a method. `receiver` holds the runtime type
+/// arguments.
 fn render_workflow_operation_call(
     output: &mut String,
     operation: &RenderedOperation<'_>,
     direct_return: bool,
     result_annotation: &str,
+    receiver: &str,
 ) {
-    let operation_attr_name = request_operation_function_name(operation);
+    let call = format!(
+        "{}(request{})\n",
+        request_operation_function_name(operation),
+        operation.runtime_type_args(receiver)
+    );
     if direct_return {
         if result_annotation == "None" {
             output.push_str("        await ");
-            output.push_str(&operation_attr_name);
-            output.push_str("(request)\n");
+            output.push_str(&call);
         } else {
             output.push_str("        return await ");
-            output.push_str(&operation_attr_name);
-            output.push_str("(request)\n");
+            output.push_str(&call);
         }
     } else {
         output.push_str("        handle = await ");
-        output.push_str(&operation_attr_name);
-        output.push_str("(request)\n");
+        output.push_str(&call);
         if result_annotation == "None" {
             output.push_str("        await handle\n");
         } else {
@@ -7110,6 +7322,7 @@ fn render_function_unpacked_overload(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
+    operation.render_runtime_type_parameters(output, &format!("{}    ", target.indent()));
 
     let primary_function = primary_function(&unpacked_input.functions);
     let primary_case = primary_function.and_then(|function| {
@@ -7636,6 +7849,7 @@ fn render_operation_poll_function(
 ) {
     let body_indent = target.body_indent();
     render_operation_signature_start(output, target, &poll_function_name(&operation.attr_name));
+    operation.render_runtime_type_parameters(output, &format!("{}    ", target.indent()));
     let unpacked_input = operation.target_unpacked_input(target);
     if let Some(unpacked_input) = unpacked_input {
         if !unpacked_input.parameters.is_empty() {
@@ -7692,13 +7906,17 @@ fn render_operation_poll_function(
         }
         start_line(output, target, "    )\n");
     }
-    let call = operation_call_target(target, service, operation);
+    let call = format!(
+        "{}(request{})",
+        operation_call_target(target, service, operation),
+        operation.runtime_type_args("")
+    );
     let response = match target {
         PythonTarget::Workflow => vec![
-            format!("handle = await {call}(request)"),
+            format!("handle = await {call}"),
             "response = await handle".to_string(),
         ],
-        PythonTarget::Client => vec![format!("response = await {call}(request)")],
+        PythonTarget::Client => vec![format!("response = await {call}")],
     };
     render_poll_loop(output, body_indent, &response, next_expr);
 }
@@ -7729,14 +7947,18 @@ fn render_poll_loop(output: &mut String, indent: &str, response: &[String], next
 }
 
 /// One line that starts an operation through a bound Nexus client and gets its handle.
-fn nexus_client_start_line(nexus_client_expr: &str, operation: &RenderedOperation<'_>) -> String {
+fn nexus_client_start_line(
+    nexus_client_expr: &str,
+    operation: &RenderedOperation<'_>,
+    receiver: &str,
+) -> String {
     let mut line = format!(
         "handle = await {nexus_client_expr}.start_operation(operation={}, input=request",
         python_string_literal(operation.wire_name)
     );
     if !operation.output_none {
         line.push_str(", output_type=");
-        line.push_str(&operation.output_type_expr);
+        line.push_str(&operation.output_type_expr_for(receiver));
     }
     line.push(')');
     line
@@ -7783,6 +8005,7 @@ fn render_client_operation_method(
         output.push_str(&input.annotation);
         output.push_str(",\n");
     }
+    operation.render_runtime_type_parameters(output, "        ");
     start_line(output, target, ") -> ");
     output.push_str(&operation_result_annotation(operation));
     output.push_str(":\n");
@@ -7814,7 +8037,7 @@ fn render_client_operation_method(
     output.push_str(",\n");
     if !operation.output_none {
         start_line(output, target, "        output_type=");
-        output.push_str(&operation.output_type_expr);
+        output.push_str(&operation.output_type_expr_for(""));
         output.push_str(",\n");
     }
     if cast_handle {
@@ -7836,6 +8059,7 @@ fn render_client_operation_method(
         start_line(output, target, "    resource = ");
         output.push_str(&resource_return.resource_type_name);
         output.push_str("(\n");
+        operation.render_runtime_type_bindings(output, "            ");
         for binding in &resource_return.bindings {
             start_line(output, target, "        ");
             output.push_str(&python_field_name(&binding.field_name));
@@ -7883,6 +8107,7 @@ fn render_client_request_method(
         output.push_str(operation_input_annotation(operation));
         output.push_str(",\n");
     }
+    operation.render_runtime_type_parameters(output, "        ");
     start_line(output, target, ") -> ");
     output.push_str(&operation_result_annotation(operation));
     output.push_str(":\n");
@@ -7890,7 +8115,9 @@ fn render_client_request_method(
     start_line(output, target, "    return await self.");
     output.push_str(&client_operation_name(service, operation));
     if operation.input.is_some() {
-        output.push_str("(request)\n");
+        output.push_str("(request");
+        output.push_str(&operation.runtime_type_args(""));
+        output.push_str(")\n");
     } else {
         output.push_str("()\n");
     }
@@ -7980,6 +8207,7 @@ fn render_request_only_operation_function(
         output.push_str(&input.annotation);
         output.push_str(",\n");
     }
+    operation.render_runtime_type_parameters(output, &format!("{}    ", target.indent()));
     if operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
         || operation.output_direct_result
@@ -8059,7 +8287,7 @@ fn render_request_only_operation_function(
                 output.push_str("    ");
             }
             output.push_str("output_type=");
-            output.push_str(&operation.output_type_expr);
+            output.push_str(&operation.output_type_expr_for(""));
             output.push_str(",\n");
         }
         if operation.generic_model_types {
@@ -8097,7 +8325,7 @@ fn render_request_only_operation_function(
         output.push_str(operation_input_wire_expr(operation));
         output.push_str(",\n");
         start_line(output, target, "        output_type=");
-        output.push_str(&operation.output_type_expr);
+        output.push_str(&operation.output_type_expr_for(""));
         output.push_str(",\n");
         start_line(output, target, "    )\n");
         start_line(output, target, "    return await handle\n");
@@ -8118,7 +8346,7 @@ fn render_request_only_operation_function(
     output.push_str(",\n");
     if !operation.output_none {
         start_line(output, target, "        output_type=");
-        output.push_str(&operation.output_type_expr);
+        output.push_str(&operation.output_type_expr_for(""));
         output.push_str(",\n");
     }
     start_line(output, target, "    )\n");
@@ -8137,6 +8365,7 @@ fn render_request_only_operation_function(
         start_line(output, target, "    return ");
         output.push_str(&resource_return.resource_type_name);
         output.push_str("(\n");
+        operation.render_runtime_type_bindings(output, &format!("{}        ", target.indent()));
         for binding in &resource_return.bindings {
             start_line(output, target, "        ");
             output.push_str(&python_field_name(&binding.field_name));
@@ -8516,6 +8745,7 @@ fn render_unpacked_operation_function(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
+    operation.render_runtime_type_parameters(output, &format!("{}    ", target.indent()));
     if !unpacked_input.parameters.is_empty() {
         start_line(output, target, "    *,\n");
     }
@@ -8550,7 +8780,9 @@ fn render_unpacked_operation_function(
     start_line(output, target, "    )\n");
     start_line(output, target, "    return await ");
     output.push_str(&operation_call_target(target, service, operation));
-    output.push_str("(request)\n");
+    output.push_str("(request");
+    output.push_str(&operation.runtime_type_args(""));
+    output.push_str(")\n");
 }
 
 /// The return annotation of an unpacked operation. A Workflow function returns the operation
@@ -8646,6 +8878,7 @@ fn render_function_unpacked_implementation(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
+    operation.render_runtime_type_parameters(output, &format!("{}    ", target.indent()));
 
     let primary_function = primary_function(&unpacked_input.functions);
     if let Some(function) = primary_function {
@@ -8819,7 +9052,9 @@ fn render_function_unpacked_implementation(
     start_line(output, target, "    )\n");
     start_line(output, target, "    return await ");
     output.push_str(&operation_call_target(target, service, operation));
-    output.push_str("(request)\n");
+    output.push_str("(request");
+    output.push_str(&operation.runtime_type_args(""));
+    output.push_str(")\n");
 }
 
 fn rendered_function_implementation_renders_field(

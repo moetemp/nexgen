@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import typing
+
 import pytest
 from temporalio.converter import PayloadConverter
 import temporalio.nexus.system
@@ -33,7 +35,7 @@ def user_payload_converter(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_read_items_round_trip_as_their_records() -> None:
-    converter = models._ReadRecordsResponseTransferTypeConverter()
+    converter = models._ReadRecordsResponseTransferTypeConverter[typing.Any]()
     model = ReadRecordsResponse(
         records=[
             StreamRecord(
@@ -72,7 +74,7 @@ def test_read_items_round_trip_as_their_records() -> None:
 
 
 def test_a_record_without_an_item_is_refused() -> None:
-    converter = models._StreamRecordTransferTypeConverter()
+    converter = models._StreamRecordTransferTypeConverter[typing.Any]()
 
     with pytest.raises(ValueError, match="missing required field StreamRecord.item"):
         _ = converter.from_transfer_type(
@@ -81,7 +83,7 @@ def test_a_record_without_an_item_is_refused() -> None:
 
 
 def test_a_request_without_its_stream_is_refused() -> None:
-    converter = models._AppendRecordsRequestTransferTypeConverter()
+    converter = models._AppendRecordsRequestTransferTypeConverter[typing.Any]()
     wire = converter.to_transfer_type(AppendRecordsRequest(stream=StreamRef(id="s-1")))
     assert wire.stream.id == "s-1"
 

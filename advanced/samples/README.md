@@ -161,14 +161,16 @@ sourced maps. Native tests exercise conversions through the generated APIs.
 Brook's Stream service WIT, a nexgen input of the Brook crate,
 `temporalio-streams`. Its records bind to the Stream protos of the API proposal
 (`temporalio/api#895`), in [`descriptors/streams/`](descriptors/streams/). This
-copy differs from the crate's file in its `python-import` attributes and in its
-read poll. The attributes make Python import those protos from the sample's own
-`streamprotos` package. The crate doesn't take them, since sdk-python generates
-the Stream protos into `temporalio` and needs the default modules.
+copy differs from the crate's file in its `python-import` attributes, in its
+read poll, and in nexgen directives that Brook's WIT takes later. The attributes
+make Python import those protos from the sample's own `streamprotos` package.
+The crate doesn't take them, since sdk-python generates the Stream protos into
+`temporalio` and needs the default modules.
 
 Python generates both targets, so one `Stream` class serves Workflow code and
 clients. The read poll names the client target, since Workflow code reads from a
-Local Activity.
+Local Activity. The Stream is generic in the record body type `body-t`, so a
+handle decodes the bodies of a read as its own type argument.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),

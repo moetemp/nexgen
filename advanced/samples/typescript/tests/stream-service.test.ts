@@ -1,7 +1,15 @@
 import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
 import Long from "long";
-import { describe, expect, test, vi } from "vitest";
+import {
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  expectTypeOf,
+  test,
+  vi,
+} from "vitest";
 
 import {
   type ReadRecordsResponse,
@@ -17,18 +25,36 @@ vi.mock("@temporalio/workflow", () => ({
   createNexusServiceClient: () => ({ startOperation }),
 }));
 
+// A body goes through the payload converter of the Workflow.
+beforeEach(() => {
+  vi.stubGlobal("__TEMPORAL_ACTIVATOR__", {
+    payloadConverter: common.defaultPayloadConverter,
+  });
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+class Turn {
+  public constructor(public readonly role: string) {}
+}
+
+const turnType: common.TypeInfo<Turn, { role: string }> = {
+  transferTypeConverter: {
+    toTransferType: (turn) => ({ role: turn.role }),
+    fromTransferType: (value) => new Turn(value.role),
+  },
+};
+
 describe("stream-service generated output", () => {
   // No SDK has these protos yet, so proto/streams.d.ts declares them. The converters fail to
   // compile when those declarations drift from what they read and write.
   test("maps each read item kind through the proto oneof", () => {
-    const model: ReadRecordsResponse = {
+    const model: ReadRecordsResponse<string> = {
       records: [
         {
           item: {
             tag: "data",
-            value: {
-              body: common.defaultPayloadConverter.toPayload("hi"),
-            },
+            value: { body: "hi" },
           },
           offset: Long.fromNumber(1),
         },
@@ -111,6 +137,28 @@ describe("stream-service generated output", () => {
     expect(String(startOperation.mock.calls[1][1].fromOffset)).toBe(
       "1880158843699200006",
     );
+  });
+
+  test("decodes the bodies of a read with the handle's body type", async () => {
+    startOperation.mockResolvedValue({ result: async () => ({ records: [] }) });
+    const stream = new Stream({ id: "stream-1" }, undefined, undefined, turnType);
+
+    const page = await stream.read();
+
+    expectTypeOf(stream).toEqualTypeOf<Stream<Turn>>();
+    expectTypeOf(page).toEqualTypeOf<ReadRecordsResponse<Turn>>();
+    // The type info of the started operation decodes the answer with the body type.
+    const [operation] = startOperation.mock.calls[0];
+    const decoded = operation.outputType.transferTypeConverter.fromTransferType({
+      records: [
+        {
+          item: "data",
+          data: { body: common.defaultPayloadConverter.toPayload({ role: "model" }) },
+          offset: Long.fromNumber(1),
+        },
+      ],
+    });
+    expect(decoded.records[0].item.value.body).toEqual(new Turn("model"));
   });
 
   test("passes an enum number that it doesn't know through", () => {

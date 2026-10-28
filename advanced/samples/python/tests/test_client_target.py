@@ -6,9 +6,11 @@ import types
 import typing
 
 import pytest
+from temporalio.api.common.v1 import Payload
 import temporalio.converter
+import temporalio.nexus.system
 import temporalio.workflow
-from typing_extensions import override
+from typing_extensions import assert_type, override
 
 import temporal_support
 import wit.stream_service._resources.stream as stream_module
@@ -26,6 +28,9 @@ from wit.stream_service.models import (
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
+    StreamData,
+    StreamItemData,
+    StreamRecord,
     StreamRef,
 )
 from wit.user_service._resources import User
@@ -41,6 +46,11 @@ from wit.workflow_handle.models import StartWorkflowRequest, StartWorkflowResult
 
 STREAM_SERVICE = "temporal.api.streamservice.v1.StreamService"
 USER_SERVICE = "UserService"
+
+
+@dataclasses.dataclass
+class Turn:
+    role: str
 
 
 @dataclasses.dataclass
@@ -66,14 +76,33 @@ class FakeNexusClient:
         *,
         output_type: type[typing.Any] | None = None,
     ) -> collections.abc.Awaitable[typing.Any]:
-        del output_type
         self._client.calls.append(Call(self._service, self._endpoint, operation, input))
         answer = self._client.answers[operation].pop(0)
+        # A payload answer decodes with the output type, as a real Nexus client does.
+        if isinstance(answer, Payload) and output_type is not None:
+            answer = typing.cast(
+                object, SYSTEM_CONVERTER.from_payload(answer, output_type)
+            )
 
         async def result() -> object:
             return answer
 
         return result()
+
+
+SYSTEM_CONVERTER = temporalio.nexus.system._SystemNexusPayloadConverter(
+    temporalio.converter.PayloadConverter.default,
+    temporalio.converter.FailureConverter.default,
+)
+
+
+@pytest.fixture(autouse=True)
+def user_payload_converter(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        temporalio.nexus.system,
+        "_current_user_payload_converter",
+        lambda: temporalio.converter.PayloadConverter.default,
+    )
 
 
 class FakeClient(
@@ -122,7 +151,7 @@ async def test_a_created_stream_calls_its_operations_through_the_client() -> Non
         }
     )
 
-    stream = await client.create_stream(stream_id="s1")
+    stream = await client.create_stream(str, stream_id="s1")
     appended = await stream.publish(records=[AppendRecord(body="hi")])
 
     # The response sets `created` to False, and the handle keeps it.
@@ -155,7 +184,7 @@ async def test_a_client_call_returns_the_result() -> None:
 async def test_a_handle_built_by_hand_takes_the_current_client() -> None:
     ref = StreamRef(id="s1")
     client = FakeClient({"DescribeStream": [DescribeStreamResponse(last_offset=5)]})
-    stream = Stream(stream=ref, created=None, status=None)
+    stream = Stream(body_type=str, stream=ref, created=None, status=None)
 
     with temporal_support.current_client(client):
         described = await stream.describe()
@@ -168,7 +197,7 @@ def test_a_handle_in_workflow_code_takes_the_workflow_operations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(temporalio.workflow, "in_workflow", lambda: True)
-    stream = Stream(stream=StreamRef(id="s1"), created=None, status=None)
+    stream = Stream(body_type=str, stream=StreamRef(id="s1"), created=None, status=None)
 
     assert isinstance(stream._ops(), WorkflowStreamService)
 
@@ -176,13 +205,13 @@ def test_a_handle_in_workflow_code_takes_the_workflow_operations(
 async def test_a_read_poll_keeps_its_offset_on_an_empty_page() -> None:
     ref = StreamRef(id="s1")
     pages = [
-        ReadRecordsResponse(next_offset=3),
-        ReadRecordsResponse(),
-        ReadRecordsResponse(done=True),
+        ReadRecordsResponse[str](next_offset=3),
+        ReadRecordsResponse[str](),
+        ReadRecordsResponse[str](done=True),
     ]
     client = FakeClient({"ReadRecords": list(pages)})
 
-    read = [page async for page in client.iter_read_records(stream=ref, last=2)]
+    read = [page async for page in client.iter_read_records(str, stream=ref, last=2)]
 
     assert read == pages
     assert [call.input for call in client.calls] == [
@@ -195,11 +224,14 @@ async def test_a_read_poll_keeps_its_offset_on_an_empty_page() -> None:
 
 async def test_a_handle_reads_every_page() -> None:
     ref = StreamRef(id="s1")
-    pages = [ReadRecordsResponse(next_offset=2), ReadRecordsResponse(done=True)]
+    pages = [
+        ReadRecordsResponse[str](next_offset=2),
+        ReadRecordsResponse[str](done=True),
+    ]
     client = FakeClient(
         {"CreateStream": [CreateStreamResult(stream=ref)], "ReadRecords": list(pages)}
     )
-    stream = await client.create_stream(stream_id="s1")
+    stream = await client.create_stream(str, stream_id="s1")
 
     read = [page async for page in stream.iter_read(from_offset=1)]
 
@@ -208,6 +240,29 @@ async def test_a_handle_reads_every_page() -> None:
         ReadRecordsRequest(stream=ref, from_offset=1),
         ReadRecordsRequest(stream=ref, from_offset=2),
     ]
+
+
+async def test_a_handle_decodes_its_bodies_with_its_body_type() -> None:
+    ref = StreamRef(id="s1")
+    record = StreamRecord(
+        item=StreamItemData(StreamData(body=Turn(role="model"))), offset=1
+    )
+    client = FakeClient(
+        {
+            "CreateStream": [CreateStreamResult(stream=ref)],
+            "ReadRecords": [
+                SYSTEM_CONVERTER.to_payload(ReadRecordsResponse(records=[record]))
+            ],
+        }
+    )
+
+    stream = await client.create_stream(Turn, stream_id="s1")
+    page = await stream.read()
+
+    _ = assert_type(stream, Stream[Turn])
+    _ = assert_type(page, ReadRecordsResponse[Turn])
+    # The body arrives as a payload, and the handle's body type decodes it.
+    assert page.records == [record]
 
 
 def test_only_the_client_target_has_the_read_poll() -> None:

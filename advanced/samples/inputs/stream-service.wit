@@ -19,6 +19,10 @@ interface stream-service {
     placeholder,
   };
 
+  /// @nexus.doc "The value type of a Stream's Records. A Stream definition sets it."
+  /// @nexus.type-parameter
+  type body-t = placeholder;
+
   /// @nexus.proto "google.protobuf.Timestamp"
   record timestamp {
     seconds: option<s64>,
@@ -115,7 +119,7 @@ interface stream-service {
   ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record append-record {
     /// @nexus.doc "The value. It goes through the payload codec."
-    body: payload,
+    body: body-t,
   }
 
   // An Activity or Local Activity item withdraws the Records of its Producer with a lower epoch. A
@@ -157,7 +161,7 @@ interface stream-service {
   ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record stream-data {
     /// @nexus.doc "The value. It goes through the payload codec."
-    body: payload,
+    body: body-t,
     producer: option<producer>,
   }
 
@@ -361,6 +365,7 @@ interface stream-service {
   // A handle never changes, since offsets are values that its methods return. Only a create's
   // response sets created and status, so a handle built from a ref has neither.
   /// @nexus.doc "A handle on one Stream. Build it from a stream-ref, or get it from a create."
+  /// @nexus.type-parameter "body-t"
   resource %stream {
     constructor(%stream: stream-ref, created: option<bool>, status: option<stream-status>);
 

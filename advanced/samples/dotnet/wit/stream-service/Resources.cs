@@ -13,7 +13,7 @@ namespace Nexgen.StreamService
 {
 
     [GeneratedCode("nexgen", null)]
-    public class Stream
+    public class Stream<TBody>
     {
         public Stream(StreamRef streamValue, bool? created, StreamStatus? status)
         {
@@ -27,9 +27,9 @@ namespace Nexgen.StreamService
         public StreamStatus? Status { get; }
 
         [GeneratedCode("nexgen", null)]
-        public Task<AppendRecordsResponse> PublishAsync(Producer? producer, long? sequence, IReadOnlyList<AppendRecord> records, WorkflowTaskEpoch? previousCompletedTask, IReadOnlyList<long> failedTasks, string? withdrawRun)
+        public Task<AppendRecordsResponse> PublishAsync(Producer? producer, long? sequence, IReadOnlyList<AppendRecord<TBody>> records, WorkflowTaskEpoch? previousCompletedTask, IReadOnlyList<long> failedTasks, string? withdrawRun)
         {
-            var request = new AppendRecordsOptions(StreamValue, records, failedTasks) { Producer = producer, Sequence = sequence, PreviousCompletedTask = previousCompletedTask, WithdrawRun = withdrawRun };
+            var request = new AppendRecordsOptions<TBody>(StreamValue, records, failedTasks) { Producer = producer, Sequence = sequence, PreviousCompletedTask = previousCompletedTask, WithdrawRun = withdrawRun };
             return Operations.AppendRecordsAsync(request);
         }
 
@@ -41,10 +41,10 @@ namespace Nexgen.StreamService
         }
 
         [GeneratedCode("nexgen", null)]
-        public Task<ReadRecordsResponse> ReadAsync(long? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait)
+        public Task<ReadRecordsResponse<TBody>> ReadAsync(long? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait)
         {
             var request = new ReadRecordsOptions(StreamValue) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait };
-            return Operations.ReadRecordsAsync(request);
+            return Operations.ReadRecordsAsync<TBody>(request);
         }
 
         [GeneratedCode("nexgen", null)]

@@ -28,10 +28,14 @@ from ..models import (
 import temporal_support as _support
 
 
+BodyT = typing.TypeVar("BodyT")
+
+
 @dataclasses.dataclass
-class Stream:
+class Stream(typing.Generic[BodyT]):
     """A handle on one Stream. Build it from a stream-ref, or get it from a create."""
 
+    body_type: type[BodyT] = dataclasses.field(repr=False, compare=False)
     stream: StreamRef
     created: bool | None
     status: StreamStatus | None
@@ -50,7 +54,7 @@ class Stream:
         self,
         producer: Producer | None = None,
         sequence: int | None = None,
-        records: list[AppendRecord] | None = None,
+        records: list[AppendRecord[BodyT]] | None = None,
         previous_completed_task: WorkflowTaskEpoch | None = None,
         failed_tasks: list[int] | None = None,
         withdraw_run: str | None = None,
@@ -95,7 +99,7 @@ class Stream:
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
         create_wait: datetime.timedelta | None = None,
-    ) -> ReadRecordsResponse:
+    ) -> ReadRecordsResponse[BodyT]:
         """Read one page of Records. The poll iterator reads them all."""
         request = ReadRecordsRequest(
             stream=self.stream,
@@ -105,7 +109,7 @@ class Stream:
             wait=wait,
             create_wait=create_wait,
         )
-        return await self._ops()._stream_service_read_records(request)
+        return await self._ops()._stream_service_read_records(request, self.body_type)
 
     async def iter_read(
         self,
@@ -114,7 +118,7 @@ class Stream:
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
         create_wait: datetime.timedelta | None = None,
-    ) -> collections.abc.AsyncIterator[ReadRecordsResponse]:
+    ) -> collections.abc.AsyncIterator[ReadRecordsResponse[BodyT]]:
         """Yield each response of ``read``. The poll helper gives the next request, and the
         iteration stops when it gives ``None``.
         """
@@ -127,7 +131,9 @@ class Stream:
             create_wait=create_wait,
         )
         while True:
-            response = await self._ops()._stream_service_read_records(request)
+            response = await self._ops()._stream_service_read_records(
+                request, self.body_type
+            )
             yield response
             next_request = _support.next_read_request(request, response)
             if next_request is None:
@@ -145,9 +151,9 @@ class Stream:
 
 
 def bind_stream_operations(
-    resource: Stream,
+    resource: Stream[BodyT],
     operations: _StreamServiceOperations,
-) -> Stream:
+) -> Stream[BodyT]:
     bound = dataclasses.replace(resource)
     object.__setattr__(bound, "_operations", operations)
     return bound
@@ -158,7 +164,7 @@ class _StreamServiceOperations(typing.Protocol):
 
     async def _stream_service_append_records(
         self,
-        request: AppendRecordsRequest,
+        request: AppendRecordsRequest[BodyT],
     ) -> AppendRecordsResponse: ...
 
     async def _stream_service_close_stream(
@@ -169,7 +175,8 @@ class _StreamServiceOperations(typing.Protocol):
     async def _stream_service_read_records(
         self,
         request: ReadRecordsRequest,
-    ) -> ReadRecordsResponse: ...
+        body_type: type[BodyT],
+    ) -> ReadRecordsResponse[BodyT]: ...
 
     async def _stream_service_describe_stream(
         self,
@@ -182,7 +189,7 @@ class WorkflowStreamService:
 
     async def _stream_service_append_records(
         self,
-        request: AppendRecordsRequest,
+        request: AppendRecordsRequest[BodyT],
     ) -> AppendRecordsResponse:
         handle = await _append_records(request)
         return await handle
@@ -197,8 +204,9 @@ class WorkflowStreamService:
     async def _stream_service_read_records(
         self,
         request: ReadRecordsRequest,
-    ) -> ReadRecordsResponse:
-        handle = await _read_records(request)
+        body_type: type[BodyT],
+    ) -> ReadRecordsResponse[BodyT]:
+        handle = await _read_records(request, body_type)
         return await handle
 
     async def _stream_service_describe_stream(
@@ -210,7 +218,7 @@ class WorkflowStreamService:
 
 
 async def _append_records(
-    request: AppendRecordsRequest,
+    request: AppendRecordsRequest[BodyT],
 ) -> temporalio.workflow.NexusOperationHandle[AppendRecordsResponse,]:
     nexus_client = temporalio.workflow.create_nexus_client(
         service="temporal.api.streamservice.v1.StreamService",
@@ -226,7 +234,7 @@ async def _append_records(
 async def append_records(
     *,
     stream: StreamRef,
-    records: list[AppendRecord] | None = None,
+    records: list[AppendRecord[BodyT]] | None = None,
     failed_tasks: list[int] | None = None,
     producer: Producer | None = None,
     sequence: int | None = None,
@@ -301,7 +309,8 @@ async def close_stream(
 
 async def _read_records(
     request: ReadRecordsRequest,
-) -> temporalio.workflow.NexusOperationHandle[ReadRecordsResponse,]:
+    body_type: type[BodyT],
+) -> temporalio.workflow.NexusOperationHandle[ReadRecordsResponse[BodyT],]:
     nexus_client = temporalio.workflow.create_nexus_client(
         service="temporal.api.streamservice.v1.StreamService",
         endpoint="__temporal_system",
@@ -309,11 +318,12 @@ async def _read_records(
     return await nexus_client.start_operation(
         operation="ReadRecords",
         input=request,
-        output_type=ReadRecordsResponse,
+        output_type=ReadRecordsResponse[body_type],
     )
 
 
 async def read_records(
+    body_type: type[BodyT],
     *,
     stream: StreamRef,
     from_offset: int | None = None,
@@ -323,7 +333,7 @@ async def read_records(
     create_wait: datetime.timedelta | None = None,
     last: int | None = None,
     max_bytes: int | None = None,
-) -> temporalio.workflow.NexusOperationHandle[ReadRecordsResponse,]:
+) -> temporalio.workflow.NexusOperationHandle[ReadRecordsResponse[BodyT],]:
     """A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads from a Local
     Activity.
 
@@ -349,7 +359,7 @@ async def read_records(
         last=last,
         max_bytes=max_bytes,
     )
-    return await _read_records(request)
+    return await _read_records(request, body_type)
 
 
 async def _describe_stream(

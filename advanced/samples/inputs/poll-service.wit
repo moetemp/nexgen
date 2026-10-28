@@ -1,0 +1,63 @@
+package temporal:poll-service@1.0.0;
+
+world system {
+  export page-service;
+  export feed-service;
+}
+
+/// @nexus.endpoint "pages"
+interface page-service {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.ListWorkflowExecutionsRequest"
+  record list-workflows-request {
+    namespace: string,
+    page-size: option<s32>,
+    next-page-token: option<list<u8>>,
+    query: option<string>,
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.ListWorkflowExecutionsResponse"
+  record list-workflows-response {
+    /// @nexus.omit
+    executions: placeholder,
+    next-page-token: option<list<u8>>,
+  }
+
+  /// @nexus.doc "List one page of Workflows. The poll iterator lists every page."
+  /// @nexus.poll python="next_page_request"
+  list-workflows: func(request: list-workflows-request) -> list-workflows-response;
+}
+
+// No endpoint, so Workflow code binds one, and a client serves the service.
+interface feed-service {
+  use page-service.{list-workflows-request, list-workflows-response};
+
+  /// @nexus.doc "The Workflows of one query."
+  resource feed {
+    constructor(namespace: string, query: option<string>);
+
+    /// @nexus.doc "List one page of the feed."
+    /// @nexus.operation "list-feed"
+    read: func(page-size: option<s32>) -> list-workflows-response;
+  }
+
+  type feed-result = own<feed>;
+
+  enum feed-order {
+    newest,
+    oldest,
+  }
+
+  // A parameter of an enum type, in a service with no endpoint.
+  record open-feed-request {
+    namespace: string,
+    query: option<string>,
+    order: option<feed-order>,
+  }
+
+  open-feed: func(request: open-feed-request) -> feed-result;
+
+  /// @nexus.poll python="next_page_request"
+  list-feed: func(request: list-workflows-request) -> list-workflows-response;
+}

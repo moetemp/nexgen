@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections.abc
 import dataclasses
 import typing
 import datetime
@@ -105,6 +106,33 @@ class Stream:
             create_wait=create_wait,
         )
         return await self._ops()._stream_service_read_records(request)
+
+    async def iter_read(
+        self,
+        from_offset: int | None = None,
+        start: StreamReadStart | None = None,
+        max_records: int | None = None,
+        wait: datetime.timedelta | None = None,
+        create_wait: datetime.timedelta | None = None,
+    ) -> collections.abc.AsyncIterator[ReadRecordsResponse]:
+        """Yield each response of ``read``. The poll helper gives the next request, and the
+        iteration stops when it gives ``None``.
+        """
+        request = ReadRecordsRequest(
+            stream=self.stream,
+            from_offset=from_offset,
+            start=start,
+            max_records=max_records,
+            wait=wait,
+            create_wait=create_wait,
+        )
+        while True:
+            response = await self._ops()._stream_service_read_records(request)
+            yield response
+            next_request = _support.next_read_request(request, response)
+            if next_request is None:
+                return
+            request = next_request
 
     async def describe(
         self,

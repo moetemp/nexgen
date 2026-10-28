@@ -73,6 +73,17 @@ required input model or returned by an operation.
   [`typescript/wit/start-workflow/`](typescript/wit/start-workflow/),
   [`typescript/tests/start-workflow.test.ts`](typescript/tests/start-workflow.test.ts)
 
+### `poll-service`
+
+Operations with `@nexus.poll`, in a service with an endpoint and in a service
+with no endpoint, and a resource method that binds one. Only Python generates
+the iterators, for both targets. The service with no endpoint also takes a
+parameter of an enum type.
+
+- WIT: [`inputs/poll-service.wit`](inputs/poll-service.wit)
+- Python: [`python/wit/poll_service/`](python/wit/poll_service/),
+  [`python/tests/test_poll_service.py`](python/tests/test_poll_service.py)
+
 ### `workflow-handle`
 
 A System Nexus operation that returns a resource. Python generates only the
@@ -150,13 +161,14 @@ sourced maps. Native tests exercise conversions through the generated APIs.
 Brook's Stream service WIT, a nexgen input of the Brook crate,
 `temporalio-streams`. Its records bind to the Stream protos of the API proposal
 (`temporalio/api#895`), in [`descriptors/streams/`](descriptors/streams/). This
-copy differs from the crate's file only in its `python-import` attributes, which
-make Python import those protos from the sample's own `streamprotos` package.
-The crate doesn't take them, since sdk-python generates the Stream protos into
-`temporalio` and needs the default modules.
+copy differs from the crate's file in its `python-import` attributes and in its
+read poll. The attributes make Python import those protos from the sample's own
+`streamprotos` package. The crate doesn't take them, since sdk-python generates
+the Stream protos into `temporalio` and needs the default modules.
 
 Python generates both targets, so one `Stream` class serves Workflow code and
-clients.
+clients. The read poll names the client target, since Workflow code reads from a
+Local Activity.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),

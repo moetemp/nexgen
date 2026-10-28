@@ -14,6 +14,7 @@ use crate::generator::typescript::{
     render_named_generic_function_start, repeated_from_wire_expr, repeated_to_wire_expr,
     required_field_expr, required_from_wire_expr, required_to_wire_expr, support_reference,
     typescript_authored_type_annotation, typescript_generated_field_name, typescript_ident,
+    typescript_model_fields,
 };
 use crate::planning::{
     PlannedFamily, PlannedProtoType, PlannedProtoTypeInfo, PlannedSpec, PlannedType,
@@ -273,8 +274,7 @@ fn model_wire_fields<'a>(
         .iter()
         .enumerate()
         .map(|(index, rendered)| {
-            let (_, field) = record
-                .model_fields()
+            let (_, field) = typescript_model_fields(record)
                 .find(|(_, field)| typescript_generated_field_name(&field.name) == rendered.name)
                 .expect("rendered model field should have a planned field");
             let local_name = if index == 0 {

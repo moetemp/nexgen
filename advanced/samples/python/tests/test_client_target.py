@@ -8,6 +8,7 @@ import typing
 
 import pytest
 from temporalio.api.common.v1 import Payload
+import temporalio.activity
 import temporalio.converter
 import temporalio.nexus.system
 import temporalio.workflow
@@ -30,6 +31,7 @@ from wit.stream_service.models import (
     CreateStreamResult,
     DescribeStreamRequest,
     DescribeStreamResponse,
+    Producer,
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamData,
@@ -192,7 +194,12 @@ async def test_a_created_stream_calls_its_operations_through_the_client() -> Non
             STREAM_SERVICE,
             "__temporal_system",
             "AppendRecords",
-            AppendRecordsRequest(stream=ref, records=[AppendRecord(body="hi")]),
+            AppendRecordsRequest(
+                stream=ref,
+                records=[AppendRecord(body="hi")],
+                # The client fills the producer from its source.
+                producer=Producer(id="client:sample"),
+            ),
         ),
     ]
 
@@ -313,6 +320,49 @@ async def test_workflow_operations_refuse_rpc_options() -> None:
         _ = await WorkflowStreamService()._stream_service_describe_stream(
             request, rpc_timeout=datetime.timedelta(seconds=3)
         )
+
+
+@dataclasses.dataclass
+class FakeActivityInfo:
+    workflow_run_id: str
+    activity_id: str
+
+
+async def test_an_activity_append_takes_the_producer_of_its_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(temporalio.activity, "in_activity", lambda: True)
+    monkeypatch.setattr(
+        temporalio.activity, "info", lambda: FakeActivityInfo("r1", "a1")
+    )
+    ref = StreamRef(id="s1")
+    client = FakeClient({"AppendRecords": [AppendRecordsResponse(last_offset=1)]})
+    stream = bind_stream_operations(
+        Stream(body_type=str, stream=ref, created=None, status=None), client
+    )
+
+    _ = await stream.publish(records=[AppendRecord(body="hi")])
+
+    # The resource method leaves the producer unset, so the client's source fills it.
+    assert [call.input for call in client.calls] == [
+        AppendRecordsRequest(
+            stream=ref,
+            records=[AppendRecord(body="hi")],
+            producer=Producer(id="act:r1:a1", run_id="r1"),
+        )
+    ]
+
+
+async def test_an_append_keeps_the_producer_that_sdk_code_sets() -> None:
+    ref = StreamRef(id="s1")
+    client = FakeClient({"AppendRecords": [AppendRecordsResponse(last_offset=1)]})
+    request = AppendRecordsRequest[str](
+        stream=ref, producer=Producer(id="writer-7"), sequence=3
+    )
+
+    _ = await client._stream_service_append_records(request)
+
+    assert [call.input for call in client.calls] == [request]
 
 
 def test_only_the_client_target_has_the_read_poll() -> None:

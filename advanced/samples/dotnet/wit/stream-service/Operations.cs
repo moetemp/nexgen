@@ -19,29 +19,9 @@ namespace Nexgen.StreamService
     public class CreateStreamOptions
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="CreateStreamOptions"/> class.
-        /// </summary>
-        public CreateStreamOptions(string streamId)
-        {
-            StreamId = streamId;
-        }
-
-        /// <summary>
-        /// Required on Redis and memory. On native, empty asks the server for an id.
-        /// </summary>
-        public string StreamId { get; set; }
-        /// <summary>
         /// The age after which a Record is dropped. Empty is the Store default.
         /// </summary>
         public System.TimeSpan? Retention { get; set; }
-        /// <summary>
-        /// Retry run only. The previous run, whose Records this withdraws.
-        /// </summary>
-        public string? WithdrawRun { get; set; }
-        /// <summary>
-        /// The Workflow run that owns the Stream. The Workflow transport sets it.
-        /// </summary>
-        public Producer? Owner { get; set; }
         /// <summary>
         /// The Stream's ref, with the owner fields.
         /// </summary>
@@ -57,35 +37,14 @@ namespace Nexgen.StreamService
         /// <summary>
         /// Initializes a new instance of the <see cref="AppendRecordsOptions{TBody}"/> class.
         /// </summary>
-        public AppendRecordsOptions(StreamRef stream, IReadOnlyList<AppendRecord<TBody>> records, IReadOnlyList<long> failedTasks)
+        public AppendRecordsOptions(StreamRef stream, IReadOnlyList<AppendRecord<TBody>> records)
         {
             Stream = stream;
             Records = records;
-            FailedTasks = failedTasks;
         }
 
         public StreamRef Stream { get; set; }
         public IReadOnlyList<AppendRecord<TBody>> Records { get; set; }
-        /// <summary>
-        /// Local Activity only. The run's failed or timed out Workflow Tasks.
-        /// </summary>
-        public IReadOnlyList<long> FailedTasks { get; set; }
-        /// <summary>
-        /// Required outside a Workflow. In a Workflow the transport sets it.
-        /// </summary>
-        public Producer? Producer { get; set; }
-        /// <summary>
-        /// The batch number in this epoch, 1 or more. It is part of the dedupe key.
-        /// </summary>
-        public long? Sequence { get; set; }
-        /// <summary>
-        /// Local Activity only. The run's last completed Workflow Task.
-        /// </summary>
-        public WorkflowTaskEpoch? PreviousCompletedTask { get; set; }
-        /// <summary>
-        /// Retry run only. The previous run, whose Records this withdraws.
-        /// </summary>
-        public string? WithdrawRun { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -94,28 +53,14 @@ namespace Nexgen.StreamService
         /// <summary>
         /// Initializes a new instance of the <see cref="CloseStreamOptions"/> class.
         /// </summary>
-        public CloseStreamOptions(StreamRef stream, IReadOnlyList<long> failedTasks)
+        public CloseStreamOptions(StreamRef stream)
         {
             Stream = stream;
-            FailedTasks = failedTasks;
         }
 
         public StreamRef Stream { get; set; }
-        /// <summary>
-        /// Workflow only. The run's failed or timed out Workflow Tasks.
-        /// </summary>
-        public IReadOnlyList<long> FailedTasks { get; set; }
-        public Producer? Producer { get; set; }
         public object? Result { get; set; }
         public System.Exception? Failure { get; set; }
-        /// <summary>
-        /// Empty is completed, or failed with a failure. A caller may set canceled.
-        /// </summary>
-        public StreamCloseStatus? Status { get; set; }
-        /// <summary>
-        /// Workflow only. The previous completed Workflow Task of the run.
-        /// </summary>
-        public WorkflowTaskEpoch? PreviousCompletedTask { get; set; }
     }
 
     /// <summary>
@@ -198,14 +143,12 @@ namespace Nexgen.StreamService
 
         /// <param name="options">Create a Stream, or get the one that exists, which keeps its Retention.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(Nexgen.Support.StreamDefinition<TBody> definition, CreateStreamOptions options)
+        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(Nexgen.Support.StreamDefinition<TBody> definition, CreateStreamOptions? options = null)
         {
-            var request = new CreateStreamRequest(options.StreamId)
+            var request = new CreateStreamRequest(Nexgen.Support.StreamWorkflowContext.StreamId(definition), Nexgen.Support.StreamWorkflowContext.Owner())
             {
-                Retention = options.Retention,
-                WithdrawRun = options.WithdrawRun,
-                Owner = options.Owner,
-                Ref = options.Ref,
+                Retention = options?.Retention,
+                Ref = options?.Ref,
             };
             return CreateStreamAsync<TBody>(request);
         }
@@ -229,13 +172,7 @@ namespace Nexgen.StreamService
         [GeneratedCode("nexgen", null)]
         public static Task<AppendRecordsResponse> AppendRecordsAsync<TBody>(AppendRecordsOptions<TBody> options)
         {
-            var request = new AppendRecordsRequest<TBody>(options.Stream, options.Records, options.FailedTasks)
-            {
-                Producer = options.Producer,
-                Sequence = options.Sequence,
-                PreviousCompletedTask = options.PreviousCompletedTask,
-                WithdrawRun = options.WithdrawRun,
-            };
+            var request = new AppendRecordsRequest<TBody>(options.Stream, options.Records, Nexgen.Support.StreamWorkflowContext.Producer());
             return AppendRecordsAsync(request);
         }
 
@@ -252,13 +189,10 @@ namespace Nexgen.StreamService
         [GeneratedCode("nexgen", null)]
         public static Task<CloseStreamResponse> CloseStreamAsync(CloseStreamOptions options)
         {
-            var request = new CloseStreamRequest(options.Stream, options.FailedTasks)
+            var request = new CloseStreamRequest(options.Stream, Nexgen.Support.StreamWorkflowContext.Producer())
             {
-                Producer = options.Producer,
                 Result = options.Result,
                 Failure = options.Failure,
-                Status = options.Status,
-                PreviousCompletedTask = options.PreviousCompletedTask,
             };
             return CloseStreamAsync(request);
         }

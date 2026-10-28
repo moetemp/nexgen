@@ -1,0 +1,14 @@
+package test:source-mixed-targets;
+
+world system { export models; }
+
+interface models {
+  type placeholder = string;
+
+  record request {
+    /// @nexus.source python="any()" typescript="any()" go="Any()" dotnet="Context.Any()"
+    /// @nexus.source target="client" python="client()" typescript="client()" go="Client()"
+    ///   dotnet="Context.Client()"
+    owner: option<string>,
+  }
+}

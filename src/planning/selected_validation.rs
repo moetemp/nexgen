@@ -7,8 +7,9 @@ use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ApiSpecLeaf, CompilerPass, FunctionArgsSpec, FunctionResultSpec, ResourceSpec,
-    SelectedFamily, ServiceSpec, TypeSpec,
+    ApiSpec, ApiSpecLeaf, CompilerPass, ExternalTypeSpec, FunctionArgsSpec, FunctionResultSpec,
+    OperationSpec, RecordFieldVisibility, ResourceSpec, SelectedFamily, ServiceSpec,
+    TargetFieldRole, TypeSpec,
 };
 
 pub(crate) struct SelectedValidationPass;
@@ -110,6 +111,9 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
             validate_resource_type_parameters(spec, service, resource, &invalid)?;
         }
         for operation in &service.operations {
+            validate_definition_sources(spec, service, operation, &invalid)?;
+        }
+        for operation in &service.operations {
             let Some(TypeSpec::Resource(returned)) = operation.output_type() else {
                 continue;
             };
@@ -149,6 +153,75 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
         }
     }
     Ok(())
+}
+
+/// A source may read `definition`, the definition argument of a call that returns a resource with
+/// `@nexus.definition`. Target code runs such a source, so the source must name its target.
+fn validate_definition_sources(
+    spec: &ApiSpec<SelectedFamily>,
+    service: &ServiceSpec<SelectedFamily>,
+    operation: &OperationSpec<SelectedFamily>,
+    invalid: &dyn Fn(String) -> Error,
+) -> Result<()> {
+    let record = match operation.input_type() {
+        Some(TypeSpec::Record(record)) => spec.record(record.as_str()),
+        Some(TypeSpec::External(ExternalTypeSpec::Proto(proto))) => {
+            spec.record_for_proto(proto.as_str())
+        }
+        _ => None,
+    };
+    let Some(record) = record else {
+        return Ok(());
+    };
+    let has_definition = match operation.output_type() {
+        Some(TypeSpec::Resource(returned)) => service
+            .resource(returned.as_str())
+            .is_some_and(|resource| resource.definition.value().is_some()),
+        _ => false,
+    };
+    for (field_name, field) in &record.fields {
+        let untargeted = match &field.visibility {
+            RecordFieldVisibility::Sourced { source_expr } if field.target_roles.is_none() => {
+                Some(source_expr)
+            }
+            _ => None,
+        };
+        let targeted = field.target_roles.iter().flat_map(|roles| {
+            [&roles.workflow, &roles.client]
+                .into_iter()
+                .filter_map(|role| match role {
+                    TargetFieldRole::Sourced { source_expr } => Some(source_expr),
+                    _ => None,
+                })
+        });
+        if untargeted.is_some_and(|source_expr| source_reads_definition(source_expr)) {
+            return Err(invalid(format!(
+                "record `{}` field `{field_name}` has a source with no target that reads \
+                 `definition`. Only target code has the definition, so name the target",
+                record.full_name
+            )));
+        }
+        if !has_definition
+            && targeted
+                .into_iter()
+                .any(|expr| source_reads_definition(expr))
+        {
+            return Err(invalid(format!(
+                "record `{}` field `{field_name}` has a source that reads `definition`, but \
+                 operation `{}` takes no definition",
+                record.full_name, operation.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Whether the arguments of a source call name `definition`.
+fn source_reads_definition(source_expr: &str) -> bool {
+    source_expr.split_once('(').is_some_and(|(_, args)| {
+        args.split(|character: char| !(character.is_alphanumeric() || character == '_'))
+            .any(|word| word == "definition")
+    })
 }
 
 /// A resource may use only the type parameters that it declares, and it must use each of them.

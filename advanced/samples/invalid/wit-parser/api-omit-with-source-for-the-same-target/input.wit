@@ -1,0 +1,14 @@
+package test:api-omit-with-source-for-the-same-target;
+
+world system { export models; }
+
+interface models {
+  type placeholder = string;
+
+  record request {
+    /// @nexus.source target="client" python="client()" typescript="client()" go="Client()"
+    ///   dotnet="Context.Client()"
+    /// @nexus.api-omit target="client"
+    owner: option<string>,
+  }
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import typing
 import datetime
 import temporalio.workflow
@@ -9,7 +10,6 @@ import temporalio.workflow
 from ..models import (
     CreateStreamRequest,
     CreateStreamResult,
-    Producer,
     StreamRef,
 )
 from .._resources import Stream
@@ -26,6 +26,8 @@ async def _create_stream(
     request: CreateStreamRequest,
     body_type: type[BodyT],
 ) -> Stream[BodyT]:
+    if request.owner is None:
+        request = dataclasses.replace(request, owner=_support.workflow_owner())
     nexus_client = temporalio.workflow.create_nexus_client(
         service="temporal.api.streamservice.v1.StreamService",
         endpoint="__temporal_system",
@@ -49,27 +51,19 @@ async def _create_stream(
 async def create_stream(
     definition: type[temporal_support.StreamDefinition[BodyT]],
     *,
-    stream_id: str,
     retention: datetime.timedelta | None = None,
-    withdraw_run: str | None = None,
-    owner: Producer | None = None,
     ref: StreamRef | None = None,
 ) -> Stream[BodyT]:
     """
     Args:
-        stream_id: Required on Redis and memory. On native, empty asks the server for an
-            id.
         retention: The age after which a Record is dropped. Empty is the Store default.
-        withdraw_run: Retry run only. The previous run, whose Records this withdraws.
-        owner: The Workflow run that owns the Stream. The Workflow transport sets it.
         ref: The Stream's ref, with the owner fields.
     """
     (body_type,) = _support.definition_type_arguments(definition)
     request = CreateStreamRequest(
-        stream_id=stream_id,
+        stream_id=_support.workflow_stream_id(definition),
         retention=retention,
-        withdraw_run=withdraw_run,
-        owner=owner,
+        owner=_support.workflow_owner(),
         ref=ref,
     )
     return await _create_stream(request, body_type)

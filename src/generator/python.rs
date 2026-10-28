@@ -25,7 +25,8 @@ use crate::spec::{
     AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec,
     FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, LanguageImportSpec,
     LanguageImportStyle, ModulePath, OperationSpec, RecordFieldSpec, RecordFieldVisibility,
-    RecordSpec, SelectedTextSpec, TypeDeclSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
+    RecordSpec, SelectedTextSpec, TargetFieldRole, TypeDeclSpec, TypeReplacementSpec, TypeSpec,
+    VariantSpec,
 };
 use crate::spec::{ApiSpec, ApiSpecBranch, ApiSpecNode};
 
@@ -706,7 +707,10 @@ impl<'a> ApiPlanner<'a> {
                 planned_record(self.api_plan, &model.full_name)
                     .fields
                     .values()
-                    .any(|field| matches!(field.visibility, RecordFieldVisibility::Sourced { .. }))
+                    .any(|field| {
+                        matches!(field.visibility, RecordFieldVisibility::Sourced { .. })
+                            && field.target_roles.is_none()
+                    })
             }),
         )? {
             files.insert("models.py", models_source, module_origin.clone())?;
@@ -1629,7 +1633,7 @@ impl<'a> ApiPlanner<'a> {
             _ => None,
         };
         let unpacked_input = unpacked_input_name
-            .map(|name| self.build_unpacked_input(name, false))
+            .map(|name| self.build_unpacked_input(name, PythonTarget::Workflow))
             .transpose()?;
         let client_unpacked_input = unpacked_input_name
             .filter(|name| {
@@ -1639,9 +1643,10 @@ impl<'a> ApiPlanner<'a> {
                         .values()
                         .any(|field| {
                             matches!(field.visibility, RecordFieldVisibility::Sourced { .. })
+                                || field.target_roles.is_some()
                         })
             })
-            .map(|name| self.build_unpacked_input(name, true))
+            .map(|name| self.build_unpacked_input(name, PythonTarget::Client))
             .transpose()?;
         let output_type_parameters = unpacked_input
             .iter()
@@ -1655,6 +1660,10 @@ impl<'a> ApiPlanner<'a> {
             &local_python_model_type_expr(&output_ref),
             &output_type_parameters,
         );
+        let source_fills = match input {
+            Some(PlannedType::Record(record)) => self.source_fills(&record.full_name),
+            _ => Vec::new(),
+        };
         let poll_next_expr = operation
             .poll_next
             .value()
@@ -1743,7 +1752,44 @@ impl<'a> ApiPlanner<'a> {
                 .value()
                 .map(str::to_string),
             asynchronous: operation.asynchronous,
+            source_fills,
         })
+    }
+
+    /// The fields of a request that a targeted source fills when the request leaves them unset. A
+    /// source that reads the call's definition runs only in the convenience function.
+    fn source_fills(&self, input_full_name: &str) -> Vec<RenderedSourceFill> {
+        let Some(model) = self.models.get(input_full_name) else {
+            return Vec::new();
+        };
+        planned_record(self.api_plan, input_full_name)
+            .fields
+            .values()
+            .filter(|field| field.visibility != RecordFieldVisibility::Omitted)
+            .zip(&model.fields)
+            // A required field always has a value, and an empty list is unset.
+            .filter(|(field, _)| {
+                !field.required || matches!(field.field_type, PlannedType::List(_))
+            })
+            .flat_map(|(field, rendered_field)| {
+                let roles = field.target_roles.as_ref();
+                [GenerationTarget::Workflow, GenerationTarget::Client]
+                    .into_iter()
+                    .filter_map(move |target| match roles?.role(target) {
+                        TargetFieldRole::Sourced { source_expr }
+                            if !python_source_reads_definition(source_expr) =>
+                        {
+                            Some(RenderedSourceFill {
+                                target,
+                                attr_name: rendered_field.attr_name.clone(),
+                                source_call: python_source_call(source_expr),
+                                list: matches!(field.field_type, PlannedType::List(_)),
+                            })
+                        }
+                        _ => None,
+                    })
+            })
+            .collect()
     }
 
     fn resolve_output_annotation(&mut self, model_type: &PlannedType) -> Result<String> {
@@ -1784,10 +1830,11 @@ impl<'a> ApiPlanner<'a> {
         panic!("message conversion should be model-shaped")
     }
 
+    /// The parameters and request fields of a target's convenience function.
     fn build_unpacked_input(
         &self,
         input_full_name: &str,
-        sourced_fields_as_parameters: bool,
+        target: PythonTarget,
     ) -> Result<RenderedUnpackedInput> {
         let model = self
             .models
@@ -1806,12 +1853,29 @@ impl<'a> ApiPlanner<'a> {
             .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
             .zip(model.fields.iter())
         {
+            if let Some(roles) = &planned_field.target_roles {
+                match roles.role(target.generation_target()) {
+                    TargetFieldRole::Parameter => {}
+                    TargetFieldRole::Sourced { source_expr } => {
+                        request_fields.push(RenderedUnpackedRequestField {
+                            attr_name: rendered_field.attr_name.clone(),
+                            value_expr: python_source_call(source_expr),
+                            default_kind: PythonFieldDefaultKind::Required,
+                        });
+                        continue;
+                    }
+                    TargetFieldRole::ApiOmitted => continue,
+                }
+            }
+            // The client target takes an untargeted source as a parameter, since the source can
+            // read the Workflow context.
             let sourced = matches!(
                 planned_field.visibility,
                 RecordFieldVisibility::Sourced { .. }
-            );
+            ) && planned_field.target_roles.is_none();
             if planned_field.visibility != RecordFieldVisibility::Public
-                && !(sourced && sourced_fields_as_parameters)
+                && planned_field.target_roles.is_none()
+                && !(sourced && target == PythonTarget::Client)
             {
                 continue;
             }
@@ -2012,12 +2076,12 @@ impl<'a> ApiPlanner<'a> {
             .fields
             .iter()
             .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
-            .map(|(field_name, field)| {
-                if let RecordFieldVisibility::Sourced { source_expr } = &field.visibility {
+            .map(|(field_name, field)| match &field.visibility {
+                // Target code runs a targeted source, so only an untargeted one is a default.
+                RecordFieldVisibility::Sourced { source_expr } if field.target_roles.is_none() => {
                     self.build_public_sourced_field(planned_model, field_name, field, source_expr)
-                } else {
-                    self.build_field(planned_model, field_name, field)
                 }
+                _ => self.build_field(planned_model, field_name, field),
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -3016,6 +3080,17 @@ struct RenderedOperation<'a> {
     runtime_type_definition: Option<String>,
     /// Whether WIT declares the operation `async`.
     asynchronous: bool,
+    /// The request fields that each target fills from its source when the request leaves them
+    /// unset.
+    source_fills: Vec<RenderedSourceFill>,
+}
+
+#[derive(Debug)]
+struct RenderedSourceFill {
+    target: GenerationTarget,
+    attr_name: String,
+    source_call: String,
+    list: bool,
 }
 
 impl RenderedOperation<'_> {
@@ -5795,6 +5870,7 @@ fn render_endpoint_service_object_operation_body(
     service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
 ) {
+    render_source_fills(output, "        ", operation, GenerationTarget::Workflow);
     if operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
         || operation.output_direct_result
@@ -6540,6 +6616,7 @@ fn render_workflow_operations_class(
             "            raise ValueError(\"RPC options apply to calls outside a Workflow\")\n",
         );
         if service.endpoint.is_none() {
+            render_source_fills(output, "        ", operation, GenerationTarget::Workflow);
             render_inline_operation_call(
                 output,
                 service,
@@ -8043,6 +8120,12 @@ fn render_client_start_methods(
     start_line(output, target, ") -> ");
     output.push_str(&handle_annotation);
     output.push_str(":\n");
+    render_source_fills(
+        output,
+        target.body_indent(),
+        operation,
+        GenerationTarget::Client,
+    );
     render_inline_nexus_client(output, target, service);
     if operation.generic_model_types {
         start_line(output, target, "    return typing.cast(\n");
@@ -8352,6 +8435,12 @@ fn render_client_operation_method(
     start_line(output, target, ") -> ");
     output.push_str(&operation_result_annotation(operation));
     output.push_str(":\n");
+    render_source_fills(
+        output,
+        target.body_indent(),
+        operation,
+        GenerationTarget::Client,
+    );
     render_inline_nexus_client(output, target, service);
     // `output_type` names the generic model with no type arguments, so the cast adds them.
     let cast_handle = operation.generic_model_types && !operation_returns_direct(operation);
@@ -8586,6 +8675,7 @@ fn render_request_only_operation_function(
             &temporalio_workflow_operation_runtime_names(service, operation),
             body_indent,
         );
+        render_source_fills(output, body_indent, operation, GenerationTarget::Workflow);
         render_inline_nexus_client(output, target, service);
         if operation.generic_model_types {
             start_line(output, target, "    return typing.cast(\n");
@@ -8657,6 +8747,7 @@ fn render_request_only_operation_function(
     );
 
     if operation.output_direct_result {
+        render_source_fills(output, body_indent, operation, GenerationTarget::Workflow);
         render_inline_nexus_client(output, target, service);
         start_line(
             output,
@@ -8678,6 +8769,7 @@ fn render_request_only_operation_function(
         return;
     }
 
+    render_source_fills(output, body_indent, operation, GenerationTarget::Workflow);
     render_inline_nexus_client(output, target, service);
     start_line(
         output,
@@ -9541,6 +9633,45 @@ fn python_parameter_default_expr(default_kind: &PythonFieldDefaultKind) -> Optio
             Some("None".to_string())
         }
         PythonFieldDefaultKind::Expression(expr) => Some(expr.clone()),
+    }
+}
+
+/// Whether a source call reads the definition argument of its call.
+fn python_source_reads_definition(source_expr: &str) -> bool {
+    source_expr
+        .split_once('(')
+        .is_some_and(|(_, args)| python_annotation_uses_identifier(args, "definition"))
+}
+
+/// Fills each request field that the target's source fills, when the request leaves it unset. A
+/// resource method and SDK code build a request with no source.
+fn render_source_fills(
+    output: &mut String,
+    indent: &str,
+    operation: &RenderedOperation<'_>,
+    target: GenerationTarget,
+) {
+    for fill in operation
+        .source_fills
+        .iter()
+        .filter(|fill| fill.target == target)
+    {
+        output.push_str(indent);
+        if fill.list {
+            output.push_str("if not request.");
+            output.push_str(&fill.attr_name);
+        } else {
+            output.push_str("if request.");
+            output.push_str(&fill.attr_name);
+            output.push_str(" is None");
+        }
+        output.push_str(":\n");
+        output.push_str(indent);
+        output.push_str("    request = dataclasses.replace(request, ");
+        output.push_str(&fill.attr_name);
+        output.push('=');
+        output.push_str(&fill.source_call);
+        output.push_str(")\n");
     }
 }
 

@@ -4,13 +4,10 @@ import type * as common from "@temporalio/common";
 import type Long from "long";
 import type {
   StreamStatus,
-  StreamCloseStatus,
   StreamReadStart,
   StreamRef,
-  Producer,
   AppendRecordsResponse,
   AppendRecord,
-  WorkflowTaskEpoch,
   ReadRecordsResponse,
   DescribeStreamResponse,
 } from "./models";
@@ -27,44 +24,14 @@ export class Stream<BodyT = unknown> {
     public readonly bodyType?: common.TypeInfo<BodyT>,
   ) {}
 
-  public async publish(
-    producer: Producer | undefined,
-    sequence: Long | undefined,
-    records: AppendRecord<BodyT>[],
-    previousCompletedTask: WorkflowTaskEpoch | undefined,
-    failedTasks: Long[],
-    withdrawRun?: string,
-  ): Promise<AppendRecordsResponse> {
-    const request = {
-      stream: this.stream,
-      producer: producer,
-      sequence: sequence,
-      records: records,
-      previousCompletedTask: previousCompletedTask,
-      failedTasks: failedTasks,
-      withdrawRun: withdrawRun,
-    };
+  public async publish(records: AppendRecord<BodyT>[]): Promise<AppendRecordsResponse> {
+    const request = { stream: this.stream, records: records };
     const handle = await appendRecords(request);
     return await handle.result();
   }
 
-  public async close(
-    producer: Producer | undefined,
-    result: common.Payload | undefined,
-    failure: Error | undefined,
-    status: StreamCloseStatus | undefined,
-    previousCompletedTask: WorkflowTaskEpoch | undefined,
-    failedTasks: Long[],
-  ): Promise<void> {
-    const request = {
-      stream: this.stream,
-      producer: producer,
-      result: result,
-      failure: failure,
-      previousCompletedTask: previousCompletedTask,
-      failedTasks: failedTasks,
-      status: status,
-    };
+  public async close(result?: common.Payload, failure?: Error): Promise<void> {
+    const request = { stream: this.stream, result: result, failure: failure };
     const handle = await closeStream(request);
     await handle.result();
   }

@@ -715,7 +715,13 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(&self.model_field_type(model, field_name, field));
             output.push(' ');
             output.push_str(&field_property_name(field));
-            output.push_str(" { get; init; }\n");
+            output.push_str(" { get; init; }");
+            if let Some(empty) = self.api_omitted_empty_value(field) {
+                output.push_str(" = ");
+                output.push_str(&empty);
+                output.push(';');
+            }
+            output.push('\n');
         }
         for (_field_name, field, _source_expr) in model.sourced_fields() {
             render_field_xml_doc(output, "    ", field);
@@ -1015,7 +1021,7 @@ impl<'a> ApiPlanner<'a> {
     ) {
         let required_fields = model
             .model_fields()
-            .filter(|(_, field)| field.required)
+            .filter(|(_, field)| dotnet_constructor_field(field))
             .collect::<Vec<_>>();
         let sourced_fields = model.sourced_fields().collect::<Vec<_>>();
         if required_fields.is_empty() && sourced_fields.is_empty() {
@@ -1623,6 +1629,26 @@ impl<'a> ApiPlanner<'a> {
                 self.high_level_value_type(value)
             ),
             value => self.high_level_value_type(value),
+        }
+    }
+
+    /// The value of a required field that the API omits, which no constructor sets. Only an empty
+    /// list or map can be unset.
+    fn api_omitted_empty_value(&self, field: &RecordFieldSpec<PlannedFamily>) -> Option<String> {
+        if dotnet_constructor_field(field) || !field.required {
+            return None;
+        }
+        match &field.field_type {
+            PlannedType::List(value) => Some(format!(
+                "System.Array.Empty<{}>()",
+                self.high_level_value_type(value)
+            )),
+            PlannedType::Map(key, value) => Some(format!(
+                "new System.Collections.Generic.Dictionary<{}, {}>()",
+                self.high_level_value_type(key),
+                self.high_level_value_type(value)
+            )),
+            _ => None,
         }
     }
 
@@ -3166,6 +3192,13 @@ fn render_definition_parameter(
             .join(", "),
     );
     output.push_str("> definition");
+}
+
+/// Whether the model constructor takes the field. A required field that the API omits stays out.
+pub(in crate::generator) fn dotnet_constructor_field(
+    field: &RecordFieldSpec<PlannedFamily>,
+) -> bool {
+    field.required && field.visibility != crate::spec::RecordFieldVisibility::ApiOmitted
 }
 
 fn render_parameter_separator(output: &mut String, has_parameters: &mut bool) {

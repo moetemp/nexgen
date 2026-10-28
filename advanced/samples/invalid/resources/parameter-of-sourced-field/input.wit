@@ -1,0 +1,23 @@
+package test:parameter-of-sourced-field@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  record cancel-job-request {
+    id: string,
+    /// @nexus.source target="workflow" python="workflow_reason()" typescript="workflowReason()"
+    ///   go="WorkflowReason()" dotnet="Context.WorkflowReason()"
+    reason: option<string>,
+  }
+
+  resource job {
+    constructor(id: string);
+
+    // The source fills `reason`, so the parameter would have no effect.
+    /// @nexus.operation "cancel-job"
+    cancel: func(reason: option<string>);
+  }
+
+  cancel-job: func(request: cancel-job-request);
+}

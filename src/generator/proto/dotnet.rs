@@ -762,7 +762,7 @@ fn render_model_from_wire_method(
     }
     let required_fields = model
         .model_fields()
-        .filter(|(_, field)| field.required)
+        .filter(|(_, field)| crate::generator::dotnet::dotnet_constructor_field(field))
         .collect::<Vec<_>>();
     output.push_str("        return new ");
     output.push_str(&type_name);
@@ -800,7 +800,8 @@ fn render_model_from_wire_method(
         .fields
         .iter()
         .filter(|(_, field)| {
-            !field.required || matches!(field.visibility, RecordFieldVisibility::Sourced { .. })
+            !crate::generator::dotnet::dotnet_constructor_field(field)
+                || matches!(field.visibility, RecordFieldVisibility::Sourced { .. })
         })
         .filter(|(_, field)| {
             !matches!(

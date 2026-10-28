@@ -62,6 +62,22 @@ pub(in crate::generator) fn support_reference(name: &str) -> String {
 
 /// The parser validates this as a call rooted in the support package; keep
 /// its authored arguments verbatim when qualifying the callee.
+/// The fields of a model. Target code runs a targeted source, so the model has that field as a
+/// plain one.
+pub(in crate::generator) fn typescript_model_fields(
+    record: &RecordSpec<PlannedFamily>,
+) -> impl Iterator<Item = (&str, &RecordFieldSpec<PlannedFamily>)> {
+    record
+        .fields
+        .iter()
+        .filter(|(_, field)| match field.visibility {
+            RecordFieldVisibility::Public | RecordFieldVisibility::ApiOmitted => true,
+            RecordFieldVisibility::Sourced { .. } => field.target_roles.is_some(),
+            RecordFieldVisibility::Omitted => false,
+        })
+        .map(|(name, field)| (name.as_str(), field))
+}
+
 fn sourced_support_call(source_expr: &str) -> String {
     format!("support.{source_expr}")
 }
@@ -446,16 +462,29 @@ impl<'a> ApiPlanner<'a> {
                             .fields
                             .values()
                             .filter(|field| field.visibility == RecordFieldVisibility::ApiOmitted)
-                            .map(|field| field.name.clone())
+                            .map(|field| typescript_generated_field_name(&field.name))
                             .collect::<Vec<_>>();
-                        fields.extend(record.sourced_fields().map(|(name, _, _)| name.to_string()));
+                        fields.extend(
+                            record
+                                .sourced_fields()
+                                .map(|(_, field, _)| typescript_generated_field_name(&field.name)),
+                        );
                         fields.sort();
                         fields.dedup();
                         fields
                     })
                     .unwrap_or_default(),
-                sourced_fields: input_model
-                    .map(|model| model.sourced_fields.clone())
+                sourced_fields: input_full_name
+                    .and_then(|name| self.api_plan.record(name))
+                    .map(|record| {
+                        record
+                            .sourced_fields()
+                            .map(|(field_name, _, source_expr)| RenderedRequestSource {
+                                name: typescript_generated_field_name(field_name),
+                                source_expr: sourced_support_call(source_expr),
+                            })
+                            .collect()
+                    })
                     .unwrap_or_default(),
                 transfer_type_converter: input_conversion
                     .wire_function_names
@@ -696,13 +725,13 @@ impl<'a> ApiPlanner<'a> {
             },
         );
 
-        let fields = planned_model
-            .model_fields()
+        let fields = typescript_model_fields(&planned_model)
             .map(|(field_name, field)| self.build_field(&planned_model, field_name, field))
             .collect();
 
         let sourced_fields = planned_model
             .sourced_fields()
+            .filter(|(_, field, _)| field.target_roles.is_none())
             .map(|(field_name, field, source_expr)| {
                 self.build_sourced_field(field_name, field, source_expr)
             })
@@ -1296,7 +1325,6 @@ impl<'a> ApiPlanner<'a> {
                     format!("Record<string, {}>", value_type.annotation),
                 ),
                 doc,
-                source_expr: default_source_expr,
                 visible: true,
                 from_wire_expr: map_value_from_wire_expr(
                     &value_type,
@@ -1320,7 +1348,6 @@ impl<'a> ApiPlanner<'a> {
                     typescript_array_annotation(&resolved_type.annotation),
                 ),
                 doc,
-                source_expr: default_source_expr,
                 visible: true,
                 from_wire_expr: format!(
                     "{} ?? []",
@@ -1334,7 +1361,6 @@ impl<'a> ApiPlanner<'a> {
             name: field_name.clone(),
             annotation: Self::typescript_field_annotation(field, resolved_type.annotation.clone()),
             doc,
-            source_expr: default_source_expr,
             visible: true,
             from_wire_expr: required_from_wire_expr(
                 &resolved_type,
@@ -3192,7 +3218,8 @@ struct RenderedOperationInput {
     type_parameters: Vec<RenderedTypeParameter>,
     annotation: String,
     api_omitted_fields: Vec<String>,
-    sourced_fields: Vec<RenderedSourcedField>,
+    /// The request fields that the operation function fills from their sources.
+    sourced_fields: Vec<RenderedRequestSource>,
     transfer_type_converter: Option<String>,
 }
 
@@ -3281,11 +3308,16 @@ pub(in crate::generator) struct RenderedFlattenedField {
 }
 
 #[derive(Debug, Clone)]
+struct RenderedRequestSource {
+    name: String,
+    source_expr: String,
+}
+
+#[derive(Debug, Clone)]
 pub(in crate::generator) struct RenderedSourcedField {
     pub(in crate::generator) name: String,
     annotation: String,
     doc: Option<String>,
-    source_expr: String,
     visible: bool,
     pub(in crate::generator) from_wire_expr: String,
     pub(in crate::generator) to_wire_expr: String,

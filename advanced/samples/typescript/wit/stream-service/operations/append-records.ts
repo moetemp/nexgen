@@ -3,6 +3,27 @@
 import * as workflow from "@temporalio/workflow";
 import { streamService } from "../services";
 import type { AppendRecordsResponse, AppendRecordsRequest } from "../models";
+import * as support from "../../../support/temporal_model_converters";
+
+type AppendRecordsInput<BodyT> =
+  AppendRecordsRequest<BodyT> extends infer Input
+    ? Input extends unknown
+      ? Omit<
+          Input,
+          | "failedTasks"
+          | "previousCompletedTask"
+          | "producer"
+          | "sequence"
+          | "withdrawRun"
+        > & {
+          failedTasks?: never;
+          previousCompletedTask?: never;
+          producer?: never;
+          sequence?: never;
+          withdrawRun?: never;
+        }
+      : never
+    : never;
 
 /**
  * Append one batch. Workflow code makes the call from a Local Activity.
@@ -10,8 +31,12 @@ import type { AppendRecordsResponse, AppendRecordsRequest } from "../models";
  * @param request - Request for the operation.
  */
 export async function appendRecords<BodyT>(
-  request: AppendRecordsRequest<BodyT>,
+  requestInput: AppendRecordsInput<BodyT>,
 ): Promise<workflow.NexusOperationHandle<AppendRecordsResponse>> {
+  const request = {
+    ...requestInput,
+    producer: support.workflowProducer(),
+  } as AppendRecordsRequest<BodyT>;
   const client = workflow.createNexusServiceClient({
     service: streamService,
     endpoint: "__temporal_system",

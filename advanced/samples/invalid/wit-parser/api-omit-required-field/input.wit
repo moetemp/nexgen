@@ -1,0 +1,12 @@
+package test:api-omit-required-field;
+
+world system { export models; }
+
+interface models {
+  type placeholder = string;
+
+  record request {
+    /// @nexus.api-omit target="workflow"
+    id: string,
+  }
+}

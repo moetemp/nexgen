@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import collections.abc
+import dataclasses
 import typing
 import abc
 import datetime
@@ -17,13 +18,10 @@ from .models import (
     CreateStreamResult,
     DescribeStreamRequest,
     DescribeStreamResponse,
-    Producer,
     ReadRecordsRequest,
     ReadRecordsResponse,
-    StreamCloseStatus,
     StreamReadStart,
     StreamRef,
-    WorkflowTaskEpoch,
 )
 from ._resources import Stream
 from ._resources.stream import bind_stream_operations
@@ -138,30 +136,21 @@ class StreamServiceClientExtension(abc.ABC):
         *,
         stream_id: str,
         retention: datetime.timedelta | None = None,
-        withdraw_run: str | None = None,
-        owner: Producer | None = None,
         ref: StreamRef | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> Stream[BodyT]:
         """
         Args:
-            stream_id: Required on Redis and memory. On native, empty asks the server
-                for an id.
+            stream_id: The id of the Stream. Required, and never empty.
             retention: The age after which a Record is dropped. Empty is the Store
                 default.
-            withdraw_run: Retry run only. The previous run, whose Records this
-                withdraws.
-            owner: The Workflow run that owns the Stream. The Workflow transport sets
-                it.
             ref: The Stream's ref, with the owner fields.
         """
         (body_type,) = _support.definition_type_arguments(definition)
         request = CreateStreamRequest(
             stream_id=stream_id,
             retention=retention,
-            withdraw_run=withdraw_run,
-            owner=owner,
             ref=ref,
         )
         return await self._stream_service_create_stream(
@@ -175,6 +164,17 @@ class StreamServiceClientExtension(abc.ABC):
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> AppendRecordsResponse:
+        if not request.failed_tasks:
+            request = dataclasses.replace(
+                request, failed_tasks=_support.local_activity_failed_tasks()
+            )
+        if request.producer is None:
+            request = dataclasses.replace(request, producer=_support.client_producer())
+        if request.previous_completed_task is None:
+            request = dataclasses.replace(
+                request,
+                previous_completed_task=_support.local_activity_previous_completed_task(),
+            )
         nexus_client = self._create_nexus_client(
             service="temporal.api.streamservice.v1.StreamService",
             endpoint="__temporal_system",
@@ -193,35 +193,16 @@ class StreamServiceClientExtension(abc.ABC):
         *,
         stream: StreamRef,
         records: list[AppendRecord[BodyT]] | None = None,
-        failed_tasks: list[int] | None = None,
-        producer: Producer | None = None,
-        sequence: int | None = None,
-        previous_completed_task: WorkflowTaskEpoch | None = None,
-        withdraw_run: str | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> AppendRecordsResponse:
-        """Append one batch. Workflow code makes the call from a Local Activity.
-
-        Args:
-            failed_tasks: Local Activity only. The run's failed or timed out Workflow
-                Tasks.
-            producer: Required outside a Workflow. In a Workflow the transport sets it.
-            sequence: The batch number in this epoch, 1 or more. It is part of the
-                dedupe key.
-            previous_completed_task: Local Activity only. The run's last completed
-                Workflow Task.
-            withdraw_run: Retry run only. The previous run, whose Records this
-                withdraws.
-        """
+        """Append one batch. Workflow code makes the call from a Local Activity."""
         request = AppendRecordsRequest(
             stream=stream,
             records=records or [],
-            failed_tasks=failed_tasks or [],
-            producer=producer,
-            sequence=sequence,
-            previous_completed_task=previous_completed_task,
-            withdraw_run=withdraw_run,
+            failed_tasks=_support.local_activity_failed_tasks(),
+            producer=_support.client_producer(),
+            previous_completed_task=_support.local_activity_previous_completed_task(),
         )
         return await self._stream_service_append_records(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
@@ -234,6 +215,8 @@ class StreamServiceClientExtension(abc.ABC):
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseStreamResponse:
+        if request.producer is None:
+            request = dataclasses.replace(request, producer=_support.client_producer())
         nexus_client = self._create_nexus_client(
             service="temporal.api.streamservice.v1.StreamService",
             endpoint="__temporal_system",
@@ -251,31 +234,16 @@ class StreamServiceClientExtension(abc.ABC):
         self,
         *,
         stream: StreamRef,
-        failed_tasks: list[int] | None = None,
-        producer: Producer | None = None,
         result: typing.Any | None = None,
         failure: BaseException | None = None,
-        status: StreamCloseStatus | None = None,
-        previous_completed_task: WorkflowTaskEpoch | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseStreamResponse:
-        """
-        Args:
-            failed_tasks: Workflow only. The run's failed or timed out Workflow Tasks.
-            status: Empty is completed, or failed with a failure. A caller may set
-                canceled.
-            previous_completed_task: Workflow only. The previous completed Workflow Task
-                of the run.
-        """
         request = CloseStreamRequest(
             stream=stream,
-            failed_tasks=failed_tasks or [],
-            producer=producer,
+            producer=_support.client_producer(),
             result=result,
             failure=failure,
-            status=status,
-            previous_completed_task=previous_completed_task,
         )
         return await self._stream_service_close_stream(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout

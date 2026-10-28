@@ -674,6 +674,12 @@ pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub poll_next: F::Text,
     /// The only target whose API gets the poll. Without it, every target gets the poll.
     pub poll_target: Option<GenerationTarget>,
+    /// The key of the response's list field whose items the poll yields (`items=`). Without
+    /// it, the poll yields each response.
+    pub poll_items: Option<String>,
+    /// The support helper that turns a page's request and one of its items into the request that
+    /// resumes after that item (`resume=`).
+    pub poll_resume: F::Text,
     /// Whether the operation can run for a long time, so a client can start it and wait later.
     pub asynchronous: bool,
     pub data: F::OperationData,
@@ -714,6 +720,8 @@ impl<F: TypeFamily> OperationSpec<F> {
             serialization_context: map.map_text(self.serialization_context),
             poll_next: map.map_text(self.poll_next),
             poll_target: self.poll_target,
+            poll_items: self.poll_items,
+            poll_resume: map.map_text(self.poll_resume),
             asynchronous: self.asynchronous,
             data,
         }

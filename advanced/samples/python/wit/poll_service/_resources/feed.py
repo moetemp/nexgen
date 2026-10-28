@@ -10,8 +10,10 @@ import datetime
 from ..models import (
     ListWorkflowsRequest,
     ListWorkflowsResponse,
+    WorkflowExecutionInfo,
 )
 import temporal_support as _support
+from .._poll import PollIterator
 
 
 @dataclasses.dataclass
@@ -48,30 +50,35 @@ class Feed:
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
         )
 
-    async def iter_read(
+    def iter_read(
         self,
         page_size: int | None = None,
         *,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
-    ) -> collections.abc.AsyncIterator[ListWorkflowsResponse]:
-        """Yield each response of ``read``. The poll helper gives the next request, and the
-        iteration stops when it gives ``None``.
+    ) -> PollIterator[ListWorkflowsRequest, WorkflowExecutionInfo]:
+        """Yield each item that ``read`` reads, page by page. The iterator's
+        ``next_request`` resumes after the last item that it yielded.
         """
         request = ListWorkflowsRequest(
             namespace=self.namespace,
             page_size=page_size,
             query=self.query,
         )
-        while True:
+
+        async def read(
+            request: ListWorkflowsRequest,
+        ) -> tuple[
+            ListWorkflowsRequest | None, collections.abc.Sequence[WorkflowExecutionInfo]
+        ]:
             response = await self._ops()._feed_service_list_feed(
                 request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
             )
-            yield response
-            next_request = _support.next_page_request(request, response)
-            if next_request is None:
-                return
-            request = next_request
+            return _support.next_page_request(
+                request, response
+            ), response.executions or []
+
+        return PollIterator(request, read, None)
 
 
 class _FeedServiceOperations(typing.Protocol):

@@ -17,10 +17,69 @@ interface page-service {
     query: option<string>,
   }
 
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution"
+  record workflow-execution {
+    workflow-id: string,
+    run-id: string,
+  }
+
+  /// @nexus.proto "temporal.api.workflow.v1.WorkflowExecutionInfo"
+  record workflow-execution-info {
+    execution: workflow-execution,
+    parent-execution: option<workflow-execution>,
+    /// @nexus.omit
+    %type: placeholder,
+    /// @nexus.omit
+    start-time: placeholder,
+    /// @nexus.omit
+    close-time: placeholder,
+    /// @nexus.omit
+    status: placeholder,
+    /// @nexus.omit
+    history-length: placeholder,
+    /// @nexus.omit
+    parent-namespace-id: placeholder,
+    /// @nexus.omit
+    execution-time: placeholder,
+    /// @nexus.omit
+    memo: placeholder,
+    /// @nexus.omit
+    search-attributes: placeholder,
+    /// @nexus.omit
+    auto-reset-points: placeholder,
+    /// @nexus.omit
+    task-queue: placeholder,
+    /// @nexus.omit
+    state-transition-count: placeholder,
+    /// @nexus.omit
+    history-size-bytes: placeholder,
+    /// @nexus.omit
+    most-recent-worker-version-stamp: placeholder,
+    /// @nexus.omit
+    execution-duration: placeholder,
+    /// @nexus.omit
+    root-execution: placeholder,
+    /// @nexus.omit
+    assigned-build-id: placeholder,
+    /// @nexus.omit
+    inherited-build-id: placeholder,
+    /// @nexus.omit
+    first-run-id: placeholder,
+    /// @nexus.omit
+    versioning-info: placeholder,
+    /// @nexus.omit
+    worker-deployment-name: placeholder,
+    /// @nexus.omit
+    priority: placeholder,
+    /// @nexus.omit
+    external-payload-size-bytes: placeholder,
+    /// @nexus.omit
+    external-payload-count: placeholder,
+  }
+
   /// @nexus.proto "temporal.api.workflowservice.v1.ListWorkflowExecutionsResponse"
   record list-workflows-response {
-    /// @nexus.omit
-    executions: placeholder,
+    executions: list<workflow-execution-info>,
     next-page-token: option<list<u8>>,
   }
 
@@ -58,6 +117,6 @@ interface feed-service {
 
   open-feed: func(request: open-feed-request) -> feed-result;
 
-  /// @nexus.poll python="next_page_request"
+  /// @nexus.poll python="next_page_request" items="executions"
   list-feed: func(request: list-workflows-request) -> list-workflows-response;
 }

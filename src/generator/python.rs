@@ -711,6 +711,21 @@ impl<'a> ApiPlanner<'a> {
                 GeneratedFileOrigin::fixed("generated Python resources package initializer"),
             )?;
         }
+        if services
+            .iter()
+            .flat_map(|service| &service.operations)
+            .any(|operation| operation.poll_items.is_some())
+        {
+            let mut source = String::new();
+            render_generated_file_header(&mut source);
+            source.push_str("\nimport collections.abc\nimport typing\n\n\n");
+            source.push_str(PYTHON_POLL_ITERATOR);
+            files.insert(
+                "_poll.py",
+                source,
+                GeneratedFileOrigin::fixed("generated Python poll iterator"),
+            )?;
+        }
         if !services.is_empty() {
             files.insert(
                 "services.py",
@@ -899,6 +914,7 @@ impl<'a> ApiPlanner<'a> {
             render_named_python_import(&mut output, "._resources", &used_resource_names);
         }
         render_support_import(&mut output, &body, self.support_package, false);
+        render_poll_iterator_import(&mut output, &body, "._poll");
         render_definition_type_checking_imports(
             &mut output,
             &body,
@@ -1095,6 +1111,7 @@ impl<'a> ApiPlanner<'a> {
             render_named_python_import(&mut output, ".", &used_resource_names);
         }
         render_support_import(&mut output, &body, support_package, false);
+        render_poll_iterator_import(&mut output, &body, ".._poll");
         render_definition_type_checking_imports(&mut output, &body, resource.definition.value());
         if !body.is_empty() {
             output.push('\n');
@@ -1769,24 +1786,24 @@ impl<'a> ApiPlanner<'a> {
             return;
         };
         let method_name = python_field_name(&method.name);
-        output.push_str("\n    async def ");
+        let page_annotation = if targets.workflow {
+            temporalio_workflow_type_annotation(service, &operation.output_annotation)
+        } else {
+            operation.output_annotation.clone()
+        };
+        let (keyword, annotation) = operation.poll_iterator_signature(&page_annotation);
+        output.push_str("\n    ");
+        output.push_str(keyword);
         output.push_str(&poll_function_name(&method_name));
         output.push_str("(\n");
         self.render_resource_method_params(output, method, targets.client);
-        output.push_str("    ) -> collections.abc.AsyncIterator[");
-        if targets.workflow {
-            output.push_str(&temporalio_workflow_type_annotation(
-                service,
-                &operation.output_annotation,
-            ));
-        } else {
-            output.push_str(&operation.output_annotation);
-        }
-        output.push_str("]:\n");
+        output.push_str("    ) -> ");
+        output.push_str(&annotation);
+        output.push_str(":\n");
         render_python_docstring(
             output,
             "        ",
-            Some(&poll_function_summary(&method_name)),
+            Some(&poll_function_summary(&method_name, operation)),
             &[],
             None,
             false,
@@ -1814,7 +1831,7 @@ impl<'a> ApiPlanner<'a> {
                 "response = await handle".to_string(),
             ]
         };
-        render_poll_loop(output, "        ", &response, next_expr);
+        render_poll_body(output, "        ", &response, next_expr, operation);
     }
 
     fn python_resource_method_result_annotation(&self, method: &PlannedResourceMethod) -> String {
@@ -2157,6 +2174,27 @@ impl<'a> ApiPlanner<'a> {
                 });
             }
         }
+        let poll_items = match (&operation.poll_items, operation.output_type()) {
+            (Some(key), Some(PlannedType::Record(record))) => {
+                let item = self
+                    .api_plan
+                    .record(&record.full_name)
+                    .and_then(|record| record.fields.get(key))
+                    .and_then(|field| match &field.field_type {
+                        PlannedType::List(item) => Some(item.as_ref()),
+                        _ => None,
+                    });
+                match (item, self.model_field_attr(&record.full_name, key)) {
+                    (Some(item), Some(attr)) => Some((
+                        attr,
+                        resolve_python_value_type(self.api_plan, &self.external_models, item)?
+                            .annotation,
+                    )),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
         let descriptor_output_ref = match operation.output_type() {
             Some(PlannedType::Record(record)) => python_erased_generic_record_annotation(
                 &output_ref,
@@ -2201,6 +2239,11 @@ impl<'a> ApiPlanner<'a> {
                 .map(|helper| format!("_support.{helper}")),
             poll_next_expr,
             poll_target: operation.poll_target,
+            poll_items,
+            poll_resume_expr: operation
+                .poll_resume
+                .value()
+                .map(|helper| format!("_support.{helper}")),
             output_resource_return,
             output_direct_result,
             output_none: operation.output_type().is_none(),
@@ -3594,6 +3637,10 @@ struct RenderedOperation<'a> {
     /// The support helper that gives the next request of a poll.
     poll_next_expr: Option<String>,
     poll_target: Option<GenerationTarget>,
+    /// The response attribute whose items the poll yields, with the item's annotation.
+    poll_items: Option<(String, String)>,
+    /// The support helper that resumes a read after one item.
+    poll_resume_expr: Option<String>,
     output_resource_return: Option<PlannedOperationResourceReturn>,
     output_direct_result: bool,
     output_none: bool,
@@ -3706,6 +3753,28 @@ impl RenderedOperation<'_> {
             output.push_str(&argument);
             output.push_str(",\n");
         }
+    }
+
+    /// The keyword and the return annotation of a poll iterator. An item poll returns a
+    /// `PollIterator` at once, and another poll is an async generator of pages.
+    fn poll_iterator_signature(&self, page_annotation: &str) -> (&'static str, String) {
+        match &self.poll_items {
+            Some((_, item)) => (
+                "def ",
+                format!("PollIterator[{}, {item}]", self.poll_request_annotation()),
+            ),
+            None => (
+                "async def ",
+                format!("collections.abc.AsyncIterator[{page_annotation}]"),
+            ),
+        }
+    }
+
+    fn poll_request_annotation(&self) -> &str {
+        self.unpacked_input
+            .as_ref()
+            .map(|input| input.model_name.as_str())
+            .unwrap_or_else(|| operation_input_annotation(self))
     }
 
     /// The poll helper, when the target gets the poll.
@@ -5567,6 +5636,7 @@ fn render_service_module(
         }
     }
     render_support_import(&mut output, &endpoint_client_body, support_package, false);
+    render_poll_iterator_import(&mut output, &endpoint_client_body, "._poll");
     render_definition_type_checking_imports(
         &mut output,
         &endpoint_client_body,
@@ -5719,6 +5789,7 @@ fn render_operation_module(
         render_named_python_import(&mut output, ".._resources", &used_resource_names);
     }
     render_support_import(&mut output, &body, support_package, false);
+    render_poll_iterator_import(&mut output, &body, ".._poll");
     render_definition_type_checking_imports(
         &mut output,
         &body,
@@ -6332,7 +6403,11 @@ fn render_endpoint_service_object_poll_method(
     operation: &RenderedOperation<'_>,
     next_expr: &str,
 ) {
-    output.push_str("    async def ");
+    let (keyword, annotation) = operation.poll_iterator_signature(
+        &temporalio_workflow_type_annotation(service, &operation.output_annotation),
+    );
+    output.push_str("    ");
+    output.push_str(keyword);
     output.push_str(&poll_function_name(&operation.attr_name));
     output.push_str("(\n");
     output.push_str("        self,\n");
@@ -6359,16 +6434,13 @@ fn render_endpoint_service_object_poll_method(
         output.push_str(operation_input_annotation(operation));
         output.push_str(",\n");
     }
-    output.push_str("    ) -> collections.abc.AsyncIterator[");
-    output.push_str(&temporalio_workflow_type_annotation(
-        service,
-        &operation.output_annotation,
-    ));
-    output.push_str("]:\n");
+    output.push_str("    ) -> ");
+    output.push_str(&annotation);
+    output.push_str(":\n");
     render_python_docstring(
         output,
         "        ",
-        Some(&poll_function_summary(&operation.attr_name)),
+        Some(&poll_function_summary(&operation.attr_name, operation)),
         &[],
         None,
         false,
@@ -6391,7 +6463,7 @@ fn render_endpoint_service_object_poll_method(
         nexus_client_start_line("self._nexus_client", operation, ""),
         "response = await handle".to_string(),
     ];
-    render_poll_loop(output, "        ", &response, next_expr);
+    render_poll_body(output, "        ", &response, next_expr, operation);
 }
 
 fn render_endpoint_service_object_operation_method(
@@ -6653,6 +6725,67 @@ fn validate_client_names(services: &[RenderedService<'_>]) -> Result<()> {
     }
     Ok(())
 }
+
+/// The iterator of a poll with `items=`. It reads a page when it runs out of items, and keeps the
+/// request that resumes after the last item that it yielded.
+const PYTHON_POLL_ITERATOR: &str = r#"_PollRequestT = typing.TypeVar("_PollRequestT")
+_PollItemT = typing.TypeVar("_PollItemT")
+
+
+@typing.final
+class PollIterator(typing.Generic[_PollRequestT, _PollItemT]):
+    """Yields each item that a poll reads, page by page.
+
+    ``next_request`` resumes after the last item that the iterator yielded. It is ``None``
+    after the last page.
+    """
+
+    def __init__(
+        self,
+        request: _PollRequestT,
+        read: collections.abc.Callable[
+            [_PollRequestT],
+            collections.abc.Awaitable[
+                tuple[_PollRequestT | None, collections.abc.Sequence[_PollItemT]]
+            ],
+        ],
+        resume: collections.abc.Callable[[_PollRequestT, _PollItemT], _PollRequestT]
+        | None,
+    ) -> None:
+        self.next_request: _PollRequestT | None = request
+        self._read: collections.abc.Callable[
+            [_PollRequestT],
+            collections.abc.Awaitable[
+                tuple[_PollRequestT | None, collections.abc.Sequence[_PollItemT]]
+            ],
+        ] = read
+        self._resume: (
+            collections.abc.Callable[[_PollRequestT, _PollItemT], _PollRequestT] | None
+        ) = resume
+        self._page: list[_PollItemT] = []
+        self._page_request: _PollRequestT = request
+        self._page_next: _PollRequestT | None = None
+
+    def __aiter__(self) -> PollIterator[_PollRequestT, _PollItemT]:
+        return self
+
+    async def __anext__(self) -> _PollItemT:
+        while not self._page:
+            if self.next_request is None:
+                raise StopAsyncIteration
+            self._page_request = self.next_request
+            self._page_next, items = await self._read(self._page_request)
+            self._page = list(items)
+            if not self._page:
+                self.next_request = self._page_next
+        item = self._page.pop(0)
+        # After a page's last item, the next read starts where the page helper says.
+        if not self._page:
+            self.next_request = self._page_next
+        elif self._resume is not None:
+            self.next_request = self._resume(self._page_request, item)
+        return item
+"#;
 
 /// The Nexus client that a client extension starts operations with. It has the
 /// `start_operation` of the Workflow Nexus client.
@@ -8690,7 +8823,18 @@ impl PythonTarget {
 
 /// Starts the `def` line of an operation, with `self` for a method.
 fn render_operation_signature_start(output: &mut String, target: PythonTarget, name: &str) {
-    start_line(output, target, "async def ");
+    render_operation_signature_start_with(output, target, name, "async def ");
+}
+
+/// Starts a function of the target with `keyword`, such as `def ` for a function that returns an
+/// iterator at once.
+fn render_operation_signature_start_with(
+    output: &mut String,
+    target: PythonTarget,
+    name: &str,
+    keyword: &str,
+) {
+    start_line(output, target, keyword);
     output.push_str(name);
     output.push_str("(\n");
     if target == PythonTarget::Client {
@@ -8889,7 +9033,13 @@ fn poll_function_name(name: &str) -> String {
     format!("iter_{name}")
 }
 
-fn poll_function_summary(name: &str) -> String {
+fn poll_function_summary(name: &str, operation: &RenderedOperation<'_>) -> String {
+    if operation.poll_items.is_some() {
+        return format!(
+            "Yield each item that ``{name}`` reads, page by page. The iterator's \
+             ``next_request`` resumes after the last item that it yielded."
+        );
+    }
     format!(
         "Yield each response of ``{name}``. The poll helper gives the next request, and the \
          iteration stops when it gives ``None``."
@@ -8905,7 +9055,19 @@ fn render_operation_poll_function(
     next_expr: &str,
 ) {
     let body_indent = target.body_indent();
-    render_operation_signature_start(output, target, &poll_function_name(&operation.attr_name));
+    let page_annotation = match target {
+        PythonTarget::Workflow => {
+            temporalio_workflow_type_annotation(service, &operation.output_annotation)
+        }
+        PythonTarget::Client => operation.output_annotation.clone(),
+    };
+    let (keyword, annotation) = operation.poll_iterator_signature(&page_annotation);
+    render_operation_signature_start_with(
+        output,
+        target,
+        &poll_function_name(&operation.attr_name),
+        keyword,
+    );
     operation.render_public_runtime_type_parameters(output, &format!("{}    ", target.indent()));
     let unpacked_input = operation.target_unpacked_input(target);
     if let Some(unpacked_input) = unpacked_input {
@@ -8934,19 +9096,13 @@ fn render_operation_poll_function(
         let keyword_only = unpacked_input.is_some_and(|input| !input.parameters.is_empty());
         render_rpc_option_parameters(output, "        ", keyword_only);
     }
-    start_line(output, target, ") -> collections.abc.AsyncIterator[");
-    match target {
-        PythonTarget::Workflow => output.push_str(&temporalio_workflow_type_annotation(
-            service,
-            &operation.output_annotation,
-        )),
-        PythonTarget::Client => output.push_str(&operation.output_annotation),
-    }
-    output.push_str("]:\n");
+    start_line(output, target, ") -> ");
+    output.push_str(&annotation);
+    output.push_str(":\n");
     render_python_docstring(
         output,
         body_indent,
-        Some(&poll_function_summary(&operation.attr_name)),
+        Some(&poll_function_summary(&operation.attr_name, operation)),
         &[],
         None,
         false,
@@ -8983,7 +9139,46 @@ fn render_operation_poll_function(
         ],
         PythonTarget::Client => vec![format!("response = await {call}")],
     };
-    render_poll_loop(output, body_indent, &response, next_expr);
+    render_poll_body(output, body_indent, &response, next_expr, operation);
+}
+
+/// The body of a poll iterator, after the first request. `response` is the code that gets the
+/// response to `request`. An item poll hands a page reader to a `PollIterator`.
+fn render_poll_body(
+    output: &mut String,
+    indent: &str,
+    response: &[String],
+    next_expr: &str,
+    operation: &RenderedOperation<'_>,
+) {
+    let Some((items_attr, item_annotation)) = &operation.poll_items else {
+        render_poll_loop(output, indent, response, next_expr);
+        return;
+    };
+    let request = operation.poll_request_annotation();
+    output.push_str(&format!(
+        "\n{indent}async def read(\n{indent}    request: {request},\n{indent}) -> "
+    ));
+    output.push_str(&format!(
+        "tuple[{request} | None, collections.abc.Sequence[{item_annotation}]]:\n"
+    ));
+    for line in response {
+        output.push_str(&format!("{indent}    {line}\n"));
+    }
+    output.push_str(&format!(
+        "{indent}    return {next_expr}(request, response), response.{items_attr} or []\n\n"
+    ));
+    output.push_str(&format!(
+        "{indent}return PollIterator(request, read, {})\n",
+        operation.poll_resume_expr.as_deref().unwrap_or("None")
+    ));
+}
+
+/// Imports the package's `PollIterator`, when the body has an item poll.
+fn render_poll_iterator_import(output: &mut String, body: &str, module: &str) {
+    if body.contains("PollIterator(") {
+        output.push_str(&format!("from {module} import PollIterator\n"));
+    }
 }
 
 /// The loop of a poll iterator, after the first request. `response` is the code that gets the

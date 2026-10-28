@@ -21,11 +21,13 @@ from .models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamReadStart,
+    StreamRecord,
     StreamRef,
     StreamStatus,
 )
 from ._resources import Stream
 import temporal_support as _support
+from ._poll import PollIterator
 
 if typing.TYPE_CHECKING:
     import temporal_support
@@ -323,7 +325,7 @@ class StreamServiceClientExtension(abc.ABC):
             request, body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
         )
 
-    async def iter_read_records(
+    def iter_read_records(
         self,
         body_type: type[BodyT],
         *,
@@ -337,9 +339,9 @@ class StreamServiceClientExtension(abc.ABC):
         max_bytes: int | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
-    ) -> collections.abc.AsyncIterator[ReadRecordsResponse[BodyT]]:
-        """Yield each response of ``read_records``. The poll helper gives the next request,
-        and the iteration stops when it gives ``None``.
+    ) -> PollIterator[ReadRecordsRequest, StreamRecord[BodyT]]:
+        """Yield each item that ``read_records`` reads, page by page. The iterator's
+        ``next_request`` resumes after the last item that it yielded.
         """
         request = ReadRecordsRequest(
             stream=stream,
@@ -351,15 +353,18 @@ class StreamServiceClientExtension(abc.ABC):
             last=last,
             max_bytes=max_bytes,
         )
-        while True:
+
+        async def read(
+            request: ReadRecordsRequest,
+        ) -> tuple[
+            ReadRecordsRequest | None, collections.abc.Sequence[StreamRecord[BodyT]]
+        ]:
             response = await self._stream_service_read_records(
                 request, body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
             )
-            yield response
-            next_request = _support.next_read_request(request, response)
-            if next_request is None:
-                return
-            request = next_request
+            return _support.next_read_request(request, response), response.records or []
+
+        return PollIterator(request, read, _support.resume_read_request)
 
     async def _stream_service_describe_stream(
         self,

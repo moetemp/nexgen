@@ -321,6 +321,10 @@ class UserStatus(enum.IntEnum):
     Deleted = 2
 ```
 
+A number that the enum doesn't know, such as a case that a newer peer sends,
+becomes a member named `Unknown<number>` with that value. TypeScript and .NET
+pass such a number through too.
+
 **TypeScript:**
 
 ```typescript

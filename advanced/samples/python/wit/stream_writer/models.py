@@ -24,6 +24,16 @@ class ExecutionType(enum.IntEnum):
     ExecutionTypeActivity = 2
     ExecutionTypeNexusOperation = 3
 
+    @classmethod
+    @typing_extensions.override
+    def _missing_(cls, value: object) -> ExecutionType | None:
+        if not isinstance(value, int):
+            return None
+        member = int.__new__(cls, value)
+        member._name_ = f"Unknown{value}"
+        member._value_ = value
+        return member
+
 
 class StreamProducerKind(enum.IntEnum):
     StreamProducerKindUnspecified = 0
@@ -32,6 +42,16 @@ class StreamProducerKind(enum.IntEnum):
     StreamProducerKindActivity = 3
     StreamProducerKindClient = 4
     StreamProducerKindStandaloneActivity = 5
+
+    @classmethod
+    @typing_extensions.override
+    def _missing_(cls, value: object) -> StreamProducerKind | None:
+        if not isinstance(value, int):
+            return None
+        member = int.__new__(cls, value)
+        member._name_ = f"Unknown{value}"
+        member._value_ = value
+        return member
 
 
 @dataclasses.dataclass(slots=True)

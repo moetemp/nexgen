@@ -21,6 +21,16 @@ class Shade(enum.IntEnum):
     ShadeLight = 1
     ShadeDark = 2
 
+    @classmethod
+    @typing_extensions.override
+    def _missing_(cls, value: object) -> Shade | None:
+        if not isinstance(value, int):
+            return None
+        member = int.__new__(cls, value)
+        member._name_ = f"Unknown{value}"
+        member._value_ = value
+        return member
+
 
 OutputT = typing.TypeVar("OutputT")
 

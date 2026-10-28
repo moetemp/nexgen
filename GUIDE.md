@@ -1732,6 +1732,9 @@ response with these types.
 - .NET. The class is `Stream<TBody>`, and a call takes the type argument, such
   as `CreateStreamAsync<Turn>(options)`.
 
+An operation that returns the resource can take a definition in place of its
+runtime types. See [`@nexus.definition`](#nexusdefinition).
+
 Go and Java refuse a generic resource. nexgen refuses a resource that uses a
 parameter that it doesn't declare, also through a proto-backed record, and a
 declared parameter that the resource doesn't use. An operation that a method
@@ -1744,6 +1747,43 @@ generic variants as unions of generic case dataclasses. TypeScript uses tagged
 object unions, Go uses sealed interfaces and case structs, and .NET uses nested
 records. References to generic variants are closed automatically wherever they
 occur.
+
+---
+
+### @nexus.definition
+
+**Placement:** Resource with `@nexus.type-parameter` **Syntax:**
+`@nexus.definition python="<type>" typescript="<type>" typescript-import="<module>" dotnet="<type>"`
+
+Names an SDK type that gives the type arguments of a generic resource, such as a
+Stream definition. An operation that returns the resource takes the definition
+in place of its runtime types. The type must be generic in the parameters of the
+resource, in order. A language with no value keeps the runtime types.
+
+```wit
+/// @nexus.type-parameter "body-t"
+/// @nexus.definition python="temporalio.common.StreamDefinition"
+///   typescript="StreamDefinition" typescript-import="@temporalio/common"
+///   dotnet="Temporalio.Common.StreamDefinition"
+resource %stream { ... }
+```
+
+- Python. The create takes
+  `definition: type[temporalio.common.StreamDefinition[BodyT]]` as its first
+  positional parameter. When `Turns` subclasses `StreamDefinition[Turn]`,
+  `create_stream(Turns, stream_id="s1")` returns a `Stream[Turn]`. The support
+  helper `definition_type_arguments(definition)` returns the runtime types. The
+  module of the type is imported for type checking only, since the SDK module
+  that defines it can import the generated package.
+- TypeScript. The create takes `definition: StreamDefinition<BodyT>` before its
+  request. The support helper `definitionTypeArguments(definition)` returns the
+  type info of each parameter. A relative `typescript-import` is relative to the
+  root of the generated package.
+- .NET. The create takes `StreamDefinition<TBody> definition`, which gives the
+  type argument.
+
+The methods of the resource keep the runtime types of the handle, so the
+operations that they bind don't take a definition.
 
 ---
 

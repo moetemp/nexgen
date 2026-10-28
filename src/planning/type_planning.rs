@@ -455,6 +455,7 @@ impl ApiSpecTransform<OperationLoweredFamily, PlannedFamily> for TypePlanningMap
                 doc: None,
                 type_name: name.to_upper_camel_case(),
                 type_parameters: Vec::new(),
+                definition: SelectedTextSpec::default(),
                 fields: Vec::new(),
                 methods: Vec::new(),
             })
@@ -709,6 +710,13 @@ impl<'a> TypePlanningContext<'a> {
                 runtime_type_parameters: operation_runtime_type_parameters(
                     &self.spec, service, operation,
                 ),
+                runtime_type_definition: operation
+                    .data
+                    .output_resource_return
+                    .as_ref()
+                    .and_then(|returned| service.resource(&returned.resource_name))
+                    .map(|resource| resource.definition.clone())
+                    .unwrap_or_default(),
             },
         })
     }
@@ -905,6 +913,7 @@ impl<'a> TypePlanningContext<'a> {
             doc: resource.doc.value().map(str::to_string),
             type_name: resource.name.to_upper_camel_case(),
             type_parameters: resource.type_parameters.clone(),
+            definition: resource.definition.clone(),
             fields: resource
                 .fields
                 .iter()
@@ -1777,6 +1786,17 @@ interface alerts {
         // An append request carries its values, so the call needs no runtime type.
         assert!(runtime_type_parameters("AppendRecords").is_empty());
         assert!(runtime_type_parameters("DescribeStream").is_empty());
+        // Only the create returns the Stream, so only it takes the Stream's definition.
+        let definition = |name: &str| {
+            plan.services[0]
+                .operation(name)
+                .and_then(|operation| operation.data.runtime_type_definition.value())
+        };
+        assert_eq!(
+            definition("CreateStream"),
+            Some("temporal_support.StreamDefinition")
+        );
+        assert_eq!(definition("ReadRecords"), None);
     }
 
     #[test]

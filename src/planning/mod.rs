@@ -154,6 +154,8 @@ pub(crate) struct PlannedResource {
     pub(crate) type_name: String,
     /// The type parameters that the resource declares, in order.
     pub(crate) type_parameters: Vec<crate::spec::TypeParameterSpec>,
+    /// The SDK type that gives the type arguments, with its import.
+    pub(crate) definition: SelectedTextSpec,
     pub(crate) fields: Vec<PlannedResourceField>,
     pub(crate) methods: Vec<PlannedResourceMethod>,
 }
@@ -243,6 +245,9 @@ pub(crate) struct PlannedOperationData {
     /// The type parameters that a call passes as runtime types, since the request can't give
     /// them. Only an operation of a generic resource has them.
     pub(crate) runtime_type_parameters: Vec<crate::spec::TypeParameterSpec>,
+    /// The definition type of the returned resource. A call takes it in place of the runtime
+    /// types.
+    pub(crate) runtime_type_definition: SelectedTextSpec,
 }
 
 #[derive(Debug, Clone, PartialEq)]

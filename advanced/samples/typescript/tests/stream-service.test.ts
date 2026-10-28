@@ -18,6 +18,7 @@ import {
   readRecordsRequestTransferTypeConverter,
   readRecordsResponseTransferTypeConverter,
 } from "../wit/stream-service/models.ts";
+import { createStream } from "../wit/stream-service/operations/create-stream.ts";
 import { Stream } from "../wit/stream-service/resources.ts";
 
 const startOperation = vi.hoisted(() => vi.fn());
@@ -159,6 +160,20 @@ describe("stream-service generated output", () => {
       ],
     });
     expect(decoded.records[0].item.value.body).toEqual(new Turn("model"));
+  });
+
+  test("takes the body type of a create from the definition", async () => {
+    startOperation.mockResolvedValue({
+      result: async () => ({ stream: { id: "stream-1" }, created: true }),
+    });
+
+    const stream = await createStream(
+      { name: "turns", type: turnType },
+      { streamId: "stream-1" },
+    );
+
+    expectTypeOf(stream).toEqualTypeOf<Stream<Turn>>();
+    expect(stream.bodyType).toBe(turnType);
   });
 
   test("passes an enum number that it doesn't know through", () => {

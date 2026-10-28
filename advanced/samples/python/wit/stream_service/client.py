@@ -29,6 +29,9 @@ from ._resources import Stream
 from ._resources.stream import bind_stream_operations
 import temporal_support as _support
 
+if typing.TYPE_CHECKING:
+    import temporal_support
+
 
 BodyT = typing.TypeVar("BodyT")
 
@@ -123,7 +126,7 @@ class StreamServiceClientExtension(abc.ABC):
 
     async def create_stream(
         self,
-        body_type: type[BodyT],
+        definition: type[temporal_support.StreamDefinition[BodyT]],
         *,
         stream_id: str,
         retention: datetime.timedelta | None = None,
@@ -143,6 +146,7 @@ class StreamServiceClientExtension(abc.ABC):
                 it.
             ref: The Stream's ref, with the owner fields.
         """
+        (body_type,) = _support.definition_type_arguments(definition)
         request = CreateStreamRequest(
             stream_id=stream_id,
             retention=retention,

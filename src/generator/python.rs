@@ -913,6 +913,11 @@ impl<'a> ApiPlanner<'a> {
             }
         }
         render_support_import(&mut output, &body, self.support_package, false);
+        render_definition_type_checking_imports(
+            &mut output,
+            &body,
+            services.iter().flat_map(|service| &service.operations),
+        );
         output.push_str("\n\n");
         output.push_str(&body);
         Ok(output)
@@ -1719,6 +1724,11 @@ impl<'a> ApiPlanner<'a> {
             generic_model_types,
             runtime_type_arguments,
             output_record_type_parameters,
+            runtime_type_definition: operation
+                .data
+                .runtime_type_definition
+                .value()
+                .map(str::to_string),
         })
     }
 
@@ -2988,6 +2998,8 @@ struct RenderedOperation<'a> {
     runtime_type_arguments: Vec<String>,
     /// The type parameters of a record output, in order.
     output_record_type_parameters: Vec<String>,
+    /// The definition type that a public call takes in place of the runtime types.
+    runtime_type_definition: Option<String>,
 }
 
 impl RenderedOperation<'_> {
@@ -3032,6 +3044,34 @@ impl RenderedOperation<'_> {
             output.push_str(name);
             output.push_str("],\n");
         }
+    }
+
+    /// The runtime type parameters of a public call. A definition gives all of them.
+    fn render_public_runtime_type_parameters(&self, output: &mut String, indent: &str) {
+        let Some(definition) = &self.runtime_type_definition else {
+            self.render_runtime_type_parameters(output, indent);
+            return;
+        };
+        output.push_str(indent);
+        output.push_str("definition: type[");
+        output.push_str(definition);
+        output.push('[');
+        output.push_str(&self.runtime_type_arguments.join(", "));
+        output.push_str("]],\n");
+    }
+
+    /// Reads the runtime types from the definition of a public call, before it passes them on.
+    fn render_definition_type_arguments(&self, output: &mut String, indent: &str) {
+        if self.runtime_type_definition.is_none() {
+            return;
+        }
+        output.push_str(indent);
+        output.push('(');
+        for name in &self.runtime_type_arguments {
+            output.push_str(&python_runtime_type_argument_name(name));
+            output.push(',');
+        }
+        output.push_str(") = _support.definition_type_arguments(definition)\n");
     }
 
     /// The bindings of the runtime type arguments in a returned resource.
@@ -4849,6 +4889,13 @@ fn render_service_module(
         }
     }
     render_support_import(&mut output, &endpoint_client_body, support_package, false);
+    render_definition_type_checking_imports(
+        &mut output,
+        &endpoint_client_body,
+        endpoint_services
+            .iter()
+            .flat_map(|service| &service.operations),
+    );
     if needs_temporalio_workflow_type_checking {
         output.push_str("if typing.TYPE_CHECKING:\n");
         output.push_str("    import temporalio.workflow\n");
@@ -4994,10 +5041,35 @@ fn render_operation_module(
         render_named_python_import(&mut output, ".._resources", &used_resource_names);
     }
     render_support_import(&mut output, &body, support_package, false);
+    render_definition_type_checking_imports(&mut output, &body, [operation]);
     output.push('\n');
     output.push('\n');
     output.push_str(&body);
     output
+}
+
+/// Imports the module of each definition type that the body names, for type checking only. The
+/// SDK module that defines the type can import the generated package.
+fn render_definition_type_checking_imports<'a>(
+    output: &mut String,
+    body: &str,
+    operations: impl IntoIterator<Item = &'a RenderedOperation<'a>>,
+) {
+    let modules = operations
+        .into_iter()
+        .filter_map(|operation| operation.runtime_type_definition.as_deref())
+        .filter(|definition| body.contains(&format!("{definition}[")))
+        .filter_map(|definition| definition.rsplit_once('.').map(|(module, _)| module))
+        .collect::<BTreeSet<_>>();
+    if modules.is_empty() {
+        return;
+    }
+    output.push_str("if typing.TYPE_CHECKING:\n");
+    for module in modules {
+        output.push_str("    import ");
+        output.push_str(module);
+        output.push('\n');
+    }
 }
 
 fn planned_module_import_names(api_plan: &PlannedSpec) -> BTreeSet<String> {
@@ -5554,7 +5626,7 @@ fn render_endpoint_service_object_poll_method(
     output.push_str(&poll_function_name(&operation.attr_name));
     output.push_str("(\n");
     output.push_str("        self,\n");
-    operation.render_runtime_type_parameters(output, "        ");
+    operation.render_public_runtime_type_parameters(output, "        ");
     if let Some(unpacked_input) = &operation.unpacked_input {
         if !unpacked_input.parameters.is_empty() {
             output.push_str("        *,\n");
@@ -5638,10 +5710,11 @@ fn render_endpoint_service_object_operation_method(
         output.push_str(&input.annotation);
         output.push_str(",\n");
     }
-    operation.render_runtime_type_parameters(output, "        ");
+    operation.render_public_runtime_type_parameters(output, "        ");
     output.push_str("    ) -> ");
     output.push_str(&operation_public_return_annotation(service, operation));
     output.push_str(":\n");
+    operation.render_definition_type_arguments(output, "        ");
     render_endpoint_service_object_operation_body(output, service, operation);
 }
 
@@ -5660,7 +5733,7 @@ fn render_endpoint_service_object_unpacked_method(
     output.push_str(&operation.attr_name);
     output.push_str("(\n");
     output.push_str("        self,\n");
-    operation.render_runtime_type_parameters(output, "        ");
+    operation.render_public_runtime_type_parameters(output, "        ");
     // Python refuses a bare `*` with no keyword parameter after it.
     if !unpacked_input.parameters.is_empty() {
         output.push_str("        *,\n");
@@ -5683,6 +5756,7 @@ fn render_endpoint_service_object_unpacked_method(
     output.push_str(":\n");
     // A method body sits one level deeper than a module function body.
     render_unpacked_operation_docstring(output, "        ", operation, unpacked_input, None);
+    operation.render_definition_type_arguments(output, "        ");
     for flattened_message in &unpacked_input.flattened_messages {
         render_flattened_message_setup(output, "        ", flattened_message);
     }
@@ -7322,7 +7396,7 @@ fn render_function_unpacked_overload(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
-    operation.render_runtime_type_parameters(output, &format!("{}    ", target.indent()));
+    operation.render_public_runtime_type_parameters(output, &format!("{}    ", target.indent()));
 
     let primary_function = primary_function(&unpacked_input.functions);
     let primary_case = primary_function.and_then(|function| {
@@ -7849,7 +7923,7 @@ fn render_operation_poll_function(
 ) {
     let body_indent = target.body_indent();
     render_operation_signature_start(output, target, &poll_function_name(&operation.attr_name));
-    operation.render_runtime_type_parameters(output, &format!("{}    ", target.indent()));
+    operation.render_public_runtime_type_parameters(output, &format!("{}    ", target.indent()));
     let unpacked_input = operation.target_unpacked_input(target);
     if let Some(unpacked_input) = unpacked_input {
         if !unpacked_input.parameters.is_empty() {
@@ -7890,6 +7964,7 @@ fn render_operation_poll_function(
         None,
         false,
     );
+    operation.render_definition_type_arguments(output, body_indent);
     if let Some(unpacked_input) = unpacked_input {
         for flattened_message in &unpacked_input.flattened_messages {
             render_flattened_message_setup(output, body_indent, flattened_message);
@@ -8107,11 +8182,12 @@ fn render_client_request_method(
         output.push_str(operation_input_annotation(operation));
         output.push_str(",\n");
     }
-    operation.render_runtime_type_parameters(output, "        ");
+    operation.render_public_runtime_type_parameters(output, "        ");
     start_line(output, target, ") -> ");
     output.push_str(&operation_result_annotation(operation));
     output.push_str(":\n");
     render_operation_docstring(output, target.body_indent(), operation, &[], None);
+    operation.render_definition_type_arguments(output, target.body_indent());
     start_line(output, target, "    return await self.");
     output.push_str(&client_operation_name(service, operation));
     if operation.input.is_some() {
@@ -8745,7 +8821,7 @@ fn render_unpacked_operation_function(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
-    operation.render_runtime_type_parameters(output, &format!("{}    ", target.indent()));
+    operation.render_public_runtime_type_parameters(output, &format!("{}    ", target.indent()));
     if !unpacked_input.parameters.is_empty() {
         start_line(output, target, "    *,\n");
     }
@@ -8764,6 +8840,7 @@ fn render_unpacked_operation_function(
     }
     render_unpacked_return_annotation(output, target, service, operation);
     render_unpacked_operation_docstring(output, body_indent, operation, unpacked_input, None);
+    operation.render_definition_type_arguments(output, body_indent);
     for flattened_message in &unpacked_input.flattened_messages {
         render_flattened_message_setup(output, body_indent, flattened_message);
     }
@@ -8878,7 +8955,7 @@ fn render_function_unpacked_implementation(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
-    operation.render_runtime_type_parameters(output, &format!("{}    ", target.indent()));
+    operation.render_public_runtime_type_parameters(output, &format!("{}    ", target.indent()));
 
     let primary_function = primary_function(&unpacked_input.functions);
     if let Some(function) = primary_function {
@@ -8964,6 +9041,7 @@ fn render_function_unpacked_implementation(
         unpacked_input,
         primary_function,
     );
+    operation.render_definition_type_arguments(output, target.body_indent());
 
     for function in &unpacked_input.functions {
         if function.primary && matches!(function.args, RenderedFunctionArgs::Typed { .. }) {

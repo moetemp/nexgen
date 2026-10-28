@@ -53,6 +53,14 @@ class Turn:
     role: str
 
 
+class Turns(temporal_support.StreamDefinition[Turn]):
+    name: typing.ClassVar[str] = "turns"
+
+
+class Texts(temporal_support.StreamDefinition[str]):
+    name: typing.ClassVar[str] = "texts"
+
+
 @dataclasses.dataclass
 class Call:
     service: str
@@ -151,7 +159,7 @@ async def test_a_created_stream_calls_its_operations_through_the_client() -> Non
         }
     )
 
-    stream = await client.create_stream(str, stream_id="s1")
+    stream = await client.create_stream(Texts, stream_id="s1")
     appended = await stream.publish(records=[AppendRecord(body="hi")])
 
     # The response sets `created` to False, and the handle keeps it.
@@ -231,7 +239,7 @@ async def test_a_handle_reads_every_page() -> None:
     client = FakeClient(
         {"CreateStream": [CreateStreamResult(stream=ref)], "ReadRecords": list(pages)}
     )
-    stream = await client.create_stream(str, stream_id="s1")
+    stream = await client.create_stream(Texts, stream_id="s1")
 
     read = [page async for page in stream.iter_read(from_offset=1)]
 
@@ -256,7 +264,7 @@ async def test_a_handle_decodes_its_bodies_with_its_body_type() -> None:
         }
     )
 
-    stream = await client.create_stream(Turn, stream_id="s1")
+    stream = await client.create_stream(Turns, stream_id="s1")
     page = await stream.read()
 
     _ = assert_type(stream, Stream[Turn])

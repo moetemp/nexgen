@@ -81,6 +81,12 @@ namespace Nexgen.DotNetExamples.Tests
             StreamServiceExample.Stream<Turn> stream) =>
             stream.ReadAsync(null, null, null, null, null);
 
+        // A definition gives the type argument of a create.
+        private static Task<StreamServiceExample.Stream<Turn>> CreateTurns() =>
+            StreamServiceExample.Operations.CreateStreamAsync(
+                new Nexgen.Support.StreamDefinition<Turn>("turns"),
+                new StreamServiceExample.CreateStreamOptions("stream-1"));
+
         // A newer server can send a Stream status that this code doesn't know.
         [Fact]
         public void UnknownEnumNumberPassesThrough()

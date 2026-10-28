@@ -34,6 +34,7 @@ of `@nexus` directives.
   - [Error Enums](#error-enums)
   - [Output Transforms](#output-transforms)
 - [Function References](#function-references)
+- [Internal Interfaces](#internal-interfaces)
 - [Generation Targets](#generation-targets)
 - [Directive Glossary](#directive-glossary)
 
@@ -1723,6 +1724,32 @@ descriptor replaces signature-derived typing.
 
 ---
 
+## Internal Interfaces
+
+`@nexus.internal` on an interface marks a service that only an SDK calls. Its
+package exports nothing, and the SDK calls its modules.
+
+```wit
+/// @nexus.endpoint "internal"
+/// @nexus.internal
+interface internal-service { ... }
+```
+
+- Python. The package's `__init__.py` exports nothing. It keeps the operation
+  registry, where a client looks up serialization contexts. The module names
+  don't change, since the SDK puts such a package under a private package.
+- TypeScript. The package has no `index.ts`, and each declaration is
+  `@internal`, so `stripInternal` drops it from the published types.
+- .NET. Each type is `internal` in place of `public`. The SDK's tests see it
+  through `InternalsVisibleTo`, or compile their own copy.
+- Go. Nothing changes. A caller writes the output under an `internal/`
+  directory, Go's own rule.
+- Java ignores the directive with a warning.
+
+The directive takes no arguments.
+
+---
+
 ## Generation Targets
 
 `--targets` sets the code that calls the generated API. Repeat the flag, or
@@ -2279,6 +2306,15 @@ converted to UpperCamelCase is used (e.g., `signal-with-start-workflow` becomes
 /// @nexus.operation name="SignalWithStartWorkflowExecution"
 signal-with-start-workflow: func(...) -> ...;
 ```
+
+---
+
+### @nexus.internal
+
+**Placement:** Interface (service) **Syntax:** `@nexus.internal` (no arguments)
+
+Marks a service that only an SDK calls, so its package exports nothing. See
+[Internal Interfaces](#internal-interfaces).
 
 ---
 

@@ -363,6 +363,13 @@ impl GeneratedFileMap {
         Ok(rekeyed)
     }
 
+    /// Rewrites the contents of each file.
+    pub(crate) fn map_contents(&mut self, map: impl Fn(&Path, &str) -> String) {
+        for (path, file) in &mut self.files {
+            file.contents = map(path, &file.contents);
+        }
+    }
+
     pub(crate) fn extend(&mut self, other: Self) -> Result<()> {
         for (path, file) in other.files {
             self.insert(path, file.contents, file.origin)?;
@@ -587,6 +594,17 @@ fn generation_warnings(plan: &PlannedSpec, language: Language) -> Vec<String> {
         })
         .filter(|_| matches!(language, Language::Go | Language::Java))
         .map(|name| format!("`@nexus.error` on `{name}` has no effect in {language}"));
+    let internal_services = plan
+        .services
+        .iter()
+        .filter(|service| service.internal && language == Language::Java)
+        .map(|service| {
+            format!(
+                "`@nexus.internal` on `{}` has no effect in {language}",
+                service.name
+            )
+        });
+    let error_enums = error_enums.chain(internal_services);
     error_enums
         .chain(plan.services
         .iter()

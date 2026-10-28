@@ -1974,6 +1974,7 @@ interface alerts {
                 experimental: false,
                 deprecated: false,
                 delay_load_temporalio_workflow: false,
+                internal: false,
                 operations: vec![OperationSpec {
                     name: "example-operation".to_string(),
                     code_name: LanguageStringSpec::default(),

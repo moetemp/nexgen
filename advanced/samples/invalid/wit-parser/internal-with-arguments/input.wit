@@ -1,0 +1,12 @@
+package test:internal-with-arguments@1.0.0;
+
+world system { export job-service; }
+
+// An internal interface exports nothing in any language, so the directive names no language.
+/// @nexus.endpoint "jobs"
+/// @nexus.internal python="true"
+interface job-service {
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}

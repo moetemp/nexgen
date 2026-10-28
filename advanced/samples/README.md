@@ -149,6 +149,22 @@ returns one field of the response. The field is JSON, so it keeps its absence.
 - TypeScript: [`typescript/wit/batch-service/`](typescript/wit/batch-service/),
   [`typescript/tests/batch-service.test.ts`](typescript/tests/batch-service.test.ts)
 
+### `internal-service`
+
+A service that only an SDK calls, with `@nexus.internal`. The Python package
+exports nothing, TypeScript has no `index.ts` and marks each declaration
+`@internal`, and .NET makes each type `internal`.
+
+- WIT: [`inputs/internal-service.wit`](inputs/internal-service.wit)
+- .NET: [`dotnet/wit/internal-service/`](dotnet/wit/internal-service/),
+  [`dotnet/tests/GeneratedApiCompileChecks.cs`](dotnet/tests/GeneratedApiCompileChecks.cs)
+- Go: [`go/internalservice/`](go/internalservice/)
+- Python: [`python/wit/internal_service/`](python/wit/internal_service/),
+  [`python/tests/test_internal_service.py`](python/tests/test_internal_service.py)
+- TypeScript:
+  [`typescript/wit/internal-service/`](typescript/wit/internal-service/),
+  [`typescript/tests/internal-service.test.ts`](typescript/tests/internal-service.test.ts)
+
 ### `worker-shutdown`
 
 A request that flattens two fields of its worker heartbeat. The call takes the

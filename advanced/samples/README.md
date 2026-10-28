@@ -151,13 +151,15 @@ proposal (`temporalio/api#895`), in
 
 Only part of today's output builds, so the sample leaves the rest out:
 
-- Python doesn't generate the service, since it can't import the protos.
+- Python imports the Stream protos from `temporalio`, which doesn't have them.
+  basedpyright skips the service.
 - TypeScript passes a `number` where a resource method's proto request wants a
   `Long`. `tsc` skips the service, but the test still checks its models.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
+- Python: [`python/wit/stream_service/`](python/wit/stream_service/)
 - TypeScript:
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
   [`typescript/tests/stream-service.test.ts`](typescript/tests/stream-service.test.ts)

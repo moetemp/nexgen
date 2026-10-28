@@ -1623,7 +1623,8 @@ Unreachable declarations and omitted oneofs remain valid.
 
 ### @nexus.type-parameter
 
-**Placement:** Type alias **Syntax:** `@nexus.type-parameter` (no arguments)
+**Placement:** Type alias or resource **Syntax:** `@nexus.type-parameter` on a
+type alias, `@nexus.type-parameter "<alias>"` on a resource
 
 Declares an opaque model type parameter. Records and variants infer their
 ordered generic parameters from public fields and case payloads, including
@@ -1691,8 +1692,51 @@ const inputType = {
 };
 ```
 
-Type parameters are also unsupported in resources, map keys, function-signature
-metadata, or resource-bound generic operations.
+Type parameters are also unsupported in map keys and in function-signature
+metadata.
+
+#### Generic resources
+
+A resource declares each type parameter that it uses with
+`@nexus.type-parameter "<alias>"`, in order. The alias can come from another
+interface through `use`. The fields, method parameters and method results of the
+resource can use only these parameters.
+
+```wit
+/// @nexus.type-parameter
+type body-t = placeholder;
+
+/// @nexus.proto "temporal.api.stream.v1.AppendRecord"
+record append-record {
+  body: body-t,
+}
+
+/// @nexus.type-parameter "body-t"
+resource %stream { ... }
+```
+
+The resource keeps a runtime type for each parameter. An operation that returns
+the resource takes one runtime type for each parameter, since its request can't
+give one. An operation that a method binds takes one for each parameter that
+only its output uses. The data converter decodes the generic values of the
+response with these types.
+
+- Python. The class is `Stream(typing.Generic[BodyT])`, with the field
+  `body_type: type[BodyT]`. The runtime type is the first positional parameter
+  of a call, so `create_stream(Turn, stream_id="s1")` returns a `Stream[Turn]`.
+- TypeScript. The class is `Stream<BodyT>`, and its last constructor parameter
+  is `bodyType?: common.TypeInfo<BodyT>`. A call takes the type info after the
+  request, and it converts the response with the model's
+  `create<Model>TransferTypeConverter` factory.
+- .NET. The class is `Stream<TBody>`, and a call takes the type argument, such
+  as `CreateStreamAsync<Turn>(options)`.
+
+Go and Java refuse a generic resource. nexgen refuses a resource that uses a
+parameter that it doesn't declare, also through a proto-backed record, and a
+declared parameter that the resource doesn't use. An operation that a method
+binds can use only the parameters of the resource. A generic resource can't be
+the result of an operation with no `@nexus.proto` message, or a field of a
+record.
 
 Python represents generic variants as tagged tuples and protobuf oneof-backed
 generic variants as unions of generic case dataclasses. TypeScript uses tagged

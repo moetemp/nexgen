@@ -727,6 +727,18 @@ fn generate_in_tree(
     tree_models: &[PlannedJsonType],
     primary_origin: GeneratedFileOrigin,
 ) -> Result<GoGenerationResult> {
+    // No Go code calls a service with a generic resource yet.
+    if let Some(resource) = api_plan
+        .services
+        .iter()
+        .flat_map(|service| &service.resources)
+        .find(|resource| !resource.type_parameters.is_empty())
+    {
+        return Err(Error::UnsupportedGenericResource {
+            language: Language::Go,
+            resource: resource.name.clone(),
+        });
+    }
     ApiPlanner::new(api_plan, options, tree_models)?.generate(primary_origin)
 }
 

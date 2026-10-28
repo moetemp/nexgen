@@ -14,7 +14,7 @@ world writer {
 interface stream-writer {
   use nexus:temporal-types/model@1.0.0.{duration, placeholder};
   use temporal:nexus/stream-service@1.0.0.{
-    append-record, producer, stream-ref, workflow-task-epoch,
+    append-record, body-t, producer, stream-ref, workflow-task-epoch,
   };
 
   /// @nexus.doc "Open a writer for one Producer of one Stream."
@@ -81,6 +81,7 @@ interface stream-writer {
   // A writer never changes. Offsets are values that its methods return. The handles of one
   // Producer epoch on one Stream share one writer, and each close or free releases one handle.
   /// @nexus.doc "An open writer of one Producer. The crate keeps its epoch and sequence."
+  /// @nexus.type-parameter "body-t"
   resource writer {
     constructor(writer-id: u64);
 

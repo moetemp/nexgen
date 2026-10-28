@@ -13,3 +13,5 @@ export type {
   WriteRecordsResponse,
   WriterResult,
 } from "./models";
+export { createWriteRecordsRequestTransferTypeConverter } from "./models";
+export { createAppendRecordTransferTypeConverter } from "./models";

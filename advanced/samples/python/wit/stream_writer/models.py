@@ -54,6 +54,9 @@ class StreamProducerKind(enum.IntEnum):
         return member
 
 
+BodyT = typing.TypeVar("BodyT")
+
+
 @dataclasses.dataclass(slots=True)
 class OpenWriterRequest:
     """Open a writer for one Producer of one Stream."""
@@ -534,14 +537,14 @@ temporalio.converter.transfer_type_convertible(_WriterResultTransferTypeConverte
 
 
 @dataclasses.dataclass(slots=True)
-class WriteRecordsRequest:
-    records: list[AppendRecord] | None = dataclasses.field(default_factory=list)
+class WriteRecordsRequest(typing.Generic[BodyT]):
+    records: list[AppendRecord[BodyT]] | None = dataclasses.field(default_factory=list)
     writer_id: int | None = None
 
 
 class _WriteRecordsRequestTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        WriteRecordsRequest,
+        WriteRecordsRequest[BodyT],
         streamprotos.temporal.sdk.streams.v1.runtime_pb2.WriteRecordsRequest,
     ]
 ):
@@ -554,12 +557,16 @@ class _WriteRecordsRequestTransferTypeConverter(
     def from_transfer_type(
         self,
         value: streamprotos.temporal.sdk.streams.v1.runtime_pb2.WriteRecordsRequest,
-        type_hint: type[WriteRecordsRequest],
-    ) -> WriteRecordsRequest:
+        type_hint: type[WriteRecordsRequest[BodyT]],
+    ) -> WriteRecordsRequest[BodyT]:
+        (body_type,) = typing.get_args(type_hint) or (typing.Any,)
         return WriteRecordsRequest(
             records=[
-                _AppendRecordTransferTypeConverter().from_transfer_type(
-                    item, AppendRecord
+                typing.cast(
+                    AppendRecord[BodyT],
+                    _AppendRecordTransferTypeConverter().from_transfer_type(
+                        item, AppendRecord[body_type]
+                    ),
                 )
                 for item in value.records
             ],
@@ -569,7 +576,7 @@ class _WriteRecordsRequestTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: WriteRecordsRequest,
+        value: WriteRecordsRequest[BodyT],
     ) -> streamprotos.temporal.sdk.streams.v1.runtime_pb2.WriteRecordsRequest:
         message = streamprotos.temporal.sdk.streams.v1.runtime_pb2.WriteRecordsRequest()
         if value.records:
@@ -584,20 +591,21 @@ class _WriteRecordsRequestTransferTypeConverter(
 
 
 temporalio.converter.transfer_type_convertible(
-    _WriteRecordsRequestTransferTypeConverter
+    _WriteRecordsRequestTransferTypeConverter[typing.Any]
 )(WriteRecordsRequest)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)
-class AppendRecord:
+class AppendRecord(typing.Generic[BodyT]):
     """One Record to append."""
 
-    body: typing.Any
+    body: BodyT
 
 
 class _AppendRecordTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        AppendRecord, streamprotos.temporal.api.stream.v1.message_pb2.AppendRecord
+        AppendRecord[BodyT],
+        streamprotos.temporal.api.stream.v1.message_pb2.AppendRecord,
     ]
 ):
     transfer_type: (
@@ -608,11 +616,12 @@ class _AppendRecordTransferTypeConverter(
     def from_transfer_type(
         self,
         value: streamprotos.temporal.api.stream.v1.message_pb2.AppendRecord,
-        type_hint: type[AppendRecord],
-    ) -> AppendRecord:
+        type_hint: type[AppendRecord[BodyT]],
+    ) -> AppendRecord[BodyT]:
+        (body_type,) = typing.get_args(type_hint) or (typing.Any,)
         if not value.HasField("body"):
             raise ValueError("missing required field AppendRecord.body")
-        body = _support.payload_from_proto(value.body)
+        body = typing.cast(BodyT, _support.payload_from_proto(value.body, body_type))
         return AppendRecord(
             body=body,
         )
@@ -620,16 +629,16 @@ class _AppendRecordTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: AppendRecord,
+        value: AppendRecord[BodyT],
     ) -> streamprotos.temporal.api.stream.v1.message_pb2.AppendRecord:
         message = streamprotos.temporal.api.stream.v1.message_pb2.AppendRecord()
         message.body.CopyFrom(_support.payload_to_proto(value.body))
         return message
 
 
-temporalio.converter.transfer_type_convertible(_AppendRecordTransferTypeConverter)(
-    AppendRecord
-)  # pyright: ignore[reportUnusedCallResult]
+temporalio.converter.transfer_type_convertible(
+    _AppendRecordTransferTypeConverter[typing.Any]
+)(AppendRecord)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)

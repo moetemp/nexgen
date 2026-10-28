@@ -1,0 +1,1 @@
+A resource declares its type parameters with `@nexus.type-parameter "<alias>"`, in Python, TypeScript and .NET. An operation of the resource takes a runtime type where its request can't give one, so the response decodes its generic values. Go and Java refuse a generic resource.

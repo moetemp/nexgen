@@ -33,14 +33,14 @@ namespace Nexgen.StreamWriter
     /// <summary>
     /// One Record to append.
     /// </summary>
-    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(AppendRecord.TransferTypeConverter))]
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(AppendRecord<>.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record AppendRecord
+    public record AppendRecord<TBody>
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="AppendRecord"/> class.
+        /// Initializes a new instance of the <see cref="AppendRecord{TBody}"/> class.
         /// </summary>
-        public AppendRecord(object? body)
+        public AppendRecord(TBody body)
         {
             Body = body;
         }
@@ -48,11 +48,16 @@ namespace Nexgen.StreamWriter
         /// <summary>
         /// The value. It goes through the payload codec.
         /// </summary>
-        public object? Body { get; init; }
+        public TBody Body { get; init; }
 
-        internal static AppendRecord FromTransferType(Temporalio.Api.Stream.V1.AppendRecord wire)
+        internal static AppendRecord<TBody> FromTransferType(Temporalio.Api.Stream.V1.AppendRecord wire)
         {
-            return new AppendRecord(Nexgen.Support.ProtoExtensions.FromPayload(wire.Body));
+            if (wire.Body == null)
+            {
+                throw new System.InvalidOperationException("missing required field AppendRecord.Body");
+            }
+
+            return new AppendRecord<TBody>(Nexgen.Support.ProtoExtensions.FromPayload<TBody>(wire.Body));
         }
 
         internal Temporalio.Api.Stream.V1.AppendRecord ToTransferType()
@@ -71,10 +76,10 @@ namespace Nexgen.StreamWriter
             public System.Type TransferType => typeof(Temporalio.Api.Stream.V1.AppendRecord);
 
             /// <summary>Converts a model value to its transfer type.</summary>
-            public object? ToTransferType(object? value) => value is null ? null : ((AppendRecord)value).ToTransferType();
+            public object? ToTransferType(object? value) => value is null ? null : ((AppendRecord<TBody>)value).ToTransferType();
 
             /// <summary>Converts a transfer-type value to this model.</summary>
-            public object? FromTransferType(object? transferType) => transferType is null ? null : AppendRecord.FromTransferType((Temporalio.Api.Stream.V1.AppendRecord)transferType);
+            public object? FromTransferType(object? transferType) => transferType is null ? null : AppendRecord<TBody>.FromTransferType((Temporalio.Api.Stream.V1.AppendRecord)transferType);
         }
 
     }
@@ -789,24 +794,24 @@ namespace Nexgen.StreamWriter
 
     }
 
-    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(WriteRecordsRequest.TransferTypeConverter))]
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(WriteRecordsRequest<>.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record WriteRecordsRequest
+    public record WriteRecordsRequest<TBody>
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="WriteRecordsRequest"/> class.
+        /// Initializes a new instance of the <see cref="WriteRecordsRequest{TBody}"/> class.
         /// </summary>
-        public WriteRecordsRequest(IReadOnlyList<AppendRecord> records)
+        public WriteRecordsRequest(IReadOnlyList<AppendRecord<TBody>> records)
         {
             Records = records;
         }
 
-        public IReadOnlyList<AppendRecord> Records { get; init; }
+        public IReadOnlyList<AppendRecord<TBody>> Records { get; init; }
         public ulong? WriterId { get; init; }
 
-        internal static WriteRecordsRequest FromTransferType(Temporal.Sdk.Streams.V1.WriteRecordsRequest wire)
+        internal static WriteRecordsRequest<TBody> FromTransferType(Temporal.Sdk.Streams.V1.WriteRecordsRequest wire)
         {
-            return new WriteRecordsRequest(System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(wire.Records, item => AppendRecord.FromTransferType(item))))
+            return new WriteRecordsRequest<TBody>(System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(wire.Records, item => AppendRecord<TBody>.FromTransferType(item))))
             {
                 WriterId = wire.WriterId == 0 ? null : wire.WriterId,
             };
@@ -832,10 +837,10 @@ namespace Nexgen.StreamWriter
             public System.Type TransferType => typeof(Temporal.Sdk.Streams.V1.WriteRecordsRequest);
 
             /// <summary>Converts a model value to its transfer type.</summary>
-            public object? ToTransferType(object? value) => value is null ? null : ((WriteRecordsRequest)value).ToTransferType();
+            public object? ToTransferType(object? value) => value is null ? null : ((WriteRecordsRequest<TBody>)value).ToTransferType();
 
             /// <summary>Converts a transfer-type value to this model.</summary>
-            public object? FromTransferType(object? transferType) => transferType is null ? null : WriteRecordsRequest.FromTransferType((Temporal.Sdk.Streams.V1.WriteRecordsRequest)transferType);
+            public object? FromTransferType(object? transferType) => transferType is null ? null : WriteRecordsRequest<TBody>.FromTransferType((Temporal.Sdk.Streams.V1.WriteRecordsRequest)transferType);
         }
 
     }

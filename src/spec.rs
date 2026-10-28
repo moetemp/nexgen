@@ -721,6 +721,8 @@ impl<F: TypeFamily> OperationSpec<F> {
 pub struct ResourceSpec<F: TypeFamily = AuthoredFamily> {
     pub name: String,
     pub doc: F::Text,
+    /// The type parameters that the resource declares, in order. It may use only these.
+    pub type_parameters: Vec<TypeParameterSpec>,
     pub fields: Vec<ResourceFieldSpec<F>>,
     pub methods: Vec<ResourceMethodSpec<F>>,
     pub data: F::ResourceData,
@@ -758,6 +760,7 @@ impl<F: TypeFamily> ResourceSpec<F> {
         ResourceSpec {
             name: self.name,
             doc: map.map_text(self.doc),
+            type_parameters: self.type_parameters,
             fields: self
                 .fields
                 .into_iter()

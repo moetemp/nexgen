@@ -29,6 +29,9 @@ from ._resources import Stream
 import temporal_support as _support
 
 
+BodyT = typing.TypeVar("BodyT")
+
+
 _OutputT = typing.TypeVar("_OutputT")
 
 
@@ -95,7 +98,8 @@ class StreamServiceClientExtension(abc.ABC):
     async def _stream_service_create_stream(
         self,
         request: CreateStreamRequest,
-    ) -> Stream:
+        body_type: type[BodyT],
+    ) -> Stream[BodyT]:
         nexus_client = self._create_nexus_client(
             service="temporal.api.streamservice.v1.StreamService",
             endpoint="__temporal_system",
@@ -109,6 +113,7 @@ class StreamServiceClientExtension(abc.ABC):
         if result.stream is None:
             raise RuntimeError("CreateStream answered without `stream`")
         return Stream(
+            body_type=body_type,
             stream=result.stream,
             created=result.created,
             status=result.status,
@@ -117,13 +122,14 @@ class StreamServiceClientExtension(abc.ABC):
 
     async def create_stream(
         self,
+        body_type: type[BodyT],
         *,
         stream_id: str,
         retention: datetime.timedelta | None = None,
         withdraw_run: str | None = None,
         owner: Producer | None = None,
         ref: StreamRef | None = None,
-    ) -> Stream:
+    ) -> Stream[BodyT]:
         """
         Args:
             stream_id: Required on Redis and memory. On native, empty asks the server
@@ -143,11 +149,11 @@ class StreamServiceClientExtension(abc.ABC):
             owner=owner,
             ref=ref,
         )
-        return await self._stream_service_create_stream(request)
+        return await self._stream_service_create_stream(request, body_type)
 
     async def _stream_service_append_records(
         self,
-        request: AppendRecordsRequest,
+        request: AppendRecordsRequest[BodyT],
     ) -> AppendRecordsResponse:
         nexus_client = self._create_nexus_client(
             service="temporal.api.streamservice.v1.StreamService",
@@ -164,7 +170,7 @@ class StreamServiceClientExtension(abc.ABC):
         self,
         *,
         stream: StreamRef,
-        records: list[AppendRecord] | None = None,
+        records: list[AppendRecord[BodyT]] | None = None,
         failed_tasks: list[int] | None = None,
         producer: Producer | None = None,
         sequence: int | None = None,
@@ -243,7 +249,8 @@ class StreamServiceClientExtension(abc.ABC):
     async def _stream_service_read_records(
         self,
         request: ReadRecordsRequest,
-    ) -> ReadRecordsResponse:
+        body_type: type[BodyT],
+    ) -> ReadRecordsResponse[BodyT]:
         nexus_client = self._create_nexus_client(
             service="temporal.api.streamservice.v1.StreamService",
             endpoint="__temporal_system",
@@ -251,12 +258,13 @@ class StreamServiceClientExtension(abc.ABC):
         handle = await nexus_client.start_operation(
             operation="ReadRecords",
             input=request,
-            output_type=ReadRecordsResponse,
+            output_type=ReadRecordsResponse[body_type],
         )
         return await handle
 
     async def read_records(
         self,
+        body_type: type[BodyT],
         *,
         stream: StreamRef,
         from_offset: int | None = None,
@@ -266,7 +274,7 @@ class StreamServiceClientExtension(abc.ABC):
         create_wait: datetime.timedelta | None = None,
         last: int | None = None,
         max_bytes: int | None = None,
-    ) -> ReadRecordsResponse:
+    ) -> ReadRecordsResponse[BodyT]:
         """A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads from a Local
         Activity.
 
@@ -295,10 +303,11 @@ class StreamServiceClientExtension(abc.ABC):
             last=last,
             max_bytes=max_bytes,
         )
-        return await self._stream_service_read_records(request)
+        return await self._stream_service_read_records(request, body_type)
 
     async def iter_read_records(
         self,
+        body_type: type[BodyT],
         *,
         stream: StreamRef,
         from_offset: int | None = None,
@@ -308,7 +317,7 @@ class StreamServiceClientExtension(abc.ABC):
         create_wait: datetime.timedelta | None = None,
         last: int | None = None,
         max_bytes: int | None = None,
-    ) -> collections.abc.AsyncIterator[ReadRecordsResponse]:
+    ) -> collections.abc.AsyncIterator[ReadRecordsResponse[BodyT]]:
         """Yield each response of ``read_records``. The poll helper gives the next request,
         and the iteration stops when it gives ``None``.
         """
@@ -323,7 +332,7 @@ class StreamServiceClientExtension(abc.ABC):
             max_bytes=max_bytes,
         )
         while True:
-            response = await self._stream_service_read_records(request)
+            response = await self._stream_service_read_records(request, body_type)
             yield response
             next_request = _support.next_read_request(request, response)
             if next_request is None:

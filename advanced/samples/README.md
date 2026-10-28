@@ -155,16 +155,17 @@ sourced maps. Native tests exercise conversions through the generated APIs.
 
 ### `stream-service` and `stream-writer`
 
-Brook's Stream service and writer WIT, byte for byte, except that the read poll
-names the client target. They are the nexgen inputs of the Brook crate,
-`temporalio-streams`. Their records bind to the Stream protos of the API
-proposal (`temporalio/api#895`) and to Brook's runtime proto, in
-[`descriptors/streams/`](descriptors/streams/). The writer uses records of the
-service, so its build links `stream-service.wit`.
+Brook's Stream service and writer WIT. The read poll names the client target,
+and the files take nexgen directives that Brook's WIT takes later. They are the
+nexgen inputs of the Brook crate, `temporalio-streams`. Their records bind to
+the Stream protos of the API proposal (`temporalio/api#895`) and to Brook's
+runtime proto, in [`descriptors/streams/`](descriptors/streams/). The writer
+uses records of the service, so its build links `stream-service.wit`.
 
 Python generates both targets, so one `Stream` class serves Workflow code and
 clients. The read poll names the client target, since Workflow code reads from a
-Local Activity.
+Local Activity. The Stream and the writer are generic in the record body type
+`body-t`, so a handle decodes the bodies of a read as its own type argument.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)

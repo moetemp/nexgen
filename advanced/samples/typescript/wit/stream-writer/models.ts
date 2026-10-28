@@ -435,78 +435,133 @@ export const writeRecordsResponseTransferTypeConverter = {
     return writeRecordsResponseToProto(value);
   },
 };
-export interface WriteRecordsRequest {
-  records?: AppendRecord[];
+export interface WriteRecordsRequest<BodyT> {
+  records?: AppendRecord<BodyT>[];
   writerId?: Long;
 }
 
-function writeRecordsRequestFromProto(
+function writeRecordsRequestFromProto<BodyT>(
   proto: temporal.sdk.streams.v1.IWriteRecordsRequest,
-): WriteRecordsRequest {
+  typeInfo: {
+    bodyT?: common.TypeInfo<BodyT, any>;
+  } = {},
+): WriteRecordsRequest<BodyT> {
   return {
-    records: proto.records?.map((value: any) => appendRecordFromProto(value)),
+    records: proto.records?.map((value: any) =>
+      appendRecordFromProto(value, { bodyT: typeInfo.bodyT }),
+    ),
     writerId: proto.writerId ?? undefined,
   };
 }
 
-function writeRecordsRequestToProto(
-  model: WriteRecordsRequest,
+function writeRecordsRequestToProto<BodyT>(
+  model: WriteRecordsRequest<BodyT>,
+  typeInfo: {
+    bodyT?: common.TypeInfo<BodyT, any>;
+  } = {},
 ): temporal.sdk.streams.v1.IWriteRecordsRequest {
   return {
-    records: model.records?.map((value) => appendRecordToProto(value)),
+    records: model.records?.map((value) =>
+      appendRecordToProto(value, { bodyT: typeInfo.bodyT }),
+    ),
     writerId: model.writerId,
   };
 }
 
 export const writeRecordsRequestTransferTypeConverter = {
-  fromTransferType(
+  fromTransferType<BodyT>(
     value: temporal.sdk.streams.v1.IWriteRecordsRequest,
-  ): WriteRecordsRequest {
-    return writeRecordsRequestFromProto(value);
+  ): WriteRecordsRequest<BodyT> {
+    return writeRecordsRequestFromProto<BodyT>(value);
   },
 
-  toTransferType(
-    value: WriteRecordsRequest,
+  toTransferType<BodyT>(
+    value: WriteRecordsRequest<BodyT>,
   ): temporal.sdk.streams.v1.IWriteRecordsRequest {
     return writeRecordsRequestToProto(value);
   },
 };
-export interface AppendRecord {
+
+export function createWriteRecordsRequestTransferTypeConverter<BodyT>(
+  typeInfo: {
+    bodyT?: common.TypeInfo<BodyT, any>;
+  } = {},
+): common.TransferTypeConverter<
+  WriteRecordsRequest<BodyT>,
+  temporal.sdk.streams.v1.IWriteRecordsRequest
+> {
+  return {
+    fromTransferType(value) {
+      return writeRecordsRequestFromProto<BodyT>(value, typeInfo);
+    },
+    toTransferType(value) {
+      return writeRecordsRequestToProto(value, typeInfo);
+    },
+  };
+}
+export interface AppendRecord<BodyT> {
   /**
    * The value. It goes through the payload codec.
    */
-  body: common.Payload;
+  body: BodyT;
 }
 
-function appendRecordFromProto(
+function appendRecordFromProto<BodyT>(
   proto: temporal.api.stream.v1.IAppendRecord,
-): AppendRecord {
+  typeInfo: {
+    bodyT?: common.TypeInfo<BodyT, any>;
+  } = {},
+): AppendRecord<BodyT> {
   return {
-    body: requiredField(
-      support.payloadFromProto(requiredField(proto.body, "AppendRecord", "body")),
-      "AppendRecord",
-      "body",
+    body: support.payloadToValue<BodyT>(
+      requiredField(proto.body, "AppendRecord", "body"),
+      typeInfo.bodyT,
     ),
   };
 }
 
-function appendRecordToProto(
-  model: AppendRecord,
+function appendRecordToProto<BodyT>(
+  model: AppendRecord<BodyT>,
+  typeInfo: {
+    bodyT?: common.TypeInfo<BodyT, any>;
+  } = {},
 ): temporal.api.stream.v1.IAppendRecord {
   return {
-    body: support.payloadToProto(requiredField(model.body, "AppendRecord", "body")),
+    body: support.valueToPayload(model.body, typeInfo.bodyT),
   };
 }
 
 export const appendRecordTransferTypeConverter = {
-  fromTransferType(value: temporal.api.stream.v1.IAppendRecord): AppendRecord {
-    return appendRecordFromProto(value);
+  fromTransferType<BodyT>(
+    value: temporal.api.stream.v1.IAppendRecord,
+  ): AppendRecord<BodyT> {
+    return appendRecordFromProto<BodyT>(value);
   },
 
-  toTransferType(value: AppendRecord): temporal.api.stream.v1.IAppendRecord {
+  toTransferType<BodyT>(
+    value: AppendRecord<BodyT>,
+  ): temporal.api.stream.v1.IAppendRecord {
     return appendRecordToProto(value);
   },
 };
+
+export function createAppendRecordTransferTypeConverter<BodyT>(
+  typeInfo: {
+    bodyT?: common.TypeInfo<BodyT, any>;
+  } = {},
+): common.TransferTypeConverter<
+  AppendRecord<BodyT>,
+  temporal.api.stream.v1.IAppendRecord
+> {
+  return {
+    fromTransferType(value) {
+      return appendRecordFromProto<BodyT>(value, typeInfo);
+    },
+    toTransferType(value) {
+      return appendRecordToProto(value, typeInfo);
+    },
+  };
+}
 export interface CloseWriterResponse {
   /**
    * The offset of the newest Record the writer wrote. Zero if it wrote none.

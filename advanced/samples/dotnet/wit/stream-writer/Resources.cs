@@ -13,7 +13,7 @@ namespace Nexgen.StreamWriter
 {
 
     [GeneratedCode("nexgen", null)]
-    public class Writer
+    public class Writer<TBody>
     {
         public Writer(ulong writerId)
         {
@@ -24,7 +24,7 @@ namespace Nexgen.StreamWriter
 
         internal NexusWorkflowClient<IStreamWriter>? NexgenClient { get; set; }
 
-        internal static Writer BindClient(Writer resource, NexusWorkflowClient<IStreamWriter> client)
+        internal static Writer<TBody> BindClient(Writer<TBody> resource, NexusWorkflowClient<IStreamWriter> client)
         {
             resource.NexgenClient = client;
             return resource;
@@ -36,11 +36,11 @@ namespace Nexgen.StreamWriter
         }
 
         [GeneratedCode("nexgen", null)]
-        public async Task<WriteRecordsResponse> WriteRecordsAsync(IReadOnlyList<AppendRecord> records)
+        public async Task<WriteRecordsResponse> WriteRecordsAsync(IReadOnlyList<AppendRecord<TBody>> records)
         {
-            var request = new WriteRecordsRequest(records) { WriterId = WriterId };
-            var result = await RequireNexgenClient().ExecuteNexusOperationAsync<WriteRecordsResponse>(svc => svc.WriteRecords(request)).ConfigureAwait(true);
-            return result;
+            var request = new WriteRecordsRequest<TBody>(records) { WriterId = WriterId };
+            var client = Workflow.CreateNexusWorkflowClient("temporal.sdk.streams.v1.StreamWriter", RequireNexgenClient().Options);
+            return await client.ExecuteNexusOperationAsync<WriteRecordsResponse>("WriteRecords", request).ConfigureAwait(true);
         }
 
         [GeneratedCode("nexgen", null)]

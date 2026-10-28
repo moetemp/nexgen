@@ -2,12 +2,13 @@
 //! Authored descriptor checks remain in `AuthoredValidationPass`; this pass
 //! consumes selected IR without cloning or selecting authored alternatives.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ApiSpecLeaf, CompilerPass, FunctionArgsSpec, FunctionResultSpec, SelectedFamily,
+    ApiSpec, ApiSpecLeaf, CompilerPass, FunctionArgsSpec, FunctionResultSpec, ResourceSpec,
+    SelectedFamily, ServiceSpec, TypeSpec,
 };
 
 pub(crate) struct SelectedValidationPass;
@@ -106,43 +107,122 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
             }
         }
         for resource in &service.resources {
-            let is_generic = |value| !spec.type_parameters_through_protos(value).is_empty();
-            let resource_is_generic = resource
-                .fields
-                .iter()
-                .any(|field| is_generic(&field.field_type))
-                || resource.methods.iter().any(|method| {
-                    method
-                        .params
-                        .iter()
-                        .any(|param| is_generic(&param.field_type))
-                        || method
-                            .result
-                            .as_ref()
-                            .is_some_and(|result| is_generic(&result.result_type))
-                });
-            if resource_is_generic {
+            validate_resource_type_parameters(spec, service, resource, &invalid)?;
+        }
+        for operation in &service.operations {
+            let Some(TypeSpec::Resource(returned)) = operation.output_type() else {
+                continue;
+            };
+            if returned.wire_type.is_none()
+                && service
+                    .resource(returned.as_str())
+                    .is_some_and(|resource| !resource.type_parameters.is_empty())
+            {
                 return Err(invalid(format!(
-                    "resource `{}` cannot contain generic type parameters",
-                    resource.name
+                    "operation `{}` returns the generic resource `{}` with no `@nexus.proto` \
+                     message, which can't carry its type arguments",
+                    operation.name, returned
                 )));
             }
+        }
+    }
 
-            for method in &resource.methods {
-                let Some(operation_name) = &method.operation_name else {
-                    continue;
-                };
-                let Some(operation) = service.operation(operation_name) else {
-                    continue;
-                };
-                let operation_is_generic = operation.input_type().is_some_and(is_generic)
-                    || operation.output_type().is_some_and(is_generic);
-                if operation_is_generic {
-                    return Err(invalid(format!(
-                        "resource-bound operation `{operation_name}` cannot use generic type parameters"
-                    )));
-                }
+    // A record that holds a resource builds it from the record's message, with no type argument.
+    let generic_resources = spec
+        .services
+        .iter()
+        .flat_map(|service| &service.resources)
+        .filter(|resource| !resource.type_parameters.is_empty())
+        .map(|resource| resource.name.as_str())
+        .collect::<BTreeSet<_>>();
+    for (_, record) in spec.records() {
+        for (field_name, field) in &record.fields {
+            if let TypeSpec::Resource(resource) = field.field_type.without_option()
+                && generic_resources.contains(resource.as_str())
+            {
+                return Err(invalid(format!(
+                    "record `{}` field `{field_name}` holds the generic resource `{resource}`, \
+                     which is not supported",
+                    record.full_name
+                )));
             }
+        }
+    }
+    Ok(())
+}
+
+/// A resource may use only the type parameters that it declares, and it must use each of them.
+/// The operations that its methods bind may use only these too.
+fn validate_resource_type_parameters(
+    spec: &ApiSpec<SelectedFamily>,
+    service: &ServiceSpec<SelectedFamily>,
+    resource: &ResourceSpec<SelectedFamily>,
+    invalid: &dyn Fn(String) -> Error,
+) -> Result<()> {
+    let declared = resource
+        .type_parameters
+        .iter()
+        .map(|parameter| parameter.full_name.as_str())
+        .collect::<BTreeSet<_>>();
+    let undeclared = |value: &TypeSpec<SelectedFamily>| {
+        spec.type_parameters_through_protos(value)
+            .into_iter()
+            .find(|usage| !declared.contains(usage.parameter.full_name.as_str()))
+    };
+    let resource_types = resource
+        .fields
+        .iter()
+        .map(|field| &field.field_type)
+        .chain(resource.methods.iter().flat_map(|method| {
+            method
+                .params
+                .iter()
+                .map(|param| &param.field_type)
+                .chain(method.result.as_ref().map(|result| &result.result_type))
+        }))
+        .collect::<Vec<_>>();
+    if let Some(usage) = resource_types.iter().find_map(|value| undeclared(value)) {
+        return Err(invalid(format!(
+            "resource `{}` uses the type parameter `{}`, which it doesn't declare. Add \
+             `@nexus.type-parameter \"<alias>\"` to the resource for it",
+            resource.name, usage.parameter.full_name
+        )));
+    }
+    let used = resource_types
+        .iter()
+        .flat_map(|value| spec.type_parameters_through_protos(value))
+        .map(|usage| usage.parameter.full_name)
+        .collect::<BTreeSet<_>>();
+    if let Some(unused) = resource
+        .type_parameters
+        .iter()
+        .find(|parameter| !used.contains(&parameter.full_name))
+    {
+        return Err(invalid(format!(
+            "resource `{}` declares the type parameter `{}`, which none of its fields, \
+             parameters or results uses",
+            resource.name, unused.full_name
+        )));
+    }
+
+    for method in &resource.methods {
+        let Some(operation_name) = &method.operation_name else {
+            continue;
+        };
+        let Some(operation) = service.operation(operation_name) else {
+            continue;
+        };
+        if let Some(usage) = operation
+            .input_type()
+            .into_iter()
+            .chain(operation.output_type())
+            .find_map(undeclared)
+        {
+            return Err(invalid(format!(
+                "resource-bound operation `{operation_name}` uses the type parameter `{}`, which \
+                 resource `{}` doesn't declare",
+                usage.parameter.full_name, resource.name
+            )));
         }
     }
     Ok(())

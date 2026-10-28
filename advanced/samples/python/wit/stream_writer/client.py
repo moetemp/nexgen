@@ -26,6 +26,9 @@ from .models import (
 from ._resources import Writer
 
 
+BodyT = typing.TypeVar("BodyT")
+
+
 _OutputT = typing.TypeVar("_OutputT")
 
 
@@ -92,7 +95,8 @@ class StreamWriterClientExtension(abc.ABC):
     async def _stream_writer_open_writer(
         self,
         request: OpenWriterRequest,
-    ) -> Writer:
+        body_type: type[BodyT],
+    ) -> Writer[BodyT]:
         nexus_client = self._create_nexus_client(
             service="temporal.sdk.streams.v1.StreamWriter",
             endpoint=None,
@@ -106,12 +110,14 @@ class StreamWriterClientExtension(abc.ABC):
         if result.writer_id is None:
             raise RuntimeError("OpenWriter answered without `writer_id`")
         return Writer(
+            body_type=body_type,
             writer_id=result.writer_id,
             _operations=self,
         )
 
     async def open_writer(
         self,
+        body_type: type[BodyT],
         *,
         stream: StreamRef,
         failed_tasks: list[int] | None = None,
@@ -119,7 +125,7 @@ class StreamWriterClientExtension(abc.ABC):
         max_batch_size: int | None = None,
         max_retry_duration: datetime.timedelta | None = None,
         previous_completed_task: WorkflowTaskEpoch | None = None,
-    ) -> Writer:
+    ) -> Writer[BodyT]:
         """
         Args:
             failed_tasks: Local Activity only. The run's failed or timed out Workflow
@@ -138,11 +144,11 @@ class StreamWriterClientExtension(abc.ABC):
             max_retry_duration=max_retry_duration,
             previous_completed_task=previous_completed_task,
         )
-        return await self._stream_writer_open_writer(request)
+        return await self._stream_writer_open_writer(request, body_type)
 
     async def _stream_writer_write_records(
         self,
-        request: WriteRecordsRequest,
+        request: WriteRecordsRequest[BodyT],
     ) -> WriteRecordsResponse:
         nexus_client = self._create_nexus_client(
             service="temporal.sdk.streams.v1.StreamWriter",
@@ -158,7 +164,7 @@ class StreamWriterClientExtension(abc.ABC):
     async def write_records(
         self,
         *,
-        records: list[AppendRecord] | None = None,
+        records: list[AppendRecord[BodyT]] | None = None,
         writer_id: int | None = None,
     ) -> WriteRecordsResponse:
         request = WriteRecordsRequest(

@@ -483,12 +483,19 @@ impl<'a> ApiPlanner<'a> {
             }
             _ => output_annotation_default.clone(),
         };
+        let runtime_type_parameters = operation
+            .data
+            .runtime_type_parameters
+            .iter()
+            .map(|parameter| parameter.name.clone())
+            .collect::<Vec<_>>();
         let output_annotation_default = match operation.output_type() {
             Some(PlannedType::Record(record)) => typescript_operation_output_annotation(
                 &output_annotation_default,
                 &self.api_plan.record_type_parameters(&record.full_name),
                 input,
                 self.api_plan,
+                &runtime_type_parameters,
             ),
             _ => output_annotation_default.clone(),
         };
@@ -505,8 +512,15 @@ impl<'a> ApiPlanner<'a> {
                 &self.api_plan.record_type_parameters(&record.full_name),
                 input,
                 self.api_plan,
+                &runtime_type_parameters,
             ),
             _ => output_transfer_annotation.clone(),
+        };
+        let output_record_type_parameters = match operation.output_type() {
+            Some(PlannedType::Record(record)) => {
+                type_parameter_names(&self.api_plan.record_type_parameters(&record.full_name))
+            }
+            _ => Vec::new(),
         };
         Ok(RenderedOperation {
             name: operation.name.as_str(),
@@ -526,13 +540,15 @@ impl<'a> ApiPlanner<'a> {
             output_annotation: output_transform
                 .and_then(|transform| transform.type_name.value().map(str::to_string))
                 .or_else(|| {
-                    output_resource_return.as_ref().map(|resource| {
-                        resource
-                            .holder
-                            .as_ref()
-                            .map_or(&resource.resource_type_name, |holder| &holder.model_name)
-                            .clone()
-                    })
+                    output_resource_return
+                        .as_ref()
+                        .map(|resource| match &resource.holder {
+                            Some(holder) => holder.model_name.clone(),
+                            None => generic_type_annotation(
+                                &resource.resource_type_name,
+                                &runtime_type_parameters,
+                            ),
+                        })
                 })
                 .unwrap_or(output_annotation_default),
             output_transform_type_import: output_transform
@@ -566,6 +582,8 @@ impl<'a> ApiPlanner<'a> {
                 .serialization_context
                 .value()
                 .map(support_reference),
+            runtime_type_parameters,
+            output_record_type_parameters,
         })
     }
 
@@ -2889,6 +2907,13 @@ pub(in crate::generator) fn generic_model_annotation(
     }
 }
 
+fn type_parameter_names(usages: &[crate::spec::TypeParameterUsage]) -> Vec<String> {
+    usages
+        .iter()
+        .map(|usage| usage.parameter.name.clone())
+        .collect()
+}
+
 fn generic_type_annotation(model_name: &str, type_parameters: &[String]) -> String {
     if type_parameters.is_empty() {
         model_name.to_string()
@@ -2940,6 +2965,7 @@ fn typescript_operation_output_annotation(
     output_parameters: &[crate::spec::TypeParameterUsage],
     input: Option<&PlannedType>,
     api_plan: &PlannedSpec,
+    runtime_type_parameters: &[String],
 ) -> String {
     if output_parameters.is_empty() {
         return model_name.to_string();
@@ -2956,6 +2982,11 @@ fn typescript_operation_output_annotation(
             input_parameters
                 .get(&usage.parameter.full_name)
                 .map(String::as_str)
+                .or_else(|| {
+                    runtime_type_parameters
+                        .contains(&usage.parameter.name)
+                        .then_some(usage.parameter.name.as_str())
+                })
                 .unwrap_or("unknown")
         })
         .collect::<Vec<_>>()
@@ -2996,6 +3027,112 @@ struct RenderedOperation<'a> {
     output_model_name: Option<String>,
     output_transfer_type_converter: Option<String>,
     serialization_context_expr: Option<String>,
+    /// The type parameters that the call takes as runtime types, by name.
+    runtime_type_parameters: Vec<String>,
+    /// The type parameters of a record output, in order.
+    output_record_type_parameters: Vec<String>,
+}
+
+impl RenderedOperation<'_> {
+    /// The type parameters of the operation function, from the request and the runtime types.
+    fn function_type_parameters(&self) -> Vec<RenderedTypeParameter> {
+        let mut parameters = self
+            .input
+            .as_ref()
+            .map(|input| input.type_parameters.clone())
+            .unwrap_or_default();
+        for name in &self.runtime_type_parameters {
+            if !parameters.iter().any(|parameter| parameter.name == *name) {
+                parameters.push(RenderedTypeParameter {
+                    name: name.clone(),
+                    constraint: String::new(),
+                    default: String::new(),
+                    infer_from_operation_request: false,
+                    explicit: true,
+                });
+            }
+        }
+        parameters
+    }
+
+    /// The parameters of the runtime types, one line each at `indent`.
+    fn render_runtime_type_parameters(&self, output: &mut String, indent: &str) {
+        for name in &self.runtime_type_parameters {
+            output.push_str(indent);
+            output.push_str(&typescript_runtime_type_argument_name(name));
+            output.push_str("?: common.TypeInfo<");
+            output.push_str(name);
+            output.push_str(">,\n");
+        }
+    }
+
+    /// The runtime types that a call passes on after its request.
+    fn runtime_type_args(&self, receiver: &str) -> String {
+        self.runtime_type_parameters
+            .iter()
+            .map(|name| {
+                format!(
+                    ", {receiver}{}",
+                    typescript_runtime_type_argument_name(name)
+                )
+            })
+            .collect()
+    }
+
+    /// The operation to start. Its type info is static, so a generic output with runtime types
+    /// takes a converter from the model's factory.
+    fn definition_expr(&self, service: &RenderedService<'_>, receiver: &str) -> String {
+        let definition = format!("{}.operations.{}", service.attr_name, self.attr_name);
+        let Some(model_name) = &self.output_model_name else {
+            return definition;
+        };
+        if self.output_transfer_type_converter.is_none()
+            || !self
+                .output_record_type_parameters
+                .iter()
+                .any(|name| self.runtime_type_parameters.contains(name))
+        {
+            return definition;
+        }
+        let type_arguments = self
+            .output_record_type_parameters
+            .iter()
+            .map(|name| {
+                if self.runtime_type_parameters.contains(name) {
+                    name.clone()
+                } else {
+                    "unknown".to_string()
+                }
+            })
+            .collect::<Vec<_>>();
+        let config = self
+            .runtime_type_parameters
+            .iter()
+            .filter(|name| self.output_record_type_parameters.contains(name))
+            .map(|name| {
+                format!(
+                    "{}: {receiver}{}",
+                    name.to_lower_camel_case(),
+                    typescript_runtime_type_argument_name(name)
+                )
+            })
+            .collect::<Vec<_>>();
+        let converter = format!(
+            "create{model_name}TransferTypeConverter<{}>({{ {} }})",
+            type_arguments.join(", "),
+            config.join(", ")
+        );
+        format!("{{ ...{definition}, outputType: {{ transferTypeConverter: {converter} }} }}")
+    }
+}
+
+/// The runtime type of a type parameter, such as `bodyType` for `BodyT`.
+fn typescript_runtime_type_argument_name(type_parameter: &str) -> String {
+    let stem = type_parameter
+        .strip_suffix('T')
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or(type_parameter);
+    format!("{}Type", stem.to_lower_camel_case())
 }
 
 #[derive(Debug)]
@@ -3896,14 +4033,25 @@ fn render_endpoint_service_operation_method(
         doc_tags.push(("@deprecated".to_string(), String::new()));
     }
     render_typescript_doc_comment(output, "  ", operation.doc.as_deref(), &doc_tags);
-    output.push_str("  public async ");
-    output.push_str(&operation.attr_name);
-    output.push_str("(\n");
+    let function_type_parameters = operation.function_type_parameters();
+    if function_type_parameters.is_empty() {
+        output.push_str("  public async ");
+        output.push_str(&operation.attr_name);
+        output.push_str("(\n");
+    } else {
+        render_named_generic_function_start(
+            output,
+            &format!("  public async {}", operation.attr_name),
+            &function_type_parameters,
+            2,
+        );
+    }
     if let Some(input) = &operation.input {
         output.push_str("    request: ");
         output.push_str(&input.annotation);
         output.push_str(",\n");
     }
+    operation.render_runtime_type_parameters(output, "    ");
     output.push_str("  ): Promise<");
     output.push_str(&typescript_operation_public_return_annotation(
         service, operation,
@@ -3924,9 +4072,7 @@ fn render_endpoint_service_operation_body(
     if !returns_direct {
         output.push_str("    return await this.client.startOperation(\n");
         output.push_str("      ");
-        output.push_str(&service.attr_name);
-        output.push_str(".operations.");
-        output.push_str(&operation.attr_name);
+        output.push_str(&operation.definition_expr(service, ""));
         output.push_str(",\n");
         output.push_str("      ");
         output.push_str(&typescript_operation_input_expr(operation));
@@ -3937,9 +4083,7 @@ fn render_endpoint_service_operation_body(
 
     output.push_str("    const handle = await this.client.startOperation(\n");
     output.push_str("      ");
-    output.push_str(&service.attr_name);
-    output.push_str(".operations.");
-    output.push_str(&operation.attr_name);
+    output.push_str(&operation.definition_expr(service, ""));
     output.push_str(",\n");
     output.push_str("      request,\n");
     output.push_str("    );\n");
@@ -3971,6 +4115,11 @@ fn render_endpoint_service_operation_body(
         for binding in &resource_return.bindings {
             output.push_str("        ");
             output.push_str(&resource_return_binding_expr_typescript(binding));
+            output.push_str(",\n");
+        }
+        for name in &operation.runtime_type_parameters {
+            output.push_str("        ");
+            output.push_str(&typescript_runtime_type_argument_name(name));
             output.push_str(",\n");
         }
         output.push_str("      ),\n");
@@ -4449,6 +4598,7 @@ fn render_service_module(
         &[
             ("nexus", "nexus-rpc", false),
             ("workflow", typescript_workflow_module(), false),
+            ("common", "@temporalio/common", true),
         ],
     );
     render_support_import(
@@ -4476,6 +4626,7 @@ fn render_service_module(
                         .iter()
                         .map(|name| typescript_json::ts_transfer_type_converter_name(name)),
                 )
+                .chain(model_converter_factory_names(models))
                 .collect::<Vec<_>>(),
         ),
     );
@@ -4543,7 +4694,7 @@ fn render_resources_module(
     let mut body = String::new();
     for service in services {
         for resource in &service.resources {
-            render_resource(&mut body, resource, service);
+            render_resource(&mut body, resource, service, api_plan);
             body.push('\n');
         }
     }
@@ -4553,9 +4704,17 @@ fn render_resources_module(
         &body,
         &api_plan.module_path.to_path_buf(),
         language_imports,
-        &[("workflow", typescript_workflow_module(), false)],
+        &[
+            ("workflow", typescript_workflow_module(), false),
+            ("common", "@temporalio/common", true),
+        ],
     );
     render_typescript_requirement_imports(&mut imports, requirements);
+    render_value_imports(
+        &mut imports,
+        "./models",
+        &used_import_names(&body, &model_converter_factory_names(models)),
+    );
     render_type_imports(
         &mut imports,
         "./models",
@@ -4627,10 +4786,12 @@ fn render_operation_module(
         &[
             ("workflow", typescript_workflow_module(), false),
             ("nexus", "../../../nexus", false),
+            ("common", "@temporalio/common", true),
         ],
     );
     render_value_imports(&mut imports, "../services", &[service.attr_name.clone()]);
     let mut model_values = model_to_wire_function_names(models);
+    model_values.extend(model_converter_factory_names(models));
     model_values.sort();
     model_values.dedup();
     render_value_imports(
@@ -4770,6 +4931,21 @@ fn resource_type_names(services: &[RenderedService<'_>]) -> Vec<String> {
                 .iter()
                 .map(|resource| resource.type_name.clone())
         })
+        .collect()
+}
+
+/// The converter factories of generic proto-backed models.
+fn model_converter_factory_names(models: &[&RenderedModel]) -> Vec<String> {
+    models
+        .iter()
+        .filter(|model| {
+            model.wire_function_names.is_some()
+                && model
+                    .type_parameters
+                    .iter()
+                    .any(|parameter| parameter.explicit)
+        })
+        .map(|model| format!("create{}TransferTypeConverter", model.name))
         .collect()
 }
 
@@ -5657,7 +5833,12 @@ fn resource_client_require_function_name(resource: &PlannedResource) -> String {
     format!("require{}Client", resource.type_name)
 }
 
-fn render_resource(output: &mut String, resource: &PlannedResource, service: &RenderedService<'_>) {
+fn render_resource(
+    output: &mut String,
+    resource: &PlannedResource,
+    service: &RenderedService<'_>,
+    api_plan: &PlannedSpec,
+) {
     let client_symbol_name = resource_client_symbol_name(resource);
     if service.endpoint.is_none() {
         output.push_str("const ");
@@ -5669,8 +5850,20 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
         )));
         output.push_str(");\n\n");
     }
+    let type_parameters = resource_type_parameter_names(resource);
     output.push_str("export class ");
     output.push_str(&resource.type_name);
+    if !type_parameters.is_empty() {
+        output.push('<');
+        output.push_str(
+            &type_parameters
+                .iter()
+                .map(|name| format!("{name} = unknown"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        output.push('>');
+    }
     output.push_str(" {\n");
     if service.endpoint.is_none() {
         output.push_str("  ");
@@ -5691,8 +5884,17 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
             field.optional,
             field.function.as_ref(),
             resource_long,
+            api_plan,
         ));
         output.push_str(",\n");
+    }
+    // The model converters decode the generic values of a response with these.
+    for name in &type_parameters {
+        output.push_str("    public readonly ");
+        output.push_str(&typescript_runtime_type_argument_name(name));
+        output.push_str("?: common.TypeInfo<");
+        output.push_str(name);
+        output.push_str(">,\n");
     }
     output.push_str("  ) {}\n");
 
@@ -5703,7 +5905,8 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
 
     for method in &resource.methods {
         let method_long = typescript_method_uses_long(method, service);
-        let result_annotation = typescript_resource_method_result_annotation(method, method_long);
+        let result_annotation =
+            typescript_resource_method_result_annotation(method, method_long, api_plan);
         output.push('\n');
         output.push_str("  public async ");
         output.push_str(&typescript_generated_field_name(&method.name));
@@ -5724,6 +5927,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                 false,
                 param.function.as_ref(),
                 method_long,
+                api_plan,
             ));
             if param.optional && before_required {
                 output.push_str(" | undefined");
@@ -5745,7 +5949,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
                     .find(|operation| operation.name == operation_name)
                     .expect("bound operation should exist on the resource service");
                 let branchable_params =
-                    branchable_request_method_params(method, request_plan, operation);
+                    branchable_request_method_params(method, request_plan, operation, api_plan);
                 let endpoint_expr = None;
                 let client_expr = service
                     .endpoint
@@ -5795,16 +5999,22 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
     output.push_str("}\n");
     if service.endpoint.is_none() {
         output.push('\n');
+        let resource_annotation = generic_type_annotation(&resource.type_name, &type_parameters);
         output.push_str("export function ");
         output.push_str(&resource_client_bind_function_name(resource));
+        if !type_parameters.is_empty() {
+            output.push('<');
+            output.push_str(&type_parameters.join(", "));
+            output.push('>');
+        }
         output.push_str("(resource: ");
-        output.push_str(&resource.type_name);
+        output.push_str(&resource_annotation);
         output.push_str(" | ");
-        render_resource_structural_type(output, resource, resource_long);
+        render_resource_structural_type(output, resource, resource_long, api_plan);
         output.push_str(", client: workflow.NexusServiceClient<typeof ");
         output.push_str(&service.attr_name);
         output.push_str(">): ");
-        output.push_str(&resource.type_name);
+        output.push_str(&resource_annotation);
         output.push_str(" {\n");
         output.push_str("  const bound = resource instanceof ");
         output.push_str(&resource.type_name);
@@ -5842,6 +6052,7 @@ fn render_resource(output: &mut String, resource: &PlannedResource, service: &Re
 fn typescript_resource_method_result_annotation(
     method: &PlannedResourceMethod,
     long: bool,
+    api_plan: &PlannedSpec,
 ) -> String {
     let Some(result) = &method.result else {
         return "void".to_string();
@@ -5849,7 +6060,7 @@ fn typescript_resource_method_result_annotation(
     let annotation = match &result.kind {
         PlannedResourceMethodResultKind::Resource { type_name } => type_name.clone(),
         PlannedResourceMethodResultKind::Value(kind) => {
-            typescript_resource_field_annotation(kind, result.optional, None, long)
+            typescript_resource_field_annotation(kind, result.optional, None, long, api_plan)
         }
     };
     if result.optional && !annotation.contains(" | undefined") {
@@ -5864,6 +6075,7 @@ fn typescript_resource_field_annotation(
     optional: bool,
     function: Option<&FunctionFieldSpec<PlannedFamily>>,
     long: bool,
+    api_plan: &PlannedSpec,
 ) -> String {
     let base = if let Some(function) = function {
         typescript_function_value_annotation(
@@ -5876,15 +6088,15 @@ fn typescript_resource_field_annotation(
         )
     } else {
         match kind {
-            PlannedType::List(value) => {
-                typescript_array_annotation(&typescript_resource_value_annotation(value, long))
-            }
+            PlannedType::List(value) => typescript_array_annotation(
+                &typescript_resource_value_annotation(value, long, api_plan),
+            ),
             PlannedType::Map(key, value) => format!(
                 "Record<{}, {}>",
-                typescript_resource_value_annotation(key, long),
-                typescript_resource_value_annotation(value, long)
+                typescript_resource_value_annotation(key, long, api_plan),
+                typescript_resource_value_annotation(value, long, api_plan)
             ),
-            value => typescript_resource_value_annotation(value, long),
+            value => typescript_resource_value_annotation(value, long, api_plan),
         }
     };
     if optional {
@@ -5895,7 +6107,11 @@ fn typescript_resource_field_annotation(
 }
 
 // A `long` value is part of a proto-backed request, which holds a 64-bit integer as a `Long`.
-fn typescript_resource_value_annotation(value: &PlannedType, long: bool) -> String {
+fn typescript_resource_value_annotation(
+    value: &PlannedType,
+    long: bool,
+    api_plan: &PlannedSpec,
+) -> String {
     match value {
         PlannedType::Int(IntSpec::I64 | IntSpec::U64) if long => "Long".to_string(),
         PlannedType::Int(_) => "number".to_string(),
@@ -5913,42 +6129,48 @@ fn typescript_resource_value_annotation(value: &PlannedType, long: bool) -> Stri
                 .unwrap_or_else(|| enum_type.name.clone())
         }
         PlannedType::Flags(flags_type) => flags_type.name.clone(),
-        PlannedType::Variant(variant_type) => variant_type.name.clone(),
+        PlannedType::Variant(variant_type) => generic_type_annotation(
+            &variant_type.name,
+            &type_parameter_names(&api_plan.variant_type_parameters(&variant_type.full_name)),
+        ),
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(proto))) => proto
             .replacement
             .as_ref()
             .and_then(typescript_replacement_type_name)
             .unwrap_or_else(|| proto.model_name.clone()),
         PlannedType::External(ExternalTypeSpec::Json(json_type)) => json_type.model_name.clone(),
-        PlannedType::Record(record) => record.model_name.clone(),
+        PlannedType::Record(record) => generic_type_annotation(
+            &record.model_name,
+            &type_parameter_names(&api_plan.record_type_parameters(&record.full_name)),
+        ),
         PlannedType::Resource(resource) => resource.type_name.clone(),
         PlannedType::Option(inner) => {
             format!(
                 "{} | undefined",
-                typescript_resource_value_annotation(inner, long)
+                typescript_resource_value_annotation(inner, long, api_plan)
             )
         }
-        PlannedType::List(inner) => {
-            typescript_array_annotation(&typescript_resource_value_annotation(inner, long))
-        }
+        PlannedType::List(inner) => typescript_array_annotation(
+            &typescript_resource_value_annotation(inner, long, api_plan),
+        ),
         PlannedType::Map(key, value) => format!(
             "Record<{}, {}>",
-            typescript_resource_value_annotation(key, long),
-            typescript_resource_value_annotation(value, long)
+            typescript_resource_value_annotation(key, long, api_plan),
+            typescript_resource_value_annotation(value, long, api_plan)
         ),
         PlannedType::Tuple(items) => format!(
             "[{}]",
             items
                 .iter()
-                .map(|item| typescript_resource_value_annotation(item, long))
+                .map(|item| typescript_resource_value_annotation(item, long, api_plan))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
         PlannedType::Result { ok, err } => typescript_result_annotation(
             ok.as_ref()
-                .map(|ok| typescript_resource_value_annotation(ok, long).to_string()),
+                .map(|ok| typescript_resource_value_annotation(ok, long, api_plan).to_string()),
             err.as_ref()
-                .map(|err| typescript_resource_value_annotation(err, long).to_string()),
+                .map(|err| typescript_resource_value_annotation(err, long, api_plan).to_string()),
         ),
         PlannedType::External(ExternalTypeSpec::Alias(AliasTypeSpec {
             type_name,
@@ -5957,7 +6179,7 @@ fn typescript_resource_value_annotation(value: &PlannedType, long: bool) -> Stri
         })) => type_name
             .value()
             .map(str::to_string)
-            .unwrap_or_else(|| typescript_resource_value_annotation(fallback, long)),
+            .unwrap_or_else(|| typescript_resource_value_annotation(fallback, long, api_plan)),
     }
 }
 
@@ -6040,6 +6262,7 @@ fn branchable_request_method_params(
     method: &PlannedResourceMethod,
     request_plan: &RequestPlan,
     operation: &RenderedOperation<'_>,
+    api_plan: &PlannedSpec,
 ) -> Vec<String> {
     let Some(input) = &operation.input else {
         return Vec::new();
@@ -6054,11 +6277,13 @@ fn branchable_request_method_params(
         .iter()
         .filter(|param| {
             used_params.contains(&param.name)
+                && param.function.is_some()
                 && typescript_resource_field_annotation(
                     &param.kind,
                     param.optional,
                     param.function.as_ref(),
                     false,
+                    api_plan,
                 )
                 .trim_start()
                 .starts_with("string | ")
@@ -6153,6 +6378,7 @@ fn render_resource_method_operation_body(
                 output.push_str(", ");
             }
             output.push_str("request");
+            output.push_str(&operation.runtime_type_args("this."));
             output.push_str(");\n");
         } else {
             output.push_str(&indent_str);
@@ -6164,6 +6390,7 @@ fn render_resource_method_operation_body(
                 output.push_str(", ");
             }
             output.push_str("request");
+            output.push_str(&operation.runtime_type_args("this."));
             output.push_str(");\n");
             output.push_str(&indent_str);
             if result_annotation == "void" {
@@ -6185,14 +6412,14 @@ fn render_resource_method_operation_body(
         } else {
             output.push_str("return await ");
         }
-        render_resource_start_operation(&mut output, service, operation, &client_expr, "request");
+        render_resource_start_operation(&mut output, service, operation, &client_expr);
         return output;
     }
 
     if returns_direct {
         output.push_str(&indent_str);
         output.push_str("const handle = await ");
-        render_resource_start_operation(&mut output, service, operation, &client_expr, "request");
+        render_resource_start_operation(&mut output, service, operation, &client_expr);
         if let Some(transform_expr) = &operation.output_transform_expr {
             output.push_str(&indent_str);
             output.push_str("const result = await handle.result();\n");
@@ -6217,6 +6444,12 @@ fn render_resource_method_operation_body(
                 output.push_str(&indent_str);
                 output.push_str("    ");
                 output.push_str(&resource_return_binding_expr_typescript(binding));
+                output.push_str(",\n");
+            }
+            for name in &operation.runtime_type_parameters {
+                output.push_str(&indent_str);
+                output.push_str("    this.");
+                output.push_str(&typescript_runtime_type_argument_name(name));
                 output.push_str(",\n");
             }
             output.push_str(&indent_str);
@@ -6249,7 +6482,7 @@ fn render_resource_method_operation_body(
     } else {
         output.push_str(&indent_str);
         output.push_str("const handle = await ");
-        render_resource_start_operation(&mut output, service, operation, &client_expr, "request");
+        render_resource_start_operation(&mut output, service, operation, &client_expr);
         output.push_str(&indent_str);
         if result_annotation == "void" {
             output.push_str("await handle.result();\n");
@@ -6265,18 +6498,13 @@ fn render_resource_start_operation(
     service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
     client_expr: &str,
-    input_expr: &str,
 ) {
     output.push_str(client_expr);
     output.push_str(".startOperation(\n");
     output.push_str("      ");
-    output.push_str(&service.attr_name);
-    output.push_str(".operations.");
-    output.push_str(&operation.attr_name);
+    output.push_str(&operation.definition_expr(service, "this."));
     output.push_str(",\n");
-    output.push_str("      ");
-    output.push_str(input_expr);
-    output.push_str(",\n");
+    output.push_str("      request,\n");
     output.push_str("    );\n");
 }
 
@@ -6425,12 +6653,8 @@ fn render_operation_function(
         doc_tags.push(("@deprecated".to_string(), String::new()));
     }
     render_typescript_doc_comment(output, "", operation.doc.as_deref(), &doc_tags);
-    let input_type_parameters = operation
-        .input
-        .as_ref()
-        .map(|input| input.type_parameters.as_slice())
-        .unwrap_or(&[]);
-    if input_type_parameters.is_empty() {
+    let function_type_parameters = operation.function_type_parameters();
+    if function_type_parameters.is_empty() {
         output.push_str("export async function ");
         output.push_str(&typescript_operation_function_name(service, operation));
         output.push_str("(\n");
@@ -6441,7 +6665,7 @@ fn render_operation_function(
                 "export async function {}",
                 typescript_operation_function_name(service, operation)
             ),
-            input_type_parameters,
+            &function_type_parameters,
             0,
         );
     }
@@ -6461,6 +6685,7 @@ fn render_operation_function(
         }
         output.push_str(",\n");
     }
+    operation.render_runtime_type_parameters(output, "  ");
     if returns_direct {
         output.push_str("): Promise<");
         output.push_str(&operation.output_annotation);
@@ -6500,9 +6725,7 @@ fn render_operation_function(
         output.push_str("  });\n");
         output.push_str("  return await client.startOperation(\n");
         output.push_str("    ");
-        output.push_str(&service.attr_name);
-        output.push_str(".operations.");
-        output.push_str(&operation.attr_name);
+        output.push_str(&operation.definition_expr(service, ""));
         output.push_str(",\n");
         output.push_str("    ");
         output.push_str(&typescript_operation_input_expr(operation));
@@ -6548,6 +6771,7 @@ fn render_operation_function(
             output.push_str(&resource_return.resource_type_name);
             output.push('(');
             output.push_str(&args.join(", "));
+            output.push_str(&operation.runtime_type_args(""));
             output.push_str(");\n");
         } else {
             output.push_str("  return result as ");
@@ -6607,6 +6831,11 @@ fn render_operation_function(
         for binding in &resource_return.bindings {
             output.push_str("    ");
             output.push_str(&resource_return_binding_expr_typescript(binding));
+            output.push_str(",\n");
+        }
+        for name in &operation.runtime_type_parameters {
+            output.push_str("    ");
+            output.push_str(&typescript_runtime_type_argument_name(name));
             output.push_str(",\n");
         }
         if service.endpoint.is_none() {
@@ -6712,19 +6941,33 @@ fn render_resource_constructor(
     output.push_str("new ");
     output.push_str(&resource.type_name);
     output.push_str("(\n");
-    for field in &resource.fields {
+    let names = resource
+        .fields
+        .iter()
+        .map(|field| typescript_generated_field_name(&field.name))
+        .chain(
+            resource_type_parameter_names(resource)
+                .into_iter()
+                .map(|name| typescript_runtime_type_argument_name(&name)),
+        );
+    for name in names {
         output.push_str(indent);
         output.push_str("  ");
         output.push_str(value_expr);
         output.push('.');
-        output.push_str(&typescript_generated_field_name(&field.name));
+        output.push_str(&name);
         output.push_str(",\n");
     }
     output.push_str(indent);
     output.push(')');
 }
 
-fn render_resource_structural_type(output: &mut String, resource: &PlannedResource, long: bool) {
+fn render_resource_structural_type(
+    output: &mut String,
+    resource: &PlannedResource,
+    long: bool,
+    api_plan: &PlannedSpec,
+) {
     output.push_str("{ ");
     for field in &resource.fields {
         output.push_str("readonly ");
@@ -6735,10 +6978,26 @@ fn render_resource_structural_type(output: &mut String, resource: &PlannedResour
             field.optional,
             field.function.as_ref(),
             long,
+            api_plan,
         ));
         output.push_str("; ");
     }
+    for name in resource_type_parameter_names(resource) {
+        output.push_str("readonly ");
+        output.push_str(&typescript_runtime_type_argument_name(&name));
+        output.push_str("?: common.TypeInfo<");
+        output.push_str(&name);
+        output.push_str(">; ");
+    }
     output.push('}');
+}
+
+fn resource_type_parameter_names(resource: &PlannedResource) -> Vec<String> {
+    resource
+        .type_parameters
+        .iter()
+        .map(|parameter| parameter.name.clone())
+        .collect()
 }
 
 fn typescript_operation_function_name(

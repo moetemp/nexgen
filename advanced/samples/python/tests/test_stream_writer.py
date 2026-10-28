@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import typing
 import uuid
 
 from nexusrpc.handler import StartOperationContext, service_handler, sync_operation
@@ -30,7 +31,7 @@ class StreamWriterHandler:
     async def write_records(
         self,
         _ctx: StartOperationContext,
-        input: stream_writer_models.WriteRecordsRequest,
+        input: stream_writer_models.WriteRecordsRequest[typing.Any],
     ) -> stream_writer_models.WriteRecordsResponse:
         self.calls.append(("WriteRecords", input))
         return stream_writer_models.WriteRecordsResponse()
@@ -69,7 +70,7 @@ class StreamWriterCallerWorkflow:
     async def run(self) -> int | None:
         service = stream_writer.StreamWriterClient("stream-writer")
         writer = await service.open_writer(
-            stream=stream_writer_models.StreamRef(id="s1")
+            str, stream=stream_writer_models.StreamRef(id="s1")
         )
         closed = await writer.close()
         return closed.last_offset

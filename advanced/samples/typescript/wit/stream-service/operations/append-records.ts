@@ -9,8 +9,8 @@ import type { AppendRecordsResponse, AppendRecordsRequest } from "../models";
  *
  * @param request - Request for the operation.
  */
-export async function appendRecords(
-  request: AppendRecordsRequest,
+export async function appendRecords<BodyT>(
+  request: AppendRecordsRequest<BodyT>,
 ): Promise<workflow.NexusOperationHandle<AppendRecordsResponse>> {
   const client = workflow.createNexusServiceClient({
     service: streamService,

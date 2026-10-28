@@ -24,7 +24,7 @@ namespace Nexgen.StreamWriter
 
         [GeneratedCode("nexgen", null)]
         [NexusOperation("WriteRecords")]
-        WriteRecordsResponse WriteRecords(WriteRecordsRequest request);
+        WriteRecordsResponse WriteRecords(WriteRecordsRequest<object> request);
 
         [GeneratedCode("nexgen", null)]
         [NexusOperation("CloseWriter")]
@@ -76,17 +76,17 @@ namespace Nexgen.StreamWriter
     }
 
     [GeneratedCode("nexgen", null)]
-    public class WriteRecordsOptions
+    public class WriteRecordsOptions<TBody>
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="WriteRecordsOptions"/> class.
+        /// Initializes a new instance of the <see cref="WriteRecordsOptions{TBody}"/> class.
         /// </summary>
-        public WriteRecordsOptions(IReadOnlyList<AppendRecord> records)
+        public WriteRecordsOptions(IReadOnlyList<AppendRecord<TBody>> records)
         {
             Records = records;
         }
 
-        public IReadOnlyList<AppendRecord> Records { get; set; }
+        public IReadOnlyList<AppendRecord<TBody>> Records { get; set; }
         public ulong? WriterId { get; set; }
     }
 
@@ -121,15 +121,15 @@ namespace Nexgen.StreamWriter
 
         /// <param name="request">Open a writer for one Producer of one Stream.</param>
         [GeneratedCode("nexgen", null)]
-        private async Task<Writer> OpenWriterAsync(OpenWriterRequest request)
+        private async Task<Writer<TBody>> OpenWriterAsync<TBody>(OpenWriterRequest request)
         {
             var result = await _client.ExecuteNexusOperationAsync<WriterResult>(svc => svc.OpenWriter(request)).ConfigureAwait(true);
-            return Writer.BindClient(new Writer((result.WriterId ?? throw new System.InvalidOperationException("OpenWriter answered without `writer_id`"))), _client);
+            return Writer<TBody>.BindClient(new Writer<TBody>((result.WriterId ?? throw new System.InvalidOperationException("OpenWriter answered without `writer_id`"))), _client);
         }
 
         /// <param name="options">Open a writer for one Producer of one Stream.</param>
         [GeneratedCode("nexgen", null)]
-        public Task<Writer> OpenWriterAsync(OpenWriterOptions options)
+        public Task<Writer<TBody>> OpenWriterAsync<TBody>(OpenWriterOptions options)
         {
             var request = new OpenWriterRequest(options.Stream, options.FailedTasks)
             {
@@ -138,21 +138,22 @@ namespace Nexgen.StreamWriter
                 MaxRetryDuration = options.MaxRetryDuration,
                 PreviousCompletedTask = options.PreviousCompletedTask,
             };
-            return OpenWriterAsync(request);
+            return OpenWriterAsync<TBody>(request);
         }
 
         [GeneratedCode("nexgen", null)]
-        private async Task<WriteRecordsResponse> WriteRecordsAsync(WriteRecordsRequest request)
+        private async Task<WriteRecordsResponse> WriteRecordsAsync<TBody>(WriteRecordsRequest<TBody> request)
         {
-            var result = await _client.ExecuteNexusOperationAsync<WriteRecordsResponse>(svc => svc.WriteRecords(request)).ConfigureAwait(true);
+            var client = Workflow.CreateNexusWorkflowClient("temporal.sdk.streams.v1.StreamWriter", _client.Options);
+            var result = await client.ExecuteNexusOperationAsync<WriteRecordsResponse>("WriteRecords", request).ConfigureAwait(true);
             return result;
         }
 
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nexgen", null)]
-        public Task<WriteRecordsResponse> WriteRecordsAsync(WriteRecordsOptions options)
+        public Task<WriteRecordsResponse> WriteRecordsAsync<TBody>(WriteRecordsOptions<TBody> options)
         {
-            var request = new WriteRecordsRequest(options.Records)
+            var request = new WriteRecordsRequest<TBody>(options.Records)
             {
                 WriterId = options.WriterId,
             };

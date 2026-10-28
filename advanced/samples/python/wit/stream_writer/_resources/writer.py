@@ -17,10 +17,14 @@ from ..models import (
 import temporal_support as _support
 
 
+BodyT = typing.TypeVar("BodyT")
+
+
 @dataclasses.dataclass
-class Writer:
+class Writer(typing.Generic[BodyT]):
     """An open writer of one Producer. The crate keeps its epoch and sequence."""
 
+    body_type: type[BodyT] = dataclasses.field(repr=False, compare=False)
     writer_id: int
     _operations: _StreamWriterOperations | None = dataclasses.field(
         default=None, repr=False, compare=False, kw_only=True
@@ -35,7 +39,7 @@ class Writer:
 
     async def write_records(
         self,
-        records: list[AppendRecord] | None = None,
+        records: list[AppendRecord[BodyT]] | None = None,
     ) -> WriteRecordsResponse:
         """Write Records at once. The answer has the first and the last offset."""
         request = WriteRecordsRequest(
@@ -68,7 +72,7 @@ class _StreamWriterOperations(typing.Protocol):
 
     async def _stream_writer_write_records(
         self,
-        request: WriteRecordsRequest,
+        request: WriteRecordsRequest[BodyT],
     ) -> WriteRecordsResponse: ...
 
     async def _stream_writer_close_writer(
@@ -90,7 +94,7 @@ class WorkflowStreamWriter:
 
     async def _stream_writer_write_records(
         self,
-        request: WriteRecordsRequest,
+        request: WriteRecordsRequest[BodyT],
     ) -> WriteRecordsResponse:
         nexus_client = self._nexus_client
         handle = await nexus_client.start_operation(
@@ -126,7 +130,7 @@ class WorkflowStreamWriter:
 
 
 def bind_writer_client(
-    resource: Writer,
+    resource: Writer[BodyT],
     nexus_client: typing.Any,
-) -> Writer:
+) -> Writer[BodyT]:
     return dataclasses.replace(resource, _operations=WorkflowStreamWriter(nexus_client))

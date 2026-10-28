@@ -206,6 +206,18 @@ describe("stream-service generated output", () => {
     expect(empty).toBe(Long.ZERO);
   });
 
+  test("closes a Stream at the end of `await using`, with no failure", async () => {
+    startOperation.mockResolvedValueOnce({ result: async () => ({}) });
+    const stream = new Stream<string>({ id: "s1" }, undefined, undefined);
+
+    await stream[Symbol.asyncDispose]();
+
+    const [operation, request] = startOperation.mock.lastCall!;
+    expect(operation.name).toBe("CloseStream");
+    expect(request.stream).toStrictEqual({ id: "s1" });
+    expect(request.failure).toBeUndefined();
+  });
+
   test("passes an enum number that it doesn't know through", () => {
     // A newer server can send a Stream status that this code doesn't know.
     const proto: temporal.api.streamservice.v1.IDescribeStreamResponse = {

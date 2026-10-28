@@ -143,6 +143,41 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
             validate_resource_flatten(spec, resource, flatten, &invalid)?;
         }
     }
+    // The end of a block passes its exception, which converts to a failure.
+    for resource in spec.services.iter().flat_map(|service| &service.resources) {
+        for method in &resource.methods {
+            let Some(failure) = method
+                .close
+                .as_ref()
+                .and_then(|close| close.failure.as_ref())
+            else {
+                continue;
+            };
+            let is_failure_proto = |ty: &TypeSpec<SelectedFamily>| {
+                matches!(
+                    ty,
+                    TypeSpec::External(ExternalTypeSpec::Proto(proto))
+                        if proto.as_str() == "temporal.api.failure.v1.Failure"
+                )
+            };
+            let is_failure = method.params.iter().any(|param| {
+                &param.name == failure
+                    && match param.field_type.without_option() {
+                        TypeSpec::External(ExternalTypeSpec::Alias(alias)) => {
+                            is_failure_proto(&alias.target)
+                        }
+                        ty => is_failure_proto(ty),
+                    }
+            });
+            if !is_failure {
+                return Err(invalid(format!(
+                    "resource `{}` method `{}` closes with the failure `{failure}`, whose type \
+                     isn't `temporal.api.failure.v1.Failure`",
+                    resource.name, method.name
+                )));
+            }
+        }
+    }
     // A whole operation input is the request, so it can't be one of its own fields.
     for service in &spec.services {
         for operation in &service.operations {

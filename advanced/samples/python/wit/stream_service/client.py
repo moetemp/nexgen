@@ -133,7 +133,7 @@ class StreamServiceClientExtension(abc.ABC):
             _operations=self,
         )
 
-    async def create_stream(
+    def create_stream(
         self,
         definition: type[temporal_support.StreamDefinition[BodyT]],
         *,
@@ -142,7 +142,7 @@ class StreamServiceClientExtension(abc.ABC):
         backend: str | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
-    ) -> Stream[BodyT]:
+    ) -> _support.ResourceCall[Stream[BodyT]]:
         """
         Args:
             id: The id of the Stream. Required, and never empty.
@@ -161,8 +161,10 @@ class StreamServiceClientExtension(abc.ABC):
             retention=retention,
             ref=ref,
         )
-        return await self._stream_service_create_stream(
-            request, body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        return _support.ResourceCall(
+            self._stream_service_create_stream(
+                request, body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+            )
         )
 
     async def _stream_service_append_records(

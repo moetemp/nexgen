@@ -90,6 +90,14 @@ namespace Nexgen.DotNetExamples.Tests
         private static Task<long> PublishTurns(StreamServiceExample.Stream<Turn> stream) =>
             stream.PublishAsync(new Turn("user"), new Turn("model"));
 
+        // `await using` closes the Stream at the end of its scope.
+        private static async Task CloseAtScopeEnd(StreamServiceExample.Stream<Turn> stream)
+        {
+            await using (stream)
+            {
+            }
+        }
+
         // The create takes the backend of the ref as an option, and the ref copies the id.
         private static Task<StreamServiceExample.Stream<Turn>> CreateTurnsOnBackend() =>
             StreamServiceExample.Operations.CreateStreamAsync(

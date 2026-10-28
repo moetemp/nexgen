@@ -912,6 +912,7 @@ impl<'a> TypePlanningContext<'a> {
                         .map(|result| self.planned_resource_method_result(result)),
                     varargs: method.varargs.clone(),
                     result_field: method.result_field.clone(),
+                    close: method.close.clone(),
                     binding,
                 })
             })

@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit"
+contains = ["closes with the failure `reason`, whose type isn't `temporal.api.failure.v1.Failure`"]

@@ -1,5 +1,8 @@
 """Shared Temporal converters used by the advanced generated samples."""
 
+from .closing import ResourceCall as ResourceCall
+from .closing import deferred_closes as deferred_closes
+from .closing import exit_close as exit_close
 from .definitions import StreamDefinition as StreamDefinition
 from .definitions import definition_type_arguments as definition_type_arguments
 from .operations import *  # noqa: F401,F403

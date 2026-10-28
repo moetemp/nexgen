@@ -3227,6 +3227,20 @@ fn build_resource(
         .map(|function| build_resource_method(resolve, function, path, &context, language))
         .collect::<Result<Vec<_>>>()?;
 
+    if methods
+        .iter()
+        .filter(|method| method.close.is_some())
+        .count()
+        > 1
+    {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context,
+            directive: "@nexus.close".to_string(),
+            reason: "marks more than one method of the resource".to_string(),
+        });
+    }
+
     for function in interface.functions.values() {
         match function.kind {
             FunctionKind::Static(id) | FunctionKind::AsyncStatic(id) if id == resource_id => {
@@ -3355,6 +3369,7 @@ fn build_resource_method(
         .map(|ty| build_resource_result(resolve, ty, path, &context, language))
         .transpose()?;
     let varargs = build_resource_method_varargs(&params, &directives, path, &context)?;
+    let close = build_resource_method_close(&params, &directives, path, &context)?;
     let result_field = match directive(&directives, "result-field", path, &context)? {
         Some(result_field) => {
             let invalid = |reason: String| Error::InvalidWitDirective {
@@ -3390,7 +3405,42 @@ fn build_resource_method(
         operation_name: build_resource_method_operation_name(&directives, path, &context)?,
         varargs,
         result_field,
+        close,
     })
+}
+
+/// A method with `@nexus.close`, which ends the resource. The end of a block calls it with no
+/// argument but the failure, so each parameter is optional.
+fn build_resource_method_close(
+    params: &[ResourceFieldSpec],
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<ResourceCloseSpec>> {
+    let Some(close) = directive(directives, "close", path, context)? else {
+        return Ok(None);
+    };
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.close".to_string(),
+        reason,
+    };
+    if let Some(param) = params.iter().find(|param| !param.optional) {
+        return Err(invalid(format!(
+            "needs optional parameters, but `{}` is required",
+            param.name
+        )));
+    }
+    let failure = close.value("failure").map(str::to_string);
+    if let Some(failure) = &failure
+        && !params.iter().any(|param| &param.name == failure)
+    {
+        return Err(invalid(format!(
+            "`{failure}` isn't a parameter of the method"
+        )));
+    }
+    Ok(Some(ResourceCloseSpec { failure }))
 }
 
 /// The API name of the last parameter of a method with `@nexus.varargs`, which takes the items of
@@ -4676,7 +4726,7 @@ interface handles {
     }
 
     #[test]
-    fn publish_takes_its_values_and_returns_the_last_offset() {
+    fn publish_takes_its_values_and_close_takes_the_failure() {
         let spec = crate::parser::load_api_spec_from_wit_for_language_with_inputs(
             Language::Python,
             &[
@@ -4692,6 +4742,18 @@ interface handles {
             panic!("an append record is a record");
         };
 
+        let close = spec.services[0].resources[0]
+            .methods
+            .iter()
+            .find(|method| method.name == "close")
+            .unwrap();
+        assert_eq!(
+            close.close,
+            Some(crate::spec::ResourceCloseSpec {
+                failure: Some("failure".to_string()),
+            })
+        );
+        assert_eq!(publish.close, None);
         assert_eq!(publish.varargs.as_deref(), Some("values"));
         // The field is named by its key, which is the proto field name.
         assert_eq!(publish.result_field.as_deref(), Some("last_offset"));

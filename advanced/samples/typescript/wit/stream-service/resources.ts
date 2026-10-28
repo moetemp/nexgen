@@ -22,6 +22,10 @@ export class Stream<BodyT = unknown> {
     public readonly bodyType?: common.TypeInfo<BodyT>,
   ) {}
 
+  public async [Symbol.asyncDispose](): Promise<void> {
+    await this.close();
+  }
+
   public async publish(...values: BodyT[]): Promise<Long> {
     const request = {
       stream: this.stream,

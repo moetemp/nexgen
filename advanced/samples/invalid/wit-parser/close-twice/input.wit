@@ -1,0 +1,16 @@
+package test:close-twice@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  resource job {
+    constructor(id: string);
+
+    // A block's end can call only one close.
+    /// @nexus.close
+    close: func(reason: option<string>);
+    /// @nexus.close
+    cancel: func(reason: option<string>);
+  }
+}

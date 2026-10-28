@@ -6097,6 +6097,18 @@ fn render_resource(
     }
     output.push_str("  ) {}\n");
 
+    // `await using` closes the resource, with no failure, since it doesn't see the error.
+    if let Some(close) = resource
+        .methods
+        .iter()
+        .find(|method| method.close.is_some())
+    {
+        output
+            .push_str("\n  public async [Symbol.asyncDispose](): Promise<void> {\n    await this.");
+        output.push_str(&typescript_generated_field_name(&close.name));
+        output.push_str("();\n  }\n");
+    }
+
     if resource.methods.is_empty() {
         output.push_str("}\n");
         return;

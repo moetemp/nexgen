@@ -48,12 +48,12 @@ async def _create_stream(
     )
 
 
-async def create_stream(
+def create_stream(
     definition: type[temporal_support.StreamDefinition[BodyT]],
     *,
     retention: datetime.timedelta | None = None,
     backend: str | None = None,
-) -> Stream[BodyT]:
+) -> _support.ResourceCall[Stream[BodyT]]:
     """
     Args:
         retention: The age after which a Record is dropped. Empty is the Store default.
@@ -72,4 +72,4 @@ async def create_stream(
         owner=_support.workflow_owner(),
         ref=ref,
     )
-    return await _create_stream(request, body_type)
+    return _support.ResourceCall(_create_stream(request, body_type))

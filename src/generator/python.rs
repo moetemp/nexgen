@@ -1072,6 +1072,7 @@ impl<'a> ApiPlanner<'a> {
         if targets.client {
             module_imports.insert("datetime".to_string());
         }
+        module_imports.insert("types".to_string());
 
         let mut output = String::new();
         render_generated_file_header(&mut output);
@@ -1205,6 +1206,7 @@ impl<'a> ApiPlanner<'a> {
         if targets.client {
             render_resource_operations_slot(output, service, bound_operations, targets);
         }
+        render_resource_context_manager(output, resource);
         if resource.methods.is_empty() {
             if !targets.client {
                 output.push_str("\n    pass\n");
@@ -8914,17 +8916,28 @@ fn render_operation_functions(
         }
         PythonTarget::Client => render_client_operation_method(output, service, operation),
     }
+    let mut public = String::new();
     if let Some(unpacked_input) = operation.target_unpacked_input(target) {
-        output.push('\n');
+        public.push('\n');
         if function_unpacked_needs_overloads(&unpacked_input.functions) {
-            render_function_unpacked_overloads(output, target, service, operation, unpacked_input);
-            output.push('\n');
+            render_function_unpacked_overloads(
+                &mut public,
+                target,
+                service,
+                operation,
+                unpacked_input,
+            );
+            public.push('\n');
         }
-        render_unpacked_operation_function(output, target, service, operation, unpacked_input);
+        render_unpacked_operation_function(&mut public, target, service, operation, unpacked_input);
     } else if target == PythonTarget::Client {
-        output.push('\n');
-        render_client_request_method(output, service, operation);
+        public.push('\n');
+        render_client_request_method(&mut public, service, operation);
     }
+    if operation_returns_closable_resource(service, operation) {
+        public = resource_call_functions(&public, &operation.attr_name);
+    }
+    output.push_str(&public);
     if let Some(next_expr) = operation.poll_next(target.generation_target()) {
         output.push('\n');
         render_operation_poll_function(output, target, service, operation, next_expr);
@@ -9297,6 +9310,93 @@ fn operation_result_annotation(operation: &RenderedOperation<'_>) -> String {
     } else {
         operation.output_annotation.clone()
     }
+}
+
+/// Renders `__aenter__` and `__aexit__` for a resource with a `@nexus.close` method. The support
+/// package decides at the block's end whether to close now, and with which failure.
+fn render_resource_context_manager(output: &mut String, resource: &PlannedResource) {
+    let Some((method, close)) = resource
+        .methods
+        .iter()
+        .find_map(|method| method.close.as_ref().map(|close| (method, close)))
+    else {
+        return;
+    };
+    output.push_str("\n    async def __aenter__(self) -> typing_extensions.Self:\n");
+    output.push_str("        return self\n");
+    output.push_str("\n    async def __aexit__(\n");
+    output.push_str("        self,\n");
+    output.push_str("        exc_type: type[BaseException] | None,\n");
+    output.push_str("        exc: BaseException | None,\n");
+    output.push_str("        tb: types.TracebackType | None,\n");
+    output.push_str("    ) -> None:\n");
+    let close_call = format!("self.{}", python_field_name(&method.name));
+    match &close.failure {
+        Some(failure) => {
+            output.push_str("        close, failure = _support.exit_close(self, exc)\n");
+            output.push_str("        if close:\n");
+            output.push_str(&format!(
+                "            await {close_call}({}=failure)\n",
+                python_field_name(failure)
+            ));
+        }
+        None => {
+            output.push_str("        close, _ = _support.exit_close(self, exc)\n");
+            output.push_str("        if close:\n");
+            output.push_str(&format!("            await {close_call}()\n"));
+        }
+    }
+}
+
+/// Whether an operation returns a resource with a `@nexus.close` method, which `async with` can
+/// close at the block's end.
+fn operation_returns_closable_resource(
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) -> bool {
+    let type_name = match &operation.output_resource_return {
+        Some(resource_return) => resource_return.resource_type_name.as_str(),
+        None if operation.output_direct_result => operation.output_annotation.as_str(),
+        None => return false,
+    };
+    service.resources.iter().any(|resource| {
+        resource.type_name == type_name
+            && resource.methods.iter().any(|method| method.close.is_some())
+    })
+}
+
+/// Makes each public function `name` a plain function that returns a `ResourceCall`, so a caller
+/// can await it for the resource or enter it with `async with`.
+fn resource_call_functions(source: &str, name: &str) -> String {
+    let marker = format!("async def {name}(");
+    let mut segments = source.split(&marker);
+    let mut output = segments.next().unwrap_or_default().to_string();
+    for segment in segments {
+        output.push_str(&format!("def {name}("));
+        let (Some(arrow), Some(colon)) = (segment.find(") -> "), segment.find(":\n")) else {
+            output.push_str(segment);
+            continue;
+        };
+        let annotation = &segment[arrow + ") -> ".len()..colon];
+        output.push_str(&segment[..arrow]);
+        output.push_str(&format!(") -> _support.ResourceCall[{annotation}]"));
+        let body = &segment[colon..];
+        // The call's coroutine is the awaitable that `ResourceCall` awaits.
+        match body.rfind("return await ") {
+            Some(index) => {
+                let line_end = body[index..]
+                    .find('\n')
+                    .map_or(body.len(), |end| index + end);
+                output.push_str(&body[..index]);
+                output.push_str("return _support.ResourceCall(");
+                output.push_str(&body[index + "return await ".len()..line_end]);
+                output.push(')');
+                output.push_str(&body[line_end..]);
+            }
+            None => output.push_str(body),
+        }
+    }
+    output
 }
 
 /// Whether a Workflow function awaits the handle itself, to transform the result or build a

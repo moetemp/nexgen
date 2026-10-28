@@ -109,6 +109,7 @@ pub(crate) struct ResolvedResourceMethodSpec {
     pub(crate) result: Option<ResourceResultSpec<SelectedFamily>>,
     pub(crate) varargs: Option<String>,
     pub(crate) result_field: Option<String>,
+    pub(crate) close: Option<crate::spec::ResourceCloseSpec>,
     pub(crate) binding: ResolvedResourceMethodBinding,
 }
 
@@ -407,6 +408,7 @@ fn resolve_resource_method(
             result: method.result.clone(),
             varargs: method.varargs.clone(),
             result_field: method.result_field.clone(),
+            close: method.close.clone(),
             binding: ResolvedResourceMethodBinding::Operation {
                 operation_name: operation.name.clone(),
                 request_plan,
@@ -468,6 +470,7 @@ fn resolve_resource_method(
         result: method.result.clone(),
         varargs: method.varargs.clone(),
         result_field: method.result_field.clone(),
+        close: method.close.clone(),
         binding,
     })
 }

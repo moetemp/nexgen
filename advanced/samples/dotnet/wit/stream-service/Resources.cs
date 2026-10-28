@@ -14,7 +14,7 @@ namespace Nexgen.StreamService
 {
 
     [GeneratedCode("nexgen", null)]
-    public class Stream<TBody>
+    public class Stream<TBody> : IAsyncDisposable
     {
         public Stream(StreamRef streamValue, bool? created, StreamStatus? status)
         {
@@ -55,6 +55,12 @@ namespace Nexgen.StreamService
         {
             var request = new DescribeStreamOptions(StreamValue);
             return Operations.DescribeStreamAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        public async ValueTask DisposeAsync()
+        {
+            await CloseAsync(default, default).ConfigureAwait(true);
         }
 
     }

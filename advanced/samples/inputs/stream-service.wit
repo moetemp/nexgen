@@ -413,6 +413,7 @@ interface stream-service {
 
     /// @nexus.doc "Close the Stream. Readers drain what is left, then end."
     /// @nexus.operation "close-stream"
+    /// @nexus.close failure="failure"
     close: func(%result: option<payload>, failure: option<failure>);
 
     /// @nexus.doc "Read one page of Records. The poll iterator reads them all."

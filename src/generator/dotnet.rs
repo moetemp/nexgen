@@ -497,8 +497,15 @@ impl<'a> ApiPlanner<'a> {
         let generic_type_name = csharp_generic_resource_type(resource);
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
+        let close = resource
+            .methods
+            .iter()
+            .find(|method| method.close.is_some());
         output.push_str("public class ");
         output.push_str(&generic_type_name);
+        if close.is_some() {
+            output.push_str(" : IAsyncDisposable");
+        }
         output.push_str("\n{\n");
         output.push_str("    public ");
         output.push_str(&type_name);
@@ -555,6 +562,16 @@ impl<'a> ApiPlanner<'a> {
         }
         for method in &resource.methods {
             self.render_resource_method(output, service, &type_name, method);
+        }
+        // `await using` closes the resource, with no failure, since it doesn't see the error.
+        if let Some(close) = close {
+            output.push_str("    ");
+            output.push_str(GENERATED_CODE_ATTRIBUTE);
+            output.push_str("\n    public async ValueTask DisposeAsync()\n    {\n        await ");
+            output.push_str(&csharp_type_name(&close.name));
+            output.push_str("Async(");
+            output.push_str(&vec!["default"; close.params.len()].join(", "));
+            output.push_str(").ConfigureAwait(true);\n    }\n\n");
         }
         output.push_str("}\n\n");
     }

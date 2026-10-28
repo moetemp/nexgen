@@ -219,7 +219,7 @@ takes the backend of the Stream's ref, and the ref copies the id. In Python, the
 factory `stream` builds a handle from an id or a ref with no call, and a handle
 passes as its ref. `publish` takes the values, and returns the offset of the
 last one. The read iterator yields each Record, and its `next_request` resumes
-after the last one.
+after the last one. `async with` and `await using` close a Stream.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),

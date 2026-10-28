@@ -2778,6 +2778,17 @@ fn build_resource(
         .unwrap_or_default();
     let type_parameters =
         build_resource_type_parameters(resolve, interface, &resource_directives, path, &context)?;
+    let definition = directive(&resource_directives, "definition", path, &context)?
+        .map(directive_language_string)
+        .unwrap_or_default();
+    if !definition.is_empty() && type_parameters.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context,
+            directive: "@nexus.definition".to_string(),
+            reason: "needs `@nexus.type-parameter` on the same resource".to_string(),
+        });
+    }
 
     let constructor = interface.functions.values().find(
         |function| matches!(function.kind, FunctionKind::Constructor(id) if id == resource_id),
@@ -2841,6 +2852,7 @@ fn build_resource(
         name: resource_name,
         doc,
         type_parameters,
+        definition,
         fields,
         methods,
         data: (),

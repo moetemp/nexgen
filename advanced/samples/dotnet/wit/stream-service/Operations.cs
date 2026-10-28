@@ -198,7 +198,7 @@ namespace Nexgen.StreamService
 
         /// <param name="options">Create a Stream, or get the one that exists, which keeps its Retention.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(CreateStreamOptions options)
+        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(Nexgen.Support.StreamDefinition<TBody> definition, CreateStreamOptions options)
         {
             var request = new CreateStreamRequest(options.StreamId)
             {

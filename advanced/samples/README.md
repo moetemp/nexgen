@@ -165,7 +165,9 @@ uses records of the service, so its build links `stream-service.wit`.
 Python generates both targets, so one `Stream` class serves Workflow code and
 clients. The read poll names the client target, since Workflow code reads from a
 Local Activity. The Stream and the writer are generic in the record body type
-`body-t`, so a handle decodes the bodies of a read as its own type argument.
+`body-t`, so a handle decodes the bodies of a read as its own type argument. The
+create of a Stream takes a definition, which is a type of the sample support
+code, since no SDK has `StreamDefinition` yet.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)

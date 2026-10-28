@@ -584,6 +584,18 @@ impl<'a> ApiPlanner<'a> {
                 .map(support_reference),
             runtime_type_parameters,
             output_record_type_parameters,
+            runtime_type_definition: operation.data.runtime_type_definition.value().map(
+                |definition| {
+                    (
+                        definition.to_string(),
+                        operation
+                            .data
+                            .runtime_type_definition
+                            .import()
+                            .map(str::to_string),
+                    )
+                },
+            ),
         })
     }
 
@@ -3031,9 +3043,43 @@ struct RenderedOperation<'a> {
     runtime_type_parameters: Vec<String>,
     /// The type parameters of a record output, in order.
     output_record_type_parameters: Vec<String>,
+    /// The definition type that the call takes in place of the runtime types, with its import.
+    runtime_type_definition: Option<(String, Option<String>)>,
 }
 
 impl RenderedOperation<'_> {
+    /// The definition parameter, which comes before the request.
+    fn render_definition_parameter(&self, output: &mut String, indent: &str) {
+        let Some((definition, _)) = &self.runtime_type_definition else {
+            return;
+        };
+        output.push_str(indent);
+        output.push_str("definition: ");
+        output.push_str(&generic_type_annotation(
+            definition,
+            &self.runtime_type_parameters,
+        ));
+        output.push_str(",\n");
+    }
+
+    /// Reads the runtime types from the definition, before the call passes them on.
+    fn render_definition_type_arguments(&self, output: &mut String, indent: &str) {
+        if self.runtime_type_definition.is_none() {
+            return;
+        }
+        output.push_str(indent);
+        output.push_str("const [");
+        output.push_str(
+            &self
+                .runtime_type_parameters
+                .iter()
+                .map(|name| typescript_runtime_type_argument_name(name))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        output.push_str("] = support.definitionTypeArguments(definition);\n");
+    }
+
     /// The type parameters of the operation function, from the request and the runtime types.
     fn function_type_parameters(&self) -> Vec<RenderedTypeParameter> {
         let mut parameters = self
@@ -3055,8 +3101,12 @@ impl RenderedOperation<'_> {
         parameters
     }
 
-    /// The parameters of the runtime types, one line each at `indent`.
+    /// The parameters of the runtime types, one line each at `indent`. A call with a definition
+    /// reads them from it.
     fn render_runtime_type_parameters(&self, output: &mut String, indent: &str) {
+        if self.runtime_type_definition.is_some() {
+            return;
+        }
         for name in &self.runtime_type_parameters {
             output.push_str(indent);
             output.push_str(&typescript_runtime_type_argument_name(name));
@@ -4046,6 +4096,7 @@ fn render_endpoint_service_operation_method(
             2,
         );
     }
+    operation.render_definition_parameter(output, "    ");
     if let Some(input) = &operation.input {
         output.push_str("    request: ");
         output.push_str(&input.annotation);
@@ -4057,6 +4108,7 @@ fn render_endpoint_service_operation_method(
         service, operation,
     ));
     output.push_str("> {\n");
+    operation.render_definition_type_arguments(output, "    ");
     render_endpoint_service_operation_body(output, service, operation);
     output.push_str("  }\n");
 }
@@ -4650,6 +4702,12 @@ fn render_service_module(
         api_plan,
         &body,
     );
+    render_definition_type_imports(
+        &mut imports,
+        &body,
+        &api_plan.module_path.to_path_buf(),
+        services.iter().flat_map(|service| &service.operations),
+    );
     // The client builds the resource that an operation returns, so its class is a value import.
     let built_resources = services
         .iter()
@@ -4816,6 +4874,12 @@ fn render_operation_module(
     if let Some(path) = &operation.output_transform_type_import {
         render_type_imports(&mut imports, path, &[operation.output_annotation.clone()]);
     }
+    render_definition_type_imports(
+        &mut imports,
+        &body,
+        &api_plan.module_path.to_path_buf().join("operations"),
+        [operation],
+    );
     render_support_import_if(
         &mut imports,
         support_package,
@@ -4854,6 +4918,30 @@ fn render_operation_module(
     render_value_imports(&mut imports, "../resources", &resource_value_imports);
     render_type_imports(&mut imports, "../resources", &type_resources);
     render_generated_module(imports, body)
+}
+
+/// Imports each definition type that the body names. A relative module is relative to the root of
+/// the generated package.
+fn render_definition_type_imports<'a>(
+    output: &mut String,
+    body: &str,
+    source_dir: &Path,
+    operations: impl IntoIterator<Item = &'a RenderedOperation<'a>>,
+) {
+    let mut imports = BTreeMap::<String, BTreeSet<String>>::new();
+    for operation in operations {
+        if let Some((definition, Some(module))) = &operation.runtime_type_definition
+            && contains_identifier(body, definition)
+        {
+            imports
+                .entry(typescript_relative_import(source_dir, module))
+                .or_default()
+                .insert(definition.clone());
+        }
+    }
+    for (module, names) in imports {
+        render_type_imports(output, &module, &names.into_iter().collect::<Vec<_>>());
+    }
 }
 
 fn render_support_import(
@@ -6634,6 +6722,12 @@ fn render_operation_function(
             "Endpoint for the service.".to_string(),
         ));
     }
+    if operation.runtime_type_definition.is_some() {
+        doc_tags.push((
+            "@param definition -".to_string(),
+            "Gives the type arguments of the resource.".to_string(),
+        ));
+    }
     if operation.input.is_some() {
         doc_tags.push((
             "@param request -".to_string(),
@@ -6672,6 +6766,7 @@ fn render_operation_function(
     if service.endpoint.is_none() {
         output.push_str("  endpoint: string,\n");
     }
+    operation.render_definition_parameter(output, "  ");
     if let Some(input) = &operation.input {
         output.push_str(if input.sourced_fields.is_empty() {
             "  request: "
@@ -6697,6 +6792,7 @@ fn render_operation_function(
         output.push_str(&operation.output_operation_annotation);
         output.push_str(">> {\n");
     }
+    operation.render_definition_type_arguments(output, "  ");
     if let Some(input) = &operation.input {
         if !input.sourced_fields.is_empty() {
             output.push_str("  const request = {\n    ...requestInput,\n");

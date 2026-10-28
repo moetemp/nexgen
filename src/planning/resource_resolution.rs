@@ -95,6 +95,7 @@ pub(crate) struct ResolvedResourceSpec {
     pub(crate) name: String,
     pub(crate) doc: SelectedTextSpec,
     pub(crate) type_parameters: Vec<crate::spec::TypeParameterSpec>,
+    pub(crate) definition: SelectedTextSpec,
     pub(crate) fields: Vec<ResourceFieldSpec<SelectedFamily>>,
     pub(crate) methods: Vec<ResolvedResourceMethodSpec>,
 }
@@ -328,6 +329,7 @@ fn resolve_resource_methods(
         name: resource.name.clone(),
         doc: resource.doc.clone(),
         type_parameters: resource.type_parameters.clone(),
+        definition: resource.definition.clone(),
         fields: resource.fields.clone(),
         methods,
     })

@@ -14,11 +14,11 @@ export interface SystemNexusWorkflowOutboundCallsInterceptor {
     next: (input: Request) => Promise<nexus.NexusOperationHandle<Response>>,
   ) => Promise<nexus.NexusOperationHandle<Response>>;
   valueOperation?: (
-    input: ValueRequest,
+    input: ValueRequest<any>,
     next: (
-      input: ValueRequest,
-    ) => Promise<nexus.NexusOperationHandle<ValueResponse<ValueT>>>,
-  ) => Promise<nexus.NexusOperationHandle<ValueResponse<ValueT>>>;
+      input: ValueRequest<any>,
+    ) => Promise<nexus.NexusOperationHandle<ValueResponse<any>>>,
+  ) => Promise<nexus.NexusOperationHandle<ValueResponse<any>>>;
 }
 
 /** Dispatches the operation-specific interceptor chain selected by service and operation. */
@@ -42,8 +42,8 @@ export function dispatchSystemNexusSpecificInterceptors(
           )(input as Request) as Promise<nexus.NexusOperationHandle<unknown>>;
         case "ValueOperation":
           return composeInterceptors(interceptors, "valueOperation", (request) =>
-            next<ValueRequest, ValueResponse<ValueT>>(request),
-          )(input as ValueRequest) as Promise<nexus.NexusOperationHandle<unknown>>;
+            next<ValueRequest<any>, ValueResponse<any>>(request),
+          )(input as ValueRequest<any>) as Promise<nexus.NexusOperationHandle<unknown>>;
         default:
           return next(input);
       }

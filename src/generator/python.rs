@@ -859,7 +859,7 @@ impl<'a> ApiPlanner<'a> {
                 ]
             })
             .flatten()
-            .chain(std::iter::once("abc".to_string()))
+            .chain(["abc".to_string(), "datetime".to_string()])
             .collect::<BTreeSet<_>>();
         let mut output = String::new();
         render_generated_file_header(&mut output);
@@ -995,6 +995,9 @@ impl<'a> ApiPlanner<'a> {
         }
         if targets.workflow && !service.delay_load_temporalio_workflow {
             module_imports.insert("temporalio.workflow".to_string());
+        }
+        if targets.client {
+            module_imports.insert("datetime".to_string());
         }
 
         let mut output = String::new();
@@ -1136,7 +1139,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    async def ");
         output.push_str(&python_field_name(&method.name));
         output.push_str("(\n");
-        self.render_resource_method_params(output, method);
+        self.render_resource_method_params(output, method, operations_object);
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
@@ -1186,19 +1189,26 @@ impl<'a> ApiPlanner<'a> {
         }
     }
 
-    fn render_resource_method_params(&self, output: &mut String, method: &PlannedResourceMethod) {
+    /// The parameters of a resource method. A method of a class that serves the client target
+    /// also takes the RPC options.
+    fn render_resource_method_params(
+        &self,
+        output: &mut String,
+        method: &PlannedResourceMethod,
+        rpc_options: bool,
+    ) {
         output.push_str("        self,\n");
         // Python refuses a parameter without a default after one with a default, and WIT
         // allows any order, so such a method takes keyword arguments only.
         let has_default = |param: &PlannedResourceField| {
             param.optional || resource_method_list_param(param).is_some()
         };
-        if method
+        let keyword_only = method
             .params
             .iter()
             .skip_while(|param| !has_default(param))
-            .any(|param| !has_default(param))
-        {
+            .any(|param| !has_default(param));
+        if keyword_only {
             output.push_str("        *,\n");
         }
         for param in &method.params {
@@ -1221,6 +1231,9 @@ impl<'a> ApiPlanner<'a> {
                 }
             }
             output.push_str(",\n");
+        }
+        if rpc_options {
+            render_rpc_option_parameters(output, "        ", keyword_only);
         }
     }
 
@@ -1260,7 +1273,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("\n    async def ");
         output.push_str(&poll_function_name(&method_name));
         output.push_str("(\n");
-        self.render_resource_method_params(output, method);
+        self.render_resource_method_params(output, method, targets.client);
         output.push_str("    ) -> collections.abc.AsyncIterator[");
         if targets.workflow {
             output.push_str(&temporalio_workflow_type_annotation(
@@ -1283,7 +1296,7 @@ impl<'a> ApiPlanner<'a> {
         let type_args = operation.runtime_type_args("self.");
         let response = if targets.client {
             vec![format!(
-                "response = await self._ops().{}(request{type_args})",
+                "response = await self._ops().{}(request{type_args}, {PYTHON_RPC_OPTION_ARGS})",
                 client_operation_name(service, operation)
             )]
         } else if service.endpoint.is_none() {
@@ -1700,6 +1713,7 @@ impl<'a> ApiPlanner<'a> {
                 .runtime_type_definition
                 .value()
                 .map(str::to_string),
+            asynchronous: operation.asynchronous,
         })
     }
 
@@ -2971,6 +2985,8 @@ struct RenderedOperation<'a> {
     output_record_type_parameters: Vec<String>,
     /// The definition type that a public call takes in place of the runtime types.
     runtime_type_definition: Option<String>,
+    /// Whether WIT declares the operation `async`.
+    asynchronous: bool,
 }
 
 impl RenderedOperation<'_> {
@@ -5866,15 +5882,19 @@ fn client_extension_class_name(service: &RenderedService<'_>) -> String {
 /// Each public method of the package's client extensions belongs to one service, so one client
 /// class can inherit them all.
 fn validate_client_names(services: &[RenderedService<'_>]) -> Result<()> {
-    let mut owners = BTreeMap::<&str, &str>::new();
+    let mut owners = BTreeMap::<String, &str>::new();
     for service in services {
         for operation in &service.operations {
-            if let Some(first_service) = owners.insert(&operation.attr_name, service.name) {
-                return Err(Error::ClientTargetNameConflict {
-                    name: operation.attr_name.clone(),
-                    first_service: first_service.to_string(),
-                    second_service: service.name.to_string(),
-                });
+            let start_name = operation_has_start_method(operation)
+                .then(|| start_function_name(&operation.attr_name));
+            for name in std::iter::once(operation.attr_name.clone()).chain(start_name) {
+                if let Some(first_service) = owners.insert(name.clone(), service.name) {
+                    return Err(Error::ClientTargetNameConflict {
+                        name,
+                        first_service: first_service.to_string(),
+                        second_service: service.name.to_string(),
+                    });
+                }
             }
         }
     }
@@ -5913,13 +5933,79 @@ const PYTHON_CLIENT_EXTENSION_HOOK: &str = r#"
         *,
         service: str,
         endpoint: str | None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None,
+        rpc_timeout: datetime.timedelta | None,
     ) -> _NexusClient:
         """Return the Nexus client that starts the operations of ``service``.
 
         ``endpoint`` is ``None`` for a service with no endpoint, which the client serves.
+        The RPC options are those of one call.
         """
         ...
 "#;
+
+/// The RPC options of a call outside a Workflow, with their annotations.
+const PYTHON_RPC_OPTIONS: [(&str, &str); 2] = [
+    (
+        "rpc_metadata",
+        "collections.abc.Mapping[str, str | bytes] | None",
+    ),
+    ("rpc_timeout", "datetime.timedelta | None"),
+];
+
+const PYTHON_RPC_OPTION_ARGS: &str = "rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout";
+
+/// The keyword parameters of the RPC options, one line each at `indent`. `keyword_only` says
+/// whether the parameters before them already end in a `*` marker.
+fn render_rpc_option_parameters(output: &mut String, indent: &str, keyword_only: bool) {
+    render_rpc_option_parameters_with_default(output, indent, keyword_only, "None");
+}
+
+fn render_rpc_option_parameters_with_default(
+    output: &mut String,
+    indent: &str,
+    keyword_only: bool,
+    default: &str,
+) {
+    if !keyword_only {
+        output.push_str(indent);
+        output.push_str("*,\n");
+    }
+    for (name, annotation) in PYTHON_RPC_OPTIONS {
+        output.push_str(indent);
+        output.push_str(name);
+        output.push_str(": ");
+        output.push_str(annotation);
+        output.push_str(" = ");
+        output.push_str(default);
+        output.push_str(",\n");
+    }
+}
+
+/// The arguments of a call that an operation function makes with its request.
+fn render_request_call_arguments(
+    output: &mut String,
+    target: PythonTarget,
+    operation: &RenderedOperation<'_>,
+) {
+    output.push_str("(request");
+    output.push_str(&operation.runtime_type_args(""));
+    if target == PythonTarget::Client {
+        output.push_str(", ");
+        output.push_str(PYTHON_RPC_OPTION_ARGS);
+    }
+    output.push_str(")\n");
+}
+
+/// Whether a client starts the operation with `start_<name>`, which returns the handle. Only an
+/// operation that WIT declares `async` can run for a long time.
+fn operation_has_start_method(operation: &RenderedOperation<'_>) -> bool {
+    operation.asynchronous && !operation_returns_direct(operation)
+}
+
+fn start_function_name(name: &str) -> String {
+    format!("start_{name}")
+}
 
 fn render_client_extension(output: &mut String, service: &RenderedService<'_>) {
     let class_name = client_extension_class_name(service);
@@ -5954,6 +6040,12 @@ fn render_client_extension(output: &mut String, service: &RenderedService<'_>) {
         for operation in &service.operations {
             output.push_str(&python_string_literal(&operation.attr_name));
             output.push_str(", ");
+            if operation_has_start_method(operation) {
+                output.push_str(&python_string_literal(&start_function_name(
+                    &operation.attr_name,
+                )));
+                output.push_str(", ");
+            }
         }
         output.push_str("):\n");
         output.push_str("                if name in base.__dict__:\n");
@@ -6327,6 +6419,8 @@ fn render_resource_method_operations_body(
     output.push_str(&client_operation_name(service, operation));
     output.push_str("(request");
     output.push_str(&operation.runtime_type_args("self."));
+    output.push_str(", ");
+    output.push_str(PYTHON_RPC_OPTION_ARGS);
     output.push_str(")\n");
 }
 
@@ -6391,6 +6485,10 @@ fn render_workflow_operations_class(
         let result_annotation =
             render_operations_method_signature(output, service, operation, true);
         output.push('\n');
+        output.push_str("        if rpc_metadata is not None or rpc_timeout is not None:\n");
+        output.push_str(
+            "            raise ValueError(\"RPC options apply to calls outside a Workflow\")\n",
+        );
         if service.endpoint.is_none() {
             render_inline_operation_call(
                 output,
@@ -6436,6 +6534,7 @@ fn render_operations_method_signature(
         output.push_str(",\n");
     }
     operation.render_runtime_type_parameters(output, "        ");
+    render_rpc_option_parameters(output, "        ", false);
     output.push_str("    ) -> ");
     output.push_str(&result_annotation);
     output.push(':');
@@ -7376,9 +7475,18 @@ fn render_function_unpacked_overload(
         }
     }
 
-    if !primary_case.is_some_and(|function_case| !function_case.positional_args.is_empty()) {
+    let keyword_marker =
+        !primary_case.is_some_and(|function_case| !function_case.positional_args.is_empty());
+    if keyword_marker {
         start_line(output, target, "    *,\n");
     }
+    let keyword_only = keyword_marker
+        || primary_case.is_some_and(|function_case| {
+            function_case
+                .positional_args
+                .iter()
+                .any(|positional_arg| positional_arg.variadic)
+        });
 
     for field in &unpacked_input.parameters {
         if primary_function.is_some_and(|function| function.callable_field_name == field.attr_name)
@@ -7454,6 +7562,9 @@ fn render_function_unpacked_overload(
             output.push_str(" = ...");
         }
         output.push_str(",\n");
+    }
+    if target == PythonTarget::Client {
+        render_rpc_option_parameters_with_default(output, "        ", keyword_only, "...");
     }
 
     start_line(output, target, ") -> ");
@@ -7849,6 +7960,153 @@ fn render_operation_functions(
         output.push('\n');
         render_operation_poll_function(output, target, service, operation, next_expr);
     }
+    if target == PythonTarget::Client && operation_has_start_method(operation) {
+        output.push('\n');
+        render_client_start_methods(output, service, operation);
+    }
+}
+
+/// The methods that start an operation and return its handle, with no wait for the result.
+fn render_client_start_methods(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) {
+    let target = PythonTarget::Client;
+    let private_name = format!(
+        "_{}_{}",
+        service.name.to_snake_case(),
+        start_function_name(&operation.attr_name)
+    );
+    let handle_annotation = format!(
+        "collections.abc.Awaitable[{}]",
+        operation_result_annotation(operation)
+    );
+    render_operation_signature_start(output, target, &private_name);
+    if let Some(input) = &operation.input {
+        start_line(output, target, "    request: ");
+        output.push_str(&input.annotation);
+        output.push_str(",\n");
+    }
+    operation.render_runtime_type_parameters(output, "        ");
+    render_rpc_option_parameters(output, "        ", false);
+    start_line(output, target, ") -> ");
+    output.push_str(&handle_annotation);
+    output.push_str(":\n");
+    render_inline_nexus_client(output, target, service);
+    if operation.generic_model_types {
+        start_line(output, target, "    return typing.cast(\n");
+        start_line(output, target, "        ");
+        output.push_str(&handle_annotation);
+        output.push_str(",\n");
+        start_line(
+            output,
+            target,
+            "        await nexus_client.start_operation(\n",
+        );
+    } else {
+        start_line(
+            output,
+            target,
+            "    return await nexus_client.start_operation(\n",
+        );
+    }
+    let indent = if operation.generic_model_types {
+        "            "
+    } else {
+        "        "
+    };
+    start_line(output, target, indent);
+    output.push_str("operation=");
+    output.push_str(&python_string_literal(operation.wire_name));
+    output.push_str(",\n");
+    start_line(output, target, indent);
+    output.push_str("input=");
+    output.push_str(operation_input_wire_expr(operation));
+    output.push_str(",\n");
+    if !operation.output_none {
+        start_line(output, target, indent);
+        output.push_str("output_type=");
+        output.push_str(&operation.output_type_expr_for(""));
+        output.push_str(",\n");
+    }
+    if operation.generic_model_types {
+        start_line(output, target, "        ),\n");
+    }
+    start_line(output, target, "    )\n");
+
+    output.push('\n');
+    let public_name = start_function_name(&operation.attr_name);
+    render_operation_signature_start(output, target, &public_name);
+    operation.render_runtime_type_parameters(output, "        ");
+    let unpacked_input = operation
+        .target_unpacked_input(target)
+        .filter(|unpacked_input| unpacked_input.functions.is_empty());
+    if let Some(unpacked_input) = unpacked_input {
+        if !unpacked_input.parameters.is_empty() {
+            start_line(output, target, "    *,\n");
+        }
+        for field in &unpacked_input.parameters {
+            start_line(output, target, "    ");
+            output.push_str(&field.attr_name);
+            output.push_str(": ");
+            output.push_str(&python_parameter_annotation(
+                &field.annotation,
+                &field.default_kind,
+            ));
+            if let Some(default_expr) = python_parameter_default_expr(&field.default_kind) {
+                render_python_default_expr(output, &default_expr, target.body_indent());
+            }
+            output.push_str(",\n");
+        }
+        render_rpc_option_parameters(output, "        ", !unpacked_input.parameters.is_empty());
+    } else {
+        if operation.input.is_some() {
+            start_line(output, target, "    request: ");
+            output.push_str(operation_input_annotation(operation));
+            output.push_str(",\n");
+        }
+        render_rpc_option_parameters(output, "        ", false);
+    }
+    start_line(output, target, ") -> ");
+    output.push_str(&handle_annotation);
+    output.push_str(":\n");
+    render_python_docstring(
+        output,
+        target.body_indent(),
+        Some(&format!(
+            "Start ``{}``, and return its handle. Await the handle for the result.",
+            operation.attr_name
+        )),
+        &[],
+        None,
+        false,
+    );
+    if let Some(unpacked_input) = unpacked_input {
+        for flattened_message in &unpacked_input.flattened_messages {
+            render_flattened_message_setup(output, target.body_indent(), flattened_message);
+        }
+        start_line(output, target, "    request = ");
+        output.push_str(&unpacked_input.model_name);
+        output.push_str("(\n");
+        for field in &unpacked_input.request_fields {
+            start_line(output, target, "        ");
+            output.push_str(&field.attr_name);
+            output.push('=');
+            output.push_str(&unpacked_request_field_value_expr(field));
+            output.push_str(",\n");
+        }
+        start_line(output, target, "    )\n");
+    }
+    start_line(output, target, "    return await self.");
+    output.push_str(&private_name);
+    if operation.input.is_some() {
+        render_request_call_arguments(output, target, operation);
+    } else {
+        output.push('(');
+        output.push_str(PYTHON_RPC_OPTION_ARGS);
+        output.push_str(")\n");
+    }
 }
 
 /// The name of the iterator of a polled operation or method.
@@ -7897,6 +8155,10 @@ fn render_operation_poll_function(
         output.push_str(operation_input_annotation(operation));
         output.push_str(",\n");
     }
+    if target == PythonTarget::Client {
+        let keyword_only = unpacked_input.is_some_and(|input| !input.parameters.is_empty());
+        render_rpc_option_parameters(output, "        ", keyword_only);
+    }
     start_line(output, target, ") -> collections.abc.AsyncIterator[");
     match target {
         PythonTarget::Workflow => output.push_str(&temporalio_workflow_type_annotation(
@@ -7931,8 +8193,13 @@ fn render_operation_poll_function(
         }
         start_line(output, target, "    )\n");
     }
+    let rpc_args = if target == PythonTarget::Client {
+        format!(", {PYTHON_RPC_OPTION_ARGS}")
+    } else {
+        String::new()
+    };
     let call = format!(
-        "{}(request{})",
+        "{}(request{}{rpc_args})",
         operation_call_target(target, service, operation),
         operation.runtime_type_args("")
     );
@@ -8031,6 +8298,7 @@ fn render_client_operation_method(
         output.push_str(",\n");
     }
     operation.render_runtime_type_parameters(output, "        ");
+    render_rpc_option_parameters(output, "        ", false);
     start_line(output, target, ") -> ");
     output.push_str(&operation_result_annotation(operation));
     output.push_str(":\n");
@@ -8129,6 +8397,7 @@ fn render_client_request_method(
         output.push_str(",\n");
     }
     operation.render_public_runtime_type_parameters(output, "        ");
+    render_rpc_option_parameters(output, "        ", false);
     start_line(output, target, ") -> ");
     output.push_str(&operation_result_annotation(operation));
     output.push_str(":\n");
@@ -8136,13 +8405,14 @@ fn render_client_request_method(
     operation.render_definition_type_arguments(output, target.body_indent());
     start_line(output, target, "    return await self.");
     output.push_str(&client_operation_name(service, operation));
+    output.push('(');
     if operation.input.is_some() {
-        output.push_str("(request");
+        output.push_str("request");
         output.push_str(&operation.runtime_type_args(""));
-        output.push_str(")\n");
-    } else {
-        output.push_str("()\n");
+        output.push_str(", ");
     }
+    output.push_str(PYTHON_RPC_OPTION_ARGS);
+    output.push_str(")\n");
 }
 
 fn function_unpacked_needs_overloads(functions: &[RenderedFunctionField]) -> bool {
@@ -8776,6 +9046,9 @@ fn render_unpacked_operation_function(
         }
         output.push_str(",\n");
     }
+    if target == PythonTarget::Client {
+        render_rpc_option_parameters(output, "        ", !unpacked_input.parameters.is_empty());
+    }
     render_unpacked_return_annotation(output, target, service, operation);
     render_unpacked_operation_docstring(output, body_indent, operation, unpacked_input, None);
     operation.render_definition_type_arguments(output, body_indent);
@@ -8795,9 +9068,7 @@ fn render_unpacked_operation_function(
     start_line(output, target, "    )\n");
     start_line(output, target, "    return await ");
     output.push_str(&operation_call_target(target, service, operation));
-    output.push_str("(request");
-    output.push_str(&operation.runtime_type_args(""));
-    output.push_str(")\n");
+    render_request_call_arguments(output, target, operation);
 }
 
 /// The return annotation of an unpacked operation. A Workflow function returns the operation
@@ -8921,14 +9192,18 @@ fn render_function_unpacked_implementation(
         .parameters
         .iter()
         .any(|field| rendered_function_implementation_renders_field(field, primary_function));
-    if primary_function.is_none()
+    let keyword_marker = primary_function.is_none()
         || (primary_function
             .and_then(python_function_fixed_positional_args)
             .is_some()
-            && has_keyword_only_parameters)
-    {
+            && has_keyword_only_parameters);
+    if keyword_marker {
         start_line(output, target, "    *,\n");
     }
+    // A variadic primary function takes `*positional_args`, which is a marker too.
+    let keyword_only = keyword_marker
+        || primary_function
+            .is_some_and(|function| python_function_fixed_positional_args(function).is_none());
 
     for field in &unpacked_input.parameters {
         if !rendered_function_implementation_renders_field(field, primary_function) {
@@ -8969,6 +9244,9 @@ fn render_function_unpacked_implementation(
             render_python_default_expr(output, &default_expr, target.body_indent());
         }
         output.push_str(",\n");
+    }
+    if target == PythonTarget::Client {
+        render_rpc_option_parameters(output, "        ", keyword_only);
     }
 
     render_unpacked_return_annotation(output, target, service, operation);
@@ -9068,9 +9346,7 @@ fn render_function_unpacked_implementation(
     start_line(output, target, "    )\n");
     start_line(output, target, "    return await ");
     output.push_str(&operation_call_target(target, service, operation));
-    output.push_str("(request");
-    output.push_str(&operation.runtime_type_args(""));
-    output.push_str(")\n");
+    render_request_call_arguments(output, target, operation);
 }
 
 fn rendered_function_implementation_renders_field(
@@ -9188,6 +9464,10 @@ fn render_inline_nexus_client(
     start_line(output, target, "        endpoint=");
     output.push_str(&endpoint);
     output.push_str(",\n");
+    if target == PythonTarget::Client {
+        start_line(output, target, "        rpc_metadata=rpc_metadata,\n");
+        start_line(output, target, "        rpc_timeout=rpc_timeout,\n");
+    }
     start_line(output, target, "    )\n");
 }
 

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import collections.abc
 import dataclasses
 import typing
+import datetime
 
 from ..models import (
     AppendRecord,
@@ -40,31 +42,46 @@ class Writer(typing.Generic[BodyT]):
     async def write_records(
         self,
         records: list[AppendRecord[BodyT]] | None = None,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> WriteRecordsResponse:
         """Write Records at once. The answer has the first and the last offset."""
         request = WriteRecordsRequest(
             writer_id=self.writer_id,
             records=records or [],
         )
-        return await self._ops()._stream_writer_write_records(request)
+        return await self._ops()._stream_writer_write_records(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def close(
         self,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseWriterResponse:
         """Release the handle. The last one waits for a write, then drops the writer."""
         request = CloseWriterRequest(
             writer_id=self.writer_id,
         )
-        return await self._ops()._stream_writer_close_writer(request)
+        return await self._ops()._stream_writer_close_writer(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def free(
         self,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> FreeWriterResponse:
         """Release the handle with no wait, for a handle that lang drops."""
         request = FreeWriterRequest(
             writer_id=self.writer_id,
         )
-        return await self._ops()._stream_writer_free_writer(request)
+        return await self._ops()._stream_writer_free_writer(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
 
 class _StreamWriterOperations(typing.Protocol):
@@ -73,16 +90,25 @@ class _StreamWriterOperations(typing.Protocol):
     async def _stream_writer_write_records(
         self,
         request: WriteRecordsRequest[BodyT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> WriteRecordsResponse: ...
 
     async def _stream_writer_close_writer(
         self,
         request: CloseWriterRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseWriterResponse: ...
 
     async def _stream_writer_free_writer(
         self,
         request: FreeWriterRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> FreeWriterResponse: ...
 
 
@@ -95,7 +121,12 @@ class WorkflowStreamWriter:
     async def _stream_writer_write_records(
         self,
         request: WriteRecordsRequest[BodyT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> WriteRecordsResponse:
+        if rpc_metadata is not None or rpc_timeout is not None:
+            raise ValueError("RPC options apply to calls outside a Workflow")
         nexus_client = self._nexus_client
         handle = await nexus_client.start_operation(
             operation="WriteRecords",
@@ -107,7 +138,12 @@ class WorkflowStreamWriter:
     async def _stream_writer_close_writer(
         self,
         request: CloseWriterRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseWriterResponse:
+        if rpc_metadata is not None or rpc_timeout is not None:
+            raise ValueError("RPC options apply to calls outside a Workflow")
         nexus_client = self._nexus_client
         handle = await nexus_client.start_operation(
             operation="CloseWriter",
@@ -119,7 +155,12 @@ class WorkflowStreamWriter:
     async def _stream_writer_free_writer(
         self,
         request: FreeWriterRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> FreeWriterResponse:
+        if rpc_metadata is not None or rpc_timeout is not None:
+            raise ValueError("RPC options apply to calls outside a Workflow")
         nexus_client = self._nexus_client
         handle = await nexus_client.start_operation(
             operation="FreeWriter",

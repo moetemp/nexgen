@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections.abc
 import dataclasses
+import datetime
 import types
 import typing
 
@@ -124,6 +125,12 @@ class FakeClient(
     def __init__(self, answers: dict[str, list[object]]) -> None:
         self.answers: dict[str, list[object]] = answers
         self.calls: list[Call] = []
+        self.rpc_options: list[
+            tuple[
+                collections.abc.Mapping[str, str | bytes] | None,
+                datetime.timedelta | None,
+            ]
+        ] = []
 
     @override
     def _create_nexus_client(
@@ -131,7 +138,10 @@ class FakeClient(
         *,
         service: str,
         endpoint: str | None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None,
+        rpc_timeout: datetime.timedelta | None,
     ) -> FakeNexusClient:
+        self.rpc_options.append((rpc_metadata, rpc_timeout))
         return FakeNexusClient(self, service, endpoint)
 
 
@@ -256,6 +266,35 @@ async def test_a_handle_decodes_its_bodies_with_its_body_type() -> None:
     _ = assert_type(page, ReadRecordsResponse[Turn])
     # The body arrives as a payload, and the handle's body type decodes it.
     assert page.records == [record]
+
+
+async def test_a_resource_method_passes_its_rpc_options_to_the_client() -> None:
+    client = FakeClient({"DescribeStream": [DescribeStreamResponse(last_offset=5)]})
+    stream = Stream(
+        body_type=str,
+        stream=StreamRef(id="s1"),
+        created=None,
+        status=None,
+        _operations=client,
+    )
+
+    _ = await stream.describe(
+        rpc_metadata={"authorization": "token"},
+        rpc_timeout=datetime.timedelta(seconds=3),
+    )
+
+    assert client.rpc_options == [
+        ({"authorization": "token"}, datetime.timedelta(seconds=3))
+    ]
+
+
+async def test_workflow_operations_refuse_rpc_options() -> None:
+    request = DescribeStreamRequest(stream=StreamRef(id="s1"))
+
+    with pytest.raises(ValueError, match="outside a Workflow"):
+        _ = await WorkflowStreamService()._stream_service_describe_stream(
+            request, rpc_timeout=datetime.timedelta(seconds=3)
+        )
 
 
 def test_only_the_client_target_has_the_read_poll() -> None:

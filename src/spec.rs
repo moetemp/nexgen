@@ -674,6 +674,8 @@ pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub poll_next: F::Text,
     /// The only target whose API gets the poll. Without it, every target gets the poll.
     pub poll_target: Option<GenerationTarget>,
+    /// Whether the operation can run for a long time, so a client can start it and wait later.
+    pub asynchronous: bool,
     pub data: F::OperationData,
 }
 
@@ -712,6 +714,7 @@ impl<F: TypeFamily> OperationSpec<F> {
             serialization_context: map.map_text(self.serialization_context),
             poll_next: map.map_text(self.poll_next),
             poll_target: self.poll_target,
+            asynchronous: self.asynchronous,
             data,
         }
     }

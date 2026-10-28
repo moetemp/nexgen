@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import collections.abc
 import typing
-import datetime
 import abc
+import datetime
 
 from .models import (
     AppendRecord,
@@ -91,10 +91,13 @@ class StreamServiceClientExtension(abc.ABC):
         *,
         service: str,
         endpoint: str | None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None,
+        rpc_timeout: datetime.timedelta | None,
     ) -> _NexusClient:
         """Return the Nexus client that starts the operations of ``service``.
 
         ``endpoint`` is ``None`` for a service with no endpoint, which the client serves.
+        The RPC options are those of one call.
         """
         ...
 
@@ -102,10 +105,15 @@ class StreamServiceClientExtension(abc.ABC):
         self,
         request: CreateStreamRequest,
         body_type: type[BodyT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Stream[BodyT]:
         nexus_client = self._create_nexus_client(
             service="temporal.api.streamservice.v1.StreamService",
             endpoint="__temporal_system",
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="CreateStream",
@@ -132,6 +140,8 @@ class StreamServiceClientExtension(abc.ABC):
         withdraw_run: str | None = None,
         owner: Producer | None = None,
         ref: StreamRef | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Stream[BodyT]:
         """
         Args:
@@ -153,15 +163,22 @@ class StreamServiceClientExtension(abc.ABC):
             owner=owner,
             ref=ref,
         )
-        return await self._stream_service_create_stream(request, body_type)
+        return await self._stream_service_create_stream(
+            request, body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _stream_service_append_records(
         self,
         request: AppendRecordsRequest[BodyT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> AppendRecordsResponse:
         nexus_client = self._create_nexus_client(
             service="temporal.api.streamservice.v1.StreamService",
             endpoint="__temporal_system",
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="AppendRecords",
@@ -180,6 +197,8 @@ class StreamServiceClientExtension(abc.ABC):
         sequence: int | None = None,
         previous_completed_task: WorkflowTaskEpoch | None = None,
         withdraw_run: str | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> AppendRecordsResponse:
         """Append one batch. Workflow code makes the call from a Local Activity.
 
@@ -203,15 +222,22 @@ class StreamServiceClientExtension(abc.ABC):
             previous_completed_task=previous_completed_task,
             withdraw_run=withdraw_run,
         )
-        return await self._stream_service_append_records(request)
+        return await self._stream_service_append_records(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _stream_service_close_stream(
         self,
         request: CloseStreamRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseStreamResponse:
         nexus_client = self._create_nexus_client(
             service="temporal.api.streamservice.v1.StreamService",
             endpoint="__temporal_system",
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="CloseStream",
@@ -230,6 +256,8 @@ class StreamServiceClientExtension(abc.ABC):
         failure: BaseException | None = None,
         status: StreamCloseStatus | None = None,
         previous_completed_task: WorkflowTaskEpoch | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseStreamResponse:
         """
         Args:
@@ -248,16 +276,23 @@ class StreamServiceClientExtension(abc.ABC):
             status=status,
             previous_completed_task=previous_completed_task,
         )
-        return await self._stream_service_close_stream(request)
+        return await self._stream_service_close_stream(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _stream_service_read_records(
         self,
         request: ReadRecordsRequest,
         body_type: type[BodyT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse[BodyT]:
         nexus_client = self._create_nexus_client(
             service="temporal.api.streamservice.v1.StreamService",
             endpoint="__temporal_system",
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="ReadRecords",
@@ -278,6 +313,8 @@ class StreamServiceClientExtension(abc.ABC):
         create_wait: datetime.timedelta | None = None,
         last: int | None = None,
         max_bytes: int | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse[BodyT]:
         """A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads from a Local
         Activity.
@@ -307,7 +344,9 @@ class StreamServiceClientExtension(abc.ABC):
             last=last,
             max_bytes=max_bytes,
         )
-        return await self._stream_service_read_records(request, body_type)
+        return await self._stream_service_read_records(
+            request, body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def iter_read_records(
         self,
@@ -321,6 +360,8 @@ class StreamServiceClientExtension(abc.ABC):
         create_wait: datetime.timedelta | None = None,
         last: int | None = None,
         max_bytes: int | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> collections.abc.AsyncIterator[ReadRecordsResponse[BodyT]]:
         """Yield each response of ``read_records``. The poll helper gives the next request,
         and the iteration stops when it gives ``None``.
@@ -336,7 +377,9 @@ class StreamServiceClientExtension(abc.ABC):
             max_bytes=max_bytes,
         )
         while True:
-            response = await self._stream_service_read_records(request, body_type)
+            response = await self._stream_service_read_records(
+                request, body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+            )
             yield response
             next_request = _support.next_read_request(request, response)
             if next_request is None:
@@ -346,10 +389,15 @@ class StreamServiceClientExtension(abc.ABC):
     async def _stream_service_describe_stream(
         self,
         request: DescribeStreamRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> DescribeStreamResponse:
         nexus_client = self._create_nexus_client(
             service="temporal.api.streamservice.v1.StreamService",
             endpoint="__temporal_system",
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="DescribeStream",
@@ -362,8 +410,12 @@ class StreamServiceClientExtension(abc.ABC):
         self,
         *,
         stream: StreamRef,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> DescribeStreamResponse:
         request = DescribeStreamRequest(
             stream=stream,
         )
-        return await self._stream_service_describe_stream(request)
+        return await self._stream_service_describe_stream(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )

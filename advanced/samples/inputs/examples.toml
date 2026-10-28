@@ -66,6 +66,12 @@ languages = ["python"]
 targets = ["workflow", "client"]
 descriptors = "temporal"
 
+# A client starts the `async` operation and waits for its result later. Only Python has the client
+# target.
+[client-calls]
+languages = ["python"]
+targets = ["workflow", "client"]
+
 # A System Nexus operation that returns a resource. Python gets only the client target.
 [workflow-handle]
 languages = ["python", "dotnet", "typescript"]

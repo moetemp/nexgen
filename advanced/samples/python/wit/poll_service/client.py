@@ -6,6 +6,7 @@ import collections.abc
 import dataclasses
 import typing
 import abc
+import datetime
 
 from .models import (
     FeedOrder,
@@ -64,20 +65,28 @@ class PageServiceClientExtension(abc.ABC):
         *,
         service: str,
         endpoint: str | None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None,
+        rpc_timeout: datetime.timedelta | None,
     ) -> _NexusClient:
         """Return the Nexus client that starts the operations of ``service``.
 
         ``endpoint`` is ``None`` for a service with no endpoint, which the client serves.
+        The RPC options are those of one call.
         """
         ...
 
     async def _page_service_list_workflows(
         self,
         request: ListWorkflowsRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ListWorkflowsResponse:
         nexus_client = self._create_nexus_client(
             service="PageService",
             endpoint="pages",
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="ListWorkflows",
@@ -93,6 +102,8 @@ class PageServiceClientExtension(abc.ABC):
         page_size: int | None = None,
         next_page_token: bytes | None = None,
         query: str | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ListWorkflowsResponse:
         """List one page of Workflows. The poll iterator lists every page."""
         request = ListWorkflowsRequest(
@@ -101,7 +112,9 @@ class PageServiceClientExtension(abc.ABC):
             next_page_token=next_page_token,
             query=query,
         )
-        return await self._page_service_list_workflows(request)
+        return await self._page_service_list_workflows(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def iter_list_workflows(
         self,
@@ -110,6 +123,8 @@ class PageServiceClientExtension(abc.ABC):
         page_size: int | None = None,
         next_page_token: bytes | None = None,
         query: str | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> collections.abc.AsyncIterator[ListWorkflowsResponse]:
         """Yield each response of ``list_workflows``. The poll helper gives the next
         request, and the iteration stops when it gives ``None``.
@@ -121,7 +136,9 @@ class PageServiceClientExtension(abc.ABC):
             query=query,
         )
         while True:
-            response = await self._page_service_list_workflows(request)
+            response = await self._page_service_list_workflows(
+                request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+            )
             yield response
             next_request = _support.next_page_request(request, response)
             if next_request is None:
@@ -156,20 +173,28 @@ class FeedServiceClientExtension(abc.ABC):
         *,
         service: str,
         endpoint: str | None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None,
+        rpc_timeout: datetime.timedelta | None,
     ) -> _NexusClient:
         """Return the Nexus client that starts the operations of ``service``.
 
         ``endpoint`` is ``None`` for a service with no endpoint, which the client serves.
+        The RPC options are those of one call.
         """
         ...
 
     async def _feed_service_open_feed(
         self,
         request: OpenFeedRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Feed:
         nexus_client = self._create_nexus_client(
             service="FeedService",
             endpoint=None,
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="OpenFeed",
@@ -185,21 +210,30 @@ class FeedServiceClientExtension(abc.ABC):
         namespace: str,
         query: str | None = None,
         order: FeedOrder | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Feed:
         request = OpenFeedRequest(
             namespace=namespace,
             query=query,
             order=order,
         )
-        return await self._feed_service_open_feed(request)
+        return await self._feed_service_open_feed(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _feed_service_list_feed(
         self,
         request: ListWorkflowsRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ListWorkflowsResponse:
         nexus_client = self._create_nexus_client(
             service="FeedService",
             endpoint=None,
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="ListFeed",
@@ -215,6 +249,8 @@ class FeedServiceClientExtension(abc.ABC):
         page_size: int | None = None,
         next_page_token: bytes | None = None,
         query: str | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ListWorkflowsResponse:
         request = ListWorkflowsRequest(
             namespace=namespace,
@@ -222,7 +258,9 @@ class FeedServiceClientExtension(abc.ABC):
             next_page_token=next_page_token,
             query=query,
         )
-        return await self._feed_service_list_feed(request)
+        return await self._feed_service_list_feed(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def iter_list_feed(
         self,
@@ -231,6 +269,8 @@ class FeedServiceClientExtension(abc.ABC):
         page_size: int | None = None,
         next_page_token: bytes | None = None,
         query: str | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> collections.abc.AsyncIterator[ListWorkflowsResponse]:
         """Yield each response of ``list_feed``. The poll helper gives the next request,
         and the iteration stops when it gives ``None``.
@@ -242,7 +282,9 @@ class FeedServiceClientExtension(abc.ABC):
             query=query,
         )
         while True:
-            response = await self._feed_service_list_feed(request)
+            response = await self._feed_service_list_feed(
+                request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+            )
             yield response
             next_request = _support.next_page_request(request, response)
             if next_request is None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import collections.abc
+import datetime
 import typing
 import uuid
 
@@ -72,8 +73,10 @@ class FakeClient(PageServiceClientExtension, FeedServiceClientExtension):
         *,
         service: str,
         endpoint: str | None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None,
+        rpc_timeout: datetime.timedelta | None,
     ) -> FakeNexusClient:
-        del service
+        del service, rpc_metadata, rpc_timeout
         return FakeNexusClient(self, endpoint)
 
     def tokens(self, operation: str) -> list[bytes | None]:

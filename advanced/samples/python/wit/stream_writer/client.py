@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import collections.abc
 import typing
-import datetime
 import abc
+import datetime
 
 from .models import (
     AppendRecord,
@@ -85,10 +85,13 @@ class StreamWriterClientExtension(abc.ABC):
         *,
         service: str,
         endpoint: str | None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None,
+        rpc_timeout: datetime.timedelta | None,
     ) -> _NexusClient:
         """Return the Nexus client that starts the operations of ``service``.
 
         ``endpoint`` is ``None`` for a service with no endpoint, which the client serves.
+        The RPC options are those of one call.
         """
         ...
 
@@ -96,10 +99,15 @@ class StreamWriterClientExtension(abc.ABC):
         self,
         request: OpenWriterRequest,
         body_type: type[BodyT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Writer[BodyT]:
         nexus_client = self._create_nexus_client(
             service="temporal.sdk.streams.v1.StreamWriter",
             endpoint=None,
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="OpenWriter",
@@ -125,6 +133,8 @@ class StreamWriterClientExtension(abc.ABC):
         max_batch_size: int | None = None,
         max_retry_duration: datetime.timedelta | None = None,
         previous_completed_task: WorkflowTaskEpoch | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Writer[BodyT]:
         """
         Args:
@@ -144,15 +154,22 @@ class StreamWriterClientExtension(abc.ABC):
             max_retry_duration=max_retry_duration,
             previous_completed_task=previous_completed_task,
         )
-        return await self._stream_writer_open_writer(request, body_type)
+        return await self._stream_writer_open_writer(
+            request, body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _stream_writer_write_records(
         self,
         request: WriteRecordsRequest[BodyT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> WriteRecordsResponse:
         nexus_client = self._create_nexus_client(
             service="temporal.sdk.streams.v1.StreamWriter",
             endpoint=None,
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="WriteRecords",
@@ -166,20 +183,29 @@ class StreamWriterClientExtension(abc.ABC):
         *,
         records: list[AppendRecord[BodyT]] | None = None,
         writer_id: int | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> WriteRecordsResponse:
         request = WriteRecordsRequest(
             records=records or [],
             writer_id=writer_id,
         )
-        return await self._stream_writer_write_records(request)
+        return await self._stream_writer_write_records(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _stream_writer_close_writer(
         self,
         request: CloseWriterRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseWriterResponse:
         nexus_client = self._create_nexus_client(
             service="temporal.sdk.streams.v1.StreamWriter",
             endpoint=None,
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="CloseWriter",
@@ -192,19 +218,28 @@ class StreamWriterClientExtension(abc.ABC):
         self,
         *,
         writer_id: int | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseWriterResponse:
         request = CloseWriterRequest(
             writer_id=writer_id,
         )
-        return await self._stream_writer_close_writer(request)
+        return await self._stream_writer_close_writer(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _stream_writer_free_writer(
         self,
         request: FreeWriterRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> FreeWriterResponse:
         nexus_client = self._create_nexus_client(
             service="temporal.sdk.streams.v1.StreamWriter",
             endpoint=None,
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="FreeWriter",
@@ -217,19 +252,28 @@ class StreamWriterClientExtension(abc.ABC):
         self,
         *,
         writer_id: int | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> FreeWriterResponse:
         request = FreeWriterRequest(
             writer_id=writer_id,
         )
-        return await self._stream_writer_free_writer(request)
+        return await self._stream_writer_free_writer(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _stream_writer_close_writers(
         self,
         request: CloseWritersRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseWritersResponse:
         nexus_client = self._create_nexus_client(
             service="temporal.sdk.streams.v1.StreamWriter",
             endpoint=None,
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="CloseWriters",
@@ -240,7 +284,12 @@ class StreamWriterClientExtension(abc.ABC):
 
     async def close_writers(
         self,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseWritersResponse:
         """Drop every open writer, for example at shutdown."""
         request = CloseWritersRequest()
-        return await self._stream_writer_close_writers(request)
+        return await self._stream_writer_close_writers(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )

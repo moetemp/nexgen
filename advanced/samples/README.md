@@ -81,6 +81,16 @@ parameter of an enum type.
 - Python: [`python/wit/poll_service/`](python/wit/poll_service/),
   [`python/tests/test_poll_service.py`](python/tests/test_poll_service.py)
 
+### `client-calls`
+
+A service with an `async func` operation and a plain one. The Python client
+target gives the `async` operation `start_run_job`, which returns the handle,
+and each call takes the RPC options.
+
+- WIT: [`inputs/client-calls.wit`](inputs/client-calls.wit)
+- Python: [`python/wit/client_calls/`](python/wit/client_calls/),
+  [`python/tests/test_client_calls.py`](python/tests/test_client_calls.py)
+
 ### `workflow-handle`
 
 A System Nexus operation that returns a resource. Python generates only the

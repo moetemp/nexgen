@@ -3117,6 +3117,7 @@ fn build_operation(
         serialization_context,
         poll_next,
         poll_target,
+        asynchronous: matches!(function.kind, FunctionKind::AsyncFreestanding),
         data: (),
     })
 }

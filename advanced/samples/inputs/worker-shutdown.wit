@@ -1,0 +1,83 @@
+package temporal:nexus@1.0.0;
+
+world system {
+  export worker-shutdown-service;
+}
+
+/// @nexus.endpoint "temporal-system"
+interface worker-shutdown-service {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.proto "temporal.api.worker.v1.WorkerHeartbeat" typescript-import="@temporalio/proto"
+  record worker-heartbeat {
+    worker-instance-key: string,
+    worker-identity: string,
+    /// @nexus.omit
+    host-info: placeholder,
+    task-queue: string,
+    /// @nexus.omit
+    deployment-version: placeholder,
+    sdk-name: option<string>,
+    sdk-version: option<string>,
+    /// @nexus.omit
+    status: placeholder,
+    /// @nexus.omit
+    start-time: placeholder,
+    /// @nexus.omit
+    heartbeat-time: placeholder,
+    /// @nexus.omit
+    elapsed-since-last-heartbeat: placeholder,
+    /// @nexus.omit
+    workflow-task-slots-info: placeholder,
+    /// @nexus.omit
+    activity-task-slots-info: placeholder,
+    /// @nexus.omit
+    nexus-task-slots-info: placeholder,
+    /// @nexus.omit
+    local-activity-slots-info: placeholder,
+    /// @nexus.omit
+    workflow-poller-info: placeholder,
+    /// @nexus.omit
+    workflow-sticky-poller-info: placeholder,
+    /// @nexus.omit
+    activity-poller-info: placeholder,
+    /// @nexus.omit
+    nexus-poller-info: placeholder,
+    /// @nexus.omit
+    total-sticky-cache-hit: placeholder,
+    /// @nexus.omit
+    total-sticky-cache-miss: placeholder,
+    /// @nexus.omit
+    current-sticky-cache-size: placeholder,
+    /// @nexus.omit
+    plugins: placeholder,
+    /// @nexus.omit
+    drivers: placeholder,
+    /// @nexus.omit
+    environment: placeholder,
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.ShutdownWorkerRequest" typescript-import="@temporalio/proto"
+  record shutdown-worker-request {
+    /// @nexus.source python="workflow_namespace()" typescript="workflowNamespace()" go="WorkflowNamespace(ctx)" dotnet="TemporalWorkflowContext.WorkflowNamespace()"
+    namespace: string,
+    /// @nexus.omit
+    sticky-task-queue: placeholder,
+    identity: string,
+    reason: option<string>,
+    /// @nexus.doc "The last heartbeat of the worker. The call copies the worker fields from the request."
+    /// @nexus.flatten-in-api fields="sdk-name sdk-version"
+    ///   fill="worker-instance-key=worker-instance-key worker-identity=identity task-queue=task-queue"
+    worker-heartbeat: option<worker-heartbeat>,
+    worker-instance-key: string,
+    task-queue: string,
+    /// @nexus.omit
+    task-queue-types: placeholder,
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.ShutdownWorkerResponse" typescript-import="@temporalio/proto"
+  record shutdown-worker-response {
+  }
+
+  shutdown-worker: func(request: shutdown-worker-request) -> shutdown-worker-response;
+}

@@ -1,0 +1,6 @@
+inputs = ["input.wit", "../../../inputs/deps"]
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit"
+contains = ["fills `run_id` from `next_page_token`, which isn't a field"]

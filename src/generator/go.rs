@@ -19,7 +19,8 @@ use crate::spec::{
     AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSpec, FieldDefaultSpec, FlagsSpec,
     FunctionArgsSpec as GenericFunctionArgsSpec, FunctionFieldSpec as GenericFunctionFieldSpec,
     FunctionResultSpec as GenericFunctionResultSpec, IntSpec, ModulePath, OperationSpec,
-    RecordFieldSpec, RecordSpec, SelectedTextSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
+    RecordFieldSpec, RecordFieldVisibility, RecordSpec, SelectedTextSpec, TypeReplacementSpec,
+    TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecLeaf, ApiSpecNode, ApiSpecTree};
 
@@ -1491,7 +1492,10 @@ impl<'a> ApiPlanner<'a> {
                 record
                     .public_fields()
                     .map(|(field_name, field)| {
-                        planned_field(record, field_name, field, self.api_plan)
+                        (
+                            planned_field(record, field_name, field, self.api_plan),
+                            field.flatten.as_ref(),
+                        )
                     })
                     .collect::<Vec<_>>()
             });
@@ -1500,9 +1504,9 @@ impl<'a> ApiPlanner<'a> {
                 .iter()
                 .enumerate()
                 .filter_map(|(index, field)| {
-                    let planned_field =
-                        planned_fields.as_ref().and_then(|fields| fields.get(index));
-                    let planned_field = planned_field?;
+                    let (planned_field, field_flatten) = planned_fields
+                        .as_ref()
+                        .and_then(|fields| fields.get(index))?;
                     let function = match &planned_field.role {
                         PlannedFieldRole::Function(function) if planned_field.required => {
                             Some(self.external_models.function_with_support_helper(function))
@@ -1515,9 +1519,10 @@ impl<'a> ApiPlanner<'a> {
                         }
                         _ => None,
                     };
-                    let flatten_in_options = !planned_field.required
-                        && field_kind_is_flattened_message(&planned_field.kind, self.api_plan);
-                    let flattened_fields = if flatten_in_options {
+                    let flatten_in_options = field_flatten.is_some()
+                        || (!planned_field.required
+                            && field_kind_is_flattened_message(&planned_field.kind, self.api_plan));
+                    let (flattened_fields, flattened_fills) = if flatten_in_options {
                         let PlannedFieldKind::Singular(PlannedValueType::Message(message)) =
                             &planned_field.kind
                         else {
@@ -1525,30 +1530,53 @@ impl<'a> ApiPlanner<'a> {
                         };
                         let record = record_for_message(self.api_plan, message)
                             .expect("flattened message should have a record");
-                        Some(
-                            self.models[&message.info.full_name]
-                                .fields
-                                .iter()
-                                .zip(record.public_fields())
-                                .map(|(field, (name, spec))| {
-                                    let planned =
-                                        self::planned_field(record, name, spec, self.api_plan);
-                                    RenderedFlattenedField {
-                                        field: field.clone(),
-                                        default_punning_zero: (!field.required)
-                                            .then(|| {
-                                                public_default_punning_zero_for_field(
-                                                    &planned.kind,
-                                                    &field.go_type,
-                                                )
-                                            })
-                                            .flatten(),
-                                    }
-                                })
-                                .collect(),
-                        )
+                        let nested_fields =
+                            rendered_fields_by_key(record, &self.models[&message.info.full_name]);
+                        let keys = match field_flatten {
+                            Some(flatten) => flatten.fields.iter().map(String::as_str).collect(),
+                            None => record
+                                .public_fields()
+                                .map(|(key, _)| key)
+                                .collect::<Vec<_>>(),
+                        };
+                        let flattened = keys
+                            .into_iter()
+                            .map(|key| {
+                                let field = nested_fields[key];
+                                let planned = self::planned_field(
+                                    record,
+                                    key,
+                                    &record.fields[key],
+                                    self.api_plan,
+                                );
+                                RenderedFlattenedField {
+                                    field: field.clone(),
+                                    default_punning_zero: (!field.required)
+                                        .then(|| {
+                                            public_default_punning_zero_for_field(
+                                                &planned.kind,
+                                                &field.go_type,
+                                            )
+                                        })
+                                        .flatten(),
+                                }
+                            })
+                            .collect();
+                        let fills = field_flatten
+                            .iter()
+                            .flat_map(|flatten| &flatten.fills)
+                            .filter_map(|(inner, outer)| {
+                                self.flattened_fill(
+                                    planned_record?,
+                                    model,
+                                    nested_fields[inner.as_str()],
+                                    outer,
+                                )
+                            })
+                            .collect();
+                        (Some(flattened), fills)
                     } else {
-                        None
+                        (None, Vec::new())
                     };
                     let default_punning_zero = (!planned_field.required && !flatten_in_options)
                         .then(|| {
@@ -1582,6 +1610,7 @@ impl<'a> ApiPlanner<'a> {
                         function_args,
                         required: field.required,
                         flattened_fields,
+                        flattened_fills,
                     })
                 })
                 .collect()
@@ -1860,6 +1889,61 @@ impl<'a> ApiPlanner<'a> {
             },
         );
         Ok(())
+    }
+
+    /// A fill of a field-level flatten reads its sibling from the options or from the sibling's
+    /// source. A sibling that the call doesn't set has no fill.
+    fn flattened_fill(
+        &self,
+        parent: &RecordSpec<PlannedFamily>,
+        parent_model: &RenderedModel,
+        inner: &RenderedField,
+        outer: &str,
+    ) -> Option<RenderedFlattenedFill> {
+        let sibling = parent.fields.get(outer)?;
+        let sibling_field = rendered_fields_by_key(parent, parent_model)
+            .get(outer)
+            .copied()?;
+        let (value, source, zero) = match &sibling.visibility {
+            RecordFieldVisibility::Sourced { source_expr, .. } => {
+                let source_expr = match &self.external_models {
+                    GoExternalModels::Proto(backend) => {
+                        backend.support_converter(source_expr.to_string())
+                    }
+                    _ => source_expr.to_string(),
+                };
+                let local = go_unexported_name(&sibling_field.name);
+                (local.clone(), Some((local, source_expr)), None)
+            }
+            RecordFieldVisibility::Public => {
+                let planned = planned_field(parent, outer, sibling, self.api_plan);
+                let zero = (!sibling.required)
+                    .then(|| {
+                        public_default_punning_zero_for_field(&planned.kind, &sibling_field.go_type)
+                    })
+                    .flatten();
+                (format!("opts.{}", sibling_field.name), None, zero)
+            }
+            _ => return None,
+        };
+        let value_is_pointer = zero.is_none() && sibling_field.go_type.starts_with('*');
+        let condition = if let Some(zero) = zero {
+            format!("{value} != {zero}")
+        } else if sibling.required
+            || (!value_is_pointer && !go_type_is_nilable(&sibling_field.go_type))
+        {
+            "true".to_string()
+        } else {
+            format!("{value} != nil")
+        };
+        Some(RenderedFlattenedFill {
+            field_name: inner.name.clone(),
+            field_is_pointer: inner.go_type.starts_with('*'),
+            value,
+            value_is_pointer,
+            condition,
+            source,
+        })
     }
 
     fn ensure_rendered_model(&mut self, message: &PlannedMessageType) -> Result<()> {
@@ -2309,6 +2393,32 @@ struct RenderedUnpackedParam {
     /// Fields promoted into the options struct for a `flatten-in-api` record.
     /// Their presence determines whether the optional nested request is built.
     flattened_fields: Option<Vec<RenderedFlattenedField>>,
+    /// Fields of the flattened record that a field-level flatten fills from sibling fields.
+    flattened_fills: Vec<RenderedFlattenedFill>,
+}
+
+/// A field of a flattened record that takes the value of a sibling field of the request.
+#[derive(Debug)]
+struct RenderedFlattenedFill {
+    field_name: String,
+    field_is_pointer: bool,
+    /// The sibling's value in the convenience function.
+    value: String,
+    value_is_pointer: bool,
+    /// The condition under which the sibling is set, or `true`.
+    condition: String,
+    /// The local and the expression of a sourced sibling.
+    source: Option<(String, String)>,
+}
+
+impl RenderedFlattenedFill {
+    fn assigned_value(&self) -> String {
+        match (self.field_is_pointer, self.value_is_pointer) {
+            (true, false) => format!("&{}", self.value),
+            (false, true) => format!("*{}", self.value),
+            _ => self.value.clone(),
+        }
+    }
 }
 
 /// A promoted field retains the internal type and the same default-punning
@@ -2612,7 +2722,9 @@ impl GoVisibilityMarker<'_> {
         {
             for (_, field) in planned_model.public_fields() {
                 let kind = planned_field_kind(&field.field_type, self.api_plan);
-                if !field.required && field_kind_is_flattened_message(&kind, self.api_plan) {
+                if field.flatten.is_some()
+                    || (!field.required && field_kind_is_flattened_message(&kind, self.api_plan))
+                {
                     let PlannedFieldKind::Singular(PlannedValueType::Message(message)) = &kind
                     else {
                         unreachable!()
@@ -2621,7 +2733,14 @@ impl GoVisibilityMarker<'_> {
                     // Other public uses can still mark that model normally.
                     let record = record_for_message(self.api_plan, message)
                         .expect("flattened message should have a record");
-                    for (_, child) in record.public_fields() {
+                    for (key, child) in record.public_fields() {
+                        if field
+                            .flatten
+                            .as_ref()
+                            .is_some_and(|flatten| !flatten.fields.iter().any(|name| name == key))
+                        {
+                            continue;
+                        }
                         self.mark_operation_field_kind(
                             &planned_field_kind(&child.field_type, self.api_plan),
                             child.name.as_str(),
@@ -2891,6 +3010,19 @@ pub(in crate::generator) fn go_string_literal(value: &str) -> String {
 // ---------------------------------------------------------------------------
 // Operation resolution
 // ---------------------------------------------------------------------------
+
+/// The rendered fields of a model by field key, in the order that `ensure_rendered_model` uses.
+fn rendered_fields_by_key<'a>(
+    record: &'a RecordSpec<PlannedFamily>,
+    model: &'a RenderedModel,
+) -> BTreeMap<&'a str, &'a RenderedField> {
+    record
+        .model_fields()
+        .map(|(key, _)| key)
+        .chain(record.sourced_fields().map(|(key, _, _)| key))
+        .zip(&model.fields)
+        .collect()
+}
 
 fn field_kind_is_flattened_message(kind: &PlannedFieldKind, api_plan: &PlannedSpec) -> bool {
     let PlannedFieldKind::Singular(PlannedValueType::Message(message)) = kind else {
@@ -4578,6 +4710,7 @@ fn render_resource_methods(
                         function_args: None,
                         required: true,
                         flattened_fields: None,
+                        flattened_fills: Vec::new(),
                     };
                     render_function_name_inline_assignment(output, &synthetic, package);
                     name_var
@@ -5562,31 +5695,58 @@ fn wrapper_param_signature(
 }
 
 fn render_public_input_locals(output: &mut String, params: &[RenderedUnpackedParam]) {
+    // A fill reads its sibling, so a sourced sibling runs once, into a local.
+    let sources = params
+        .iter()
+        .flat_map(|param| &param.flattened_fills)
+        .filter_map(|fill| fill.source.clone())
+        .collect::<BTreeMap<_, _>>();
+    for (local, source_expr) in sources {
+        output.push_str(&format!("\t{local} := {source_expr}\n"));
+    }
     for param in params
         .iter()
         .filter(|param| param_belongs_in_options(param))
     {
         if let Some(fields) = &param.flattened_fields {
-            output.push_str(&format!("\tvar {} {}\n", param.param_name, param.go_type));
             let conditions = fields
                 .iter()
                 .map(RenderedFlattenedField::presence_condition)
+                .chain(
+                    param
+                        .flattened_fills
+                        .iter()
+                        .map(|fill| fill.condition.clone()),
+                )
                 .collect::<Vec<_>>();
-            let condition = if conditions.is_empty() {
-                "false".to_string()
-            } else {
-                conditions.join(" || ")
-            };
-            output.push_str(&format!(
-                "\tif {condition} {{\n\t\t{} = &{}{{}}\n",
+            let pointer = param.go_type.starts_with('*');
+            let always = !pointer || conditions.iter().any(|condition| condition == "true");
+            let indent = if always { "\t" } else { "\t\t" };
+            let new_value = format!(
+                "{} = &{}{{}}",
                 param.param_name,
                 param.go_type.trim_start_matches('*')
-            ));
+            );
+            if !pointer {
+                output.push_str(&format!("\tvar {} {}\n", param.param_name, param.go_type));
+            } else if always {
+                output.push_str(&format!("\t{}\n", new_value.replacen(" = ", " := ", 1)));
+            } else {
+                let condition = if conditions.is_empty() {
+                    "false".to_string()
+                } else {
+                    conditions.join(" || ")
+                };
+                output.push_str(&format!(
+                    "\tvar {} {}\n\tif {condition} {{\n\t\t{new_value}\n",
+                    param.param_name, param.go_type
+                ));
+            }
             for flattened in fields {
                 let field = &flattened.field;
                 if flattened.default_punning_zero.is_some() {
                     output.push_str(&format!(
-                        "\t\tif {} {{\n\t\t\t{}.{} = &opts.{}\n\t\t}}\n",
+                        "{indent}if {} {{\n{indent}\t{}.{} = &opts.{}\n{indent}}}\n",
                         flattened.presence_condition(),
                         param.param_name,
                         field.name,
@@ -5594,12 +5754,30 @@ fn render_public_input_locals(output: &mut String, params: &[RenderedUnpackedPar
                     ));
                 } else {
                     output.push_str(&format!(
-                        "\t\t{}.{} = opts.{}\n",
+                        "{indent}{}.{} = opts.{}\n",
                         param.param_name, field.name, field.name
                     ));
                 }
             }
-            output.push_str("\t}\n");
+            for fill in &param.flattened_fills {
+                let assignment = format!(
+                    "{}.{} = {}",
+                    param.param_name,
+                    fill.field_name,
+                    fill.assigned_value()
+                );
+                if fill.condition == "true" {
+                    output.push_str(&format!("{indent}{assignment}\n"));
+                } else {
+                    output.push_str(&format!(
+                        "{indent}if {} {{\n{indent}\t{assignment}\n{indent}}}\n",
+                        fill.condition
+                    ));
+                }
+            }
+            if !always {
+                output.push_str("\t}\n");
+            }
         }
         if let Some(zero) = &param.default_punning_zero {
             output.push_str("\tvar ");

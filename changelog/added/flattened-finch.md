@@ -1,0 +1,1 @@
+`@nexus.flatten-in-api fields="..." fill="<field>=<sibling>"` on a field makes the named fields of its record parameters of the call, and copies sibling fields into the others. Python, TypeScript, .NET and Go generate it.

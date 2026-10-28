@@ -176,10 +176,12 @@ describe("stream-service generated output", () => {
 
     expectTypeOf(stream).toEqualTypeOf<Stream<Turn>>();
     expect(stream.bodyType).toBe(turnType);
-    // The Workflow sources give the id from the definition, and the owner from the run.
+    // The Workflow sources give the id from the definition, and the owner from the run. The ref
+    // copies the id.
     const [, request] = startOperation.mock.lastCall!;
-    expect(request.streamId).toBe("chat-1:r1:turns");
+    expect(request.id).toBe("chat-1:r1:turns");
     expect(request.owner).toEqual({ id: "wf:r2", runId: "r2" });
+    expect(request.ref).toStrictEqual({ backend: undefined, id: "chat-1:r1:turns" });
   });
 
   test("passes an enum number that it doesn't know through", () => {

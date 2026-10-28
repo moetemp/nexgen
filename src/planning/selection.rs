@@ -304,6 +304,7 @@ mod tests {
                             required: true,
                             visibility: RecordFieldVisibility::Public,
                             target_roles: None,
+                            flatten: None,
                             function: Some(FunctionFieldSpec {
                                 primary: false,
                                 result: FunctionResultSpec::Authored(TypeSpec::String),

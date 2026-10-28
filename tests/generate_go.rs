@@ -1653,6 +1653,44 @@ fn go_flatten_in_api_keeps_models_public_when_exposed_elsewhere() {
 }
 
 #[test]
+fn go_field_flatten_fills_from_options_and_a_sourced_sibling() {
+    let root = project_root();
+    let source = fs::read_to_string(wit_input_path(&root, "worker-shutdown")).unwrap();
+    let temp_dir = unique_output_path("go-field-flatten-source");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("worker-shutdown.wit");
+    fs::write(
+        &wit_path,
+        source.replace(
+            "    identity: string,\n",
+            "    /// @nexus.source go=\"WorkerIdentity(ctx)\"\n    identity: string,\n",
+        ),
+    )
+    .unwrap();
+    let rendered = generate_to_string_with_inputs(
+        nexgen::language::Language::Go,
+        &[wit_path, linked_inputs_path(&root)],
+        &[descriptor_path(&root)],
+    )
+    .unwrap();
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    let options = rendered
+        .split("type ShutdownWorkerOptions struct {")
+        .nth(1)
+        .and_then(|rest| rest.split("\n}\n").next())
+        .unwrap();
+    assert!(options.contains("\tSdkName string\n"), "{options}");
+    assert!(!options.contains("Identity"), "{options}");
+    assert!(!options.contains("WorkerHeartbeat"), "{options}");
+    assert!(rendered.contains("\tidentity := support.WorkerIdentity(ctx)\n"));
+    assert!(rendered.contains("\tworkerHeartbeatValue := &workerHeartbeat{}\n"));
+    assert!(rendered.contains("\tworkerHeartbeatValue.WorkerIdentity = identity\n"));
+    assert!(rendered.contains("\tworkerHeartbeatValue.TaskQueue = opts.TaskQueue\n"));
+    assert!(rendered.contains("\t\tworkerHeartbeatValue.SdkName = &opts.SdkName\n"));
+}
+
+#[test]
 fn go_rejects_inputs_flattening_to_the_same_module_file() {
     // Two distinct input files -- `full_name.json` at the root and
     // `full/name.json` in a subdirectory -- flatten to the same Go module file

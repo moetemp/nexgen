@@ -1239,6 +1239,7 @@ fn build_fields_from_record(
                     required: false,
                     visibility: RecordFieldVisibility::Omitted,
                     target_roles: None,
+                    flatten: None,
                     function: None,
                     data: (),
                 },
@@ -1263,6 +1264,14 @@ fn build_fields_from_record(
             !required || matches!(field_type, TypeSpec::List(_) | TypeSpec::Map(..));
         let (visibility, target_roles) =
             field_target_roles(sources, api_omits, unset_allowed, path, &field_context)?;
+        let flatten = build_field_flatten(
+            resolve,
+            record,
+            &field.ty,
+            &directives,
+            path,
+            &field_context,
+        )?;
         let annotation =
             directive(&directives, "type", path, &field_context)?.map(directive_language_string);
         let flattened_annotation = directive(&directives, "flattened-type", path, &field_context)?
@@ -1297,6 +1306,7 @@ fn build_fields_from_record(
                 required,
                 visibility,
                 target_roles,
+                flatten,
                 function,
                 data: (),
             },
@@ -1330,6 +1340,7 @@ fn build_fields_from_record(
                         required: arg_field.required,
                         visibility: RecordFieldVisibility::Public,
                         target_roles: None,
+                        flatten: None,
                         function: None,
                         data: (),
                     },
@@ -1830,6 +1841,91 @@ fn default_on_non_enum_error(path: &Path, context: &str) -> Error {
         directive: "@nexus.default".to_string(),
         reason: "only enum field defaults are supported".to_string(),
     }
+}
+
+/// The key of a record field, which is its proto field name.
+fn record_field_key(field: &wit_parser_crate::Field, path: &Path, context: &str) -> Result<String> {
+    let directives = parse_directives(field.docs.contents.as_deref(), path, context)?;
+    Ok(
+        directive_value(&directives, "proto-field", path, context, "value")?
+            .unwrap_or_else(|| field.name.to_snake_case()),
+    )
+}
+
+/// A field-level `@nexus.flatten-in-api`. It names fields of the field's record by WIT name, and
+/// each `fill` names a field of that record and a sibling field.
+fn build_field_flatten(
+    resolve: &Resolve,
+    parent: &Record,
+    ty: &Type,
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<FieldFlattenSpec>> {
+    let Some(flatten) = directive(directives, "flatten-in-api", path, context)? else {
+        return Ok(None);
+    };
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.flatten-in-api".to_string(),
+        reason,
+    };
+    if let Some(key) = flatten
+        .args
+        .keys()
+        .find(|key| !["fields", "fill"].contains(&key.as_str()))
+    {
+        return Err(invalid(format!(
+            "on a field, takes `fields` and `fill`, not `{key}`"
+        )));
+    }
+    let Some(fields) = flatten.value("fields") else {
+        return Err(invalid(
+            "on a field, names the fields of its record to promote, such as `fields=\"backend\"`"
+                .to_string(),
+        ));
+    };
+    let mut ty = *ty;
+    let record = loop {
+        let Type::Id(id) = ty else {
+            return Err(invalid("the field's type isn't a record".to_string()));
+        };
+        match &resolve.types[id].kind {
+            TypeDefKind::Option(inner) | TypeDefKind::Type(inner) => ty = *inner,
+            TypeDefKind::Record(record) => break record,
+            _ => return Err(invalid("the field's type isn't a record".to_string())),
+        }
+    };
+    let key = |record: &Record, name: &str, owner: &str| -> Result<String> {
+        let field = record
+            .fields
+            .iter()
+            .find(|field| field.name == name)
+            .ok_or_else(|| invalid(format!("`{name}` isn't a field of the {owner}")))?;
+        record_field_key(field, path, context)
+    };
+    let fields = fields
+        .split_whitespace()
+        .map(|name| key(record, name, "field's record"))
+        .collect::<Result<Vec<_>>>()?;
+    let fills = flatten
+        .value("fill")
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(|fill| {
+            let Some((inner, outer)) = fill.split_once('=') else {
+                return Err(invalid(format!(
+                    "`{fill}` isn't a fill. Write `<field>=<sibling field>`"
+                )));
+            };
+            Ok((
+                key(record, inner, "field's record")?,
+                key(parent, outer, "parent record")?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(FieldFlattenSpec { fields, fills }))
 }
 
 /// The `@nexus.source` calls of one field. A source with no target fills the field in every
@@ -4242,6 +4338,37 @@ interface generic-service {
         );
         // An api-omit with no target keeps the plain visibility.
         assert_eq!(record.fields["sequence"].target_roles, None);
+    }
+
+    #[test]
+    fn a_field_flatten_names_fields_by_key() {
+        let spec = crate::parser::load_api_spec_from_wit_for_language_with_inputs(
+            Language::Python,
+            &[
+                root().join("advanced/samples/inputs/worker-shutdown.wit"),
+                linked_inputs_path(),
+            ],
+        )
+        .unwrap();
+        let fields = &spec.types["worker-shutdown-service.shutdown-worker-request"];
+        let crate::spec::TypeDeclSpec::Record(record) = &fields.declaration else {
+            panic!("the shutdown request is a record");
+        };
+
+        assert_eq!(
+            record.fields["worker_heartbeat"].flatten,
+            Some(crate::spec::FieldFlattenSpec {
+                fields: vec!["sdk_name".to_string(), "sdk_version".to_string()],
+                fills: [
+                    ("worker_instance_key", "worker_instance_key"),
+                    ("worker_identity", "identity"),
+                    ("task_queue", "task_queue"),
+                ]
+                .map(|(inner, outer)| (inner.to_string(), outer.to_string()))
+                .to_vec(),
+            })
+        );
+        assert_eq!(record.fields["identity"].flatten, None);
     }
 
     #[test]

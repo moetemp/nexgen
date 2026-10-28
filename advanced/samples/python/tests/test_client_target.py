@@ -301,9 +301,9 @@ async def test_a_read_poll_keeps_its_offset_on_an_empty_page() -> None:
     ]
     client = FakeClient({"ReadRecords": list(pages)})
 
-    read = [page async for page in client.iter_read_records(str, stream=ref, last=2)]
+    read = [item async for item in client.iter_read_records(str, stream=ref, last=2)]
 
-    assert read == pages
+    assert read == []
     assert [call.input for call in client.calls] == [
         ReadRecordsRequest(stream=ref, last=2),
         ReadRecordsRequest(stream=ref, from_offset=3),
@@ -312,23 +312,40 @@ async def test_a_read_poll_keeps_its_offset_on_an_empty_page() -> None:
     ]
 
 
-async def test_a_handle_reads_every_page() -> None:
+def stream_record(body: str, offset: int) -> StreamRecord[str]:
+    return StreamRecord(item=StreamItemData(StreamData(body=body)), offset=offset)
+
+
+async def test_a_handle_yields_items_and_resumes_after_each() -> None:
     ref = StreamRef(id="s1")
     pages = [
-        ReadRecordsResponse[str](next_offset=2),
-        ReadRecordsResponse[str](done=True),
+        ReadRecordsResponse(
+            records=[stream_record("a", 10), stream_record("b", 12)], next_offset=15
+        ),
+        ReadRecordsResponse[str](next_offset=15),
+        ReadRecordsResponse(
+            records=[stream_record("c", 20)], next_offset=21, done=True
+        ),
     ]
     client = FakeClient(
         {"CreateStream": [CreateStreamResult(stream=ref)], "ReadRecords": list(pages)}
     )
     stream = await client.create_stream(Texts, id="s1")
 
-    read = [page async for page in stream.iter_read(from_offset=1)]
+    read = stream.iter_read(from_offset=10)
+    seen: list[tuple[int | None, int | None]] = []
+    async for record in read:
+        seen.append(
+            (record.offset, read.next_request and read.next_request.from_offset)
+        )
 
-    assert read == pages
+    # After an item, the read resumes past it, and after a page's last item, where the page ends.
+    assert seen == [(10, 11), (12, 15), (20, None)]
+    assert read.next_request is None
     assert [call.input for call in client.calls[1:]] == [
-        ReadRecordsRequest(stream=ref, from_offset=1),
-        ReadRecordsRequest(stream=ref, from_offset=2),
+        ReadRecordsRequest(stream=ref, from_offset=10),
+        ReadRecordsRequest(stream=ref, from_offset=15),
+        ReadRecordsRequest(stream=ref, from_offset=15),
     ]
 
 

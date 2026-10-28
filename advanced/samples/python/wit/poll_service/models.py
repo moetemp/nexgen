@@ -5,6 +5,8 @@ from __future__ import annotations
 import dataclasses
 import enum
 import typing_extensions
+import temporalio.api.common.v1.message_pb2
+import temporalio.api.workflow.v1.message_pb2
 import temporalio.api.workflowservice.v1.request_response_pb2
 import temporalio.converter
 
@@ -86,6 +88,9 @@ temporalio.converter.transfer_type_convertible(
 
 @dataclasses.dataclass(slots=True)
 class ListWorkflowsResponse:
+    executions: list[WorkflowExecutionInfo] | None = dataclasses.field(
+        default_factory=list
+    )
     next_page_token: bytes | None = None
 
 
@@ -109,6 +114,12 @@ class _ListWorkflowsResponseTransferTypeConverter(
         type_hint: type[ListWorkflowsResponse],
     ) -> ListWorkflowsResponse:
         return ListWorkflowsResponse(
+            executions=[
+                _WorkflowExecutionInfoTransferTypeConverter().from_transfer_type(
+                    item, WorkflowExecutionInfo
+                )
+                for item in value.executions
+            ],
             next_page_token=value.next_page_token
             if bool(value.next_page_token)
             else None,
@@ -120,6 +131,14 @@ class _ListWorkflowsResponseTransferTypeConverter(
         value: ListWorkflowsResponse,
     ) -> temporalio.api.workflowservice.v1.request_response_pb2.ListWorkflowExecutionsResponse:
         message = temporalio.api.workflowservice.v1.request_response_pb2.ListWorkflowExecutionsResponse()
+        if value.executions:
+            for element in value.executions:
+                item = message.executions.add()
+                item.CopyFrom(
+                    _WorkflowExecutionInfoTransferTypeConverter().to_transfer_type(
+                        element
+                    )
+                )
         if value.next_page_token is not None:
             message.next_page_token = value.next_page_token
         return message
@@ -128,6 +147,113 @@ class _ListWorkflowsResponseTransferTypeConverter(
 temporalio.converter.transfer_type_convertible(
     _ListWorkflowsResponseTransferTypeConverter
 )(ListWorkflowsResponse)  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True)
+class WorkflowExecutionInfo:
+    execution: WorkflowExecution
+    parent_execution: WorkflowExecution | None = None
+
+
+class _WorkflowExecutionInfoTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        WorkflowExecutionInfo,
+        temporalio.api.workflow.v1.message_pb2.WorkflowExecutionInfo,
+    ]
+):
+    transfer_type: (
+        type[temporalio.api.workflow.v1.message_pb2.WorkflowExecutionInfo] | None
+    ) = temporalio.api.workflow.v1.message_pb2.WorkflowExecutionInfo
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: temporalio.api.workflow.v1.message_pb2.WorkflowExecutionInfo,
+        type_hint: type[WorkflowExecutionInfo],
+    ) -> WorkflowExecutionInfo:
+        if not value.HasField("execution"):
+            raise ValueError("missing required field WorkflowExecutionInfo.execution")
+        execution = _WorkflowExecutionTransferTypeConverter().from_transfer_type(
+            value.execution, WorkflowExecution
+        )
+        return WorkflowExecutionInfo(
+            execution=execution,
+            parent_execution=_WorkflowExecutionTransferTypeConverter().from_transfer_type(
+                value.parent_execution, WorkflowExecution
+            )
+            if value.HasField("parent_execution")
+            else None,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: WorkflowExecutionInfo,
+    ) -> temporalio.api.workflow.v1.message_pb2.WorkflowExecutionInfo:
+        message = temporalio.api.workflow.v1.message_pb2.WorkflowExecutionInfo()
+        message.execution.CopyFrom(
+            _WorkflowExecutionTransferTypeConverter().to_transfer_type(value.execution)
+        )
+        if value.parent_execution is not None:
+            message.parent_execution.CopyFrom(
+                _WorkflowExecutionTransferTypeConverter().to_transfer_type(
+                    value.parent_execution
+                )
+            )
+        return message
+
+
+temporalio.converter.transfer_type_convertible(
+    _WorkflowExecutionInfoTransferTypeConverter
+)(WorkflowExecutionInfo)  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True)
+class WorkflowExecution:
+    workflow_id: str
+    run_id: str
+
+
+class _WorkflowExecutionTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        WorkflowExecution, temporalio.api.common.v1.message_pb2.WorkflowExecution
+    ]
+):
+    transfer_type: (
+        type[temporalio.api.common.v1.message_pb2.WorkflowExecution] | None
+    ) = temporalio.api.common.v1.message_pb2.WorkflowExecution
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: temporalio.api.common.v1.message_pb2.WorkflowExecution,
+        type_hint: type[WorkflowExecution],
+    ) -> WorkflowExecution:
+        if not value.workflow_id:
+            raise ValueError("missing required field WorkflowExecution.workflow_id")
+        workflow_id = value.workflow_id
+        if not value.run_id:
+            raise ValueError("missing required field WorkflowExecution.run_id")
+        run_id = value.run_id
+        return WorkflowExecution(
+            workflow_id=workflow_id,
+            run_id=run_id,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: WorkflowExecution,
+    ) -> temporalio.api.common.v1.message_pb2.WorkflowExecution:
+        message = temporalio.api.common.v1.message_pb2.WorkflowExecution()
+        message.workflow_id = value.workflow_id
+        message.run_id = value.run_id
+        return message
+
+
+temporalio.converter.transfer_type_convertible(_WorkflowExecutionTransferTypeConverter)(
+    WorkflowExecution
+)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)

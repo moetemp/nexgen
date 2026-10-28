@@ -22,11 +22,13 @@ from ..models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamReadStart,
+    StreamRecord,
     StreamRef,
     StreamStatus,
     _StreamRefTransferTypeConverter,
 )
 import temporal_support as _support
+from .._poll import PollIterator
 
 if typing.TYPE_CHECKING:
     import temporal_support
@@ -112,7 +114,7 @@ class Stream(typing.Generic[BodyT]):
             request, self.body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
         )
 
-    async def iter_read(
+    def iter_read(
         self,
         from_offset: int | None = None,
         start: StreamReadStart | None = None,
@@ -122,9 +124,9 @@ class Stream(typing.Generic[BodyT]):
         *,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
-    ) -> collections.abc.AsyncIterator[ReadRecordsResponse[BodyT]]:
-        """Yield each response of ``read``. The poll helper gives the next request, and the
-        iteration stops when it gives ``None``.
+    ) -> PollIterator[ReadRecordsRequest, StreamRecord[BodyT]]:
+        """Yield each item that ``read`` reads, page by page. The iterator's
+        ``next_request`` resumes after the last item that it yielded.
         """
         request = ReadRecordsRequest(
             stream=self.stream,
@@ -134,18 +136,21 @@ class Stream(typing.Generic[BodyT]):
             wait=wait,
             create_wait=create_wait,
         )
-        while True:
+
+        async def read(
+            request: ReadRecordsRequest,
+        ) -> tuple[
+            ReadRecordsRequest | None, collections.abc.Sequence[StreamRecord[BodyT]]
+        ]:
             response = await self._ops()._stream_service_read_records(
                 request,
                 self.body_type,
                 rpc_metadata=rpc_metadata,
                 rpc_timeout=rpc_timeout,
             )
-            yield response
-            next_request = _support.next_read_request(request, response)
-            if next_request is None:
-                return
-            request = next_request
+            return _support.next_read_request(request, response), response.records or []
+
+        return PollIterator(request, read, _support.resume_read_request)
 
     async def describe(
         self,

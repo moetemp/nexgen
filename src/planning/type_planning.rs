@@ -703,6 +703,8 @@ impl<'a> TypePlanningContext<'a> {
             serialization_context: operation.serialization_context.clone(),
             poll_next: operation.poll_next.clone(),
             poll_target: operation.poll_target,
+            poll_items: operation.poll_items.clone(),
+            poll_resume: operation.poll_resume.clone(),
             asynchronous: operation.asynchronous,
             data: PlannedOperationData {
                 output_resource_return: plan_operation_resource_return(
@@ -1989,6 +1991,8 @@ interface alerts {
                     serialization_context: LanguageStringSpec::default(),
                     poll_next: LanguageStringSpec::default(),
                     poll_target: None,
+                    poll_items: None,
+                    poll_resume: LanguageStringSpec::default(),
                     asynchronous: false,
                     data: (),
                 }],

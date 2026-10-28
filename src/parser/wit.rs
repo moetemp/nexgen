@@ -3546,6 +3546,8 @@ fn build_operation(
     )?;
     let serialization_context = build_operation_serialization_context(&directives, path, &context)?;
     let (poll_next, poll_target) = build_operation_poll(&directives, path, &context)?;
+    let (poll_items, poll_resume) =
+        build_operation_poll_items(resolve, function, &directives, path, &context)?;
     let output = if let Some(output_type) = function.result.as_ref() {
         Some(
             find_operation_type_spec(resolve, output_type, path, &context)?.ok_or_else(|| {
@@ -3587,6 +3589,8 @@ fn build_operation(
         serialization_context,
         poll_next,
         poll_target,
+        poll_items,
+        poll_resume,
         asynchronous: matches!(function.kind, FunctionKind::AsyncFreestanding),
         data: (),
     })
@@ -3785,6 +3789,66 @@ fn build_operation_poll(
         }
     };
     Ok((spec, target))
+}
+
+/// The response field whose items a poll yields, by key, and the helper that resumes a read
+/// after one item.
+fn build_operation_poll_items(
+    resolve: &Resolve,
+    function: &Function,
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<(Option<String>, LanguageStringSpec)> {
+    let Some(directive) = directive(directives, "poll", path, context)? else {
+        return Ok((None, LanguageStringSpec::default()));
+    };
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.poll".to_string(),
+        reason,
+    };
+    let resume = directive_language_string_for_key(directive, "resume");
+    for helper in resume.default.iter().chain(resume.by_language.values()) {
+        if !is_valid_support_helper_path(helper) {
+            return Err(invalid(format!(
+                "invalid `resume` support helper `{helper}`"
+            )));
+        }
+    }
+    let Some(items) = directive.value("items") else {
+        if resume.default.is_some() || !resume.by_language.is_empty() {
+            return Err(invalid("`resume` needs `items`".to_string()));
+        }
+        return Ok((None, resume));
+    };
+    let record = function
+        .result
+        .and_then(|ty| flattened_record(resolve, ty))
+        .ok_or_else(|| {
+            invalid("`items` needs an operation whose result is a record".to_string())
+        })?;
+    let field = record
+        .fields
+        .iter()
+        .find(|field| field.name == items)
+        .ok_or_else(|| invalid(format!("`{items}` isn't a field of the response")))?;
+    let mut ty = field.ty;
+    let is_list = loop {
+        let Type::Id(id) = ty else {
+            break false;
+        };
+        match &resolve.types[id].kind {
+            TypeDefKind::Option(inner) | TypeDefKind::Type(inner) => ty = *inner,
+            TypeDefKind::List(_) => break true,
+            _ => break false,
+        }
+    };
+    if !is_list {
+        return Err(invalid(format!("`{items}` isn't a list")));
+    }
+    Ok((Some(record_field_key(field, path, context)?), resume))
 }
 
 pub(crate) fn select_world(

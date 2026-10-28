@@ -47,3 +47,13 @@ def next_page_request(request: _RequestT, response: _PageResponse) -> _RequestT 
     if not response.next_page_token:
         return None
     return dataclasses.replace(request, next_page_token=response.next_page_token)
+
+
+class _ReadItem(typing.Protocol):
+    @property
+    def offset(self) -> int | None: ...
+
+
+def resume_read_request(request: _ReadRequestT, item: _ReadItem) -> _ReadRequestT:
+    # A read that resumes after an item starts past its offset, and reads no `last` again.
+    return dataclasses.replace(request, from_offset=(item.offset or 0) + 1, last=None)

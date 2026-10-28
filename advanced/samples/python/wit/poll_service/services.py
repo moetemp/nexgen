@@ -12,12 +12,14 @@ from .models import (
     ListWorkflowsRequest,
     ListWorkflowsResponse,
     OpenFeedRequest,
+    WorkflowExecutionInfo,
 )
 from ._resources.feed import (
     Feed,
     bind_feed_client,
 )
 import temporal_support as _support
+from ._poll import PollIterator
 
 if typing.TYPE_CHECKING:
     from ._resources import Feed
@@ -91,16 +93,16 @@ class FeedServiceClient:
             output_type=ListWorkflowsResponse,
         )
 
-    async def iter_list_feed(
+    def iter_list_feed(
         self,
         *,
         namespace: str,
         page_size: int | None = None,
         next_page_token: bytes | None = None,
         query: str | None = None,
-    ) -> collections.abc.AsyncIterator[ListWorkflowsResponse]:
-        """Yield each response of ``list_feed``. The poll helper gives the next request,
-        and the iteration stops when it gives ``None``.
+    ) -> PollIterator[ListWorkflowsRequest, WorkflowExecutionInfo]:
+        """Yield each item that ``list_feed`` reads, page by page. The iterator's
+        ``next_request`` resumes after the last item that it yielded.
         """
         request = ListWorkflowsRequest(
             namespace=namespace,
@@ -108,13 +110,18 @@ class FeedServiceClient:
             next_page_token=next_page_token,
             query=query,
         )
-        while True:
+
+        async def read(
+            request: ListWorkflowsRequest,
+        ) -> tuple[
+            ListWorkflowsRequest | None, collections.abc.Sequence[WorkflowExecutionInfo]
+        ]:
             handle = await self._nexus_client.start_operation(
                 operation="ListFeed", input=request, output_type=ListWorkflowsResponse
             )
             response = await handle
-            yield response
-            next_request = _support.next_page_request(request, response)
-            if next_request is None:
-                return
-            request = next_request
+            return _support.next_page_request(
+                request, response
+            ), response.executions or []
+
+        return PollIterator(request, read, None)

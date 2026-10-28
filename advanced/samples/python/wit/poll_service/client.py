@@ -12,10 +12,12 @@ from .models import (
     ListWorkflowsRequest,
     ListWorkflowsResponse,
     OpenFeedRequest,
+    WorkflowExecutionInfo,
 )
 from ._resources import Feed
 from ._resources.feed import bind_feed_operations
 import temporal_support as _support
+from ._poll import PollIterator
 
 
 _OutputT = typing.TypeVar("_OutputT")
@@ -263,7 +265,7 @@ class FeedServiceClientExtension(abc.ABC):
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
         )
 
-    async def iter_list_feed(
+    def iter_list_feed(
         self,
         *,
         namespace: str,
@@ -272,9 +274,9 @@ class FeedServiceClientExtension(abc.ABC):
         query: str | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
-    ) -> collections.abc.AsyncIterator[ListWorkflowsResponse]:
-        """Yield each response of ``list_feed``. The poll helper gives the next request,
-        and the iteration stops when it gives ``None``.
+    ) -> PollIterator[ListWorkflowsRequest, WorkflowExecutionInfo]:
+        """Yield each item that ``list_feed`` reads, page by page. The iterator's
+        ``next_request`` resumes after the last item that it yielded.
         """
         request = ListWorkflowsRequest(
             namespace=namespace,
@@ -282,15 +284,20 @@ class FeedServiceClientExtension(abc.ABC):
             next_page_token=next_page_token,
             query=query,
         )
-        while True:
+
+        async def read(
+            request: ListWorkflowsRequest,
+        ) -> tuple[
+            ListWorkflowsRequest | None, collections.abc.Sequence[WorkflowExecutionInfo]
+        ]:
             response = await self._feed_service_list_feed(
                 request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
             )
-            yield response
-            next_request = _support.next_page_request(request, response)
-            if next_request is None:
-                return
-            request = next_request
+            return _support.next_page_request(
+                request, response
+            ), response.executions or []
+
+        return PollIterator(request, read, None)
 
     def feed(
         self,

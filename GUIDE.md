@@ -2315,7 +2315,7 @@ type or transform expression refers to an otherwise-unavailable module.
 ### @nexus.poll
 
 **Placement:** Operation (function) **Syntax:**
-`@nexus.poll python="<support-helper>" [target="workflow|client"]`
+`@nexus.poll python="<support-helper>" [target="workflow|client"] [items="<field>"] [python-resume="<support-helper>"]`
 
 Generates an `iter_<name>` async iterator for the operation, and for each
 resource method that binds it. The iterator sends the request, yields the
@@ -2349,6 +2349,28 @@ def next_read_request(request, response):
 
 The referenced helper must be available from the package specified by
 `--support-package`.
+
+`items` names a list field of the response. The iterator then yields the items,
+not the pages, and it is a `PollIterator` of the package. Its `next_request` is
+the request that resumes after the last item that it yielded, and it is `None`
+after the last page. `resume` names a helper `(page request, item) -> request`
+that resumes after one item. After a page's last item, or after a page with no
+item, `next_request` is the page helper's request. A caller saves it and resumes
+with it.
+
+```wit
+/// @nexus.poll python="next_read_request" items="records"
+///   python-resume="resume_read_request" target="client"
+read-records: func(request: read-records-request) -> read-records-response;
+```
+
+```python
+def resume_read_request(request, item):
+    return dataclasses.replace(request, from_offset=(item.offset or 0) + 1, last=None)
+```
+
+nexgen refuses `items` that names no list field of the response, and `resume`
+with no `items`.
 
 ---
 

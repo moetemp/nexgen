@@ -78,7 +78,7 @@ required input model or returned by an operation.
 Operations with `@nexus.poll`, in a service with an endpoint and in a service
 with no endpoint, and a resource method that binds one. Only Python generates
 the iterators, for both targets. The service with no endpoint also takes a
-parameter of an enum type.
+parameter of an enum type, and its poll yields the executions of each page.
 
 - WIT: [`inputs/poll-service.wit`](inputs/poll-service.wit)
 - Python: [`python/wit/poll_service/`](python/wit/poll_service/),
@@ -218,7 +218,8 @@ which the sample support code gives in place of Brook's runtime. The create
 takes the backend of the Stream's ref, and the ref copies the id. In Python, the
 factory `stream` builds a handle from an id or a ref with no call, and a handle
 passes as its ref. `publish` takes the values, and returns the offset of the
-last one.
+last one. The read iterator yields each Record, and its `next_request` resumes
+after the last one.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),

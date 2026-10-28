@@ -23,14 +23,26 @@ from wit.poll_service.models import (
     ListWorkflowsRequest,
     ListWorkflowsResponse,
     OpenFeedRequest,
+    WorkflowExecution,
+    WorkflowExecutionInfo,
 )
 
-# Each page names the next one, and the last page names none.
+
+def info(workflow_id: str) -> WorkflowExecutionInfo:
+    return WorkflowExecutionInfo(
+        execution=WorkflowExecution(workflow_id=workflow_id, run_id="r1")
+    )
+
+
+# Each page names the next one, and the last page names none. The middle page is empty.
 PAGES = {
-    None: ListWorkflowsResponse(next_page_token=b"2"),
+    None: ListWorkflowsResponse(
+        executions=[info("w1"), info("w2")], next_page_token=b"2"
+    ),
     b"2": ListWorkflowsResponse(next_page_token=b"3"),
-    b"3": ListWorkflowsResponse(),
+    b"3": ListWorkflowsResponse(executions=[info("w3")]),
 }
+ITEMS = [info("w1"), info("w2"), info("w3")]
 
 
 def page(request: ListWorkflowsRequest) -> ListWorkflowsResponse:
@@ -102,9 +114,12 @@ async def test_a_client_polls_an_operation_until_the_helper_stops() -> None:
 async def test_a_client_polls_a_service_with_no_endpoint() -> None:
     client = FakeClient()
 
-    pages = [response async for response in client.iter_list_feed(namespace="default")]
+    read = client.iter_list_feed(namespace="default")
+    items = [item async for item in read]
 
-    assert pages == list(PAGES.values())
+    # The feed's poll yields the executions of each page.
+    assert items == ITEMS
+    assert read.next_request is None
     assert client.tokens("ListFeed") == [None, b"2", b"3"]
     assert {endpoint for endpoint, _, _ in client.calls} == {None}
 
@@ -115,9 +130,9 @@ async def test_a_client_resource_polls_its_method() -> None:
         namespace="default", query="q", order=FeedOrder.Oldest
     )
 
-    pages = [response async for response in feed.iter_read(page_size=10)]
+    items = [item async for item in feed.iter_read(page_size=10)]
 
-    assert pages == list(PAGES.values())
+    assert items == ITEMS
     assert client.calls[0][2] == OpenFeedRequest(
         namespace="default", query="q", order=FeedOrder.Oldest
     )
@@ -167,12 +182,12 @@ class PollWorkflow:
     async def run(self) -> list[int]:
         pages = [p async for p in poll_service.iter_list_workflows(namespace="default")]
         service = poll_service.FeedServiceClient("feeds")
-        feed_pages = [p async for p in service.iter_list_feed(namespace="default")]
+        feed_items = [i async for i in service.iter_list_feed(namespace="default")]
         feed = await service.open_feed(
             namespace="default", query="q", order=FeedOrder.Oldest
         )
-        read_pages = [p async for p in feed.iter_read()]
-        return [len(pages), len(feed_pages), len(read_pages)]
+        read_items = [i async for i in feed.iter_read()]
+        return [len(pages), len(feed_items), len(read_items)]
 
 
 async def test_workflow_code_polls_each_kind_of_operation(

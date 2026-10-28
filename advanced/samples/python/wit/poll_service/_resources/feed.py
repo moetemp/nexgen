@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections.abc
 import dataclasses
 import typing
+import datetime
 
 from ..models import (
     ListWorkflowsRequest,
@@ -33,6 +34,9 @@ class Feed:
     async def read(
         self,
         page_size: int | None = None,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ListWorkflowsResponse:
         """List one page of the feed."""
         request = ListWorkflowsRequest(
@@ -40,11 +44,16 @@ class Feed:
             page_size=page_size,
             query=self.query,
         )
-        return await self._ops()._feed_service_list_feed(request)
+        return await self._ops()._feed_service_list_feed(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def iter_read(
         self,
         page_size: int | None = None,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> collections.abc.AsyncIterator[ListWorkflowsResponse]:
         """Yield each response of ``read``. The poll helper gives the next request, and the
         iteration stops when it gives ``None``.
@@ -55,7 +64,9 @@ class Feed:
             query=self.query,
         )
         while True:
-            response = await self._ops()._feed_service_list_feed(request)
+            response = await self._ops()._feed_service_list_feed(
+                request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+            )
             yield response
             next_request = _support.next_page_request(request, response)
             if next_request is None:
@@ -78,6 +89,9 @@ class _FeedServiceOperations(typing.Protocol):
     async def _feed_service_list_feed(
         self,
         request: ListWorkflowsRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ListWorkflowsResponse: ...
 
 
@@ -90,7 +104,12 @@ class WorkflowFeedService:
     async def _feed_service_list_feed(
         self,
         request: ListWorkflowsRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ListWorkflowsResponse:
+        if rpc_metadata is not None or rpc_timeout is not None:
+            raise ValueError("RPC options apply to calls outside a Workflow")
         nexus_client = self._nexus_client
         handle = await nexus_client.start_operation(
             operation="ListFeed",

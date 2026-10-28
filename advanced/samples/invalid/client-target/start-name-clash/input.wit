@@ -1,0 +1,15 @@
+package temporal:start-name-clash@1.0.0;
+
+world service { export job-service; }
+
+// The client starts `run-job` with `start_run_job`, which is also the name of the second operation.
+/// @nexus.endpoint "jobs"
+interface job-service {
+  record job-request {
+    name: string,
+  }
+
+  run-job: async func(request: job-request);
+
+  start-run-job: func(request: job-request);
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections.abc
 import typing
 import abc
+import datetime
 
 from .models import (
     GetUserRequest,
@@ -68,20 +69,28 @@ class UserServiceClientExtension(abc.ABC):
         *,
         service: str,
         endpoint: str | None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None,
+        rpc_timeout: datetime.timedelta | None,
     ) -> _NexusClient:
         """Return the Nexus client that starts the operations of ``service``.
 
         ``endpoint`` is ``None`` for a service with no endpoint, which the client serves.
+        The RPC options are those of one call.
         """
         ...
 
     async def _user_service_get_user(
         self,
         request: GetUserRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> User:
         nexus_client = self._create_nexus_client(
             service="UserService",
             endpoint=None,
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="GetUser",
@@ -95,19 +104,28 @@ class UserServiceClientExtension(abc.ABC):
         self,
         *,
         user_id: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> User:
         request = GetUserRequest(
             user_id=user_id,
         )
-        return await self._user_service_get_user(request)
+        return await self._user_service_get_user(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _user_service_update_email(
         self,
         request: UpdateEmailRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> User:
         nexus_client = self._create_nexus_client(
             service="UserService",
             endpoint=None,
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="UpdateEmail",
@@ -122,20 +140,29 @@ class UserServiceClientExtension(abc.ABC):
         *,
         user_id: str,
         email: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> User:
         request = UpdateEmailRequest(
             user_id=user_id,
             email=email,
         )
-        return await self._user_service_update_email(request)
+        return await self._user_service_update_email(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _user_service_notify(
         self,
         request: NotifyRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         nexus_client = self._create_nexus_client(
             service="UserService",
             endpoint=None,
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="Notify",
@@ -151,6 +178,8 @@ class UserServiceClientExtension(abc.ABC):
         channels: list[str] | None = None,
         sender: str,
         email: bool | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         request = NotifyRequest(
             user_id=user_id,
@@ -159,15 +188,22 @@ class UserServiceClientExtension(abc.ABC):
             sender=sender,
             email=email,
         )
-        return await self._user_service_notify(request)
+        return await self._user_service_notify(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _user_service_notify_all(
         self,
         request: NotifyAllRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         nexus_client = self._create_nexus_client(
             service="UserService",
             endpoint=None,
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="NotifyAll",
@@ -177,7 +213,12 @@ class UserServiceClientExtension(abc.ABC):
 
     async def notify_all(
         self,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         """Notify every user."""
         request = NotifyAllRequest()
-        return await self._user_service_notify_all(request)
+        return await self._user_service_notify_all(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )

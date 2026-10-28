@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections.abc
 import typing
 import abc
+import datetime
 
 from .models import (
     Request,
@@ -68,20 +69,28 @@ class InterceptorServiceClientExtension(abc.ABC):
         *,
         service: str,
         endpoint: str | None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None,
+        rpc_timeout: datetime.timedelta | None,
     ) -> _NexusClient:
         """Return the Nexus client that starts the operations of ``service``.
 
         ``endpoint`` is ``None`` for a service with no endpoint, which the client serves.
+        The RPC options are those of one call.
         """
         ...
 
     async def _interceptor_service_first_operation(
         self,
         request: Request,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Response:
         nexus_client = self._create_nexus_client(
             service="InterceptorService",
             endpoint="__temporal_system",
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="FirstOperation",
@@ -94,19 +103,28 @@ class InterceptorServiceClientExtension(abc.ABC):
         self,
         *,
         id: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Response:
         request = Request(
             id=id,
         )
-        return await self._interceptor_service_first_operation(request)
+        return await self._interceptor_service_first_operation(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _interceptor_service_second_operation(
         self,
         request: Request,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Response:
         nexus_client = self._create_nexus_client(
             service="InterceptorService",
             endpoint="__temporal_system",
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="SecondOperation",
@@ -119,19 +137,28 @@ class InterceptorServiceClientExtension(abc.ABC):
         self,
         *,
         id: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Response:
         request = Request(
             id=id,
         )
-        return await self._interceptor_service_second_operation(request)
+        return await self._interceptor_service_second_operation(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _interceptor_service_value_operation(
         self,
         request: ValueRequest[ValueT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ValueResponse[ValueT]:
         nexus_client = self._create_nexus_client(
             service="InterceptorService",
             endpoint="__temporal_system",
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = typing.cast(
             collections.abc.Awaitable[ValueResponse[ValueT]],
@@ -148,9 +175,13 @@ class InterceptorServiceClientExtension(abc.ABC):
         *,
         id: str,
         value: ValueT,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ValueResponse[ValueT]:
         request = ValueRequest(
             id=id,
             value=value,
         )
-        return await self._interceptor_service_value_operation(request)
+        return await self._interceptor_service_value_operation(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )

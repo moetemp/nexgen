@@ -702,6 +702,7 @@ impl<'a> TypePlanningContext<'a> {
             serialization_context: operation.serialization_context.clone(),
             poll_next: operation.poll_next.clone(),
             poll_target: operation.poll_target,
+            asynchronous: operation.asynchronous,
             data: PlannedOperationData {
                 output_resource_return: plan_operation_resource_return(
                     &self.spec,
@@ -1984,6 +1985,7 @@ interface alerts {
                     serialization_context: LanguageStringSpec::default(),
                     poll_next: LanguageStringSpec::default(),
                     poll_target: None,
+                    asynchronous: false,
                     data: (),
                 }],
                 resources: Vec::new(),

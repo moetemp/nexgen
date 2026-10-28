@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import collections.abc
 import dataclasses
 import typing
+import datetime
 
 from ..models import (
     NotifyRequest,
@@ -30,12 +32,17 @@ class User:
     async def update_email(
         self,
         email: str,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> User:
         request = UpdateEmailRequest(
             user_id=self.user_id,
             email=email,
         )
-        return await self._ops()._user_service_update_email(request)
+        return await self._ops()._user_service_update_email(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def notify(
         self,
@@ -43,6 +50,8 @@ class User:
         reason: str | None = None,
         channels: list[str] | None = None,
         sender: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         request = NotifyRequest(
             user_id=self.user_id,
@@ -50,7 +59,9 @@ class User:
             channels=channels or [],
             sender=sender,
         )
-        await self._ops()._user_service_notify(request)
+        await self._ops()._user_service_notify(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
 
 def bind_user_operations(
@@ -68,11 +79,17 @@ class _UserServiceOperations(typing.Protocol):
     async def _user_service_update_email(
         self,
         request: UpdateEmailRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> User: ...
 
     async def _user_service_notify(
         self,
         request: NotifyRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None: ...
 
 
@@ -85,7 +102,12 @@ class WorkflowUserService:
     async def _user_service_update_email(
         self,
         request: UpdateEmailRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> User:
+        if rpc_metadata is not None or rpc_timeout is not None:
+            raise ValueError("RPC options apply to calls outside a Workflow")
         nexus_client = self._nexus_client
         handle = await nexus_client.start_operation(
             operation="UpdateEmail",
@@ -101,7 +123,12 @@ class WorkflowUserService:
     async def _user_service_notify(
         self,
         request: NotifyRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
+        if rpc_metadata is not None or rpc_timeout is not None:
+            raise ValueError("RPC options apply to calls outside a Workflow")
         nexus_client = self._nexus_client
         handle = await nexus_client.start_operation(
             operation="Notify",

@@ -1,0 +1,31 @@
+package temporal:client-calls@1.0.0;
+
+world service {
+  export job-service;
+}
+
+// A client runs a short call to its end, or starts a long job and waits for it later.
+/// @nexus.endpoint "jobs"
+interface job-service {
+  record run-job-request {
+    name: string,
+  }
+
+  record run-job-response {
+    output: string,
+  }
+
+  record describe-job-request {
+    name: string,
+  }
+
+  record describe-job-response {
+    status: string,
+  }
+
+  /// @nexus.doc "Run a job, which can take a long time."
+  run-job: async func(request: run-job-request) -> run-job-response;
+
+  /// @nexus.doc "Describe a job."
+  describe-job: func(request: describe-job-request) -> describe-job-response;
+}

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import collections.abc
 import typing
-import datetime
 import abc
+import datetime
 
 from .models import (
     StartWorkflowRequest,
@@ -62,20 +62,28 @@ class WorkflowHandleServiceClientExtension(abc.ABC):
         *,
         service: str,
         endpoint: str | None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None,
+        rpc_timeout: datetime.timedelta | None,
     ) -> _NexusClient:
         """Return the Nexus client that starts the operations of ``service``.
 
         ``endpoint`` is ``None`` for a service with no endpoint, which the client serves.
+        The RPC options are those of one call.
         """
         ...
 
     async def _workflow_handle_service_start_workflow(
         self,
         request: StartWorkflowRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> WorkflowHandle:
         nexus_client = self._create_nexus_client(
             service="WorkflowHandleService",
             endpoint="temporal-system",
+            rpc_metadata=rpc_metadata,
+            rpc_timeout=rpc_timeout,
         )
         handle = await nexus_client.start_operation(
             operation="StartWorkflow",
@@ -98,6 +106,8 @@ class WorkflowHandleServiceClientExtension(abc.ABC):
         task_queue: str,
         workflow_start_delay: datetime.timedelta | None = None,
         namespace: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> WorkflowHandle:
         """Start a Workflow through System Nexus and get a handle to it."""
         request = StartWorkflowRequest(
@@ -107,4 +117,6 @@ class WorkflowHandleServiceClientExtension(abc.ABC):
             workflow_start_delay=workflow_start_delay,
             namespace=namespace,
         )
-        return await self._workflow_handle_service_start_workflow(request)
+        return await self._workflow_handle_service_start_workflow(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )

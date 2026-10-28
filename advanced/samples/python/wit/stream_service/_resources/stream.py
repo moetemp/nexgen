@@ -58,6 +58,9 @@ class Stream(typing.Generic[BodyT]):
         previous_completed_task: WorkflowTaskEpoch | None = None,
         failed_tasks: list[int] | None = None,
         withdraw_run: str | None = None,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> AppendRecordsResponse:
         """Publish Records. The answer has the first and the last offset."""
         request = AppendRecordsRequest(
@@ -69,7 +72,9 @@ class Stream(typing.Generic[BodyT]):
             failed_tasks=failed_tasks or [],
             withdraw_run=withdraw_run,
         )
-        return await self._ops()._stream_service_append_records(request)
+        return await self._ops()._stream_service_append_records(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def close(
         self,
@@ -79,6 +84,9 @@ class Stream(typing.Generic[BodyT]):
         status: StreamCloseStatus | None = None,
         previous_completed_task: WorkflowTaskEpoch | None = None,
         failed_tasks: list[int] | None = None,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         """Close the Stream. Readers drain what is left, then end."""
         request = CloseStreamRequest(
@@ -90,7 +98,9 @@ class Stream(typing.Generic[BodyT]):
             failed_tasks=failed_tasks or [],
             status=status,
         )
-        _ = await self._ops()._stream_service_close_stream(request)
+        _ = await self._ops()._stream_service_close_stream(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def read(
         self,
@@ -99,6 +109,9 @@ class Stream(typing.Generic[BodyT]):
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
         create_wait: datetime.timedelta | None = None,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse[BodyT]:
         """Read one page of Records. The poll iterator reads them all."""
         request = ReadRecordsRequest(
@@ -109,7 +122,9 @@ class Stream(typing.Generic[BodyT]):
             wait=wait,
             create_wait=create_wait,
         )
-        return await self._ops()._stream_service_read_records(request, self.body_type)
+        return await self._ops()._stream_service_read_records(
+            request, self.body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def iter_read(
         self,
@@ -118,6 +133,9 @@ class Stream(typing.Generic[BodyT]):
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
         create_wait: datetime.timedelta | None = None,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> collections.abc.AsyncIterator[ReadRecordsResponse[BodyT]]:
         """Yield each response of ``read``. The poll helper gives the next request, and the
         iteration stops when it gives ``None``.
@@ -132,7 +150,10 @@ class Stream(typing.Generic[BodyT]):
         )
         while True:
             response = await self._ops()._stream_service_read_records(
-                request, self.body_type
+                request,
+                self.body_type,
+                rpc_metadata=rpc_metadata,
+                rpc_timeout=rpc_timeout,
             )
             yield response
             next_request = _support.next_read_request(request, response)
@@ -142,12 +163,17 @@ class Stream(typing.Generic[BodyT]):
 
     async def describe(
         self,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> DescribeStreamResponse:
         """Describe the Stream's status, newest offset and Retention."""
         request = DescribeStreamRequest(
             stream=self.stream,
         )
-        return await self._ops()._stream_service_describe_stream(request)
+        return await self._ops()._stream_service_describe_stream(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
 
 def bind_stream_operations(
@@ -165,22 +191,34 @@ class _StreamServiceOperations(typing.Protocol):
     async def _stream_service_append_records(
         self,
         request: AppendRecordsRequest[BodyT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> AppendRecordsResponse: ...
 
     async def _stream_service_close_stream(
         self,
         request: CloseStreamRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseStreamResponse: ...
 
     async def _stream_service_read_records(
         self,
         request: ReadRecordsRequest,
         body_type: type[BodyT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse[BodyT]: ...
 
     async def _stream_service_describe_stream(
         self,
         request: DescribeStreamRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> DescribeStreamResponse: ...
 
 
@@ -190,14 +228,24 @@ class WorkflowStreamService:
     async def _stream_service_append_records(
         self,
         request: AppendRecordsRequest[BodyT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> AppendRecordsResponse:
+        if rpc_metadata is not None or rpc_timeout is not None:
+            raise ValueError("RPC options apply to calls outside a Workflow")
         handle = await _append_records(request)
         return await handle
 
     async def _stream_service_close_stream(
         self,
         request: CloseStreamRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseStreamResponse:
+        if rpc_metadata is not None or rpc_timeout is not None:
+            raise ValueError("RPC options apply to calls outside a Workflow")
         handle = await _close_stream(request)
         return await handle
 
@@ -205,14 +253,24 @@ class WorkflowStreamService:
         self,
         request: ReadRecordsRequest,
         body_type: type[BodyT],
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse[BodyT]:
+        if rpc_metadata is not None or rpc_timeout is not None:
+            raise ValueError("RPC options apply to calls outside a Workflow")
         handle = await _read_records(request, body_type)
         return await handle
 
     async def _stream_service_describe_stream(
         self,
         request: DescribeStreamRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> DescribeStreamResponse:
+        if rpc_metadata is not None or rpc_timeout is not None:
+            raise ValueError("RPC options apply to calls outside a Workflow")
         handle = await _describe_stream(request)
         return await handle
 

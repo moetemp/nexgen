@@ -1489,13 +1489,20 @@ method returns an object with the `start_operation` of the Workflow Nexus
 client. A service with no `@nexus.endpoint` gets `endpoint=None`, and the client
 serves it. A call returns the result of the operation.
 
+Each call takes the keyword options `rpc_metadata` and `rpc_timeout`, which
+default to `None`, and passes them to `_create_nexus_client`. An operation that
+WIT declares `async func` also has `start_<name>`, which returns the handle of
+the operation. The caller awaits the handle for the result later. The handle
+gives the result of the operation as it is, so an operation that returns a
+resource or has an output transform gets no `start_<name>`.
+
 ```python
 class Client(StreamServiceClientExtension, WorkflowHandleServiceClientExtension):
-    def _create_nexus_client(self, *, service, endpoint):
+    def _create_nexus_client(self, *, service, endpoint, rpc_metadata, rpc_timeout):
         ...  # for example, start a standalone Nexus operation
 
-stream = await Client().create_stream(stream_id="s1")
-await stream.publish(records=records)
+stream = await Client().create_stream(Turns, stream_id="s1")
+await stream.publish(records=records, rpc_timeout=timedelta(seconds=10))
 ```
 
 Each operation also has a private method that takes the request, such as
@@ -1515,6 +1522,10 @@ build from its fields, calls `current_operations(workflow=...)` of the support
 package. In Workflow code, the helper returns `workflow()`, the Workflow
 operations of a service with an endpoint. Outside a Workflow, it returns the
 current client.
+
+The methods of the resource take the RPC options too. The Workflow operations
+raise `ValueError` when either option is set, since the options apply to calls
+outside a Workflow only.
 
 The client target has no sources yet, so a `@nexus.source` field is a parameter
 of the client call.

@@ -134,6 +134,22 @@ sourced maps. Native tests exercise conversions through the generated APIs.
   [`typescript/wit/proto-backed-showcase/`](typescript/wit/proto-backed-showcase/),
   [`typescript/tests/proto-backed-showcase.test.ts`](typescript/tests/proto-backed-showcase.test.ts)
 
+### `worker-shutdown`
+
+A request that flattens two fields of its worker heartbeat. The call takes the
+SDK name and version, and the heartbeat copies the worker fields of the request.
+
+- WIT: [`inputs/worker-shutdown.wit`](inputs/worker-shutdown.wit)
+- .NET: [`dotnet/wit/worker-shutdown/`](dotnet/wit/worker-shutdown/),
+  [`dotnet/tests/GeneratedApiCompileChecks.cs`](dotnet/tests/GeneratedApiCompileChecks.cs)
+- Go: [`go/workershutdown/`](go/workershutdown/),
+  [`go/tests/workershutdown_test.go`](go/tests/workershutdown_test.go)
+- Python: [`python/wit/worker_shutdown/`](python/wit/worker_shutdown/),
+  [`python/tests/test_worker_shutdown.py`](python/tests/test_worker_shutdown.py)
+- TypeScript:
+  [`typescript/wit/worker-shutdown/`](typescript/wit/worker-shutdown/),
+  [`typescript/tests/worker-shutdown.test.ts`](typescript/tests/worker-shutdown.test.ts)
+
 ### `notification-service`
 
 - WIT: [`inputs/notification-service.wit`](inputs/notification-service.wit)
@@ -183,7 +199,8 @@ Local Activity. The Stream is generic in the record body type `body-t`, so a
 handle decodes the bodies of a read as its own type argument. The create of a
 Stream takes a definition, which is a type of the sample support code, since no
 SDK has `StreamDefinition` yet. The requests take a source for each target,
-which the sample support code gives in place of Brook's runtime.
+which the sample support code gives in place of Brook's runtime. The create
+takes the backend of the Stream's ref, and the ref copies the id.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),

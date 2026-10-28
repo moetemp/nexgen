@@ -402,9 +402,9 @@ namespace Nexgen.StreamService
         /// <summary>
         /// Initializes a new instance of the <see cref="CreateStreamRequest"/> class.
         /// </summary>
-        public CreateStreamRequest(string streamId, Producer? owner)
+        public CreateStreamRequest(string id, Producer? owner)
         {
-            StreamId = streamId;
+            Id = id;
             Owner = owner;
         }
 
@@ -423,7 +423,7 @@ namespace Nexgen.StreamService
         /// <summary>
         /// The id of the Stream. Required, and never empty.
         /// </summary>
-        public string StreamId { get; init; }
+        public string Id { get; init; }
         /// <summary>
         /// The Workflow run that owns the Stream. The Workflow transport sets it.
         /// </summary>
@@ -442,7 +442,7 @@ namespace Nexgen.StreamService
         internal Temporalio.Api.StreamService.V1.CreateStreamRequest ToTransferType()
         {
             var proto = new Temporalio.Api.StreamService.V1.CreateStreamRequest();
-            proto.StreamId = StreamId;
+            proto.StreamId = Id;
             if (Owner is { } owner)
             {
                 proto.Owner = (Temporalio.Api.Stream.V1.Producer)owner.ToTransferType();

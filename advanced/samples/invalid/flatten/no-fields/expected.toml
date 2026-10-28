@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.flatten-in-api", "names the fields of its record to promote"]

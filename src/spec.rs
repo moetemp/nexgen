@@ -855,8 +855,20 @@ pub struct RecordFieldSpec<F: TypeFamily = AuthoredFamily> {
     pub visibility: RecordFieldVisibility,
     /// Set when a `@nexus.source` or `@nexus.api-omit` of the field names a target.
     pub target_roles: Option<TargetFieldRoles>,
+    /// Set when `@nexus.flatten-in-api` on the field promotes some fields of its record.
+    pub flatten: Option<FieldFlattenSpec>,
     pub function: Option<FunctionFieldSpec<F>>,
     pub data: F::FieldData,
+}
+
+/// A field-level `@nexus.flatten-in-api`. The call takes the named fields of the field's record as
+/// parameters, and it fills other fields of that record from sibling fields. Names are field keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldFlattenSpec {
+    /// The fields of the record that become parameters, in order.
+    pub fields: Vec<String>,
+    /// Each field of the record that a sibling field of the parent record fills, with the sibling.
+    pub fills: Vec<(String, String)>,
 }
 
 /// What each generation target does with a field whose `@nexus.source` or `@nexus.api-omit` names
@@ -1146,6 +1158,7 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             required: self.required,
             visibility: self.visibility,
             target_roles: self.target_roles,
+            flatten: self.flatten,
             function: self.function.map(|function| function.map_names_with(map)),
             data,
         }
@@ -1166,6 +1179,7 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             && !self.required
             && self.visibility == RecordFieldVisibility::Public
             && self.target_roles.is_none()
+            && self.flatten.is_none()
             && self.function.is_none()
     }
 }

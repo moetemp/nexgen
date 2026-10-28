@@ -1,0 +1,20 @@
+package test:fill-without-sibling@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  record get-history-request {
+    namespace: string,
+    // A fill names a field of the record and a sibling field, with `=` between them.
+    /// @nexus.flatten-in-api fields="workflow-id" fill="run-id"
+    execution: option<workflow-execution>,
+  }
+
+  get-history: func(request: get-history-request);
+}

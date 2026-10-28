@@ -1,0 +1,20 @@
+package test:no-fields@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  record get-history-request {
+    namespace: string,
+    // A flatten on a field names the fields that it promotes.
+    /// @nexus.flatten-in-api
+    execution: option<workflow-execution>,
+  }
+
+  get-history: func(request: get-history-request);
+}

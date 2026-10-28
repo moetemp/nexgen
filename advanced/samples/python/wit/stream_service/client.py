@@ -134,22 +134,27 @@ class StreamServiceClientExtension(abc.ABC):
         self,
         definition: type[temporal_support.StreamDefinition[BodyT]],
         *,
-        stream_id: str,
+        id: str,
         retention: datetime.timedelta | None = None,
-        ref: StreamRef | None = None,
+        backend: str | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> Stream[BodyT]:
         """
         Args:
-            stream_id: The id of the Stream. Required, and never empty.
+            id: The id of the Stream. Required, and never empty.
             retention: The age after which a Record is dropped. Empty is the Store
                 default.
-            ref: The Stream's ref, with the owner fields.
+            backend: Registered backend name, empty for the default. The Store never
+                reads it.
         """
         (body_type,) = _support.definition_type_arguments(definition)
+        ref = StreamRef(
+            backend=backend,
+            id=id,
+        )
         request = CreateStreamRequest(
-            stream_id=stream_id,
+            id=id,
             retention=retention,
             ref=ref,
         )

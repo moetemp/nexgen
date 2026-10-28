@@ -86,6 +86,12 @@ namespace Nexgen.DotNetExamples.Tests
             StreamServiceExample.Operations.CreateStreamAsync(
                 new Nexgen.Support.StreamDefinition<Turn>("turns"));
 
+        // The create takes the backend of the ref as an option, and the ref copies the id.
+        private static Task<StreamServiceExample.Stream<Turn>> CreateTurnsOnBackend() =>
+            StreamServiceExample.Operations.CreateStreamAsync(
+                new Nexgen.Support.StreamDefinition<Turn>("turns"),
+                new StreamServiceExample.CreateStreamOptions { Backend = "redis" });
+
         // A newer server can send a Stream status that this code doesn't know.
         [Fact]
         public void UnknownEnumNumberPassesThrough()

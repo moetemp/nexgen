@@ -69,6 +69,9 @@ replaced without deleting these authored helpers.
   proto-backed type roundtrip example for focused native/proto conversion
   coverage, including retry policies, activity options, durations, task queues,
   and priority.
+- [`worker-shutdown`](samples/inputs/worker-shutdown.wit): a proto-backed
+  request that flattens two fields of one field, and copies sibling fields into
+  the others.
 - [`notification-service`](samples/inputs/notification-service.wit): a
   proto-backed notification completion payload with generic source-context and
   output values, generated for Python, .NET, and TypeScript.

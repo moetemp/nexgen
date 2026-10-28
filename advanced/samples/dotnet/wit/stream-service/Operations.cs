@@ -23,9 +23,9 @@ namespace Nexgen.StreamService
         /// </summary>
         public System.TimeSpan? Retention { get; set; }
         /// <summary>
-        /// The Stream's ref, with the owner fields.
+        /// Registered backend name, empty for the default. The Store never reads it.
         /// </summary>
-        public StreamRef? Ref { get; set; }
+        public string? Backend { get; set; }
     }
 
     /// <summary>
@@ -145,10 +145,11 @@ namespace Nexgen.StreamService
         [GeneratedCode("nexgen", null)]
         public static Task<Stream<TBody>> CreateStreamAsync<TBody>(Nexgen.Support.StreamDefinition<TBody> definition, CreateStreamOptions? options = null)
         {
-            var request = new CreateStreamRequest(Nexgen.Support.StreamWorkflowContext.StreamId(definition), Nexgen.Support.StreamWorkflowContext.Owner())
+            var id = Nexgen.Support.StreamWorkflowContext.StreamId(definition);
+            var request = new CreateStreamRequest(id, Nexgen.Support.StreamWorkflowContext.Owner())
             {
                 Retention = options?.Retention,
-                Ref = options?.Ref,
+                Ref = new StreamRef(id) { Backend = options?.Backend },
             };
             return CreateStreamAsync<TBody>(request);
         }

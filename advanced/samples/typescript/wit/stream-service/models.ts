@@ -188,7 +188,7 @@ export interface CreateStreamRequest {
   /**
    * The id of the Stream. Required, and never empty.
    */
-  streamId: string;
+  id: string;
   /**
    * The age after which a Record is dropped. Empty is the Store default.
    */
@@ -211,10 +211,10 @@ function createStreamRequestFromProto(
   proto: temporal.api.streamservice.v1.ICreateStreamRequest,
 ): CreateStreamRequest {
   return {
-    streamId: requiredField(
+    id: requiredField(
       proto.streamId === "" ? undefined : proto.streamId,
       "CreateStreamRequest",
-      "streamId",
+      "id",
     ),
     retention:
       proto.retention == null ? undefined : support.durationFromProto(proto.retention),
@@ -228,7 +228,7 @@ function createStreamRequestToProto(
   model: CreateStreamRequest,
 ): temporal.api.streamservice.v1.ICreateStreamRequest {
   return {
-    streamId: requiredField(model.streamId, "CreateStreamRequest", "streamId"),
+    streamId: requiredField(model.id, "CreateStreamRequest", "id"),
     retention:
       model.retention == null ? undefined : support.durationToProto(model.retention),
     withdrawRun: model.withdrawRun,

@@ -113,7 +113,7 @@ BodyT = typing.TypeVar("BodyT")
 class CreateStreamRequest:
     """Create a Stream, or get the one that exists, which keeps its Retention."""
 
-    stream_id: str
+    id: str
     retention: datetime.timedelta | None = None
     withdraw_run: str | None = None
     owner: Producer | None = None
@@ -140,10 +140,10 @@ class _CreateStreamRequestTransferTypeConverter(
         type_hint: type[CreateStreamRequest],
     ) -> CreateStreamRequest:
         if not value.stream_id:
-            raise ValueError("missing required field CreateStreamRequest.stream_id")
-        stream_id = value.stream_id
+            raise ValueError("missing required field CreateStreamRequest.id")
+        id = value.stream_id
         return CreateStreamRequest(
-            stream_id=stream_id,
+            id=id,
             retention=_support.duration_from_proto(value.retention)
             if value.HasField("retention")
             else None,
@@ -166,7 +166,7 @@ class _CreateStreamRequestTransferTypeConverter(
         value: CreateStreamRequest,
     ) -> streamprotos.temporal.api.streamservice.v1.request_response_pb2.CreateStreamRequest:
         message = streamprotos.temporal.api.streamservice.v1.request_response_pb2.CreateStreamRequest()
-        message.stream_id = value.stream_id
+        message.stream_id = value.id
         if value.retention is not None:
             message.retention.CopyFrom(_support.duration_to_proto(value.retention))
         if value.withdraw_run is not None:

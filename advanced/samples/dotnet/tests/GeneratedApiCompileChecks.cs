@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using Temporalio.Workflows;
 using StartWorkflowExample = Nexgen.StartWorkflowService;
+using WorkerShutdownExample = Nexgen.WorkerShutdownService;
 
 namespace Nexgen.DotNetExamples.Tests
 {
@@ -26,6 +27,15 @@ namespace Nexgen.DotNetExamples.Tests
                     "task-queue")
                 {
                     WorkflowStartDelay = TimeSpan.FromSeconds(1),
+                });
+
+        // The shutdown takes the SDK fields of the heartbeat. The heartbeat copies the worker
+        // fields of the request.
+        internal static Task<WorkerShutdownExample.ShutdownWorkerResponse> ShutdownWorkerAsync() =>
+            WorkerShutdownExample.Operations.ShutdownWorkerAsync(
+                new WorkerShutdownExample.ShutdownWorkerOptions("worker-1", "key-1", "queue")
+                {
+                    SdkName = "temporal-dotnet",
                 });
     }
 }

@@ -203,6 +203,7 @@ interface stream-service {
   ///   python-import="streamprotos.temporal.api.streamservice.v1.request_response_pb2"
   record create-stream-request {
     /// @nexus.doc "The id of the Stream. Required, and never empty."
+    /// @nexus.name python="id" typescript="id" dotnet="Id"
     /// @nexus.source target="workflow" python="workflow_stream_id(definition)"
     ///   typescript="workflowStreamId(definition)"
     ///   dotnet="StreamWorkflowContext.StreamId(definition)"
@@ -218,6 +219,7 @@ interface stream-service {
     /// @nexus.api-omit target="client"
     owner: option<producer>,
     /// @nexus.doc "The Stream's ref, with the owner fields."
+    /// @nexus.flatten-in-api fields="backend" fill="id=stream-id"
     %ref: option<stream-ref>,
     // Native only. Brook's Stores don't read it.
     /// @nexus.omit

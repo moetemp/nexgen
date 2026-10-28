@@ -50,6 +50,10 @@ languages = ["python"]
 targets = ["workflow", "client"]
 descriptors = "temporal"
 
+# The request flattens two fields of its heartbeat, and fills the others from the request.
+[worker-shutdown]
+descriptors = "temporal"
+
 # A client starts the `async` operation and waits for its result later. Only Python has the client
 # target.
 [client-calls]

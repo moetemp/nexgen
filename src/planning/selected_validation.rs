@@ -7,9 +7,9 @@ use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ApiSpecLeaf, CompilerPass, ExternalTypeSpec, FunctionArgsSpec, FunctionResultSpec,
-    OperationSpec, RecordFieldVisibility, ResourceSpec, SelectedFamily, ServiceSpec,
-    TargetFieldRole, TypeSpec,
+    ApiSpec, ApiSpecLeaf, CompilerPass, ExternalTypeSpec, FieldFlattenSpec, FunctionArgsSpec,
+    FunctionResultSpec, OperationSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec,
+    ResourceSpec, SelectedFamily, ServiceSpec, TargetFieldRole, TypeSpec,
 };
 
 pub(crate) struct SelectedValidationPass;
@@ -131,6 +131,14 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
         }
     }
 
+    for (_, record) in spec.records() {
+        for (field_name, field) in &record.fields {
+            if let Some(flatten) = &field.flatten {
+                validate_field_flatten(spec, record, field_name, field, flatten, &invalid)?;
+            }
+        }
+    }
+
     // A record that holds a resource builds it from the record's message, with no type argument.
     let generic_resources = spec
         .services
@@ -151,6 +159,94 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
                 )));
             }
         }
+    }
+    Ok(())
+}
+
+/// A field-level flatten promotes fields of a proto-backed record, and the call must be able to
+/// give every required field of that record.
+fn validate_field_flatten(
+    spec: &ApiSpec<SelectedFamily>,
+    parent: &RecordSpec<SelectedFamily>,
+    field_name: &str,
+    field: &RecordFieldSpec<SelectedFamily>,
+    flatten: &FieldFlattenSpec,
+    invalid: &dyn Fn(String) -> Error,
+) -> Result<()> {
+    let context = format!("record `{}` field `{field_name}`", parent.full_name);
+    let nested = match field.field_type.without_option() {
+        TypeSpec::Record(record) => spec.record(record.as_str()),
+        TypeSpec::External(ExternalTypeSpec::Proto(proto)) => spec.record_for_proto(proto.as_str()),
+        _ => None,
+    };
+    let Some(nested) = nested.filter(|nested| nested.source.is_some()) else {
+        return Err(invalid(format!(
+            "{context} flattens fields, but its type isn't a proto-backed record"
+        )));
+    };
+    if nested.flatten_in_api {
+        return Err(invalid(format!(
+            "{context} flattens fields of `{}`, which flattens all of its fields already",
+            nested.full_name
+        )));
+    }
+    if field.api_hidden() {
+        return Err(invalid(format!(
+            "{context} flattens fields, so it can't have a source or an api-omit too"
+        )));
+    }
+    let promoted = |key: &str| {
+        nested
+            .fields
+            .get(key)
+            .filter(|field| field.visibility != RecordFieldVisibility::Omitted)
+    };
+    for key in &flatten.fields {
+        let Some(promoted_field) = promoted(key) else {
+            return Err(invalid(format!(
+                "{context} promotes `{key}`, which `{}` omits",
+                nested.full_name
+            )));
+        };
+        if let Some((sibling_name, _)) = parent.fields.iter().find(|(name, sibling)| {
+            name.as_str() != field_name
+                && sibling.visibility != RecordFieldVisibility::Omitted
+                && sibling.name == promoted_field.name
+        }) {
+            return Err(invalid(format!(
+                "{context} promotes `{key}`, whose name `{}` is also the name of field \
+                 `{sibling_name}`",
+                promoted_field.name
+            )));
+        }
+    }
+    for (inner, outer) in &flatten.fills {
+        let outer_field = parent
+            .fields
+            .get(outer)
+            .filter(|field| field.visibility != RecordFieldVisibility::Omitted);
+        let (Some(inner_field), Some(outer_field)) = (promoted(inner), outer_field) else {
+            return Err(invalid(format!(
+                "{context} fills `{inner}` from `{outer}`, which isn't a field"
+            )));
+        };
+        if inner_field.field_type.without_option() != outer_field.field_type.without_option() {
+            return Err(invalid(format!(
+                "{context} fills `{inner}` from `{outer}`, whose type differs"
+            )));
+        }
+    }
+    if let Some((key, _)) = nested.fields.iter().find(|(key, nested_field)| {
+        nested_field.required
+            && nested_field.visibility != RecordFieldVisibility::Omitted
+            && !flatten.fields.contains(key)
+            && !flatten.fills.iter().any(|(inner, _)| inner == *key)
+    }) {
+        return Err(invalid(format!(
+            "{context} flattens fields of `{}`, but neither promotes nor fills its required \
+             field `{key}`",
+            nested.full_name
+        )));
     }
     Ok(())
 }

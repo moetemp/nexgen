@@ -1846,8 +1846,10 @@ impl<'a> ApiPlanner<'a> {
         let mut request_fields = Vec::new();
         let mut flattened_messages = Vec::new();
         let mut parameter_sources = BTreeMap::<String, String>::new();
+        // The request field of each field key, which a fill of a flattened field reads.
+        let mut request_field_indexes = BTreeMap::<&str, usize>::new();
 
-        for ((_field_name, planned_field), rendered_field) in planned_model
+        for ((field_name, planned_field), rendered_field) in planned_model
             .fields
             .iter()
             .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
@@ -1857,6 +1859,7 @@ impl<'a> ApiPlanner<'a> {
                 match roles.role(target.generation_target()) {
                     TargetFieldRole::Parameter => {}
                     TargetFieldRole::Sourced { source_expr } => {
+                        request_field_indexes.insert(field_name, request_fields.len());
                         request_fields.push(RenderedUnpackedRequestField {
                             attr_name: rendered_field.attr_name.clone(),
                             value_expr: python_source_call(source_expr),
@@ -1931,6 +1934,7 @@ impl<'a> ApiPlanner<'a> {
                     .and_then(|doc| doc.value())
                     .map(str::to_string),
             });
+            request_field_indexes.insert(field_name, request_fields.len());
             request_fields.push(RenderedUnpackedRequestField {
                 attr_name: rendered_field.attr_name.clone(),
                 value_expr: rendered_field.attr_name.clone(),
@@ -1938,10 +1942,39 @@ impl<'a> ApiPlanner<'a> {
             });
         }
 
+        // A fill reads the value of its sibling, so a sourced sibling runs once, before the
+        // request, into a local.
+        let mut source_locals = Vec::new();
+        for fill in flattened_messages
+            .iter_mut()
+            .flat_map(|message| &mut message.fills)
+        {
+            let Some(&index) = request_field_indexes.get(fill.sibling.as_str()) else {
+                continue;
+            };
+            let request_field = &mut request_fields[index];
+            if request_field.value_expr != request_field.attr_name
+                && !source_locals
+                    .iter()
+                    .any(|(local, _): &(String, String)| *local == request_field.attr_name)
+            {
+                source_locals.push((
+                    request_field.attr_name.clone(),
+                    std::mem::replace(
+                        &mut request_field.value_expr,
+                        request_field.attr_name.clone(),
+                    ),
+                ));
+            }
+            fill.value_expr = request_field.attr_name.clone();
+            fill.required = planned_model.field_required(&fill.sibling);
+        }
+
         Ok(RenderedUnpackedInput {
             model_name: model.name.clone(),
             parameters,
             request_fields,
+            source_locals,
             flattened_messages,
             functions: planned_model
                 .functions()
@@ -1996,21 +2029,52 @@ impl<'a> ApiPlanner<'a> {
         };
         let full_name = &record.full_name;
         let nested_planned_model = self.api_plan.record(full_name)?;
-        if !nested_planned_model.flatten_in_api {
+        if !nested_planned_model.flatten_in_api && planned_field.flatten.is_none() {
             return None;
         }
         let nested_rendered_model = self.models.get(full_name)?;
+        let nested_fields = nested_planned_model
+            .fields
+            .iter()
+            .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
+            .zip(nested_rendered_model.fields.iter())
+            .collect::<Vec<_>>();
+        // A field-level flatten promotes the named fields, in its order, and fills others.
+        let promoted = match &planned_field.flatten {
+            Some(flatten) => flatten
+                .fields
+                .iter()
+                .filter_map(|key| nested_fields.iter().find(|((name, _), _)| *name == key))
+                .copied()
+                .collect::<Vec<_>>(),
+            None => nested_fields
+                .iter()
+                .filter(|((_, field), _)| field.visibility == RecordFieldVisibility::Public)
+                .copied()
+                .collect(),
+        };
+        let fills = planned_field
+            .flatten
+            .iter()
+            .flat_map(|flatten| &flatten.fills)
+            .filter_map(|(inner, outer)| {
+                let (_, rendered) = nested_fields.iter().find(|((name, _), _)| *name == inner)?;
+                Some(RenderedFlattenedMessageFill {
+                    attr_name: rendered.attr_name.clone(),
+                    sibling: outer.clone(),
+                    value_expr: String::new(),
+                    required: false,
+                })
+            })
+            .collect();
 
         Some(RenderedFlattenedMessage {
             local_name: rendered_field.attr_name.clone(),
             model_name: nested_rendered_model.name.clone(),
             required: planned_field.required,
-            fields: nested_planned_model
-                .fields
-                .iter()
-                .filter(|(_, field)| field.visibility != RecordFieldVisibility::Omitted)
-                .zip(nested_rendered_model.fields.iter())
-                .filter(|((_, field), _)| field.visibility == RecordFieldVisibility::Public)
+            fills,
+            fields: promoted
+                .into_iter()
                 .map(
                     |((nested_field_name, nested_planned_field), nested_rendered_field)| {
                         RenderedFlattenedMessageField {
@@ -3318,6 +3382,8 @@ struct RenderedUnpackedInput {
     model_name: String,
     parameters: Vec<RenderedUnpackedInputField>,
     request_fields: Vec<RenderedUnpackedRequestField>,
+    /// Source calls that run before the request, by local name, since a fill reads the value.
+    source_locals: Vec<(String, String)>,
     flattened_messages: Vec<RenderedFlattenedMessage>,
     functions: Vec<RenderedFunctionField>,
 }
@@ -3343,6 +3409,17 @@ struct RenderedFlattenedMessage {
     model_name: String,
     required: bool,
     fields: Vec<RenderedFlattenedMessageField>,
+    /// The fields that sibling fields fill, with the sibling's value.
+    fills: Vec<RenderedFlattenedMessageFill>,
+}
+
+#[derive(Debug)]
+struct RenderedFlattenedMessageFill {
+    attr_name: String,
+    /// The key of the sibling field.
+    sibling: String,
+    value_expr: String,
+    required: bool,
 }
 
 #[derive(Debug)]
@@ -5755,9 +5832,7 @@ fn render_endpoint_service_object_poll_method(
         false,
     );
     if let Some(unpacked_input) = &operation.unpacked_input {
-        for flattened_message in &unpacked_input.flattened_messages {
-            render_flattened_message_setup(output, "        ", flattened_message);
-        }
+        render_unpacked_setup(output, "        ", unpacked_input);
         output.push_str("        request = ");
         output.push_str(&unpacked_input.model_name);
         output.push_str("(\n");
@@ -5848,9 +5923,7 @@ fn render_endpoint_service_object_unpacked_method(
     // A method body sits one level deeper than a module function body.
     render_unpacked_operation_docstring(output, "        ", operation, unpacked_input, None);
     operation.render_definition_type_arguments(output, "        ");
-    for flattened_message in &unpacked_input.flattened_messages {
-        render_flattened_message_setup(output, "        ", flattened_message);
-    }
+    render_unpacked_setup(output, "        ", unpacked_input);
     output.push_str("        request = ");
     output.push_str(&unpacked_input.model_name);
     output.push_str("(\n");
@@ -8216,9 +8289,7 @@ fn render_client_start_methods(
         false,
     );
     if let Some(unpacked_input) = unpacked_input {
-        for flattened_message in &unpacked_input.flattened_messages {
-            render_flattened_message_setup(output, target.body_indent(), flattened_message);
-        }
+        render_unpacked_setup(output, target.body_indent(), unpacked_input);
         start_line(output, target, "    request = ");
         output.push_str(&unpacked_input.model_name);
         output.push_str("(\n");
@@ -8311,9 +8382,7 @@ fn render_operation_poll_function(
     );
     operation.render_definition_type_arguments(output, body_indent);
     if let Some(unpacked_input) = unpacked_input {
-        for flattened_message in &unpacked_input.flattened_messages {
-            render_flattened_message_setup(output, body_indent, flattened_message);
-        }
+        render_unpacked_setup(output, body_indent, unpacked_input);
         start_line(output, target, "    request = ");
         output.push_str(&unpacked_input.model_name);
         output.push_str("(\n");
@@ -9206,9 +9275,7 @@ fn render_unpacked_operation_function(
     render_unpacked_return_annotation(output, target, service, operation);
     render_unpacked_operation_docstring(output, body_indent, operation, unpacked_input, None);
     operation.render_definition_type_arguments(output, body_indent);
-    for flattened_message in &unpacked_input.flattened_messages {
-        render_flattened_message_setup(output, body_indent, flattened_message);
-    }
+    render_unpacked_setup(output, body_indent, unpacked_input);
     start_line(output, target, "    request = ");
     output.push_str(&unpacked_input.model_name);
     output.push_str("(\n");
@@ -9477,9 +9544,7 @@ fn render_function_unpacked_implementation(
             output.push_str("]\n");
         }
     }
-    for flattened_message in &unpacked_input.flattened_messages {
-        render_flattened_message_setup(output, target.body_indent(), flattened_message);
-    }
+    render_unpacked_setup(output, target.body_indent(), unpacked_input);
 
     start_line(output, target, "    request = ");
     output.push_str(&unpacked_input.model_name);
@@ -9523,6 +9588,24 @@ fn rendered_function_implementation_renders_field(
     true
 }
 
+/// The statements of a convenience function that come before its request.
+fn render_unpacked_setup(
+    output: &mut String,
+    indent: &str,
+    unpacked_input: &RenderedUnpackedInput,
+) {
+    for (local, source_call) in &unpacked_input.source_locals {
+        output.push_str(indent);
+        output.push_str(local);
+        output.push_str(" = ");
+        output.push_str(source_call);
+        output.push('\n');
+    }
+    for flattened_message in &unpacked_input.flattened_messages {
+        render_flattened_message_setup(output, indent, flattened_message);
+    }
+}
+
 fn render_flattened_message_setup(
     output: &mut String,
     indent: &str,
@@ -9532,7 +9615,19 @@ fn render_flattened_message_setup(
         || flattened_message
             .fields
             .iter()
-            .any(|field| field.default_kind == PythonFieldDefaultKind::Required);
+            .any(|field| field.default_kind == PythonFieldDefaultKind::Required)
+        || flattened_message.fills.iter().any(|fill| fill.required);
+    let values = flattened_message
+        .fields
+        .iter()
+        .map(|field| (&field.attr_name, &field.value_expr))
+        .chain(
+            flattened_message
+                .fills
+                .iter()
+                .map(|fill| (&fill.attr_name, &fill.value_expr)),
+        )
+        .collect::<Vec<_>>();
 
     output.push_str(indent);
     output.push_str(&flattened_message.local_name);
@@ -9540,12 +9635,12 @@ fn render_flattened_message_setup(
     if always_construct {
         output.push_str(&flattened_message.model_name);
         output.push_str("(\n");
-        for field in &flattened_message.fields {
+        for (attr_name, value_expr) in &values {
             output.push_str(indent);
             output.push_str("    ");
-            output.push_str(&field.attr_name);
+            output.push_str(attr_name);
             output.push('=');
-            output.push_str(&field.value_expr);
+            output.push_str(value_expr);
             output.push_str(",\n");
         }
         output.push_str(indent);
@@ -9558,11 +9653,11 @@ fn render_flattened_message_setup(
     output.push_str("    None\n");
     output.push_str(indent);
     output.push_str("    if ");
-    for (index, field) in flattened_message.fields.iter().enumerate() {
+    for (index, (_, value_expr)) in values.iter().enumerate() {
         if index > 0 {
             output.push_str(" and ");
         }
-        output.push_str(&field.value_expr);
+        output.push_str(value_expr);
         output.push_str(" is None");
     }
     output.push_str("\n");
@@ -9570,12 +9665,12 @@ fn render_flattened_message_setup(
     output.push_str("    else ");
     output.push_str(&flattened_message.model_name);
     output.push_str("(\n");
-    for field in &flattened_message.fields {
+    for (attr_name, value_expr) in &values {
         output.push_str(indent);
         output.push_str("        ");
-        output.push_str(&field.attr_name);
+        output.push_str(attr_name);
         output.push('=');
-        output.push_str(&field.value_expr);
+        output.push_str(value_expr);
         output.push_str(",\n");
     }
     output.push_str(indent);

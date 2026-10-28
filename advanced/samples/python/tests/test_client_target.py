@@ -7,6 +7,7 @@ import types
 import typing
 
 import pytest
+from streamprotos.temporal.api.streamservice.v1 import request_response_pb2
 from temporalio.api.common.v1 import Payload
 import temporalio.activity
 import temporalio.converter
@@ -177,7 +178,7 @@ async def test_a_created_stream_calls_its_operations_through_the_client() -> Non
         }
     )
 
-    stream = await client.create_stream(Texts, stream_id="s1")
+    stream = await client.create_stream(Texts, id="s1")
     appended = await stream.publish(records=[AppendRecord(body="hi")])
 
     # The response sets `created` to False, and the handle keeps it.
@@ -188,7 +189,7 @@ async def test_a_created_stream_calls_its_operations_through_the_client() -> Non
             STREAM_SERVICE,
             "__temporal_system",
             "CreateStream",
-            CreateStreamRequest(stream_id="s1"),
+            CreateStreamRequest(id="s1", ref=StreamRef(id="s1")),
         ),
         Call(
             STREAM_SERVICE,
@@ -202,6 +203,25 @@ async def test_a_created_stream_calls_its_operations_through_the_client() -> Non
             ),
         ),
     ]
+
+
+async def test_a_create_takes_the_ref_fields_as_parameters() -> None:
+    client = FakeClient(
+        {"CreateStream": [CreateStreamResult(stream=StreamRef(id="s1"))]}
+    )
+
+    _ = await client.create_stream(Texts, id="s1", backend="redis")
+
+    request = client.calls[0].input
+    # The ref copies the id, and takes the backend.
+    assert request == CreateStreamRequest(
+        id="s1", ref=StreamRef(id="s1", backend="redis")
+    )
+    wire = request_response_pb2.CreateStreamRequest.FromString(
+        SYSTEM_CONVERTER.to_payload(request).data
+    )
+    assert wire.stream_id == "s1"
+    assert (wire.ref.id, wire.ref.backend) == ("s1", "redis")
 
 
 async def test_a_client_call_returns_the_result() -> None:
@@ -262,7 +282,7 @@ async def test_a_handle_reads_every_page() -> None:
     client = FakeClient(
         {"CreateStream": [CreateStreamResult(stream=ref)], "ReadRecords": list(pages)}
     )
-    stream = await client.create_stream(Texts, stream_id="s1")
+    stream = await client.create_stream(Texts, id="s1")
 
     read = [page async for page in stream.iter_read(from_offset=1)]
 
@@ -287,7 +307,7 @@ async def test_a_handle_decodes_its_bodies_with_its_body_type() -> None:
         }
     )
 
-    stream = await client.create_stream(Turns, stream_id="s1")
+    stream = await client.create_stream(Turns, id="s1")
     page = await stream.read()
 
     _ = assert_type(stream, Stream[Turn])

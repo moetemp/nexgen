@@ -1106,6 +1106,38 @@ the optional nested record when none of its fields are supplied. Go uses nil
 pointers internally for wire presence, but its public options use
 default-punning: empty strings mean omitted.
 
+#### Flattening some fields of one field
+
+On a field, `@nexus.flatten-in-api` promotes the fields that `fields` names. A
+`fill` sets a field of the record from a sibling field of the request, after the
+sibling's parameter or source.
+
+```wit
+record create-stream-request {
+  /// @nexus.name python="id" typescript="id" dotnet="Id"
+  stream-id: string,
+  /// @nexus.flatten-in-api fields="backend" fill="id=stream-id"
+  %ref: option<stream-ref>,
+}
+```
+
+The call takes `backend`, and the ref copies the id. The call sets the field
+when it sets a promoted field or a fill applies, so this create always sets
+`ref`.
+
+```python
+async def create_stream(..., id: str, backend: str | None = None, ...) -> ...:
+    ref = StreamRef(backend=backend, id=id)
+    request = CreateStreamRequest(id=id, ref=ref)
+```
+
+The field's type must be a record that a proto backs, or an `option` of one. The
+call must give each required field of that record, as a promoted field or with a
+fill. A promoted field can't have the name of a sibling, and a fill can't change
+the type. The field can't have a source or an api-omit too, and its record can't
+flatten all of its fields already. Go puts the promoted fields in the options
+struct of the operation. Java doesn't generate proto-backed models.
+
 ### Output Transforms
 
 An operation annotated with `@nexus.output-transform` transforms the raw
@@ -2198,11 +2230,15 @@ The referenced helper must be available from the package specified by
 
 ### @nexus.flatten-in-api
 
-**Placement:** Record type (with `@nexus.proto`) **Syntax:**
-`@nexus.flatten-in-api` (no arguments)
+**Placement:** Record type (with `@nexus.proto`), or a field whose type is such
+a record **Syntax:** `@nexus.flatten-in-api` (no arguments) on a record,
+`@nexus.flatten-in-api fields="<field> ..." fill="<field>=<sibling> ..."` on a
+field
 
 Flattens the record's fields into the parent record's generated API surface
-instead of creating a nested model.
+instead of creating a nested model. On a field, it flattens only the fields that
+`fields` names, and `fill` copies sibling fields into the record. See
+[Flattening some fields of one field](#flattening-some-fields-of-one-field).
 
 ```wit
 /// @nexus.proto "temporal.api.sdk.v1.UserMetadata"
@@ -2212,8 +2248,6 @@ record user-metadata {
   static-details: option<payload>,
 }
 ```
-
-Only supported on record types.
 
 In Go, `@nexus.flatten-in-api` promotes the record's fields into the generated
 operation options struct. For a parent request with

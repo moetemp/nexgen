@@ -4680,7 +4680,7 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         "async def _start_system_nexus_operation(\n    interceptor: _SystemNexusWorkflowOutboundInterceptorBase,\n    input: StartNexusOperationInput[_InputT, _OutputT],\n) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n",
     );
     for (service, operation) in &operations {
-        let output_type = system_nexus_type_expr(&operation.output_type_expr);
+        let output_type = system_nexus_generic_type_expr(&operation.descriptor_output_ref);
         output.push_str("    if input.service == ");
         output.push_str(&python_string_literal(service.wire_name));
         output.push_str(" and input.operation_name == ");
@@ -4688,7 +4688,7 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         output.push_str(
             ":\n        typed_input = typing.cast(\n            \"StartNexusOperationInput[",
         );
-        output.push_str(operation_input_type_ref(operation));
+        output.push_str(&system_nexus_input_type_expr(operation));
         output.push_str(", ");
         output.push_str(&output_type);
         output.push_str("]\",\n            input,\n        )\n        # The dispatch check above establishes that this operation's response type is _OutputT.\n        return typing.cast(\n            \"temporalio.workflow.NexusOperationHandle[_OutputT]\",\n            await interceptor.start_");
@@ -4703,11 +4703,11 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
     output.push_str("    @abc.abstractmethod\n    def _next_system_nexus_interceptor(\n        self,\n    ) -> _SystemNexusWorkflowOutboundInterceptorBase:\n        ...\n");
     output.push_str("\n    @abc.abstractmethod\n    async def start_system_nexus_operation(\n        self,\n        input: StartNexusOperationInput[_InputT, _OutputT],\n    ) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n        \"\"\"Intercept a System Nexus operation through the generic hook.\"\"\"\n        ...\n");
     for (_service, operation) in &operations {
-        let output_type = system_nexus_type_expr(&operation.output_type_expr);
+        let output_type = system_nexus_generic_type_expr(&operation.descriptor_output_ref);
         output.push_str("\n    async def start_");
         output.push_str(&operation.attr_name);
         output.push_str("(\n        self, request: ");
-        output.push_str(operation_input_type_ref(operation));
+        output.push_str(&system_nexus_input_type_expr(operation));
         output.push_str("\n    ) -> temporalio.workflow.NexusOperationHandle[");
         output.push_str(&output_type);
         output.push_str("]:\n");
@@ -4722,11 +4722,11 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
     output.push_str("\n\nclass _SystemNexusWorkflowOutboundInterceptorTerminal(abc.ABC):\n");
     output.push_str("    @abc.abstractmethod\n    async def _intercept_system_nexus_operation(\n        self,\n        input: StartNexusOperationInput[_InputT, _OutputT],\n    ) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n        ...\n");
     for (service, operation) in operations {
-        let output_type = system_nexus_type_expr(&operation.output_type_expr);
+        let output_type = system_nexus_generic_type_expr(&operation.descriptor_output_ref);
         output.push_str("\n    async def start_");
         output.push_str(&operation.attr_name);
         output.push_str("(\n        self, request: ");
-        output.push_str(operation_input_type_ref(operation));
+        output.push_str(&system_nexus_input_type_expr(operation));
         output.push_str("\n    ) -> temporalio.workflow.NexusOperationHandle[");
         output.push_str(&output_type);
         output.push_str("]:\n");
@@ -4746,6 +4746,22 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         output.push_str(",\n                schedule_to_close_timeout=None,\n                schedule_to_start_timeout=None,\n                start_to_close_timeout=None,\n                cancellation_type=NexusOperationCancellationType.WAIT_COMPLETED,\n                headers=None,\n                summary=None,\n            )\n        )\n");
     }
     output
+}
+
+// The interceptor serves every type argument of a generic model, so it names the model with its
+// type arguments erased to `typing.Any`.
+fn system_nexus_generic_type_expr(type_expr: &str) -> String {
+    match type_expr.split_once('[') {
+        Some((base, arguments)) => format!("{}[{arguments}", system_nexus_type_expr(base)),
+        None => system_nexus_type_expr(type_expr),
+    }
+}
+
+fn system_nexus_input_type_expr(operation: &RenderedOperation<'_>) -> String {
+    operation.input.as_ref().map_or_else(
+        || "None".to_string(),
+        |input| system_nexus_generic_type_expr(&input.descriptor_type_ref),
+    )
 }
 
 fn system_nexus_type_expr(type_expr: &str) -> String {

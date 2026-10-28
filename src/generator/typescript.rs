@@ -4075,6 +4075,20 @@ fn render_operation_registry_module(
 /// Renders the operation-specific interception surface consumed by the SDK's
 /// workflow outbound interceptor. It deliberately remains separate from the
 /// generic System Nexus hook, as it does in the other SDKs.
+// The interceptor serves every type argument of a generic model, so it names the model as the
+// service definition does, with its type arguments erased.
+fn system_nexus_interceptor_input_annotation(operation: &RenderedOperation<'_>) -> String {
+    operation.input.as_ref().map_or_else(
+        || "undefined".to_string(),
+        |input| {
+            input.model_name.as_ref().map_or_else(
+                || input.annotation.clone(),
+                |model_name| typescript_erased_model_annotation(model_name, &input.type_parameters),
+            )
+        },
+    )
+}
+
 fn render_system_nexus_interceptors_module(
     enums: &[&RenderedEnum],
     flags: &[&RenderedFlags],
@@ -4097,17 +4111,7 @@ fn render_system_nexus_interceptors_module(
         .collect::<Vec<_>>();
     let mut body = String::from("export interface SystemNexusWorkflowOutboundCallsInterceptor {\n");
     for (_, operation) in &operations {
-        let input = operation
-            .input
-            .as_ref()
-            .and_then(|input| input.model_name.as_deref())
-            .or_else(|| {
-                operation
-                    .input
-                    .as_ref()
-                    .map(|input| input.annotation.as_str())
-            })
-            .unwrap_or("undefined");
+        let input = &system_nexus_interceptor_input_annotation(operation);
         body.push_str("  ");
         body.push_str(&operation.attr_name);
         body.push_str("?: ");
@@ -4116,9 +4120,9 @@ fn render_system_nexus_interceptors_module(
         body.push_str(", next: (input: ");
         body.push_str(input);
         body.push_str(") => Promise<nexus.NexusOperationHandle<");
-        body.push_str(&operation.output_operation_annotation);
+        body.push_str(&operation.service_output_operation_annotation);
         body.push_str(">>) => Promise<nexus.NexusOperationHandle<");
-        body.push_str(&operation.output_operation_annotation);
+        body.push_str(&operation.service_output_operation_annotation);
         body.push_str(">>;\n");
     }
     body.push_str("}\n\n");
@@ -4140,17 +4144,7 @@ fn render_system_nexus_interceptors_module(
         body.push_str(&typescript_string_literal(service.wire_name));
         body.push_str(":\n      switch (operation) {\n");
         for operation in &service.operations {
-            let input = operation
-                .input
-                .as_ref()
-                .and_then(|input| input.model_name.as_deref())
-                .or_else(|| {
-                    operation
-                        .input
-                        .as_ref()
-                        .map(|input| input.annotation.as_str())
-                })
-                .unwrap_or("undefined");
+            let input = &system_nexus_interceptor_input_annotation(operation);
             body.push_str("        case ");
             body.push_str(&typescript_string_literal(operation.wire_name));
             body.push_str(":\n");
@@ -4160,7 +4154,7 @@ fn render_system_nexus_interceptors_module(
             body.push_str("            next<");
             body.push_str(input);
             body.push_str(", ");
-            body.push_str(&operation.output_operation_annotation);
+            body.push_str(&operation.service_output_operation_annotation);
             body.push_str(">(request)\n");
             body.push_str("          )(input as ");
             body.push_str(input);

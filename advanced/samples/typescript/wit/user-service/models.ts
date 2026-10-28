@@ -16,3 +16,5 @@ export interface NotifyRequest {
   sender: string;
   email?: boolean;
 }
+
+export type NotifyAllRequest = Record<string, never>;

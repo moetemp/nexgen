@@ -32,7 +32,12 @@ interface user-service {
     email: option<bool>,
   }
 
+  // No field, so a caller method takes no parameter.
+  record notify-all-request {
+  }
+
   get-user: func(request: get-user-request) -> user-result;
   update-email: func(request: update-email-request) -> user-result;
   notify: func(request: notify-request);
+  notify-all: func(request: notify-all-request);
 }

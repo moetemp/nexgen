@@ -29,6 +29,10 @@ namespace Nexgen.UserService
         [NexusOperation("Notify")]
         void Notify(NotifyRequest request);
 
+        [GeneratedCode("nexgen", null)]
+        [NexusOperation("NotifyAll")]
+        void NotifyAll();
+
     }
 
     [GeneratedCode("nexgen", null)]
@@ -144,6 +148,12 @@ namespace Nexgen.UserService
                 Email = options.Email,
             };
             return NotifyAsync(request);
+        }
+
+        [GeneratedCode("nexgen", null)]
+        public async Task NotifyAllAsync()
+        {
+            await _client.ExecuteNexusOperationAsync(svc => svc.NotifyAll()).ConfigureAwait(true);
         }
 
     }

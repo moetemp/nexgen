@@ -520,7 +520,45 @@ impl<'a> TypePlanningContext<'a> {
             planner: self,
         });
         self.resolve_planned_record_field_types(&source_spec, &mut planned_spec);
+        self.resolve_planned_variant_case_types(&source_spec, &mut planned_spec);
         planned_spec
+    }
+
+    // A case payload that names a proto-bound WIT record or enum plans as that type, as a field
+    // does.
+    fn resolve_planned_variant_case_types(
+        &mut self,
+        source_spec: &ApiSpec<OperationLoweredFamily>,
+        planned_spec: &mut PlannedSpec,
+    ) {
+        for (variant_name, planned_entry) in &mut planned_spec.types {
+            let TypeDeclSpec::Variant(planned_variant) = &mut planned_entry.declaration else {
+                continue;
+            };
+            let Some(source_variant) = source_spec.variant(variant_name) else {
+                continue;
+            };
+            for (case, source_case) in planned_variant.cases.iter_mut().zip(&source_variant.cases) {
+                let Some(TypeSpec::External(ExternalTypeSpec::Proto(proto_name))) =
+                    source_case.payload.as_ref().map(TypeSpec::without_option)
+                else {
+                    continue;
+                };
+                if self.spec.record_for_proto(proto_name.as_str()).is_some()
+                    || self.spec.enum_for_proto(proto_name.as_str()).is_some()
+                {
+                    case.payload = Some(
+                        self.planned_type_from_authored(
+                            source_case
+                                .payload
+                                .as_ref()
+                                .expect("payload")
+                                .without_option(),
+                        ),
+                    );
+                }
+            }
+        }
     }
 
     fn resolve_planned_record_field_types(

@@ -12,14 +12,24 @@ from temporalio.api.workflowservice.v1 import (
 from temporalio.converter import DataConverter, PayloadConverter
 import temporalio.nexus.system
 
+from oneofsample.v1 import oneof_pb2
 from wit.proto_oneof import (
+    EndpointTarget,
+    EndpointTargetVariantExternal,
+    EndpointTargetVariantWorker,
+    EndpointWorkerTarget,
     Outcome,
     OutcomeValueFailure,
     OutcomeValueSuccess,
+    Paint,
+    PaintPickTone,
     PauseActivityRequest,
+    Shade,
 )
 from wit.proto_oneof.models import (
+    _EndpointTargetTransferTypeConverter,
     _OutcomeTransferTypeConverter,
+    _PaintTransferTypeConverter,
     _PauseActivityRequestTransferTypeConverter,
 )
 
@@ -147,3 +157,36 @@ def test_optional_proto_oneof_round_trips_unset_as_none() -> None:
         request_id="request-id",
     )
     assert converter.from_transfer_type(proto, PauseActivityRequest) == model
+
+
+def test_proto_oneof_case_round_trips_as_its_record() -> None:
+    converter = _EndpointTargetTransferTypeConverter()
+    model = EndpointTarget(
+        variant=EndpointTargetVariantWorker(
+            EndpointWorkerTarget(namespace="ns", task_queue="tq")
+        )
+    )
+
+    wire = converter.to_transfer_type(model)
+    assert wire.WhichOneof("variant") == "worker"
+    assert wire.worker.task_queue == "tq"
+
+    decoded = converter.from_transfer_type(wire, EndpointTarget)
+    assert decoded == model
+    assert isinstance(decoded.variant, EndpointTargetVariantWorker)
+    assert isinstance(decoded.variant.value, EndpointWorkerTarget)
+    assert not isinstance(decoded.variant, EndpointTargetVariantExternal)
+
+
+def test_proto_oneof_case_round_trips_as_its_enum() -> None:
+    converter = _PaintTransferTypeConverter()
+    model = Paint(pick=PaintPickTone(Shade.ShadeDark))
+
+    wire = converter.to_transfer_type(model)
+    assert wire.WhichOneof("pick") == "tone"
+    assert wire.tone == oneof_pb2.SHADE_DARK
+
+    decoded = converter.from_transfer_type(wire, Paint)
+    assert decoded == model
+    assert isinstance(decoded.pick, PaintPickTone)
+    assert decoded.pick.value is Shade.ShadeDark

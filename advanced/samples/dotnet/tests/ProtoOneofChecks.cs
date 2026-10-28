@@ -4,6 +4,7 @@ using NexusRpc.Handlers;
 using Xunit;
 using static Nexgen.DotNetExamples.Tests.TransferTypeTestSupport;
 using WireOutcome = Temporalio.Api.Update.V1.Outcome;
+using WirePaint = OneofSample.V1.Paint;
 using WirePauseActivityRequest = Temporalio.Api.WorkflowService.V1.PauseActivityRequest;
 
 namespace Nexgen.DotNetExamples.Tests
@@ -149,6 +150,22 @@ namespace Nexgen.DotNetExamples.Tests
             Assert.Equal("activity-type", wire.Type);
 
             Assert.Equal(model, FromPayload<PauseActivityRequest>(ToPayload(model)));
+        }
+
+        [Fact]
+        public void ProtoOneofCaseRoundTripsAsItsEnum()
+        {
+            var model = new Paint { Pick = new PaintPick.Tone(Shade.ShadeDark) };
+
+            var wire = Assert.IsType<WirePaint>(
+                CreateSdkConverter(typeof(Paint)).ToTransferType(model));
+            Assert.Equal(WirePaint.PickOneofCase.Tone, wire.PickCase);
+            Assert.Equal(OneofSample.V1.Shade.Dark, wire.Tone);
+
+            var decoded = Assert.IsType<Paint>(
+                CreateSdkConverter(typeof(Paint)).FromTransferType(wire));
+            Assert.Equal(model, decoded);
+            Assert.Equal(Shade.ShadeDark, Assert.IsType<PaintPick.Tone>(decoded.Pick).Value);
         }
     }
 }

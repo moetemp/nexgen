@@ -149,9 +149,9 @@ the service, so its build links `stream-service.wit`.
 
 Only part of today's output builds, so the samples leave the rest out:
 
-- Python and TypeScript don't generate the service. They panic on the read item,
-  a `oneof` of proto-bound records, and Python can't import the protos. .NET
-  types each case of the read item as its proto class.
+- Python doesn't generate the service, since it can't import the protos.
+- TypeScript passes a `number` where a resource method's proto request wants a
+  `Long`. `tsc` skips the service, but the test still checks its models.
 - .NET plans the writer's `uint64` `writer-id` as a `long`, so the sample
   project leaves the .NET writer out of the build.
 - The TypeScript writer passes a `number` where its proto request wants a
@@ -165,7 +165,10 @@ Only part of today's output builds, so the samples leave the rest out:
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),
   [`dotnet/wit/stream-writer/`](dotnet/wit/stream-writer/),
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
-- TypeScript: [`typescript/wit/stream-writer/`](typescript/wit/stream-writer/)
+- TypeScript:
+  [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
+  [`typescript/wit/stream-writer/`](typescript/wit/stream-writer/),
+  [`typescript/tests/stream-service.test.ts`](typescript/tests/stream-service.test.ts)
 
 ## Supporting files
 

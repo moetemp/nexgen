@@ -36,10 +36,10 @@ namespace Nexgen.ProtoOneof
         private EndpointTargetVariant() { }
 
         [GeneratedCode("nexgen", null)]
-        public sealed record Worker(Temporalio.Api.Nexus.V1.EndpointTarget.Types.Worker Value) : EndpointTargetVariant;
+        public sealed record Worker(EndpointWorkerTarget Value) : EndpointTargetVariant;
 
         [GeneratedCode("nexgen", null)]
-        public sealed record External(Temporalio.Api.Nexus.V1.EndpointTarget.Types.External Value) : EndpointTargetVariant;
+        public sealed record External(EndpointExternalTarget Value) : EndpointTargetVariant;
     }
 
     [GeneratedCode("nexgen", null)]
@@ -60,7 +60,7 @@ namespace Nexgen.ProtoOneof
         private PaintPick() { }
 
         [GeneratedCode("nexgen", null)]
-        public sealed record Tone(OneofSample.V1.Shade Value) : PaintPick;
+        public sealed record Tone(Shade Value) : PaintPick;
 
         [GeneratedCode("nexgen", null)]
         public sealed record Name(string Value) : PaintPick;
@@ -121,10 +121,10 @@ namespace Nexgen.ProtoOneof
             switch (wire.VariantCase)
             {
                 case Temporalio.Api.Nexus.V1.EndpointTarget.VariantOneofCase.Worker:
-                    variantOneof = new EndpointTargetVariant.Worker(wire.Worker);
+                    variantOneof = new EndpointTargetVariant.Worker(EndpointWorkerTarget.FromTransferType(wire.Worker));
                     break;
                 case Temporalio.Api.Nexus.V1.EndpointTarget.VariantOneofCase.External:
-                    variantOneof = new EndpointTargetVariant.External(wire.External);
+                    variantOneof = new EndpointTargetVariant.External(EndpointExternalTarget.FromTransferType(wire.External));
                     break;
                 default:
                     variantOneof = null;
@@ -143,10 +143,10 @@ namespace Nexgen.ProtoOneof
             switch (Variant)
             {
                 case EndpointTargetVariant.Worker workerCase:
-                    proto.Worker = workerCase.Value;
+                    proto.Worker = (Temporalio.Api.Nexus.V1.EndpointTarget.Types.Worker)workerCase.Value.ToTransferType();
                     break;
                 case EndpointTargetVariant.External externalCase:
-                    proto.External = externalCase.Value;
+                    proto.External = (Temporalio.Api.Nexus.V1.EndpointTarget.Types.External)externalCase.Value.ToTransferType();
                     break;
             }
             return proto;
@@ -297,7 +297,7 @@ namespace Nexgen.ProtoOneof
             switch (wire.PickCase)
             {
                 case OneofSample.V1.Paint.PickOneofCase.Tone:
-                    pickOneof = new PaintPick.Tone(wire.Tone);
+                    pickOneof = new PaintPick.Tone((Shade)wire.Tone);
                     break;
                 case OneofSample.V1.Paint.PickOneofCase.Name:
                     pickOneof = new PaintPick.Name(wire.Name);
@@ -319,7 +319,7 @@ namespace Nexgen.ProtoOneof
             switch (Pick)
             {
                 case PaintPick.Tone toneCase:
-                    proto.Tone = toneCase.Value;
+                    proto.Tone = (OneofSample.V1.Shade)toneCase.Value;
                     break;
                 case PaintPick.Name nameCase:
                     proto.Name = nameCase.Value;

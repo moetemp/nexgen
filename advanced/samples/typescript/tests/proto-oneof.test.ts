@@ -5,10 +5,13 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "v
 import {
   createOutcomeTransferTypeConverter,
   type Outcome,
+  type Paint,
   type PauseActivityRequest,
   outcomeTransferTypeConverter as outcomeConverter,
+  paintTransferTypeConverter as paintConverter,
   pauseActivityRequestTransferTypeConverter as pauseConverter,
 } from "../wit/proto-oneof/index.ts";
+import { Shade } from "../wit/proto-oneof/models.ts";
 
 beforeEach(() => {
   vi.stubGlobal("__TEMPORAL_ACTIVATOR__", {
@@ -213,5 +216,15 @@ describe("proto-oneof generated models", () => {
         activity: "unknown",
       }),
     ).toThrow("invalid oneof discriminator for PauseActivityRequest.activity");
+  });
+
+  it("round-trips a oneof case that names a proto-bound enum as that enum", () => {
+    const model: Paint = { pick: { tag: "tone", value: Shade.ShadeDark } };
+    const wire = paintConverter.toTransferType(model);
+    expect(wire).toEqual({ pick: "tone", tone: 2 });
+    const decoded = paintConverter.fromTransferType(wire);
+    expect(decoded).toEqual(model);
+    if (decoded.pick?.tag !== "tone") throw new Error("expected tone");
+    expectTypeOf(decoded.pick.value).toEqualTypeOf<Shade>();
   });
 });

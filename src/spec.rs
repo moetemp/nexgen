@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use indexmap::IndexMap;
 
 use crate::language::Language;
+use crate::nexgen_config::GenerationTarget;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ApiSpec<F: TypeFamily = AuthoredFamily> {
@@ -668,6 +669,11 @@ pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub output: Option<TypeSpec<F>>,
     pub output_transform: Option<OperationOutputTransformSpec<F>>,
     pub serialization_context: F::Text,
+    /// The support helper that turns a request and its response into the next request of a poll,
+    /// or into nothing to stop. It changes no model or wire byte.
+    pub poll_next: F::Text,
+    /// The only target whose API gets the poll. Without it, every target gets the poll.
+    pub poll_target: Option<GenerationTarget>,
     pub data: F::OperationData,
 }
 
@@ -704,6 +710,8 @@ impl<F: TypeFamily> OperationSpec<F> {
                 .output_transform
                 .map(|transform| transform.map_names_with(map)),
             serialization_context: map.map_text(self.serialization_context),
+            poll_next: map.map_text(self.poll_next),
+            poll_target: self.poll_target,
             data,
         }
     }

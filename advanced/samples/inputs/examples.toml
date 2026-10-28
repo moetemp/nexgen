@@ -30,10 +30,11 @@ descriptors = ["temporal_api.bin", "oneofsample.bin"]
 languages = ["python", "dotnet", "typescript"]
 descriptors = "temporal"
 
-# Brook's Stream service WIT, byte for byte. Its records bind to the Stream protos of
-# temporalio/api#895 in descriptors/streams/, which no SDK has yet. So Python imports them from the
-# sample's own package, and the other Temporal protos from temporalio.
-# Python also gets the client target, so one Stream class serves Workflow code and clients.
+# Brook's Stream service WIT. Only its read poll differs, since it names the client target. Its
+# records bind to the Stream protos of temporalio/api#895 in descriptors/streams/, which no SDK has
+# yet. So Python imports them from the sample's own package, and the other Temporal protos from
+# temporalio. Python also gets the client target, so one Stream class serves Workflow code and
+# clients.
 [stream-service]
 languages = ["python", "typescript", "dotnet"]
 targets = ["workflow", "client"]
@@ -57,6 +58,13 @@ descriptors = ["temporal_api.bin", "streams.bin"]
 "temporal/api/streamservice/" = "streamprotos.temporal.api.streamservice"
 "temporal/api/enums/v1/stream.proto" = "streamprotos.temporal.api.enums.v1.stream_pb2"
 "temporal/sdk/streams/" = "streamprotos.temporal.sdk.streams"
+
+# Polled operations and a polled resource method, in a service with an endpoint and in one with no
+# endpoint. Only Python generates the iterators.
+[poll-service]
+languages = ["python"]
+targets = ["workflow", "client"]
+descriptors = "temporal"
 
 # A System Nexus operation that returns a resource. Python gets only the client target.
 [workflow-handle]

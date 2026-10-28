@@ -1,0 +1,1 @@
+`@nexus.poll` on an operation generates a Python `iter_<name>` iterator in each generated target, also for a service with no endpoint, and for each resource method that binds the operation. A support helper turns each request and response into the next request, or into `None` to stop. `target` limits the iterator to one target.

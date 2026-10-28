@@ -12,6 +12,7 @@ use wit_parser_crate::{
 
 use crate::error::{Error, Result};
 use crate::language::Language;
+use crate::nexgen_config::GenerationTarget;
 use crate::spec::*;
 
 type PackageOrigins = BTreeMap<PackageId, PathBuf>;
@@ -2995,6 +2996,7 @@ fn build_operation(
         &operation_name,
     )?;
     let serialization_context = build_operation_serialization_context(&directives, path, &context)?;
+    let (poll_next, poll_target) = build_operation_poll(&directives, path, &context)?;
     let output = if let Some(output_type) = function.result.as_ref() {
         Some(
             find_operation_type_spec(resolve, output_type, path, &context)?.ok_or_else(|| {
@@ -3034,6 +3036,8 @@ fn build_operation(
         output,
         output_transform,
         serialization_context,
+        poll_next,
+        poll_target,
         data: (),
     })
 }
@@ -3180,6 +3184,57 @@ fn build_operation_serialization_context(
         }
     }
     Ok(spec)
+}
+
+/// Reads `@nexus.poll` on an operation. Each language value names a support helper that takes
+/// the request and its response and returns the next request, or `None` to stop.
+fn build_operation_poll(
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<(LanguageStringSpec, Option<GenerationTarget>)> {
+    let Some(directive) = directive(directives, "poll", path, context)? else {
+        return Ok((LanguageStringSpec::default(), None));
+    };
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.poll".to_string(),
+        reason,
+    };
+    let spec = directive_language_string(directive);
+    if spec.default.is_none() && spec.by_language.is_empty() {
+        return Err(invalid(
+            "name the support helper that builds the next request".to_string(),
+        ));
+    }
+    for (language, helper) in spec
+        .default
+        .iter()
+        .map(|helper| ("default", helper.as_str()))
+        .chain(
+            spec.by_language
+                .iter()
+                .map(|(language, helper)| (language_key(*language), helper.as_str())),
+        )
+    {
+        if !is_valid_support_helper_path(helper) {
+            return Err(invalid(format!(
+                "invalid `{language}` support helper `{helper}`"
+            )));
+        }
+    }
+    let target = match directive.value("target") {
+        None => None,
+        Some("workflow") => Some(GenerationTarget::Workflow),
+        Some("client") => Some(GenerationTarget::Client),
+        Some(target) => {
+            return Err(invalid(format!(
+                "`target` is `{target}`, but it must be `workflow` or `client`"
+            )));
+        }
+    };
+    Ok((spec, target))
 }
 
 pub(crate) fn select_world(

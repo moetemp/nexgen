@@ -12,7 +12,7 @@ use crate::generator::{
     ExternalModelBackend, GeneratedFileMap, GeneratedFileOrigin, GeneratedFiles, GenerationMode,
 };
 use crate::language::Language;
-use crate::nexgen_config::GenerationTargets;
+use crate::nexgen_config::{GenerationTarget, GenerationTargets};
 use crate::planning::{
     PlannedFamily, PlannedOperationResourceFieldBinding, PlannedOperationResourceReturn,
     PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
@@ -712,6 +712,7 @@ impl<'a> ApiPlanner<'a> {
                     self.model_hoists,
                     &operation_model_names,
                     &self.language_imports,
+                    self.support_package,
                     workflow_api,
                 ),
                 module_origin.clone(),
@@ -1085,6 +1086,7 @@ impl<'a> ApiPlanner<'a> {
                 bound_operations,
                 targets.client,
             );
+            self.render_resource_poll_method(output, service, method, bound_operations, targets);
         }
     }
 
@@ -1101,41 +1103,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    async def ");
         output.push_str(&python_field_name(&method.name));
         output.push_str("(\n");
-        output.push_str("        self,\n");
-        // Python refuses a parameter without a default after one with a default, and WIT
-        // allows any order, so such a method takes keyword arguments only.
-        let has_default = |param: &PlannedResourceField| {
-            param.optional || resource_method_list_param(param).is_some()
-        };
-        if method
-            .params
-            .iter()
-            .skip_while(|param| !has_default(param))
-            .any(|param| !has_default(param))
-        {
-            output.push_str("        *,\n");
-        }
-        for param in &method.params {
-            output.push_str("        ");
-            output.push_str(&python_field_name(&param.name));
-            output.push_str(": ");
-            if let Some(value) = resource_method_list_param(param) {
-                // A list request field defaults to empty, as in the standalone wrapper.
-                output.push_str("list[");
-                output.push_str(&self.python_resource_value_annotation(value));
-                output.push_str("] | None = None");
-            } else {
-                output.push_str(&self.python_resource_field_annotation(
-                    &param.kind,
-                    param.optional,
-                    param.function.as_ref(),
-                ));
-                if param.optional {
-                    output.push_str(" = None");
-                }
-            }
-            output.push_str(",\n");
-        }
+        self.render_resource_method_params(output, method);
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
@@ -1183,6 +1151,123 @@ impl<'a> ApiPlanner<'a> {
                 output.push_str(")\n");
             }
         }
+    }
+
+    fn render_resource_method_params(&self, output: &mut String, method: &PlannedResourceMethod) {
+        output.push_str("        self,\n");
+        // Python refuses a parameter without a default after one with a default, and WIT
+        // allows any order, so such a method takes keyword arguments only.
+        let has_default = |param: &PlannedResourceField| {
+            param.optional || resource_method_list_param(param).is_some()
+        };
+        if method
+            .params
+            .iter()
+            .skip_while(|param| !has_default(param))
+            .any(|param| !has_default(param))
+        {
+            output.push_str("        *,\n");
+        }
+        for param in &method.params {
+            output.push_str("        ");
+            output.push_str(&python_field_name(&param.name));
+            output.push_str(": ");
+            if let Some(value) = resource_method_list_param(param) {
+                // A list request field defaults to empty, as in the standalone wrapper.
+                output.push_str("list[");
+                output.push_str(&self.python_resource_value_annotation(value));
+                output.push_str("] | None = None");
+            } else {
+                output.push_str(&self.python_resource_field_annotation(
+                    &param.kind,
+                    param.optional,
+                    param.function.as_ref(),
+                ));
+                if param.optional {
+                    output.push_str(" = None");
+                }
+            }
+            output.push_str(",\n");
+        }
+    }
+
+    /// The iterator of a method whose operation polls. The class serves every generated target,
+    /// so it has the iterator when one of those targets gets the poll.
+    fn render_resource_poll_method(
+        &self,
+        output: &mut String,
+        service: &RenderedService<'_>,
+        method: &PlannedResourceMethod,
+        bound_operations: &[ResourceBoundOperation<'_>],
+        targets: GenerationTargets,
+    ) {
+        let PlannedResourceMethodBindingSpec::Operation {
+            operation_name,
+            request_plan,
+            ..
+        } = &method.binding
+        else {
+            return;
+        };
+        let Some(operation) = bound_operations
+            .iter()
+            .map(|bound_operation| bound_operation.operation)
+            .find(|operation| operation.name == operation_name)
+        else {
+            return;
+        };
+        let Some(next_expr) = [GenerationTarget::Workflow, GenerationTarget::Client]
+            .into_iter()
+            .filter(|target| targets.contains(*target))
+            .find_map(|target| operation.poll_next(target))
+        else {
+            return;
+        };
+        let method_name = python_field_name(&method.name);
+        output.push_str("\n    async def ");
+        output.push_str(&poll_function_name(&method_name));
+        output.push_str("(\n");
+        self.render_resource_method_params(output, method);
+        output.push_str("    ) -> collections.abc.AsyncIterator[");
+        if targets.workflow {
+            output.push_str(&temporalio_workflow_type_annotation(
+                service,
+                &operation.output_annotation,
+            ));
+        } else {
+            output.push_str(&operation.output_annotation);
+        }
+        output.push_str("]:\n");
+        render_python_docstring(
+            output,
+            "        ",
+            Some(&poll_function_summary(&method_name)),
+            &[],
+            None,
+            false,
+        );
+        render_resource_method_request(output, method, operation, request_plan);
+        let response = if targets.client {
+            vec![format!(
+                "response = await self._ops().{}(request)",
+                client_operation_name(service, operation)
+            )]
+        } else if service.endpoint.is_none() {
+            vec![
+                "nexus_client = getattr(self, \"_nexus_client\")".to_string(),
+                nexus_client_start_line("nexus_client", operation),
+                "response = await handle".to_string(),
+            ]
+        } else {
+            vec![
+                format!(
+                    "handle = await {}(request)",
+                    request_operation_function_name(operation)
+                ),
+                "response = await handle".to_string(),
+            ]
+        };
+        render_poll_loop(output, "        ", &response, next_expr);
     }
 
     fn python_resource_method_result_annotation(&self, method: &PlannedResourceMethod) -> String {
@@ -1471,6 +1556,32 @@ impl<'a> ApiPlanner<'a> {
             &local_python_model_type_expr(&output_ref),
             &output_type_parameters,
         );
+        let poll_next_expr = operation
+            .poll_next
+            .value()
+            .map(|helper| format!("_support.{helper}"));
+        if poll_next_expr.is_some() {
+            let reason = if unpacked_input
+                .as_ref()
+                .is_some_and(|unpacked_input| !unpacked_input.functions.is_empty())
+            {
+                Some("it has function inputs")
+            } else if output_transform.is_some() {
+                Some("it has an output transform")
+            } else if output_resource_return.is_some() || output_direct_result {
+                Some("it returns a resource")
+            } else if operation.output_type().is_none() {
+                Some("it returns nothing")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                return Err(Error::UnsupportedPoll {
+                    operation: operation.name.clone(),
+                    reason: reason.to_string(),
+                });
+            }
+        }
         let descriptor_output_ref = match operation.output_type() {
             Some(PlannedType::Record(record)) => python_erased_generic_record_annotation(
                 &output_ref,
@@ -1504,6 +1615,8 @@ impl<'a> ApiPlanner<'a> {
                 .serialization_context
                 .value()
                 .map(|helper| format!("_support.{helper}")),
+            poll_next_expr,
+            poll_target: operation.poll_target,
             output_resource_return,
             output_direct_result,
             output_none: operation.output_type().is_none(),
@@ -2767,6 +2880,9 @@ struct RenderedOperation<'a> {
     output_type_expr: String,
     output_transform_expr: Option<String>,
     serialization_context_expr: Option<String>,
+    /// The support helper that gives the next request of a poll.
+    poll_next_expr: Option<String>,
+    poll_target: Option<GenerationTarget>,
     output_resource_return: Option<PlannedOperationResourceReturn>,
     output_direct_result: bool,
     output_none: bool,
@@ -2779,6 +2895,13 @@ struct RenderedOperation<'a> {
 }
 
 impl RenderedOperation<'_> {
+    /// The poll helper, when the target gets the poll.
+    fn poll_next(&self, target: GenerationTarget) -> Option<&str> {
+        self.poll_next_expr
+            .as_deref()
+            .filter(|_| self.poll_target.is_none_or(|only| only == target))
+    }
+
     fn target_unpacked_input(&self, target: PythonTarget) -> Option<&RenderedUnpackedInput> {
         match target {
             PythonTarget::Workflow => self.unpacked_input.as_ref(),
@@ -3617,15 +3740,23 @@ fn package_export_names(
                     .iter()
                     .filter(|service| service.endpoint.is_some())
                     .flat_map(|service| {
-                        service
-                            .operations
-                            .iter()
-                            .map(|operation| operation.attr_name.clone())
+                        service.operations.iter().flat_map(workflow_function_names)
                     }),
             );
         }
     }
     names
+}
+
+/// The public functions of an operation in the Workflow target.
+fn workflow_function_names(operation: &RenderedOperation<'_>) -> Vec<String> {
+    std::iter::once(operation.attr_name.clone())
+        .chain(
+            operation
+                .poll_next(GenerationTarget::Workflow)
+                .map(|_| poll_function_name(&operation.attr_name)),
+        )
+        .collect()
 }
 
 fn operation_key(service_name: &str, operation_name: &str) -> String {
@@ -4293,6 +4424,7 @@ fn render_service_module(
     model_hoists: Option<&PythonModelHoists>,
     model_names: &[String],
     language_imports: &[LanguageImportSpec],
+    support_package: &str,
     include_endpoint_clients: bool,
 ) -> String {
     let mut module_imports = BTreeSet::new();
@@ -4453,6 +4585,9 @@ fn render_service_module(
                 // `TYPE_CHECKING`.
                 || operation.deprecated
         });
+    if endpoint_client_body.contains("collections.abc.") {
+        output.push_str("import collections.abc\n");
+    }
     if uses_typing || endpoint_client_body.contains("typing.") || needs_type_checking_imports {
         output.push_str("import typing\n");
     }
@@ -4527,6 +4662,7 @@ fn render_service_module(
             );
         }
     }
+    render_support_import(&mut output, &endpoint_client_body, support_package, false);
     if needs_temporalio_workflow_type_checking {
         output.push_str("if typing.TYPE_CHECKING:\n");
         output.push_str("    import temporalio.workflow\n");
@@ -5046,12 +5182,7 @@ fn render_package_init(
     let operation_function_names = services_with_functions
         .iter()
         .filter(|service| service.endpoint.is_some())
-        .flat_map(|service| {
-            service
-                .operations
-                .iter()
-                .map(|operation| operation.attr_name.clone())
-        })
+        .flat_map(|service| service.operations.iter().flat_map(workflow_function_names))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
@@ -5101,7 +5232,7 @@ fn render_package_init(
                     render_named_python_import(
                         &mut output,
                         &module,
-                        std::slice::from_ref(&operation.attr_name),
+                        &workflow_function_names(operation),
                     );
                 }
             }
@@ -5215,7 +5346,80 @@ fn render_endpoint_service_object(output: &mut String, service: &RenderedService
     for operation in &service.operations {
         output.push('\n');
         render_endpoint_service_object_operation_method(output, service, operation);
+        if let Some(next_expr) = operation.poll_next(GenerationTarget::Workflow) {
+            output.push('\n');
+            render_endpoint_service_object_poll_method(output, service, operation, next_expr);
+        }
     }
+}
+
+fn render_endpoint_service_object_poll_method(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    next_expr: &str,
+) {
+    output.push_str("    async def ");
+    output.push_str(&poll_function_name(&operation.attr_name));
+    output.push_str("(\n");
+    output.push_str("        self,\n");
+    if let Some(unpacked_input) = &operation.unpacked_input {
+        if !unpacked_input.parameters.is_empty() {
+            output.push_str("        *,\n");
+        }
+        for field in &unpacked_input.parameters {
+            output.push_str("        ");
+            output.push_str(&field.attr_name);
+            output.push_str(": ");
+            output.push_str(&python_parameter_annotation(
+                &field.annotation,
+                &field.default_kind,
+            ));
+            if let Some(default_expr) = python_parameter_default_expr(&field.default_kind) {
+                render_python_default_expr(output, &default_expr, "        ");
+            }
+            output.push_str(",\n");
+        }
+    } else if operation.input.is_some() {
+        output.push_str("        request: ");
+        output.push_str(operation_input_annotation(operation));
+        output.push_str(",\n");
+    }
+    output.push_str("    ) -> collections.abc.AsyncIterator[");
+    output.push_str(&temporalio_workflow_type_annotation(
+        service,
+        &operation.output_annotation,
+    ));
+    output.push_str("]:\n");
+    render_python_docstring(
+        output,
+        "        ",
+        Some(&poll_function_summary(&operation.attr_name)),
+        &[],
+        None,
+        false,
+    );
+    if let Some(unpacked_input) = &operation.unpacked_input {
+        for flattened_message in &unpacked_input.flattened_messages {
+            render_flattened_message_setup(output, "        ", flattened_message);
+        }
+        output.push_str("        request = ");
+        output.push_str(&unpacked_input.model_name);
+        output.push_str("(\n");
+        for field in &unpacked_input.request_fields {
+            output.push_str("            ");
+            output.push_str(&field.attr_name);
+            output.push('=');
+            output.push_str(&unpacked_request_field_value_expr(field));
+            output.push_str(",\n");
+        }
+        output.push_str("        )\n");
+    }
+    let response = [
+        nexus_client_start_line("self._nexus_client", operation),
+        "response = await handle".to_string(),
+    ];
+    render_poll_loop(output, "        ", &response, next_expr);
 }
 
 fn render_endpoint_service_object_operation_method(
@@ -7303,6 +7507,13 @@ impl PythonTarget {
         }
     }
 
+    fn generation_target(self) -> GenerationTarget {
+        match self {
+            Self::Workflow => GenerationTarget::Workflow,
+            Self::Client => GenerationTarget::Client,
+        }
+    }
+
     /// The indent of the target's function bodies.
     fn body_indent(self) -> &'static str {
         match self {
@@ -7351,6 +7562,138 @@ fn render_operation_functions(
         output.push('\n');
         render_client_request_method(output, service, operation);
     }
+    if let Some(next_expr) = operation.poll_next(target.generation_target()) {
+        output.push('\n');
+        render_operation_poll_function(output, target, service, operation, next_expr);
+    }
+}
+
+/// The name of the iterator of a polled operation or method.
+fn poll_function_name(name: &str) -> String {
+    format!("iter_{name}")
+}
+
+fn poll_function_summary(name: &str) -> String {
+    format!(
+        "Yield each response of ``{name}``. The poll helper gives the next request, and the \
+         iteration stops when it gives ``None``."
+    )
+}
+
+/// The iterator of a polled operation, with the parameters of the operation's own function.
+fn render_operation_poll_function(
+    output: &mut String,
+    target: PythonTarget,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    next_expr: &str,
+) {
+    let body_indent = target.body_indent();
+    render_operation_signature_start(output, target, &poll_function_name(&operation.attr_name));
+    let unpacked_input = operation.target_unpacked_input(target);
+    if let Some(unpacked_input) = unpacked_input {
+        if !unpacked_input.parameters.is_empty() {
+            start_line(output, target, "    *,\n");
+        }
+        for field in &unpacked_input.parameters {
+            start_line(output, target, "    ");
+            output.push_str(&field.attr_name);
+            output.push_str(": ");
+            output.push_str(&python_parameter_annotation(
+                &field.annotation,
+                &field.default_kind,
+            ));
+            if let Some(default_expr) = python_parameter_default_expr(&field.default_kind) {
+                render_python_default_expr(output, &default_expr, body_indent);
+            }
+            output.push_str(",\n");
+        }
+    } else if operation.input.is_some() {
+        start_line(output, target, "    request: ");
+        output.push_str(operation_input_annotation(operation));
+        output.push_str(",\n");
+    }
+    start_line(output, target, ") -> collections.abc.AsyncIterator[");
+    match target {
+        PythonTarget::Workflow => output.push_str(&temporalio_workflow_type_annotation(
+            service,
+            &operation.output_annotation,
+        )),
+        PythonTarget::Client => output.push_str(&operation.output_annotation),
+    }
+    output.push_str("]:\n");
+    render_python_docstring(
+        output,
+        body_indent,
+        Some(&poll_function_summary(&operation.attr_name)),
+        &[],
+        None,
+        false,
+    );
+    if let Some(unpacked_input) = unpacked_input {
+        for flattened_message in &unpacked_input.flattened_messages {
+            render_flattened_message_setup(output, body_indent, flattened_message);
+        }
+        start_line(output, target, "    request = ");
+        output.push_str(&unpacked_input.model_name);
+        output.push_str("(\n");
+        for field in &unpacked_input.request_fields {
+            start_line(output, target, "        ");
+            output.push_str(&field.attr_name);
+            output.push('=');
+            output.push_str(&unpacked_request_field_value_expr(field));
+            output.push_str(",\n");
+        }
+        start_line(output, target, "    )\n");
+    }
+    let call = operation_call_target(target, service, operation);
+    let response = match target {
+        PythonTarget::Workflow => vec![
+            format!("handle = await {call}(request)"),
+            "response = await handle".to_string(),
+        ],
+        PythonTarget::Client => vec![format!("response = await {call}(request)")],
+    };
+    render_poll_loop(output, body_indent, &response, next_expr);
+}
+
+/// The loop of a poll iterator, after the first request. `response` is the code that gets the
+/// response to `request`.
+fn render_poll_loop(output: &mut String, indent: &str, response: &[String], next_expr: &str) {
+    output.push_str(indent);
+    output.push_str("while True:\n");
+    for line in response {
+        output.push_str(indent);
+        output.push_str("    ");
+        output.push_str(line);
+        output.push('\n');
+    }
+    output.push_str(indent);
+    output.push_str("    yield response\n");
+    output.push_str(indent);
+    output.push_str("    next_request = ");
+    output.push_str(next_expr);
+    output.push_str("(request, response)\n");
+    output.push_str(indent);
+    output.push_str("    if next_request is None:\n");
+    output.push_str(indent);
+    output.push_str("        return\n");
+    output.push_str(indent);
+    output.push_str("    request = next_request\n");
+}
+
+/// One line that starts an operation through a bound Nexus client and gets its handle.
+fn nexus_client_start_line(nexus_client_expr: &str, operation: &RenderedOperation<'_>) -> String {
+    let mut line = format!(
+        "handle = await {nexus_client_expr}.start_operation(operation={}, input=request",
+        python_string_literal(operation.wire_name)
+    );
+    if !operation.output_none {
+        line.push_str(", output_type=");
+        line.push_str(&operation.output_type_expr);
+    }
+    line.push(')');
+    line
 }
 
 /// The name of the private client method that starts the operation and awaits the result.

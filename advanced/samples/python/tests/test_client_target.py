@@ -11,6 +11,7 @@ import temporalio.workflow
 from typing_extensions import override
 
 import temporal_support
+import wit.stream_service._resources.stream as stream_module
 import wit.workflow_handle as workflow_handle
 from wit.stream_service._resources import Stream
 from wit.stream_service._resources.stream import WorkflowStreamService
@@ -23,6 +24,8 @@ from wit.stream_service.models import (
     CreateStreamResult,
     DescribeStreamRequest,
     DescribeStreamResponse,
+    ReadRecordsRequest,
+    ReadRecordsResponse,
     StreamRef,
 )
 from wit.stream_writer.client import StreamWriterClientExtension
@@ -153,6 +156,49 @@ def test_a_handle_in_workflow_code_takes_the_workflow_operations(
     stream = Stream(stream=StreamRef(id="s1"), created=None, status=None)
 
     assert isinstance(stream._ops(), WorkflowStreamService)
+
+
+async def test_a_read_poll_keeps_its_offset_on_an_empty_page() -> None:
+    ref = StreamRef(id="s1")
+    pages = [
+        ReadRecordsResponse(next_offset=3),
+        ReadRecordsResponse(),
+        ReadRecordsResponse(done=True),
+    ]
+    client = FakeClient({"ReadRecords": list(pages)})
+
+    read = [page async for page in client.iter_read_records(stream=ref, last=2)]
+
+    assert read == pages
+    assert [call.input for call in client.calls] == [
+        ReadRecordsRequest(stream=ref, last=2),
+        ReadRecordsRequest(stream=ref, from_offset=3),
+        # The empty page has no next offset, so the read stays at offset 3.
+        ReadRecordsRequest(stream=ref, from_offset=3),
+    ]
+
+
+async def test_a_handle_reads_every_page() -> None:
+    ref = StreamRef(id="s1")
+    pages = [ReadRecordsResponse(next_offset=2), ReadRecordsResponse(done=True)]
+    client = FakeClient(
+        {"CreateStream": [CreateStreamResult(stream=ref)], "ReadRecords": list(pages)}
+    )
+    stream = await client.create_stream(stream_id="s1")
+
+    read = [page async for page in stream.iter_read(from_offset=1)]
+
+    assert read == pages
+    assert [call.input for call in client.calls[1:]] == [
+        ReadRecordsRequest(stream=ref, from_offset=1),
+        ReadRecordsRequest(stream=ref, from_offset=2),
+    ]
+
+
+def test_only_the_client_target_has_the_read_poll() -> None:
+    # The WIT names the client target, since Workflow code reads from a Local Activity.
+    assert hasattr(stream_module, "read_records")
+    assert not hasattr(stream_module, "iter_read_records")
 
 
 async def test_a_service_with_no_endpoint_is_left_to_the_client() -> None:

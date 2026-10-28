@@ -1,0 +1,5 @@
+languages = ["python"]
+
+[error]
+kind = "unsupported-poll"
+contains = ["`Read`", "it has an output transform"]

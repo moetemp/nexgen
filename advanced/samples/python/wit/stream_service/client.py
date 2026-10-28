@@ -26,6 +26,7 @@ from .models import (
     WorkflowTaskEpoch,
 )
 from ._resources import Stream
+import temporal_support as _support
 
 
 _OutputT = typing.TypeVar("_OutputT")
@@ -295,6 +296,39 @@ class StreamServiceClientExtension(abc.ABC):
             max_bytes=max_bytes,
         )
         return await self._stream_service_read_records(request)
+
+    async def iter_read_records(
+        self,
+        *,
+        stream: StreamRef,
+        from_offset: int | None = None,
+        start: StreamReadStart | None = None,
+        max_records: int | None = None,
+        wait: datetime.timedelta | None = None,
+        create_wait: datetime.timedelta | None = None,
+        last: int | None = None,
+        max_bytes: int | None = None,
+    ) -> collections.abc.AsyncIterator[ReadRecordsResponse]:
+        """Yield each response of ``read_records``. The poll helper gives the next request,
+        and the iteration stops when it gives ``None``.
+        """
+        request = ReadRecordsRequest(
+            stream=stream,
+            from_offset=from_offset,
+            start=start,
+            max_records=max_records,
+            wait=wait,
+            create_wait=create_wait,
+            last=last,
+            max_bytes=max_bytes,
+        )
+        while True:
+            response = await self._stream_service_read_records(request)
+            yield response
+            next_request = _support.next_read_request(request, response)
+            if next_request is None:
+                return
+            request = next_request
 
     async def _stream_service_describe_stream(
         self,

@@ -2007,6 +2007,46 @@ type or transform expression refers to an otherwise-unavailable module.
 
 ---
 
+### @nexus.poll
+
+**Placement:** Operation (function) **Syntax:**
+`@nexus.poll python="<support-helper>" [target="workflow|client"]`
+
+Generates an `iter_<name>` async iterator for the operation, and for each
+resource method that binds it. The iterator sends the request, yields the
+response, and calls `<support-helper>(request, response)`. The helper returns
+the next request, or `None` to stop. So the directive names no field of one kind
+of poll. Only Python generates the iterator so far, and the other languages
+ignore the directive.
+
+Each generated target gets the iterator, in its own form, also for a service
+with no endpoint. `target` limits the iterator to one target. One resource class
+serves both targets, so it gets the iterator when the package has the named
+target. nexgen refuses the directive on an operation with function inputs, an
+output transform, a resource result or no result, since it can't make an
+iterator for those.
+
+```wit
+/// @nexus.operation name="ReadRecords"
+/// @nexus.poll python="next_read_request" target="client"
+read-records: func(request: read-records-request) -> read-records-response;
+```
+
+```python
+def next_read_request(request, response):
+    if response.done:
+        return None
+    from_offset = response.next_offset
+    if from_offset is None:
+        from_offset = request.from_offset
+    return dataclasses.replace(request, from_offset=from_offset, last=None)
+```
+
+The referenced helper must be available from the package specified by
+`--support-package`.
+
+---
+
 ### @nexus.flatten-in-api
 
 **Placement:** Record type (with `@nexus.proto`) **Syntax:**

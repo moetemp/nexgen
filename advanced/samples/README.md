@@ -70,6 +70,17 @@ sample-project instructions for [Go](go/README.md), [Python](python/README.md),
   [`typescript/wit/start-workflow/`](typescript/wit/start-workflow/),
   [`typescript/tests/start-workflow.test.ts`](typescript/tests/start-workflow.test.ts)
 
+### `poll-service`
+
+Operations with `@nexus.poll`, in a service with an endpoint and in a service
+with no endpoint, and a resource method that binds one. Only Python generates
+the iterators, for both targets. The service with no endpoint also takes a
+parameter of an enum type.
+
+- WIT: [`inputs/poll-service.wit`](inputs/poll-service.wit)
+- Python: [`python/wit/poll_service/`](python/wit/poll_service/),
+  [`python/tests/test_poll_service.py`](python/tests/test_poll_service.py)
+
 ### `workflow-handle`
 
 A System Nexus operation that returns a resource. Python generates only the
@@ -144,14 +155,16 @@ sourced maps. Native tests exercise conversions through the generated APIs.
 
 ### `stream-service` and `stream-writer`
 
-Brook's Stream service and writer WIT, byte for byte. They are the nexgen inputs
-of the Brook crate, `temporalio-streams`. Their records bind to the Stream
-protos of the API proposal (`temporalio/api#895`) and to Brook's runtime proto,
-in [`descriptors/streams/`](descriptors/streams/). The writer uses records of
-the service, so its build links `stream-service.wit`.
+Brook's Stream service and writer WIT, byte for byte, except that the read poll
+names the client target. They are the nexgen inputs of the Brook crate,
+`temporalio-streams`. Their records bind to the Stream protos of the API
+proposal (`temporalio/api#895`) and to Brook's runtime proto, in
+[`descriptors/streams/`](descriptors/streams/). The writer uses records of the
+service, so its build links `stream-service.wit`.
 
 Python generates both targets, so one `Stream` class serves Workflow code and
-clients.
+clients. The read poll names the client target, since Workflow code reads from a
+Local Activity.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)

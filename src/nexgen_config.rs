@@ -26,6 +26,22 @@ pub struct GenerationTargets {
     pub client: bool,
 }
 
+/// One generation target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GenerationTarget {
+    Workflow,
+    Client,
+}
+
+impl GenerationTargets {
+    pub fn contains(self, target: GenerationTarget) -> bool {
+        match target {
+            GenerationTarget::Workflow => self.workflow,
+            GenerationTarget::Client => self.client,
+        }
+    }
+}
+
 impl Default for GenerationTargets {
     fn default() -> Self {
         Self {

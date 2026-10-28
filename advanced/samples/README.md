@@ -180,10 +180,14 @@ Some of the output doesn't type-check. Python imports the Stream protos from
 TypeScript passes a `number` where a resource method's proto request wants a
 `Long`. So `tsc` skips the service, but the test still checks its models.
 
+Python generates both targets. The client target writes the `client` package,
+with its own `Stream` class, and imports the models of the parent package.
+
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
-- Python: [`python/wit/stream_service/`](python/wit/stream_service/)
+- Python: [`python/wit/stream_service/`](python/wit/stream_service/),
+  [`python/tests/test_client_target.py`](python/tests/test_client_target.py)
 - TypeScript:
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
   [`typescript/tests/stream-service.test.ts`](typescript/tests/stream-service.test.ts)

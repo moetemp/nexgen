@@ -23,3 +23,8 @@ class NotifyRequest:
     channels: list[str] | None = dataclasses.field(default_factory=list)
     sender: str
     email: bool | None = None
+
+
+@dataclasses.dataclass(slots=True)
+class NotifyAllRequest:
+    pass

@@ -9,6 +9,7 @@ from streamprotos.temporal.api.streamservice.v1 import request_response_pb2
 from wit.stream_service import models
 from wit.stream_service.models import (
     AppendRecordsRequest,
+    CreateStreamRequest,
     ReadRecordsResponse,
     StreamClose,
     StreamCloseStatus,
@@ -89,3 +90,14 @@ def test_a_request_without_its_stream_is_refused() -> None:
         ValueError, match="missing required field AppendRecordsRequest.stream"
     ):
         _ = converter.from_transfer_type(wire, AppendRecordsRequest)
+
+
+def test_a_native_create_without_a_stream_id_decodes() -> None:
+    converter = models._CreateStreamRequestTransferTypeConverter()
+    # On native, an empty stream id asks the server for one. Proto3 has no presence for a string.
+    wire = request_response_pb2.CreateStreamRequest(stream_id="")
+
+    with pytest.raises(
+        ValueError, match="missing required field CreateStreamRequest.stream_id"
+    ):
+        _ = converter.from_transfer_type(wire, CreateStreamRequest)

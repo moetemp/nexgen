@@ -6,6 +6,7 @@ import { describe, expect, test } from "vitest";
 import {
   type ReadRecordsResponse,
   StreamCloseStatus,
+  createStreamRequestTransferTypeConverter,
   readRecordsRequestTransferTypeConverter,
   readRecordsResponseTransferTypeConverter,
 } from "../wit/stream-service/models.ts";
@@ -66,6 +67,21 @@ describe("stream-service generated output", () => {
     expect(() =>
       readRecordsResponseTransferTypeConverter.fromTransferType(proto),
     ).toThrow("missing required field StreamRecord.item");
+  });
+
+  test("decodes a native create without a stream id", () => {
+    // On native, an empty stream id asks the server for one. Proto3 JSON leaves out a string
+    // with its default value.
+    const protos: temporal.api.streamservice.v1.ICreateStreamRequest[] = [
+      { streamId: "" },
+      {},
+    ];
+
+    for (const proto of protos) {
+      expect(() =>
+        createStreamRequestTransferTypeConverter.fromTransferType(proto),
+      ).toThrow("missing required field CreateStreamRequest.streamId");
+    }
   });
 
   test("maps every field of a read request through its proto", () => {

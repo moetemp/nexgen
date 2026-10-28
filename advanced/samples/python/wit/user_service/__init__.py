@@ -58,4 +58,10 @@ __nexus_operation_registry__: dict[
     ): _NexusOperationInfo(
         operation=_services.UserService.notify,
     ),
+    (
+        "UserService",
+        "NotifyAll",
+    ): _NexusOperationInfo(
+        operation=_services.UserService.notify_all,
+    ),
 }

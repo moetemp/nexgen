@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from nexusrpc import Operation, service
 import typing
+import datetime
 import temporalio.workflow
 
 from .models import (
+    AppendRecord,
     CloseWriterRequest,
     CloseWriterResponse,
     CloseWritersRequest,
@@ -14,6 +16,9 @@ from .models import (
     FreeWriterRequest,
     FreeWriterResponse,
     OpenWriterRequest,
+    Producer,
+    StreamRef,
+    WorkflowTaskEpoch,
     WriteRecordsRequest,
     WriteRecordsResponse,
     WriterResult,

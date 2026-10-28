@@ -24,6 +24,7 @@ from ..models import (
     StreamStatus,
     WorkflowTaskEpoch,
 )
+import temporal_support as _support
 
 
 @dataclasses.dataclass
@@ -33,6 +34,16 @@ class Stream:
     stream: StreamRef
     created: bool | None
     status: StreamStatus | None
+    _operations: _StreamServiceOperations | None = dataclasses.field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
+
+    def _ops(self) -> _StreamServiceOperations:
+        # A handle built by hand, or decoded from data, takes the
+        # operations of the code that runs it.
+        if self._operations is not None:
+            return self._operations
+        return _support.current_operations(workflow=WorkflowStreamService)
 
     async def publish(
         self,
@@ -53,8 +64,7 @@ class Stream:
             failed_tasks=failed_tasks or [],
             withdraw_run=withdraw_run,
         )
-        handle = await _append_records(request)
-        return await handle
+        return await self._ops()._stream_service_append_records(request)
 
     async def close(
         self,
@@ -75,8 +85,7 @@ class Stream:
             failed_tasks=failed_tasks or [],
             status=status,
         )
-        handle = await _close_stream(request)
-        await handle
+        _ = await self._ops()._stream_service_close_stream(request)
 
     async def read(
         self,
@@ -95,8 +104,7 @@ class Stream:
             wait=wait,
             create_wait=create_wait,
         )
-        handle = await _read_records(request)
-        return await handle
+        return await self._ops()._stream_service_read_records(request)
 
     async def describe(
         self,
@@ -105,6 +113,61 @@ class Stream:
         request = DescribeStreamRequest(
             stream=self.stream,
         )
+        return await self._ops()._stream_service_describe_stream(request)
+
+
+class _StreamServiceOperations(typing.Protocol):
+    """The operations of ``StreamService`` that ``Stream`` calls."""
+
+    async def _stream_service_append_records(
+        self,
+        request: AppendRecordsRequest,
+    ) -> AppendRecordsResponse: ...
+
+    async def _stream_service_close_stream(
+        self,
+        request: CloseStreamRequest,
+    ) -> CloseStreamResponse: ...
+
+    async def _stream_service_read_records(
+        self,
+        request: ReadRecordsRequest,
+    ) -> ReadRecordsResponse: ...
+
+    async def _stream_service_describe_stream(
+        self,
+        request: DescribeStreamRequest,
+    ) -> DescribeStreamResponse: ...
+
+
+class WorkflowStreamService:
+    """The operations of ``StreamService`` that ``Stream`` calls in Workflow code."""
+
+    async def _stream_service_append_records(
+        self,
+        request: AppendRecordsRequest,
+    ) -> AppendRecordsResponse:
+        handle = await _append_records(request)
+        return await handle
+
+    async def _stream_service_close_stream(
+        self,
+        request: CloseStreamRequest,
+    ) -> CloseStreamResponse:
+        handle = await _close_stream(request)
+        return await handle
+
+    async def _stream_service_read_records(
+        self,
+        request: ReadRecordsRequest,
+    ) -> ReadRecordsResponse:
+        handle = await _read_records(request)
+        return await handle
+
+    async def _stream_service_describe_stream(
+        self,
+        request: DescribeStreamRequest,
+    ) -> DescribeStreamResponse:
         handle = await _describe_stream(request)
         return await handle
 

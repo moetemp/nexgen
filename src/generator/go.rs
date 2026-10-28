@@ -5758,6 +5758,7 @@ mod tests {
                 mode: crate::generator::GenerationMode::NativeApi,
                 system_nexus,
                 python_proto_modules: Vec::new(),
+                targets: Default::default(),
             },
             language: crate::language::Language::Go,
             input_paths: vec![input],

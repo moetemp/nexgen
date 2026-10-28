@@ -14,6 +14,7 @@ from ..models import (
     WriteRecordsRequest,
     WriteRecordsResponse,
 )
+import temporal_support as _support
 
 
 @dataclasses.dataclass
@@ -21,6 +22,16 @@ class Writer:
     """An open writer of one Producer. The crate keeps its epoch and sequence."""
 
     writer_id: int
+    _operations: _StreamWriterOperations | None = dataclasses.field(
+        default=None, repr=False, compare=False, kw_only=True
+    )
+
+    def _ops(self) -> _StreamWriterOperations:
+        # A handle built by hand, or decoded from data, takes the
+        # operations of the code that runs it.
+        if self._operations is not None:
+            return self._operations
+        return _support.current_operations(workflow=None)
 
     async def write_records(
         self,
@@ -31,13 +42,7 @@ class Writer:
             writer_id=self.writer_id,
             records=records or [],
         )
-        nexus_client = getattr(self, "_nexus_client")
-        handle = await nexus_client.start_operation(
-            operation="WriteRecords",
-            input=request,
-            output_type=WriteRecordsResponse,
-        )
-        return await handle
+        return await self._ops()._stream_writer_write_records(request)
 
     async def close(
         self,
@@ -46,13 +51,7 @@ class Writer:
         request = CloseWriterRequest(
             writer_id=self.writer_id,
         )
-        nexus_client = getattr(self, "_nexus_client")
-        handle = await nexus_client.start_operation(
-            operation="CloseWriter",
-            input=request,
-            output_type=CloseWriterResponse,
-        )
-        return await handle
+        return await self._ops()._stream_writer_close_writer(request)
 
     async def free(
         self,
@@ -61,7 +60,63 @@ class Writer:
         request = FreeWriterRequest(
             writer_id=self.writer_id,
         )
-        nexus_client = getattr(self, "_nexus_client")
+        return await self._ops()._stream_writer_free_writer(request)
+
+
+class _StreamWriterOperations(typing.Protocol):
+    """The operations of ``StreamWriter`` that ``Writer`` calls."""
+
+    async def _stream_writer_write_records(
+        self,
+        request: WriteRecordsRequest,
+    ) -> WriteRecordsResponse: ...
+
+    async def _stream_writer_close_writer(
+        self,
+        request: CloseWriterRequest,
+    ) -> CloseWriterResponse: ...
+
+    async def _stream_writer_free_writer(
+        self,
+        request: FreeWriterRequest,
+    ) -> FreeWriterResponse: ...
+
+
+class WorkflowStreamWriter:
+    """The operations of ``StreamWriter`` that ``Writer`` calls in Workflow code."""
+
+    def __init__(self, nexus_client: typing.Any) -> None:
+        self._nexus_client: typing.Any = nexus_client
+
+    async def _stream_writer_write_records(
+        self,
+        request: WriteRecordsRequest,
+    ) -> WriteRecordsResponse:
+        nexus_client = self._nexus_client
+        handle = await nexus_client.start_operation(
+            operation="WriteRecords",
+            input=request,
+            output_type=WriteRecordsResponse,
+        )
+        return await handle
+
+    async def _stream_writer_close_writer(
+        self,
+        request: CloseWriterRequest,
+    ) -> CloseWriterResponse:
+        nexus_client = self._nexus_client
+        handle = await nexus_client.start_operation(
+            operation="CloseWriter",
+            input=request,
+            output_type=CloseWriterResponse,
+        )
+        return await handle
+
+    async def _stream_writer_free_writer(
+        self,
+        request: FreeWriterRequest,
+    ) -> FreeWriterResponse:
+        nexus_client = self._nexus_client
         handle = await nexus_client.start_operation(
             operation="FreeWriter",
             input=request,
@@ -74,5 +129,4 @@ def bind_writer_client(
     resource: Writer,
     nexus_client: typing.Any,
 ) -> Writer:
-    setattr(resource, "_nexus_client", nexus_client)
-    return resource
+    return dataclasses.replace(resource, _operations=WorkflowStreamWriter(nexus_client))

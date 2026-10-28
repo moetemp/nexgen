@@ -27,7 +27,7 @@ async def _signal_with_start(
     result = await handle
     return SignalResult(
         namespace=request.namespace,
-        started=result.started or None,
+        started=result.started,
     )
 
 

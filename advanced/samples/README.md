@@ -72,11 +72,14 @@ sample-project instructions for [Go](go/README.md), [Python](python/README.md),
 
 ### `workflow-handle`
 
-A System Nexus operation that returns a resource.
+A System Nexus operation that returns a resource. Python generates only the
+client target, so its package has no Workflow code, and the sourced `namespace`
+is a parameter.
 
 - WIT: [`inputs/workflow-handle.wit`](inputs/workflow-handle.wit)
 - .NET: [`dotnet/wit/workflow-handle/`](dotnet/wit/workflow-handle/)
-- Python: [`python/wit/workflow_handle/`](python/wit/workflow_handle/)
+- Python: [`python/wit/workflow_handle/`](python/wit/workflow_handle/),
+  [`python/tests/test_client_target.py`](python/tests/test_client_target.py)
 - TypeScript:
   [`typescript/wit/workflow-handle/`](typescript/wit/workflow-handle/)
 
@@ -147,10 +150,8 @@ protos of the API proposal (`temporalio/api#895`) and to Brook's runtime proto,
 in [`descriptors/streams/`](descriptors/streams/). The writer uses records of
 the service, so its build links `stream-service.wit`.
 
-Only part of today's output builds, so the samples leave the rest out:
-
-- The Python writer's caller doesn't import every type that it uses, so the
-  Python checks skip its `services.py`.
+Python generates both targets, so one `Stream` class serves Workflow code and
+clients.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit),
   [`inputs/stream-writer.wit`](inputs/stream-writer.wit)
@@ -160,7 +161,8 @@ Only part of today's output builds, so the samples leave the rest out:
 - Python: [`python/wit/stream_service/`](python/wit/stream_service/),
   [`python/wit/stream_writer/`](python/wit/stream_writer/),
   [`python/tests/test_stream_service.py`](python/tests/test_stream_service.py),
-  [`python/tests/test_stream_writer.py`](python/tests/test_stream_writer.py)
+  [`python/tests/test_stream_writer.py`](python/tests/test_stream_writer.py),
+  [`python/tests/test_client_target.py`](python/tests/test_client_target.py)
 - TypeScript:
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
   [`typescript/wit/stream-writer/`](typescript/wit/stream-writer/),

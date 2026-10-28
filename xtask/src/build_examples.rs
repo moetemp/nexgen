@@ -7,7 +7,7 @@ use heck::{ToSnakeCase, ToUpperCamelCase};
 use nexgen::error::Error as NexgenError;
 use nexgen::generator::{GenerationMode, TsDateTimeTypes};
 use nexgen::language::Language;
-use nexgen::nexgen_config::{NexgenConfig, ProtoModule};
+use nexgen::nexgen_config::{GenerationTargets, NexgenConfig, ProtoModule};
 use nexgen::{GenerateRequest, format_generated_files, generate_to_file};
 use serde::Deserialize;
 
@@ -28,6 +28,9 @@ struct ExampleConfig {
     /// to its module. Only the Python output uses it.
     #[serde(default)]
     python_proto_modules: BTreeMap<String, String>,
+    /// The targets of the Python output. The other languages get the workflow target.
+    #[serde(default)]
+    targets: Vec<ExampleTarget>,
     // Each example plans against only the protos it declares, so one sample's protos can't
     // change how another example resolves a proto name.
     descriptors: Option<ExampleDescriptors>,
@@ -48,7 +51,24 @@ enum DescriptorPreset {
     Temporal,
 }
 
+#[derive(Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum ExampleTarget {
+    Workflow,
+    Client,
+}
+
 impl ExampleConfig {
+    fn targets(&self, language: Language) -> GenerationTargets {
+        if language != Language::Python || self.targets.is_empty() {
+            return GenerationTargets::default();
+        }
+        GenerationTargets {
+            workflow: self.targets.contains(&ExampleTarget::Workflow),
+            client: self.targets.contains(&ExampleTarget::Client),
+        }
+    }
+
     fn supports(&self, language: Language) -> bool {
         self.languages
             .as_ref()
@@ -520,6 +540,9 @@ fn build_example(repo_root: &Path, language: Language, example_id: &str) -> Resu
                         })
                         .collect()
                 })
+                .unwrap_or_default(),
+            targets: example
+                .map(|example| example.targets(language))
                 .unwrap_or_default(),
         },
         language,

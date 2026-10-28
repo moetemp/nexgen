@@ -8,11 +8,9 @@ import typing
 import nexusrpc
 import temporalio.converter
 from . import services as _services
-from .operations.start_workflow import start_workflow
+import temporal_support as _support
 
-__all__ = [
-    "start_workflow",
-]
+__all__ = []
 
 
 _InputT = typing.TypeVar("_InputT")
@@ -45,5 +43,6 @@ __nexus_operation_registry__: dict[
         "StartWorkflow",
     ): _NexusOperationInfo(
         operation=_services.WorkflowHandleService.start_workflow,
+        serialization_context=_support.start_workflow_serialization_context,
     ),
 }

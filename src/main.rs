@@ -67,6 +67,31 @@ struct GenerateArgs {
     #[cfg(feature = "advanced")]
     #[arg(long = "system-nexus")]
     system_nexus: bool,
+    /// The code that calls the generated API, `workflow` (the default) or `client` (Python with
+    /// `--native-api`). Repeat the flag, or separate the targets with commas.
+    #[cfg(feature = "advanced")]
+    #[arg(
+        long = "targets",
+        value_enum,
+        value_delimiter = ',',
+        default_values_t = [CliGenerationTarget::Workflow]
+    )]
+    targets: Vec<CliGenerationTarget>,
+}
+
+#[cfg(feature = "advanced")]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum CliGenerationTarget {
+    Workflow,
+    Client,
+}
+
+#[cfg(feature = "advanced")]
+fn generation_targets(targets: &[CliGenerationTarget]) -> nexgen::nexgen_config::GenerationTargets {
+    nexgen::nexgen_config::GenerationTargets {
+        workflow: targets.contains(&CliGenerationTarget::Workflow),
+        client: targets.contains(&CliGenerationTarget::Client),
+    }
 }
 
 #[derive(Args)]
@@ -229,6 +254,7 @@ fn main() -> ExitCode {
                     },
                     system_nexus,
                     python_proto_modules: args.python_proto_modules,
+                    targets: generation_targets(&args.support.common.targets),
                 };
                 let mut request = generate_request(
                     Language::Python,
@@ -263,6 +289,7 @@ fn main() -> ExitCode {
                     },
                     system_nexus,
                     python_proto_modules: Vec::new(),
+                    targets: generation_targets(&args.common.targets),
                 };
                 let mut request = generate_request(
                     Language::TypeScript,
@@ -330,6 +357,7 @@ fn generate_request(
             },
             system_nexus: args.system_nexus,
             python_proto_modules: Vec::new(),
+            targets: generation_targets(&args.targets),
         },
         #[cfg(not(feature = "advanced"))]
         config: Default::default(),

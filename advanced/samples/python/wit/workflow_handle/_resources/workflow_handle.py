@@ -10,5 +10,6 @@ class WorkflowHandle:
     namespace: str
     workflow_id: str
     run_id: str | None
-
-    pass
+    _operations: object | None = dataclasses.field(
+        default=None, repr=False, compare=False, kw_only=True
+    )

@@ -75,5 +75,6 @@ interface workflow-handle-service {
   type start-workflow-result = own<workflow-handle>;
 
   /// @nexus.doc "Start a Workflow through System Nexus and get a handle to it."
+  /// @nexus.serialization-context python="start_workflow_serialization_context"
   start-workflow: func(request: start-workflow-request) -> start-workflow-result;
 }

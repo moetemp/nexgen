@@ -14,6 +14,25 @@ pub struct NexgenConfig {
     /// Python modules for protos that `temporalio.api` doesn't have yet, such as an API that isn't
     /// released. Without an entry, a `temporal/...` proto file is a `temporalio...` module.
     pub python_proto_modules: Vec<ProtoModule>,
+    pub targets: GenerationTargets,
+}
+
+/// The code that calls the generated API. The models are the same for each target.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GenerationTargets {
+    /// Workflow code.
+    pub workflow: bool,
+    /// Code outside a Workflow, through a client class that inherits a generated extension.
+    pub client: bool,
+}
+
+impl Default for GenerationTargets {
+    fn default() -> Self {
+        Self {
+            workflow: true,
+            client: false,
+        }
+    }
 }
 
 /// A proto file path prefix, such as `temporal/api/stream/` or one `.proto` file, and the Python
@@ -50,6 +69,7 @@ impl Default for NexgenConfig {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: false,
             python_proto_modules: Vec::new(),
+            targets: GenerationTargets::default(),
         }
     }
 }
@@ -82,7 +102,7 @@ impl Drop for NexgenConfigScope {
 
 #[cfg(test)]
 mod tests {
-    use super::{NexgenConfig, ProtoModule, current, scope};
+    use super::{GenerationTargets, NexgenConfig, ProtoModule, current, scope};
     use crate::generator::GenerationMode;
 
     #[test]
@@ -110,6 +130,7 @@ mod tests {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
             python_proto_modules: Vec::new(),
+            targets: GenerationTargets::default(),
         };
         {
             let _outer_scope = scope(outer.clone());
@@ -130,6 +151,7 @@ mod tests {
             mode: GenerationMode::DefinitionsOnly,
             system_nexus: true,
             python_proto_modules: Vec::new(),
+            targets: GenerationTargets::default(),
         };
         {
             let _scope = scope(config.clone());

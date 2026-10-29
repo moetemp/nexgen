@@ -384,9 +384,9 @@ interface stream-service {
   // response sets created, so a stream built from a handle has none.
   /// @nexus.doc "One Stream. Build it from a stream-handle, or get it from a create."
   /// @nexus.type-parameter "body-t"
-  /// @nexus.definition python="temporalio.common.StreamDefinition"
-  ///   typescript="StreamDefinition" typescript-import="@temporalio/common"
-  ///   dotnet="Temporalio.Common.StreamDefinition"
+  /// @nexus.definition python="temporal_support.StreamDefinition"
+  ///   typescript="StreamDefinition" typescript-import="../../../support/temporal_model_converters"
+  ///   dotnet="Nexgen.Support.StreamDefinition"
   /// @nexus.flatten-in-api param="handle" fields="id backend" keep=true
   resource %stream {
     constructor(handle: stream-handle, created: option<bool>);

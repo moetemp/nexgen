@@ -931,7 +931,8 @@ impl<'a> ApiPlanner<'a> {
         high_level_return: &str,
         request_kind: RequestArgumentKind,
     ) {
-        render_operation_xml_doc(output, "    ", operation, self.api_plan, false);
+        let public = self.operation_request_method_access(operation, request_kind) == "public";
+        render_operation_xml_doc(output, "    ", operation, self.api_plan, false, public);
         output.push_str("    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
@@ -953,7 +954,12 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(method_name);
         self.render_operation_method_type_parameters(output, operation);
         output.push('(');
+        let mut has_parameters = false;
+        if public {
+            render_definition_parameter(output, operation, &mut has_parameters);
+        }
         if has_input {
+            render_parameter_separator(output, &mut has_parameters);
             output.push_str(input_type);
             output.push_str(" request");
         }
@@ -1126,7 +1132,15 @@ impl<'a> ApiPlanner<'a> {
         endpoint_constant_name: &str,
         endpoint_parameter: bool,
     ) {
-        render_operation_xml_doc(output, "    ", operation, self.api_plan, endpoint_parameter);
+        let public = self.operation_request_method_access(operation, request_kind) == "public";
+        render_operation_xml_doc(
+            output,
+            "    ",
+            operation,
+            self.api_plan,
+            endpoint_parameter,
+            public,
+        );
         output.push_str("    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
@@ -1167,6 +1181,9 @@ impl<'a> ApiPlanner<'a> {
         if endpoint_parameter {
             output.push_str("string endpoint");
             has_parameters = true;
+        }
+        if access == "public" {
+            render_definition_parameter(output, operation, &mut has_parameters);
         }
         if has_input {
             render_parameter_separator(output, &mut has_parameters);
@@ -2088,6 +2105,7 @@ impl<'a> ApiPlanner<'a> {
             output.push_str("string endpoint");
             has_parameters = true;
         }
+        render_definition_parameter(output, operation, &mut has_parameters);
         self.render_flattened_parameters(output, model, overload, &mut has_parameters);
         if model_has_options_fields(model, self.api_plan) {
             render_parameter_separator(output, &mut has_parameters);
@@ -2944,6 +2962,7 @@ fn render_operation_xml_doc(
     operation: &PlannedOperation,
     api_plan: &PlannedSpec,
     endpoint_parameter: bool,
+    definition_parameter: bool,
 ) {
     let return_doc = operation
         .output
@@ -2965,8 +2984,17 @@ fn render_operation_xml_doc(
             "Endpoint for the service.".to_string(),
         ));
     }
-    if let Some(request_doc) = request_doc {
-        params.push(("request".to_string(), request_doc.to_string()));
+    if definition_parameter {
+        params.extend(definition_parameter_doc(operation));
+    }
+    match request_doc {
+        Some(request_doc) => params.push(("request".to_string(), request_doc.to_string())),
+        // C# warns about an undocumented parameter when another parameter has a doc.
+        None if !params.is_empty() && operation_has_input(operation, api_plan) => params.push((
+            "request".to_string(),
+            "The request of the operation.".to_string(),
+        )),
+        None => {}
     }
     render_xml_doc(
         output,
@@ -3172,14 +3200,26 @@ fn render_operation_flattened_xml_doc(
         .output
         .as_ref()
         .and_then(|_| dotnet_doc(&operation.return_doc));
+    let mut docs = Vec::from_iter(definition_parameter_doc(operation));
+    docs.extend(flattened_method_parameter_docs(model, api_plan, overload));
     render_xml_doc(
         output,
         indent,
         dotnet_doc(&operation.doc),
-        flattened_method_parameter_docs(model, api_plan, overload),
+        docs,
         return_doc,
         operation.experimental,
     );
+}
+
+/// The doc of the definition parameter, when the operation takes one.
+fn definition_parameter_doc(operation: &PlannedOperation) -> Option<(String, String)> {
+    operation.data.runtime_type_definition.value().map(|_| {
+        (
+            "definition".to_string(),
+            "Gives the type arguments of the resource.".to_string(),
+        )
+    })
 }
 
 fn flattened_method_parameter_docs(
@@ -3253,6 +3293,31 @@ fn push_function_args_parameter_docs(
         };
         push_field_parameter_doc(params, arg_field);
     }
+}
+
+/// The definition parameter of a public call. It gives the type arguments that a call takes in
+/// place of runtime types.
+fn render_definition_parameter(
+    output: &mut String,
+    operation: &PlannedOperation,
+    has_parameters: &mut bool,
+) {
+    let Some(definition) = operation.data.runtime_type_definition.value() else {
+        return;
+    };
+    render_parameter_separator(output, has_parameters);
+    output.push_str(definition);
+    output.push('<');
+    output.push_str(
+        &operation
+            .data
+            .runtime_type_parameters
+            .iter()
+            .map(|parameter| csharp_type_parameter_name(&parameter.name))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    output.push_str("> definition");
 }
 
 fn render_parameter_separator(output: &mut String, has_parameters: &mut bool) {

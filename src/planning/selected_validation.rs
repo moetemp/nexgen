@@ -7,8 +7,8 @@ use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ApiSpecLeaf, CompilerPass, FunctionArgsSpec, FunctionResultSpec, ResourceSpec,
-    SelectedFamily, ServiceSpec, TypeSpec,
+    ApiSpec, ApiSpecLeaf, CompilerPass, ExternalTypeSpec, FunctionArgsSpec, FunctionResultSpec,
+    OperationSpec, ResourceSpec, SelectedFamily, ServiceSpec, TypeSpec,
 };
 
 pub(crate) struct SelectedValidationPass;
@@ -124,6 +124,7 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
                     operation.name, returned
                 )));
             }
+            validate_definition_parameter(spec, service, operation, returned.as_str(), &invalid)?;
         }
     }
 
@@ -147,6 +148,42 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
                 )));
             }
         }
+    }
+    Ok(())
+}
+
+/// A call of an operation that takes a definition names its parameter `definition`, next to the
+/// fields of its request. A method that binds the operation passes runtime types.
+fn validate_definition_parameter(
+    spec: &ApiSpec<SelectedFamily>,
+    service: &ServiceSpec<SelectedFamily>,
+    operation: &OperationSpec<SelectedFamily>,
+    returned: &str,
+    invalid: &dyn Fn(String) -> Error,
+) -> Result<()> {
+    let takes_definition = service
+        .resource(returned)
+        .is_some_and(|resource| resource.definition.value().is_some())
+        && !service.resources.iter().any(|resource| {
+            resource
+                .methods
+                .iter()
+                .any(|method| method.operation_name.as_deref() == Some(operation.name.as_str()))
+        });
+    let request = match operation.input_type() {
+        Some(TypeSpec::Record(record)) => spec.record(record.as_str()),
+        Some(TypeSpec::External(ExternalTypeSpec::Proto(proto))) => {
+            spec.record_for_proto(proto.as_str())
+        }
+        _ => None,
+    };
+    if takes_definition && request.is_some_and(|request| request.fields.contains_key("definition"))
+    {
+        return Err(invalid(format!(
+            "operation `{}` takes the definition of `{returned}` as `definition`, so its request \
+             can't have a field named `definition`",
+            operation.name
+        )));
     }
     Ok(())
 }

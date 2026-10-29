@@ -21,6 +21,7 @@ import temporalio.workflow
 from temporalio.api.common.v1 import Payload
 from typing_extensions import assert_type, override
 
+import temporal_support
 import wit.stream_service.both.workflow as workflow_package
 import wit.stream_service.both.workflow._resources.stream as workflow_stream_module
 from wit.stream_service.both.client import Stream, StreamServiceClientExtension
@@ -63,6 +64,14 @@ SYSTEM_CONVERTER = temporalio.nexus.system._SystemNexusPayloadConverter(
 @dataclasses.dataclass
 class Turn:
     role: str
+
+
+class Turns(temporal_support.StreamDefinition[Turn]):
+    name: typing.ClassVar[str] = "turns"
+
+
+class Texts(temporal_support.StreamDefinition[str]):
+    name: typing.ClassVar[str] = "texts"
 
 
 @pytest.fixture(autouse=True)
@@ -185,7 +194,7 @@ async def test_sdk_factory_needs_no_adapter() -> None:
             "DescribeStream": DescribeStreamResponse(last_offset=5),
         },
     )
-    stream = await client.create_stream(str, id="sdk-stream")
+    stream = await client.create_stream(Texts, id="sdk-stream")
     assert stream.handle == ref
     stored = client.get_stream(handle=ref, created=None, body_type=str)
     assert (await stored.describe()).last_offset == 5
@@ -211,7 +220,7 @@ async def test_an_operation_starts_through_the_sdk_nexus_client() -> None:
         assert not hasattr(client, name)
         assert not hasattr(client, f"_stream_service_{name}")
 
-    stream = await client.create_stream(str, id="s1")
+    stream = await client.create_stream(Texts, id="s1")
     response = await stream.publish(records=[])
     await stream.close()
 
@@ -294,7 +303,7 @@ async def test_client_only_calls_need_no_workflow_context(
             "DescribeStream": client_models.DescribeStreamResponse(last_offset=8),
         },
     )
-    stream = await client.create_stream(str, id="client-stream")
+    stream = await client.create_stream(Texts, id="client-stream")
     response = await stream.describe()
     assert response.last_offset == 8
     assert len(client.created_clients) == 1
@@ -314,7 +323,7 @@ async def test_each_call_gets_a_new_operation_id() -> None:
             "DescribeStream": DescribeStreamResponse(last_offset=7),
         },
     )
-    stream = await client.create_stream(str, id="s1")
+    stream = await client.create_stream(Texts, id="s1")
     _ = await stream.describe()
     _ = await stream.describe()
     ids = [started.id for started in answers.started]
@@ -405,7 +414,7 @@ async def test_a_stream_read_from_the_end_stays_at_the_first_next_offset() -> No
         Client,
         {"CreateStream": CreateStreamResult(handle=ref), "ReadRecords": list(pages)},
     )
-    stream = await client.create_stream(str, id="s1")
+    stream = await client.create_stream(Texts, id="s1")
 
     read = [
         page
@@ -616,7 +625,7 @@ async def test_a_handle_decodes_its_bodies_with_its_body_type() -> None:
         },
     )
 
-    stream = await client.create_stream(Turn, id="s1")
+    stream = await client.create_stream(Turns, id="s1")
     page = await stream.read()
 
     _ = assert_type(stream, Stream[Turn])

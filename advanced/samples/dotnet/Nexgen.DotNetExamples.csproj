@@ -10,6 +10,8 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <!-- A cref that does not resolve gives a broken link in the generated documentation. -->
     <WarningsAsErrors>$(WarningsAsErrors);CS1574;CS1580;CS1584;CS1658</WarningsAsErrors>
+    <!-- An SDK that builds with warnings as errors refuses a missing or unknown param tag. -->
+    <WarningsAsErrors>$(WarningsAsErrors);CS1572;CS1573</WarningsAsErrors>
   </PropertyGroup>
 
   <ItemGroup>

@@ -18,6 +18,9 @@ from ..models import (
 from ._resources.stream import Stream
 import temporal_support as _support
 
+if typing.TYPE_CHECKING:
+    import temporal_support
+
 
 _NexusServiceT = typing.TypeVar("_NexusServiceT")
 BodyT = typing.TypeVar("BodyT")
@@ -87,7 +90,7 @@ class StreamServiceClientExtension(abc.ABC):
 
     async def create_stream(
         self,
-        body_type: type[BodyT],
+        definition: type[temporal_support.StreamDefinition[BodyT]],
         *,
         id: str,
         retention: datetime.timedelta | None = None,
@@ -104,6 +107,7 @@ class StreamServiceClientExtension(abc.ABC):
             stream_handle: The handle, whose id is stream-id. With an owner, it needs
                 the handle's owner.
         """
+        (body_type,) = _support.definition_type_arguments(definition)
         request = CreateStreamRequest(
             id=id,
             retention=retention,

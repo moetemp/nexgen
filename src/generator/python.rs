@@ -1225,6 +1225,11 @@ impl<'a> ApiPlanner<'a> {
         }
         render_support_import(&mut output, &body, self.support_package, false);
         render_poll_iterator_import(&mut output, &body, "._poll");
+        render_definition_type_checking_imports(
+            &mut output,
+            &body,
+            services.iter().flat_map(|service| &service.operations),
+        );
         output.push_str("\n\n");
         output.push_str(&body);
         Ok(output)
@@ -2279,6 +2284,11 @@ impl<'a> ApiPlanner<'a> {
             generic_model_types,
             runtime_type_arguments,
             output_record_type_parameters,
+            runtime_type_definition: operation
+                .data
+                .runtime_type_definition
+                .value()
+                .map(str::to_string),
         })
     }
 
@@ -3602,6 +3612,8 @@ struct RenderedOperation<'a> {
     runtime_type_arguments: Vec<String>,
     /// The type parameters of a record output, in order.
     output_record_type_parameters: Vec<String>,
+    /// The definition type that a public call takes in place of the runtime types.
+    runtime_type_definition: Option<String>,
 }
 
 impl RenderedOperation<'_> {
@@ -3654,6 +3666,50 @@ impl RenderedOperation<'_> {
             output.push_str(name);
             output.push_str("],\n");
         }
+    }
+
+    /// The runtime type parameters of a public call. A definition gives all of them.
+    fn render_public_runtime_type_parameters(&self, output: &mut String, indent: &str) {
+        let Some(definition) = &self.runtime_type_definition else {
+            self.render_runtime_type_parameters(output, indent);
+            return;
+        };
+        output.push_str(indent);
+        output.push_str("definition: type[");
+        output.push_str(definition);
+        output.push('[');
+        output.push_str(&self.runtime_type_arguments.join(", "));
+        output.push_str("]],\n");
+    }
+
+    /// The definition parameter of a public call that takes a request. It comes before the
+    /// request, as in TypeScript and .NET.
+    fn render_request_definition_parameter(&self, output: &mut String, indent: &str) {
+        if self.runtime_type_definition.is_some() {
+            self.render_public_runtime_type_parameters(output, indent);
+        }
+    }
+
+    /// The runtime type parameters of a public call that takes a request, which come after the
+    /// request. A definition gives them.
+    fn render_request_runtime_type_parameters(&self, output: &mut String, indent: &str) {
+        if self.runtime_type_definition.is_none() {
+            self.render_runtime_type_parameters(output, indent);
+        }
+    }
+
+    /// Reads the runtime types from the definition of a public call, before it passes them on.
+    fn render_definition_type_arguments(&self, output: &mut String, indent: &str) {
+        if self.runtime_type_definition.is_none() {
+            return;
+        }
+        output.push_str(indent);
+        output.push('(');
+        for name in &self.runtime_type_arguments {
+            output.push_str(&python_runtime_type_argument_name(name));
+            output.push(',');
+        }
+        output.push_str(") = _support.definition_type_arguments(definition)\n");
     }
 
     /// The bindings of the runtime type arguments in a returned resource, which `receiver` holds
@@ -5543,6 +5599,14 @@ fn render_workflow_clients_module(
         render_resource_data_import(&mut output, &body, &service.resources, 1);
     }
     render_support_import(&mut output, &body, support_package, false);
+    render_definition_type_checking_imports(
+        &mut output,
+        &body,
+        services
+            .iter()
+            .filter(|service| service.endpoint.is_none())
+            .flat_map(|service| &service.operations),
+    );
     output.push_str("\n\n");
     output.push_str(&body);
     output
@@ -5641,10 +5705,35 @@ fn render_operation_module(
     }
     render_resource_data_import(&mut output, &body, &service.resources, 2);
     render_support_import(&mut output, &body, support_package, false);
+    render_definition_type_checking_imports(&mut output, &body, [operation]);
     output.push('\n');
     output.push('\n');
     output.push_str(&body);
     output
+}
+
+/// Imports the module of each definition type that the body names, for type checking only. The
+/// SDK module that defines the type can import the generated package.
+fn render_definition_type_checking_imports<'a>(
+    output: &mut String,
+    body: &str,
+    operations: impl IntoIterator<Item = &'a RenderedOperation<'a>>,
+) {
+    let modules = operations
+        .into_iter()
+        .filter_map(|operation| operation.runtime_type_definition.as_deref())
+        .filter(|definition| body.contains(&format!("{definition}[")))
+        .filter_map(|definition| definition.rsplit_once('.').map(|(module, _)| module))
+        .collect::<BTreeSet<_>>();
+    if modules.is_empty() {
+        return;
+    }
+    output.push_str("if typing.TYPE_CHECKING:\n");
+    for module in modules {
+        output.push_str("    import ");
+        output.push_str(module);
+        output.push('\n');
+    }
 }
 
 fn planned_module_import_names(api_plan: &PlannedSpec) -> BTreeSet<String> {
@@ -6225,15 +6314,17 @@ fn render_endpoint_service_object_operation_method(
     output.push_str(&operation.attr_name);
     output.push_str("(\n");
     output.push_str("        self,\n");
+    operation.render_request_definition_parameter(output, "        ");
     if let Some(input) = &operation.input {
         output.push_str("        request: ");
         output.push_str(&input.annotation);
         output.push_str(",\n");
     }
-    operation.render_runtime_type_parameters(output, "        ");
+    operation.render_request_runtime_type_parameters(output, "        ");
     output.push_str("    ) -> ");
     output.push_str(&operation_public_return_annotation(service, operation));
     output.push_str(":\n");
+    operation.render_definition_type_arguments(output, "        ");
     render_endpoint_service_object_operation_body(output, service, operation);
 }
 
@@ -6252,7 +6343,7 @@ fn render_endpoint_service_object_unpacked_method(
     output.push_str(&operation.attr_name);
     output.push_str("(\n");
     output.push_str("        self,\n");
-    operation.render_runtime_type_parameters(output, "        ");
+    operation.render_public_runtime_type_parameters(output, "        ");
     output.push_str("        *,\n");
     for field in &unpacked_input.parameters {
         output.push_str("        ");
@@ -6271,6 +6362,7 @@ fn render_endpoint_service_object_unpacked_method(
     output.push_str(&operation_public_return_annotation(service, operation));
     output.push_str(":\n");
     render_unpacked_operation_docstring(output, "    ", operation, unpacked_input, None);
+    operation.render_definition_type_arguments(output, "        ");
     for flattened_message in &unpacked_input.flattened_messages {
         render_flattened_message_setup(output, "    ", flattened_message);
     }
@@ -8050,7 +8142,8 @@ fn render_function_unpacked_overload(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
-    operation.render_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
+    operation
+        .render_public_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
 
     let primary_function = primary_function(&unpacked_input.functions);
     let primary_case = primary_function.and_then(|function| {
@@ -8598,7 +8691,8 @@ fn render_operation_poll_function(
     let target = GenerationTarget::Client;
     let body_indent = target_body_indent(target);
     render_operation_signature_start(output, target, &poll_function_name(&operation.attr_name));
-    operation.render_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
+    operation
+        .render_public_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
     render_poll_function_params(output, operation);
     start_line(output, target, ") -> collections.abc.AsyncGenerator[");
     output.push_str(&operation.output_annotation);
@@ -8618,6 +8712,7 @@ fn render_operation_poll_function(
         None,
         operation.experimental,
     );
+    operation.render_definition_type_arguments(output, body_indent);
     render_poll_function_request(output, operation);
     // The iteration uses one Nexus client for every page.
     render_inline_nexus_client(output, target, service);
@@ -8638,7 +8733,8 @@ fn render_operation_poll_items_function(
     output.push_str(&poll_items_function_name(&operation.attr_name));
     output.push_str("(\n");
     start_line(output, target, "    self,\n");
-    operation.render_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
+    operation
+        .render_public_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
     render_poll_function_params(output, operation);
     start_line(output, target, ") -> PollIterator[");
     output.push_str(operation_input_annotation(operation));
@@ -8662,11 +8758,18 @@ fn render_operation_poll_items_function(
         operation.experimental,
     );
     render_poll_function_request(output, operation);
-    let runtime_type_args = operation
-        .runtime_type_arguments
-        .iter()
-        .map(|name| python_runtime_type_argument_name(name))
-        .map(|name| format!("{name}={name}"));
+    // The page iterator takes the same definition or runtime types.
+    let runtime_type_args: Vec<String> = if operation.runtime_type_definition.is_some() {
+        vec!["definition=definition".to_string()]
+    } else {
+        operation
+            .runtime_type_arguments
+            .iter()
+            .map(|name| python_runtime_type_argument_name(name))
+            .map(|name| format!("{name}={name}"))
+            .collect()
+    };
+    let runtime_type_args = runtime_type_args.into_iter();
     let page_args = match unpacked_input {
         Some(unpacked_input) => runtime_type_args
             .chain(
@@ -9014,16 +9117,18 @@ fn render_client_request_method(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
+    operation.render_request_definition_parameter(output, "        ");
     if operation.input.is_some() {
         start_line(output, target, "    request: ");
         output.push_str(operation_input_annotation(operation));
         output.push_str(",\n");
     }
-    operation.render_runtime_type_parameters(output, "        ");
+    operation.render_request_runtime_type_parameters(output, "        ");
     start_line(output, target, ") -> ");
     output.push_str(&operation_result_annotation(operation));
     output.push_str(":\n");
     render_operation_docstring(output, target_body_indent(target), operation, &[], None);
+    operation.render_definition_type_arguments(output, target_body_indent(target));
     start_line(output, target, "    return await self.");
     output.push_str(&client_operation_name(service, operation));
     if operation.input.is_some() {
@@ -9103,7 +9208,9 @@ fn render_request_only_operation_function(
     operation: &RenderedOperation<'_>,
 ) {
     let function_name = request_operation_function_name(operation);
-    let render_request_doc = operation.unpacked_input.is_none();
+    // With no unpacked function, this function is the public call.
+    let public = operation.unpacked_input.is_none();
+    let render_request_doc = public;
     if operation.deprecated {
         output.push_str(
             "@typing_extensions.deprecated(\"This operation is deprecated.\", category=None)\n",
@@ -9112,12 +9219,19 @@ fn render_request_only_operation_function(
     output.push_str("async def ");
     output.push_str(&function_name);
     output.push_str("(\n");
+    if public {
+        operation.render_request_definition_parameter(output, "    ");
+    }
     if let Some(input) = &operation.input {
         output.push_str("    request: ");
         output.push_str(&input.annotation);
         output.push_str(",\n");
     }
-    operation.render_runtime_type_parameters(output, "    ");
+    if public {
+        operation.render_request_runtime_type_parameters(output, "    ");
+    } else {
+        operation.render_runtime_type_parameters(output, "    ");
+    }
     if operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
         || operation.output_direct_result
@@ -9203,6 +9317,9 @@ fn render_request_only_operation_function(
 
     if render_request_doc {
         render_operation_docstring(output, "    ", operation, &[], None);
+    }
+    if public {
+        operation.render_definition_type_arguments(output, "    ");
     }
 
     render_temporalio_workflow_runtime_imports(
@@ -9653,7 +9770,8 @@ fn render_unpacked_operation_function(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
-    operation.render_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
+    operation
+        .render_public_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
     if !unpacked_input.parameters.is_empty() {
         start_line(output, target, "    *,\n");
     }
@@ -9672,6 +9790,7 @@ fn render_unpacked_operation_function(
     }
     render_unpacked_return_annotation(output, target, service, operation);
     render_unpacked_operation_docstring(output, body_indent, operation, unpacked_input, None);
+    operation.render_definition_type_arguments(output, body_indent);
     for flattened_message in &unpacked_input.flattened_messages {
         render_flattened_message_setup(output, body_indent, flattened_message);
     }
@@ -9786,7 +9905,8 @@ fn render_function_unpacked_implementation(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
-    operation.render_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
+    operation
+        .render_public_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
 
     let primary_function = primary_function(&unpacked_input.functions);
     if let Some(function) = primary_function {
@@ -9872,6 +9992,7 @@ fn render_function_unpacked_implementation(
         unpacked_input,
         primary_function,
     );
+    operation.render_definition_type_arguments(output, target_body_indent(target));
 
     for function in &unpacked_input.functions {
         if !matches!(function.args, RenderedFunctionArgs::Varargs { .. }) {

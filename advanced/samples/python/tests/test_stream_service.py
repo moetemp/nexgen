@@ -18,6 +18,7 @@ from temporalio.converter import PayloadConverter
 import temporalio.nexus.system
 import temporalio.workflow
 
+import temporal_support
 from wit.stream_service.models import models as models_only
 from wit.stream_service.workflow import models as workflow_models
 from wit.stream_service.client import models as client_models
@@ -29,6 +30,10 @@ from wit.stream_service.both import workflow as both_workflow
 @dataclasses.dataclass
 class FakeWorkflowInfo:
     run_id: str
+
+
+class Texts(temporal_support.StreamDefinition[str]):
+    name: typing.ClassVar[str] = "texts"
 
 
 @pytest.fixture(
@@ -180,7 +185,7 @@ async def test_workflow_apis_call_the_stream_service(
 
     monkeypatch.setattr(temporalio.workflow, "create_nexus_client", create_client)
     monkeypatch.setattr(temporalio.workflow, "info", lambda: FakeWorkflowInfo("r2"))
-    stream = await api.create_stream(str, id="workflow-stream")
+    stream = await api.create_stream(Texts, id="workflow-stream")
     response = await stream.publish(records=[])
     assert response.last_offset == 3
     # The Workflow API fills the owner and the producer from its sources.

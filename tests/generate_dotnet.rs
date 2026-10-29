@@ -85,7 +85,7 @@ fn generate_dotnet_files(
     let output_path = temp_dir.join("output");
     generate_to_file(&GenerateRequest {
         config: nexgen::nexgen_config::NexgenConfig {
-            mode: nexgen::generator::GenerationMode::NativeApi,
+            targets: nexgen::nexgen_config::GenerationTargets::WORKFLOW,
             ..Default::default()
         },
         language: nexgen::language::Language::Dotnet,

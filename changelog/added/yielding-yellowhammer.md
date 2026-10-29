@@ -1,0 +1,1 @@
+`@nexus.poll items="<field>"` makes a Python poll iterator yield the items of each page, with a `next_request` to resume with. With `python-resume="<helper>"`, it resumes after the last item that the iterator yielded. Without it, it reads the current page again. TypeScript and .NET still yield the responses.

@@ -1,0 +1,6 @@
+languages = ["python"]
+targets = ["workflow", "client"]
+
+[error]
+kind = "python-generated-name-conflict"
+contains = ["`PollIterator`", "the item iterator of poll `Read`"]

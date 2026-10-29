@@ -340,9 +340,9 @@ async def test_a_read_that_does_not_wait_stops_at_an_empty_page_that_did_not_mov
     ]
     client = Client({"ReadRecords": list(pages)})
 
-    read = [page async for page in client.iter_read_records(str, stream=ref, last=2)]
+    read = [item async for item in client.iter_read_records(str, stream=ref, last=2)]
 
-    assert read == pages
+    assert read == pages[0].records
     assert [call[3] for call in client.calls] == [
         ReadRecordsRequest(stream=ref, last=2),
         ReadRecordsRequest(stream=ref, from_offset=3),
@@ -363,13 +363,13 @@ async def test_a_waiting_read_goes_on_after_an_empty_page_at_the_same_offset() -
     client = Client({"ReadRecords": list(pages)})
 
     read = [
-        page
-        async for page in client.iter_read_records(
+        item
+        async for item in client.iter_read_records(
             str, stream=ref, from_offset=1, wait=wait
         )
     ]
 
-    assert read == pages
+    assert read == pages[0].records
     assert [call[3] for call in client.calls] == [
         ReadRecordsRequest(stream=ref, from_offset=1, wait=wait),
         ReadRecordsRequest(stream=ref, from_offset=2, wait=wait),
@@ -391,13 +391,13 @@ async def test_a_stream_read_from_the_end_stays_at_the_first_next_offset() -> No
     stream = await client.create_stream(Texts, id="s1")
 
     read = [
-        page
-        async for page in stream.iter_read(
+        item
+        async for item in stream.iter_read(
             start=StreamReadStart.StreamReadStartEnd, wait=wait
         )
     ]
 
-    assert read == pages
+    assert read == pages[1].records
     assert [call[3] for call in client.calls[1:]] == [
         ReadRecordsRequest(
             stream=ref, start=StreamReadStart.StreamReadStartEnd, wait=wait
@@ -418,13 +418,13 @@ async def test_a_done_first_page_ends_the_read() -> None:
     ]
     client = Client({"ReadRecords": list(pages)})
 
-    read = [page async for page in client.iter_read_records(str, stream=ref)]
+    read = [item async for item in client.iter_read_records(str, stream=ref)]
 
-    assert read == pages
+    assert read == pages[0].records
     assert [call[3] for call in client.calls] == [ReadRecordsRequest(stream=ref)]
 
 
-async def test_a_changed_page_does_not_change_the_next_request() -> None:
+async def test_a_changed_item_does_not_change_the_next_request() -> None:
     ref = StreamRef(id="s1")
     wait = datetime.timedelta(seconds=30)
     client = Client(
@@ -438,14 +438,52 @@ async def test_a_changed_page_does_not_change_the_next_request() -> None:
         }
     )
 
-    async for page in client.iter_read_records(
+    async for item in client.iter_read_records(
         str, stream=ref, from_offset=1, wait=wait
     ):
-        page.next_offset = 9
+        item.offset = 9
 
     assert [call[3] for call in client.calls] == [
         ReadRecordsRequest(stream=ref, from_offset=1, wait=wait),
         ReadRecordsRequest(stream=ref, from_offset=2, wait=wait),
+    ]
+
+
+def stream_record(body: str, offset: int) -> StreamRecord[str]:
+    return StreamRecord(item=StreamItemData(StreamData(body=body)), offset=offset)
+
+
+async def test_a_handle_yields_items_and_resumes_after_each() -> None:
+    ref = StreamRef(id="s1")
+    wait = datetime.timedelta(seconds=30)
+    pages = [
+        ReadRecordsResponse(
+            records=[stream_record("a", 10), stream_record("b", 12)], next_offset=15
+        ),
+        ReadRecordsResponse[str](next_offset=15),
+        ReadRecordsResponse(
+            records=[stream_record("c", 20)], next_offset=21, done=True
+        ),
+    ]
+    client = Client(
+        {"CreateStream": [CreateStreamResult(stream=ref)], "ReadRecords": list(pages)}
+    )
+    stream = await client.create_stream(Texts, id="s1")
+
+    read = stream.iter_read(from_offset=10, wait=wait)
+    seen: list[tuple[int | None, int | None]] = []
+    async for record in read:
+        seen.append(
+            (record.offset, read.next_request and read.next_request.from_offset)
+        )
+
+    # After an item, the read resumes past it, and after a page's last item, where the page ends.
+    assert seen == [(10, 11), (12, 15), (20, None)]
+    assert read.next_request is None
+    assert [call[3] for call in client.calls[1:]] == [
+        ReadRecordsRequest(stream=ref, from_offset=10, wait=wait),
+        ReadRecordsRequest(stream=ref, from_offset=15, wait=wait),
+        ReadRecordsRequest(stream=ref, from_offset=15, wait=wait),
     ]
 
 

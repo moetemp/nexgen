@@ -1,0 +1,8 @@
+languages = ["python"]
+system_nexus = true
+targets = ["workflow", "client"]
+descriptors = "temporal"
+
+[error]
+kind = "unsupported-poll"
+contains = ["`ListWorkflows`", "has `items` that names `next_page_token`"]

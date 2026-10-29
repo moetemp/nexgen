@@ -1,0 +1,9 @@
+languages = ["dotnet"]
+system_nexus = true
+targets = ["workflow", "client"]
+
+[error]
+kind = "dotnet-generated-name-conflict"
+contains = [
+  ".NET generated name `ReadPagesAsync` for the iterator of operation `Reader.Read` conflicts with operation `Reader.ReadPages`",
+]

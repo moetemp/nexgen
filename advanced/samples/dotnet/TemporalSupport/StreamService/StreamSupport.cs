@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Temporalio.Activities;
 using Temporalio.Workflows;
 
 namespace Nexgen.Support
@@ -18,9 +19,22 @@ namespace Nexgen.Support
             (Workflow.InWorkflow ? Workflow.NewGuid() : System.Guid.NewGuid()).ToString();
     }
 
-    // The client sources.
+    // The client sources. An Activity's attempt produces in an Activity, or else the client.
     internal static class StreamActivityContext
     {
+        internal static Temporalio.Workflows.Producer Producer()
+        {
+            if (!ActivityExecutionContext.HasCurrent)
+            {
+                return new("client:sample");
+            }
+            var info = ActivityExecutionContext.Current.Info;
+            return new($"act:{info.WorkflowRunId}:{info.ActivityId}")
+            {
+                RunId = info.WorkflowRunId,
+            };
+        }
+
         internal static IReadOnlyList<long> LocalActivityFailedTasks() =>
             System.Array.Empty<long>();
 

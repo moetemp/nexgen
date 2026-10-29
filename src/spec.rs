@@ -857,8 +857,18 @@ pub struct RecordFieldSpec<F: TypeFamily = AuthoredFamily> {
     pub field_type: TypeSpec<F>,
     pub required: bool,
     pub origin: F::Origin,
+    /// Set when `@nexus.flatten-in-api` on the field promotes some fields of its record.
+    pub flatten: Option<FieldFlattenSpec>,
     pub function: Option<FunctionFieldSpec<F>>,
     pub data: F::FieldData,
+}
+
+/// A field-level `@nexus.flatten-in-api`. The call takes the fields in `fields` of the field's
+/// record as parameters. Names are field keys.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldFlattenSpec {
+    /// The fields of the record that become parameters, in order.
+    pub fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1290,6 +1300,7 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             field_type: self.field_type.map_names_with(map),
             required: self.required,
             origin: map.map_origin(self.origin),
+            flatten: self.flatten,
             function: self.function.map(|function| function.map_names_with(map)),
             data,
         }
@@ -1305,6 +1316,7 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             && self.flattened_annotation.is_none()
             && !self.required
             && self.origin.is_none()
+            && self.flatten.is_none()
             && self.function.is_none()
     }
 }

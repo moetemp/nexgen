@@ -1139,8 +1139,14 @@ fn build_fields_from_record(
         }
 
         if omit_directive.is_some() {
-            for conflicting_directive in ["source", "type", "flattened-type", "function", "default"]
-            {
+            for conflicting_directive in [
+                "source",
+                "type",
+                "flattened-type",
+                "function",
+                "default",
+                "flatten-in-api",
+            ] {
                 if directives
                     .iter()
                     .any(|directive| directive.name() == conflicting_directive)
@@ -1186,6 +1192,7 @@ fn build_fields_from_record(
                         default: Some(FieldOrigin::Omitted),
                         ..Default::default()
                     },
+                    flatten: None,
                     function: None,
                     data: (),
                 },
@@ -1235,6 +1242,7 @@ fn build_fields_from_record(
                     .to_string(),
             });
         }
+        let flatten = build_field_flatten(resolve, &field.ty, &directives, path, &field_context)?;
         let annotation =
             directive(&directives, "type", path, &field_context)?.map(directive_language_string);
         let flattened_annotation = directive(&directives, "flattened-type", path, &field_context)?
@@ -1261,6 +1269,7 @@ fn build_fields_from_record(
                 field_type,
                 required,
                 origin,
+                flatten,
                 function,
                 data: (),
             },
@@ -1292,6 +1301,7 @@ fn build_fields_from_record(
                         ),
                         required: arg_field.required,
                         origin: Default::default(),
+                        flatten: None,
                         function: None,
                         data: (),
                     },
@@ -1863,6 +1873,65 @@ fn origin_directives<'a>(
         selected.push((directive, targets));
     }
     Ok(selected)
+}
+
+/// A field-level `@nexus.flatten-in-api`. `fields` lists fields of the field's record by WIT name.
+fn build_field_flatten(
+    resolve: &Resolve,
+    ty: &Type,
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<FieldFlattenSpec>> {
+    let Some(flatten) = directive(directives, "flatten-in-api", path, context)? else {
+        return Ok(None);
+    };
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.flatten-in-api".to_string(),
+        reason,
+    };
+    let Some(fields) = flatten.value("fields") else {
+        return Err(invalid(
+            "on a field, needs the fields of its record to promote, such as `fields=\"backend\"`"
+                .to_string(),
+        ));
+    };
+    let mut ty = *ty;
+    let record = loop {
+        let Type::Id(id) = ty else {
+            return Err(invalid("the field's type isn't a record".to_string()));
+        };
+        match &resolve.types[id].kind {
+            TypeDefKind::Option(inner) | TypeDefKind::Type(inner) => ty = *inner,
+            TypeDefKind::Record(record) => break record,
+            _ => return Err(invalid("the field's type isn't a record".to_string())),
+        }
+    };
+    let fields = fields
+        .split_whitespace()
+        .map(|name| {
+            let field = record
+                .fields
+                .iter()
+                .find(|field| field.name == name)
+                .ok_or_else(|| invalid(format!("`{name}` isn't a field of the field's record")))?;
+            let directives = parse_directives(field.docs.contents.as_deref(), path, context)?;
+            record_field_key(field, &directives, path, context)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    if fields.is_empty() {
+        return Err(invalid(
+            "on a field, promotes at least one field of its record".to_string(),
+        ));
+    }
+    // Each field of the record is one parameter.
+    let mut named = BTreeSet::new();
+    if let Some(key) = fields.iter().find(|key| !named.insert(key.as_str())) {
+        return Err(invalid(format!("has `{key}` twice in `fields`")));
+    }
+    Ok(Some(FieldFlattenSpec { fields }))
 }
 
 fn build_origin_targets(

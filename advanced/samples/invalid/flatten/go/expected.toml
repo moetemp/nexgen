@@ -1,0 +1,7 @@
+inputs = ["input.wit", "../../../inputs/deps"]
+descriptors = "temporal"
+languages = ["go"]
+
+[error]
+kind = "unsupported-go-type"
+contains = ["Go code generation does not support record `history-service.get-history-request` field `execution`: Go doesn't flatten some fields of a request field"]

@@ -273,8 +273,8 @@ const CATALOG: &[Annotation] = {
         },
         Annotation {
             name: "flatten-in-api",
-            sites: &[Record],
-            keys: &[],
+            sites: &[Record, Field],
+            keys: &["fields"],
             language_keys: &[],
             repeatable: false,
             languages: None,
@@ -385,6 +385,10 @@ impl Annotation {
     }
 
     fn accepts_key(&self, key: &str, site: Site) -> bool {
+        // A record flattens all of its fields, and a field lists the fields of its record.
+        if self.name == "flatten-in-api" {
+            return site == Site::Field && key == "fields";
+        }
         if self.name == "type"
             && site == Site::Field
             && (key.ends_with("-from") || key.ends_with("-to"))

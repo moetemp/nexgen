@@ -1,0 +1,6 @@
+inputs = ["input.wit", "../../../inputs/deps"]
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit-directive"
+contains = ["invalid WIT directive `@nexus.omit` on type `history-service.get-history-request` field `execution`", "cannot be combined with `@nexus.flatten-in-api`"]

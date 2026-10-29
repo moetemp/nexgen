@@ -188,7 +188,7 @@ async def test_sdk_factory_needs_no_adapter() -> None:
             "DescribeStream": DescribeStreamResponse(last_offset=5),
         },
     )
-    stream = await client.create_stream(str, stream_ref=ref)
+    stream = await client.create_stream(str, id=ref.id)
     assert stream.ref == ref
     stored = client.get_stream(ref=ref, created=None, body_type=str)
     assert (await stored.describe()).last_offset == 5
@@ -212,7 +212,7 @@ async def test_an_operation_starts_through_the_sdk_nexus_client() -> None:
         assert not hasattr(client, name)
         assert not hasattr(client, f"_stream_service_{name}")
 
-    stream = await client.create_stream(str, stream_ref=StreamRef(id="s1"))
+    stream = await client.create_stream(str, id="s1")
     response = await stream.publish(records=[])
     await stream.close()
 
@@ -288,6 +288,23 @@ async def test_a_client_append_sends_the_writer_of_its_activity(
     assert wire.writer.withdraw_run == ""
 
 
+async def test_a_create_takes_the_handle_fields_as_parameters() -> None:
+    client, answers = connect(
+        Client, {"CreateStream": CreateStreamResult(ref=StreamRef(id="s1"))}
+    )
+
+    _ = await client.create_stream(str, id="s1", backend="redis")
+
+    request = answers.started[0].arg
+    assert request == CreateStreamRequest(
+        stream_ref=StreamRef(id="s1", backend="redis"),
+        request_id=request.request_id,
+    )
+    # The proto keeps the ref.
+    payload = SYSTEM_CONVERTER.to_payload(request)
+    assert SYSTEM_CONVERTER.from_payload(payload, CreateStreamRequest) == request
+
+
 async def test_a_stored_stream_ref_rebuilds_the_resource() -> None:
     client, answers = connect(
         Client, {"DescribeStream": DescribeStreamResponse(last_offset=7)}
@@ -331,7 +348,7 @@ async def test_client_only_calls_need_no_workflow_context(
             "DescribeStream": client_models.DescribeStreamResponse(last_offset=8),
         },
     )
-    stream = await client.create_stream(str, stream_ref=ref)
+    stream = await client.create_stream(str, id=ref.id)
     response = await stream.describe()
     assert response.last_offset == 8
     assert len(client.created_clients) == 1
@@ -351,7 +368,7 @@ async def test_each_call_gets_a_new_operation_id() -> None:
             "DescribeStream": DescribeStreamResponse(last_offset=7),
         },
     )
-    stream = await client.create_stream(str, stream_ref=StreamRef(id="s1"))
+    stream = await client.create_stream(str, id="s1")
     _ = await stream.describe()
     _ = await stream.describe()
     ids = [started.id for started in answers.started]
@@ -442,7 +459,7 @@ async def test_a_stream_read_from_the_end_stays_at_the_first_next_offset() -> No
         Client,
         {"CreateStream": CreateStreamResult(ref=ref), "ReadRecords": list(pages)},
     )
-    stream = await client.create_stream(str, stream_ref=StreamRef(id="s1"))
+    stream = await client.create_stream(str, id="s1")
 
     read = [
         page
@@ -651,7 +668,7 @@ async def test_a_handle_decodes_its_bodies_with_its_body_type() -> None:
         },
     )
 
-    stream = await client.create_stream(Turn, stream_ref=StreamRef(id="s1"))
+    stream = await client.create_stream(Turn, id="s1")
     page = await stream.read()
 
     _ = assert_type(stream, Stream[Turn])
@@ -670,9 +687,7 @@ async def test_a_call_and_a_resource_method_pass_their_rpc_options() -> None:
     )
     timeout = datetime.timedelta(seconds=3)
 
-    stream = await client.create_stream(
-        str, stream_ref=StreamRef(id="s1"), rpc_timeout=timeout
-    )
+    stream = await client.create_stream(str, id="s1", rpc_timeout=timeout)
     _ = await stream.describe(rpc_metadata={"authorization": "token"})
 
     assert [

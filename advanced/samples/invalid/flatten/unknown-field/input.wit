@@ -1,0 +1,20 @@
+package test:unknown-field@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  record get-history-request {
+    namespace: string,
+    // `id` isn't a field of `workflow-execution`.
+    /// @nexus.flatten-in-api fields="id"
+    execution: option<workflow-execution>,
+  }
+
+  get-history: func(request: get-history-request);
+}

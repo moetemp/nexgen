@@ -72,15 +72,14 @@ async def test_a_workflow_create_fills_its_sources(
     nexus_client: FakeNexusClient,
 ) -> None:
     stream = await create_stream(
-        str,
-        stream_ref=StreamRef(id="turns"),
-        retention=datetime.timedelta(days=1),
+        str, id="turns", backend="redis", retention=datetime.timedelta(days=1)
     )
 
-    # The request id comes from the Workflow, so a replay sends the same one.
+    # The request id comes from the Workflow, so a replay sends the same one. The ref takes the id
+    # and the backend.
     assert nexus_client.inputs == [
         CreateStreamRequest(
-            stream_ref=StreamRef(id="turns"),
+            stream_ref=StreamRef(id="turns", backend="redis"),
             retention=datetime.timedelta(days=1),
             request_id=str(REQUEST_ID),
         )

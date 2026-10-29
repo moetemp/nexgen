@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["invalid WIT directive `@nexus.flatten-in-api` on type `history-service.get-history-request` field `execution`", "`id` isn't a field of the field's record"]

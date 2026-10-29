@@ -1,0 +1,73 @@
+package temporal:nexus@1.0.0;
+
+world system { export compare-service; }
+
+/// @nexus.endpoint "compare"
+interface compare-service {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution"
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  // Both flattens promote `workflow-id`.
+  /// @nexus.proto "temporal.api.workflow.v1.WorkflowExecutionInfo"
+  record execution-info {
+    /// @nexus.flatten-in-api fields="workflow-id"
+    execution: option<workflow-execution>,
+    /// @nexus.omit
+    %type: placeholder,
+    /// @nexus.omit
+    start-time: placeholder,
+    /// @nexus.omit
+    close-time: placeholder,
+    /// @nexus.omit
+    status: placeholder,
+    /// @nexus.omit
+    history-length: placeholder,
+    /// @nexus.omit
+    parent-namespace-id: placeholder,
+    /// @nexus.flatten-in-api fields="workflow-id"
+    parent-execution: option<workflow-execution>,
+    /// @nexus.omit
+    execution-time: placeholder,
+    /// @nexus.omit
+    memo: placeholder,
+    /// @nexus.omit
+    search-attributes: placeholder,
+    /// @nexus.omit
+    auto-reset-points: placeholder,
+    /// @nexus.omit
+    task-queue: placeholder,
+    /// @nexus.omit
+    state-transition-count: placeholder,
+    /// @nexus.omit
+    history-size-bytes: placeholder,
+    /// @nexus.omit
+    most-recent-worker-version-stamp: placeholder,
+    /// @nexus.omit
+    execution-duration: placeholder,
+    /// @nexus.omit
+    root-execution: placeholder,
+    /// @nexus.omit
+    assigned-build-id: placeholder,
+    /// @nexus.omit
+    inherited-build-id: placeholder,
+    /// @nexus.omit
+    first-run-id: placeholder,
+    /// @nexus.omit
+    versioning-info: placeholder,
+    /// @nexus.omit
+    worker-deployment-name: placeholder,
+    /// @nexus.omit
+    priority: placeholder,
+    /// @nexus.omit
+    external-payload-size-bytes: placeholder,
+    /// @nexus.omit
+    external-payload-count: placeholder,
+  }
+
+  compare: func(request: execution-info);
+}

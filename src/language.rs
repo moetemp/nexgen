@@ -25,7 +25,7 @@ impl Language {
 
     /// Whether nexgen generates the client target for the language.
     pub const fn has_client_target(self) -> bool {
-        matches!(self, Self::Python)
+        matches!(self, Self::Python | Self::TypeScript)
     }
 }
 

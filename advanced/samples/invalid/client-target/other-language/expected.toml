@@ -1,4 +1,4 @@
-languages = ["typescript", "go", "dotnet"]
+languages = ["go", "dotnet"]
 targets = ["client"]
 
 [error]

@@ -24,7 +24,7 @@ use crate::spec::{
     EnumSpec, ExternalTypeSpec, IntSpec, RecordFieldSpec, RecordSpec, TypeReplacementSpec,
 };
 
-mod resources;
+pub(in crate::generator) mod resources;
 
 pub(in crate::generator) fn integer_annotation(int: IntSpec) -> &'static str {
     match int {

@@ -5,12 +5,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::integer_annotation;
 use crate::error::{Error, Result};
 use crate::generator::typescript::{
-    RenderedResource, RenderedService, render_resource_with_annotations,
-    typescript_resource_field_type,
+    RenderedResource, RenderedService, ResolvedFieldType, render_data_resource,
+    render_resource_with_annotations, typescript_resource_field_type,
 };
 use crate::planning::{
-    PlannedFamily, PlannedResource, PlannedResourceMethodBindingSpec, PlannedSpec, PlannedType,
-    RequestPlan, RequestPlanSource, ResolvedResourceBindingSource, operation_input_model,
+    PlannedFamily, PlannedResource, PlannedResourceField, PlannedResourceMethod,
+    PlannedResourceMethodBindingSpec, PlannedSpec, PlannedType, RequestPlan, RequestPlanSource,
+    ResolvedResourceBindingSource, operation_input_model,
 };
 use crate::spec::{ExternalTypeSourceSpec, ExternalTypeSpec, IntSpec, ServiceSpec};
 
@@ -21,34 +22,64 @@ pub(super) fn render_resource(
     resource: &PlannedResource,
     rendered_service: &RenderedService<'_>,
 ) -> Result<RenderedResource> {
-    let bindings = ResourceBindings::resolve(api, service, resource)?;
+    let annotations = ResourceAnnotations::resolve(api, service, resource)?;
     let mut source = String::new();
-    let requirements = render_resource_with_annotations(
-        &mut source,
-        resource,
-        rendered_service,
-        api,
-        |field| {
-            typescript_resource_field_type(
-                &field.kind,
-                field.optional,
-                field.function.as_ref(),
-                bindings.field_is_proto(&field.name),
-            )
-        },
-        |method, param| {
-            typescript_resource_field_type(
-                &param.kind,
-                false,
-                param.function.as_ref(),
-                bindings.param_is_proto(&method.name, &param.name),
-            )
-        },
-    );
+    let requirements = if crate::nexgen_config::current().targets.workflow {
+        render_resource_with_annotations(
+            &mut source,
+            resource,
+            rendered_service,
+            api,
+            |field| annotations.field(field),
+            |method, param| annotations.param(method, param),
+        )
+    } else {
+        render_data_resource(&mut source, resource, |field| annotations.field(field))
+    };
     Ok(RenderedResource {
         source,
         requirements,
     })
+}
+
+/// The TypeScript type of each value of a resource, from the backing of the requests that it
+/// binds to. The client target's resource uses the same types as the Workflow resource.
+pub(in crate::generator) struct ResourceAnnotations {
+    bindings: ResourceBindings,
+}
+
+impl ResourceAnnotations {
+    pub(in crate::generator) fn resolve(
+        api: &PlannedSpec,
+        service: &ServiceSpec<PlannedFamily>,
+        resource: &PlannedResource,
+    ) -> Result<Self> {
+        Ok(Self {
+            bindings: ResourceBindings::resolve(api, service, resource)?,
+        })
+    }
+
+    pub(in crate::generator) fn field(&self, field: &PlannedResourceField) -> ResolvedFieldType {
+        typescript_resource_field_type(
+            &field.kind,
+            field.optional,
+            field.function.as_ref(),
+            self.bindings.field_is_proto(&field.name),
+        )
+    }
+
+    pub(in crate::generator) fn param(
+        &self,
+        method: &PlannedResourceMethod,
+        param: &PlannedResourceField,
+    ) -> ResolvedFieldType {
+        typescript_resource_field_type(
+            &param.kind,
+            false,
+            param.function.as_ref(),
+            self.bindings.param_is_proto(&method.name, &param.name),
+        )
+    }
 }
 
 /// Integer representation is a property of a binding, not of resource syntax.

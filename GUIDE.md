@@ -1514,9 +1514,9 @@ separate the targets with commas.
   model fields. A handler that implements the service needs only these.
 - `workflow` selects the API for Workflow code.
 - `client` writes the same API for code outside a Workflow, in a `client`
-  package inside the output directory. So far only Python supports it. It can be
-  selected independently or alongside `workflow`. nexgen refuses it for a
-  service with no `@nexus.endpoint`.
+  package inside the output directory. So far Python and TypeScript support it.
+  It can be selected independently or alongside `workflow`. nexgen refuses it
+  for a service with no `@nexus.endpoint`.
 
 The `client` package has its own resource classes and a
 `<Service>ClientExtension` for each service, with the names of the Workflow
@@ -1599,6 +1599,42 @@ await job.restart()
 
 nexgen refuses a factory name that is also the name of a client method of a
 service in the package.
+
+In TypeScript, the `client/` package has `index.ts`, `extension.ts`,
+`resources.ts` and `nexus-client.ts`. `<Service>ClientExtension(Base)` is a
+mixin. A client class extends it and implements `createNexusClient`, which takes
+the service definition and the endpoint and returns a `NexusServiceClient`, an
+object with the `startOperation` of the `NexusServiceClient` of
+`@temporalio/client`. A call takes the request object, and the factory of a
+resource is `get<Resource>`, with the identity fields as parameters. The mixin
+throws a `TypeError` when `Base` already has one of its public names, on its
+prototype or as an instance field.
+
+```ts
+import { Client } from "@temporalio/client";
+import type * as nexus from "nexus-rpc";
+import {
+  type NexusServiceClient,
+  StreamServiceClientExtension,
+} from "./stream-service/client";
+
+class StreamClient extends StreamServiceClientExtension(Client) {
+  createNexusClient<T extends nexus.ServiceDefinition>(options: {
+    service: T;
+    endpoint: string;
+  }): NexusServiceClient<T> {
+    return this.nexus.createServiceClient(options);
+  }
+}
+
+const stream = await new StreamClient({ connection }).createStream({ id: "s1" });
+await stream.publish(records);
+```
+
+A TypeScript client resource keeps its Nexus client in a private field, so the
+handle still converts as data. nexgen refuses an operation whose client method
+would be `createNexusClient`, and a type named `NexusServiceClient`, since both
+would clash in the client package.
 
 Sources work in the client target as well. Restrict workflow-only helpers with
 `targets="workflow"`. If a required resource-method request field has neither an
@@ -2154,17 +2190,18 @@ type or transform expression refers to an otherwise-unavailable module.
 ### @nexus.poll
 
 **Placement:** Operation (function) **Syntax:**
-`@nexus.poll python="<support-helper>" targets="client"`
+`@nexus.poll python="<support-helper>" typescript="<support-helper>" targets="client"`
 
-Generates an `iter_<name>` async iterator on the client extension, and on each
-client resource method that binds the operation. The iterator sends the request,
-yields the response, and calls `<support-helper>(request, response)` for the
-next request. The helper is a sync function in the `--support-package`. It
-returns `None` to stop.
+Generates an async iterator on the client extension, and on each client resource
+method that binds the operation. Python names it `iter_<name>`, and TypeScript
+names it `iter<Name>`. The iterator sends the request, yields the response, and
+calls `<support-helper>(request, response)` for the next request. The helper is
+a sync function in the `--support-package`. It returns `None` (`undefined` in
+TypeScript) to stop.
 
 ```wit
 /// @nexus.operation name="ReadRecords"
-/// @nexus.poll python="next_read_request" targets="client"
+/// @nexus.poll python="next_read_request" typescript="nextReadRequest" targets="client"
 read-records: func(request: read-records-request) -> read-records-response;
 ```
 
@@ -2178,16 +2215,17 @@ def next_read_request(request, response):
     return dataclasses.replace(request, from_offset=response.next_offset)
 ```
 
-The stream sample's full helper is in
-[`temporal_support/poll.py`](advanced/samples/python/temporal_support/poll.py).
+The stream sample's full helpers are in
+[`temporal_support/poll.py`](advanced/samples/python/temporal_support/poll.py)
+and [`support/poll.ts`](advanced/samples/typescript/support/poll.ts).
 
 - The iterator yields pages, not the items in them.
 - All pages use one Nexus client. Each page is a new operation with a new random
   operation ID.
-- Only the Python client target generates the iterator, so `targets` must be
-  `client`.
+- Only the client target generates the iterator, so `targets` must be `client`.
 - nexgen refuses the directive on a resource method, on an operation that it
-  can't poll, and when `iter_<name>` clashes with another member.
+  can't poll, and when the iterator's name clashes with another member.
+  TypeScript also refuses a request with type parameters.
 - Use `asyncio.timeout` to limit a whole iteration. After an error, start a new
   iteration at the last page's `next_offset`.
 

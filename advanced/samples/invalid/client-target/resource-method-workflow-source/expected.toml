@@ -1,4 +1,4 @@
-languages = ["python"]
+languages = ["python", "typescript"]
 system_nexus = true
 targets = ["workflow", "client"]
 

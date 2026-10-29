@@ -1,0 +1,11 @@
+package temporal:client-typescript-hook-name-clash@1.0.0;
+
+world system { export connector; }
+
+// The client method of this operation would hide the hook that the client class implements.
+/// @nexus.endpoint "connectors"
+interface connector {
+  record create-nexus-client-request { name: string }
+
+  create-nexus-client: func(request: create-nexus-client-request);
+}

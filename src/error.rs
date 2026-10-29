@@ -86,6 +86,15 @@ pub enum Error {
     },
 
     #[error(
+        "TypeScript generated name `{name}` for {generated_by} conflicts with {conflicting_declaration}"
+    )]
+    TypeScriptGeneratedNameConflict {
+        name: String,
+        generated_by: String,
+        conflicting_declaration: String,
+    },
+
+    #[error(
         ".NET type parameter `{parameter}` in `{declaration}` maps to `{name}`, which conflicts with {conflicting}"
     )]
     DotnetTypeParameterNameConflict {

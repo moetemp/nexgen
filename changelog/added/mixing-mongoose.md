@@ -1,0 +1,2 @@
+`--targets workflow,client` also generates a TypeScript `client/` package, with a client extension mixin for each service and its own resource classes. A client class implements `createNexusClient`, which can return `client.nexus.createServiceClient(options)` of `@temporalio/client`. Each call uses a new random operation ID, and each extension has a `get<Resource>` factory.
+`@nexus.poll` with a `typescript` helper generates a TypeScript `iter<Name>` iterator in the client target, on the client extension and on each client resource method that binds the operation.

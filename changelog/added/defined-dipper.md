@@ -1,0 +1,1 @@
+`@nexus.definition` names an SDK type, such as a Stream definition, that gives the type arguments of a generic resource. An operation that returns the resource takes it in place of runtime types, in Python, TypeScript and .NET, unless a resource method binds the operation.

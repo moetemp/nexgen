@@ -12,6 +12,7 @@ import temporalio.nexus.system
 from temporalio.api.common.v1 import Payload
 from typing_extensions import assert_type, override
 
+import temporal_support
 import wit.stream_service.both as workflow_package
 import wit.stream_service.both._resources.stream as workflow_stream_module
 from wit.stream_service.both.client import Stream, StreamServiceClientExtension
@@ -43,6 +44,14 @@ SYSTEM_CONVERTER = temporalio.nexus.system._SystemNexusPayloadConverter(
 @dataclasses.dataclass
 class Turn:
     role: str
+
+
+class Turns(temporal_support.StreamDefinition[Turn]):
+    name: typing.ClassVar[str] = "turns"
+
+
+class Texts(temporal_support.StreamDefinition[str]):
+    name: typing.ClassVar[str] = "texts"
 
 
 @pytest.fixture(autouse=True)
@@ -109,7 +118,7 @@ async def test_a_created_stream_publishes_on_the_system_endpoint() -> None:
         }
     )
 
-    stream = await client.create_stream(str, id="s1")
+    stream = await client.create_stream(Texts, id="s1")
     response = await stream.publish(records=[])
 
     assert isinstance(stream, Stream)
@@ -204,7 +213,7 @@ async def test_a_stream_read_from_the_end_stays_at_the_first_next_offset() -> No
     client = Client(
         {"CreateStream": [CreateStreamResult(stream=ref)], "ReadRecords": list(pages)}
     )
-    stream = await client.create_stream(str, id="s1")
+    stream = await client.create_stream(Texts, id="s1")
 
     read = [
         page
@@ -287,7 +296,7 @@ async def test_a_handle_decodes_its_bodies_with_its_body_type() -> None:
         }
     )
 
-    stream = await client.create_stream(Turn, id="s1")
+    stream = await client.create_stream(Turns, id="s1")
     page = await stream.read()
 
     _ = assert_type(stream, Stream[Turn])

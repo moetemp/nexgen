@@ -727,6 +727,9 @@ pub struct ResourceSpec<F: TypeFamily = AuthoredFamily> {
     pub doc: F::Text,
     /// The type parameters that the resource declares, in order. It may use only these.
     pub type_parameters: Vec<TypeParameterSpec>,
+    /// An SDK type that gives the type arguments of the resource, such as a Stream definition.
+    /// An operation that returns the resource takes it in place of runtime types.
+    pub definition: F::Text,
     pub fields: Vec<ResourceFieldSpec<F>>,
     pub methods: Vec<ResourceMethodSpec<F>>,
     pub data: F::ResourceData,
@@ -765,6 +768,7 @@ impl<F: TypeFamily> ResourceSpec<F> {
             name: self.name,
             doc: map.map_text(self.doc),
             type_parameters: self.type_parameters,
+            definition: map.map_text(self.definition),
             fields: self
                 .fields
                 .into_iter()

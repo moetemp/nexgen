@@ -1,0 +1,6 @@
+inputs = ["input.wit", "../../../inputs/deps"]
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit"
+contains = ["promotes `workflow_id` of field `execution` and `workflow_id` of field `parent_execution`"]

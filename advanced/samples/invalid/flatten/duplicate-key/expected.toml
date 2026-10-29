@@ -1,0 +1,6 @@
+inputs = ["input.wit", "../../../inputs/deps"]
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.flatten-in-api", "names `run_id` twice"]

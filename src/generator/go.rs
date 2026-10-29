@@ -742,6 +742,19 @@ fn generate_in_tree(
             resource: resource.name.clone(),
         });
     }
+    // A Go call takes a whole request field, so nexgen can't promote some fields of one.
+    if let Some((record, field_name)) = api_plan.records().find_map(|(_, record)| {
+        record
+            .fields
+            .iter()
+            .find(|(_, field)| field.flatten.is_some())
+            .map(|(field_name, _)| (record, field_name))
+    }) {
+        return Err(Error::UnsupportedGoType {
+            context: format!("record `{}` field `{field_name}`", record.full_name),
+            reason: "Go doesn't flatten some fields of a request field".to_string(),
+        });
+    }
     ApiPlanner::new(api_plan, options, tree_models)?.generate(primary_origin)
 }
 

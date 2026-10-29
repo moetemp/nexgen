@@ -23,9 +23,9 @@ namespace Temporalio.Workflows
         /// </summary>
         public System.TimeSpan? Retention { get; set; }
         /// <summary>
-        /// The ref, whose id is stream-id. A create with an owner needs the ref's owner.
+        /// Registered backend name, empty for the default. The Store never reads it.
         /// </summary>
-        public StreamRef? Ref { get; set; }
+        public string? Backend { get; set; }
     }
 
     /// <summary>
@@ -142,10 +142,11 @@ namespace Temporalio.Workflows
         [GeneratedCode("nexgen", null)]
         public static Task<Stream<TBody>> CreateStreamAsync<TBody>(Nexgen.Support.StreamDefinition<TBody> definition, CreateStreamOptions? options = null)
         {
-            var request = new CreateStreamRequest(Nexgen.Support.StreamWorkflowContext.StreamId(definition), Nexgen.Support.StreamWorkflowContext.Owner())
+            var id = Nexgen.Support.StreamWorkflowContext.StreamId(definition);
+            var request = new CreateStreamRequest(id, Nexgen.Support.StreamWorkflowContext.Owner())
             {
                 Retention = options?.Retention,
-                Ref = options?.Ref,
+                Ref = new StreamRef(id) { Backend = options?.Backend, Owner = Nexgen.Support.StreamWorkflowContext.HandleOwner() },
             };
             return CreateStreamAsync<TBody>(request);
         }

@@ -1,0 +1,1 @@
+`@nexus.flatten-in-api fields="..." fill="<field>=<sibling>"` on a field makes the named fields of its record parameters of the call, and copies sibling fields into the others. Python, TypeScript and .NET generate it in each target, and Go refuses it. An `@nexus.source field="<field>"` on the same field fills a field of the record from a source, in the targets that it names.

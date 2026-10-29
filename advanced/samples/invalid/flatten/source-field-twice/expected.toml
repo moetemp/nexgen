@@ -1,0 +1,6 @@
+[error]
+kind = "invalid-wit-directive"
+contains = [
+  "@nexus.source",
+  "overlapping target `client`; repeated `@nexus.source` directives must have disjoint target sets",
+]

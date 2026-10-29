@@ -1,0 +1,6 @@
+[error]
+kind = "invalid-wit-directive"
+contains = [
+  "@nexus.source",
+  "names `run-id`, which isn't an `option<T>`. A target with no source leaves it unset",
+]

@@ -194,10 +194,19 @@ async def test_workflow_apis_call_the_stream_service(
     assert response.last_offset == 3
     # The Workflow target fills the id, the owner and the producer from its sources.
     run = model_types.Producer(id="wf:r2", run_id="r2")
+    owner = model_types.Execution(
+        type=model_types.ExecutionType.ExecutionTypeWorkflow,
+        business_id="wf-1",
+        run_id="r1",
+    )
     expected = [
         (
             "CreateStream",
-            model_types.CreateStreamRequest(id="wf-1:r1:texts", owner=run),
+            model_types.CreateStreamRequest(
+                id="wf-1:r1:texts",
+                owner=run,
+                ref=model_types.StreamRef(id="wf-1:r1:texts", owner=owner),
+            ),
         ),
         (
             "AppendRecords",

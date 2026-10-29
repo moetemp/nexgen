@@ -48,17 +48,23 @@ async def create_stream(
     definition: type[temporal_support.StreamDefinition[BodyT]],
     *,
     retention: datetime.timedelta | None = None,
-    ref: StreamRef | None = None,
+    backend: str | None = None,
 ) -> Stream[BodyT]:
     """
     Args:
         retention: The age after which a Record is dropped. Empty is the Store default.
-        ref: The ref, whose id is stream-id. A create with an owner needs the ref's
-            owner.
+        backend: Registered backend name, empty for the default. The Store never reads
+            it.
     """
     (body_type,) = _support.definition_type_arguments(definition)
+    id = _support.workflow_stream_id(definition)
+    ref = StreamRef(
+        backend=backend,
+        id=id,
+        owner=_support.workflow_handle_owner(),
+    )
     request = CreateStreamRequest(
-        id=_support.workflow_stream_id(definition),
+        id=id,
         retention=retention,
         owner=_support.workflow_owner(),
         ref=ref,

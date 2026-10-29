@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.source", "names `run-id`, which `fields` or `fill` of the flatten already sets"]

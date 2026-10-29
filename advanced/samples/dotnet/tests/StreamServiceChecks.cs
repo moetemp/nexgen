@@ -103,5 +103,11 @@ namespace Nexgen.DotNetExamples.Tests
         private static Task<StreamServiceExample.Stream<Turn>> CreateTurns() =>
             StreamServiceExample.Operations.CreateStreamAsync(
                 new Streams::Nexgen.Support.StreamDefinition<Turn>("turns"));
+
+        // The create takes the backend of the ref as an option, and the ref copies the id.
+        private static Task<StreamServiceExample.Stream<Turn>> CreateTurnsOnBackend() =>
+            StreamServiceExample.Operations.CreateStreamAsync(
+                new Streams::Nexgen.Support.StreamDefinition<Turn>("turns"),
+                new StreamServiceExample.CreateStreamOptions { Backend = "redis" });
     }
 }

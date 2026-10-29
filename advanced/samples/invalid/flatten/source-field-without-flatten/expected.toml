@@ -1,0 +1,6 @@
+[error]
+kind = "invalid-wit-directive"
+contains = [
+  "@nexus.source",
+  "with `field`, fills a field of the record that a field-level `@nexus.flatten-in-api` builds, and the field has none",
+]

@@ -22,6 +22,17 @@ def workflow_stream_id(definition: type[typing.Any]) -> str:
     return f"{info.workflow_id}:{info.first_execution_run_id}:{name}"
 
 
+def workflow_handle_owner() -> typing.Any:
+    """The Workflow's run chain, which owns its Streams: its id and its first run id."""
+    info = temporalio.workflow.info()
+    models = importlib.import_module("wit.stream_service.both.models")
+    return models.Execution(
+        type=models.ExecutionType.ExecutionTypeWorkflow,
+        business_id=info.workflow_id,
+        run_id=info.first_execution_run_id,
+    )
+
+
 def workflow_owner() -> typing.Any:
     run_id = temporalio.workflow.info().run_id
     return _producer(f"wf:{run_id}", run_id)

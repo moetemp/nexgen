@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { NexusServiceClient } from "../wit/stream-service/both/client/nexus-client.ts";
 
 import {
+  ExecutionType,
   type ReadRecordsResponse,
   StreamCloseStatus,
   StreamStatus,
@@ -15,11 +16,17 @@ import {
   readRecordsRequestTransferTypeConverter,
   readRecordsResponseTransferTypeConverter,
 } from "../wit/stream-service/both/models.ts";
+import { createStream } from "../wit/stream-service/both/operations/create-stream.ts";
 import { Stream } from "../wit/stream-service/both/resources.ts";
 
 const startOperation = vi.hoisted(() => vi.fn());
 vi.mock("@temporalio/workflow", () => ({
   createNexusServiceClient: () => ({ startOperation }),
+  workflowInfo: () => ({
+    workflowId: "chat-1",
+    firstExecutionRunId: "r1",
+    runId: "r2",
+  }),
 }));
 
 // A body goes through the payload converter of the Workflow.
@@ -108,6 +115,25 @@ describe("stream-service generated output", () => {
     expect(
       readRecordsRequestTransferTypeConverter.toTransferType(model).stream?.id,
     ).toBe("stream-1");
+  });
+
+  test("a Workflow create names the run chain that owns the stream", async () => {
+    startOperation.mockResolvedValue({
+      result: async () => ({ stream: { id: "chat-1:r1:turns" } }),
+    });
+
+    await createStream({ name: "turns" }, { backend: "redis" });
+
+    const [, request] = startOperation.mock.calls[0];
+    expect(request.ref).toEqual({
+      backend: "redis",
+      id: "chat-1:r1:turns",
+      owner: {
+        type: ExecutionType.ExecutionTypeWorkflow,
+        businessId: "chat-1",
+        runId: "r1",
+      },
+    });
   });
 
   test("preserves offsets above 2^53 through resource calls and proto conversion", async () => {

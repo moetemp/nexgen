@@ -1,0 +1,45 @@
+package temporal:nexus@1.0.0;
+
+world system { export versioning-service; }
+
+/// @nexus.endpoint "versioning"
+interface versioning-service {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.proto "temporal.api.deployment.v1.WorkerDeploymentVersion"
+  record worker-deployment-version {
+    build-id: string,
+    deployment-name: option<string>,
+  }
+
+  /// @nexus.proto "temporal.api.workflow.v1.DeploymentVersionTransition"
+  record deployment-version-transition {
+    version: option<string>,
+    deployment-version: option<worker-deployment-version>,
+  }
+
+  /// @nexus.proto "temporal.api.workflow.v1.WorkflowExecutionVersioningInfo"
+  record versioning-info {
+    /// @nexus.omit
+    behavior: placeholder,
+    /// @nexus.omit
+    deployment: placeholder,
+    /// @nexus.omit
+    version: placeholder,
+    /// @nexus.flatten-in-api fields="build-id"
+    deployment-version: option<worker-deployment-version>,
+    /// @nexus.omit
+    versioning-override: placeholder,
+    /// @nexus.omit
+    deployment-transition: placeholder,
+    // The call builds `deployment-version` from its promoted fields, so it has no value to copy.
+    /// @nexus.flatten-in-api fields="version" fill="deployment-version=deployment-version"
+    version-transition: option<deployment-version-transition>,
+    /// @nexus.omit
+    revision-number: placeholder,
+    /// @nexus.omit
+    continue-as-new-initial-versioning-behavior: placeholder,
+  }
+
+  set-versioning: func(request: versioning-info);
+}

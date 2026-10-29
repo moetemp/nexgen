@@ -231,7 +231,8 @@ async def test_an_operation_starts_through_the_sdk_nexus_client() -> None:
         "__temporal_system",
         "CreateStream",
     )
-    assert create.arg == CreateStreamRequest(id="s1")
+    # The ref copies the id.
+    assert create.arg == CreateStreamRequest(id="s1", ref=StreamRef(id="s1"))
     assert uuid.UUID(create.id)
     assert create.result_type is CreateStreamResult
     assert (append.service, append.endpoint, append.operation) == (
@@ -285,6 +286,23 @@ async def test_an_activity_publish_takes_the_producer_of_its_attempt(
     ]
 
 
+async def test_a_create_takes_the_ref_fields_as_parameters() -> None:
+    client, answers = connect(
+        Client, {"CreateStream": CreateStreamResult(stream=StreamRef(id="s1"))}
+    )
+
+    _ = await client.create_stream(Texts, id="s1", backend="redis")
+
+    request = answers.started[0].arg
+    # The ref copies the id, and takes the backend.
+    assert request == CreateStreamRequest(
+        id="s1", ref=StreamRef(id="s1", backend="redis")
+    )
+    # The proto keeps the ref.
+    payload = SYSTEM_CONVERTER.to_payload(request)
+    assert SYSTEM_CONVERTER.from_payload(payload, CreateStreamRequest) == request
+
+
 async def test_a_stored_stream_ref_rebuilds_the_handle() -> None:
     client, answers = connect(
         Client, {"DescribeStream": DescribeStreamResponse(last_offset=7)}
@@ -335,7 +353,9 @@ async def test_client_only_calls_need_no_workflow_context(
     assert response.last_offset == 8
     assert len(client.created_clients) == 1
     create, describe = answers.started
-    assert create.arg == client_models.CreateStreamRequest(id="client-stream")
+    assert create.arg == client_models.CreateStreamRequest(
+        id="client-stream", ref=client_models.StreamRef(id="client-stream")
+    )
     assert describe.arg == client_models.DescribeStreamRequest(stream=ref)
     assert describe.result_type is client_models.DescribeStreamResponse
 

@@ -1,0 +1,6 @@
+inputs = ["input.wit", "../../../inputs/deps"]
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit"
+contains = ["fills `run_id` from `first_execution_run_id`", "which the call doesn't set as a value"]

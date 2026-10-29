@@ -20,6 +20,8 @@ from wit.stream_service.both.models import (
     AppendRecordsResponse,
     CreateStreamRequest,
     CreateStreamResult,
+    Execution,
+    ExecutionType,
     Producer,
     StreamRef,
 )
@@ -74,12 +76,21 @@ async def test_a_workflow_create_fills_its_sources(
 ) -> None:
     stream = await create_stream(Turns, retention=datetime.timedelta(days=1))
 
-    # The id comes from the definition, and the owner from the run.
+    # The id comes from the definition, and the owner from the run, before the request is built.
+    # The ref copies the id, and names the run chain that owns the Stream.
     assert nexus_client.inputs == [
         CreateStreamRequest(
             id="chat-1:r1:turns",
             retention=datetime.timedelta(days=1),
             owner=Producer(id="wf:r2", run_id="r2"),
+            ref=StreamRef(
+                id="chat-1:r1:turns",
+                owner=Execution(
+                    type=ExecutionType.ExecutionTypeWorkflow,
+                    business_id="chat-1",
+                    run_id="r1",
+                ),
+            ),
         )
     ]
     assert stream.body_type is str

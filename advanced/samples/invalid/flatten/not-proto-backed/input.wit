@@ -1,0 +1,20 @@
+package test:not-proto-backed@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  record get-history-request {
+    namespace: string,
+    // The call can't build a record that no proto backs from some of its fields.
+    /// @nexus.flatten-in-api fields="workflow-id"
+    execution: option<workflow-execution>,
+  }
+
+  get-history: func(request: get-history-request);
+}

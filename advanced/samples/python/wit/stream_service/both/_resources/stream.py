@@ -8,6 +8,7 @@ import datetime
 import temporalio.api.stream.v1.message_pb2
 import temporalio.converter
 import temporalio.workflow
+import types
 
 from ..models import (
     AppendRecord,
@@ -64,6 +65,19 @@ class Stream(typing.Generic[BodyT]):
     @typing_extensions.override
     def __repr__(self) -> str:
         return f"Stream(stream={self.stream!r}, created={self.created!r})"
+
+    async def __aenter__(self) -> typing_extensions.Self:
+        return self
+
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: types.TracebackType | None,
+    ) -> None:
+        close, failure = _support.exit_close(self, exc)
+        if close:
+            await self.close(failure=failure)
 
     async def publish(
         self,

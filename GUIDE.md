@@ -22,6 +22,7 @@ of `@nexus` directives.
   - [Resource Declaration](#resource-declaration)
   - [Name-Binding: How Resource Methods Find Operations](#name-binding-how-resource-methods-find-operations)
   - [Resource Return Binding](#resource-return-binding)
+  - [Closing a Resource](#closing-a-resource)
   - [Items, Wrapped Values and One Result Field](#items-wrapped-values-and-one-result-field)
   - [Edge Cases and Error Conditions](#edge-cases-and-error-conditions)
 - [Proto-Backed Models](#proto-backed-models)
@@ -758,6 +759,50 @@ record create-job-result {
 result = await handle  # CreateJobResponse
 return CreateJobResult(job=Job(job_id=result.job_id), created=result.created)
 ```
+
+### Closing a Resource
+
+`@nexus.close` marks the method that ends a resource. Each of its parameters is
+optional. `failure` names the parameter that takes the error of an `async with`
+block, in Python.
+
+```wit
+/// @nexus.operation "close-stream"
+/// @nexus.close failure="failure"
+close: func(%result: option<payload>, failure: option<failure>);
+```
+
+```python
+async with client.create_stream(Turns, id="chat-1:turns") as stream:
+    await stream.publish(Turn("user"))
+```
+
+In Python the resource is an async context manager, in both packages. At the
+block's end it asks the support package with `_support.exit_close(self, exc)`
+whether to close now, and with which failure, so the SDK owns the policy.
+Outside a Workflow, the sample's policy closes on a clean exit and on an
+`Exception`. It closes a cancel as Temporal's `CancelledError`. It leaves the
+resource open for another `BaseException`, such as `KeyboardInterrupt`. In
+Workflow code, the sample only records the resource, and the SDK closes it. If
+the close fails, its error has the block's error as its `__context__`.
+
+A call that returns such a resource returns a `ResourceCall`, which a caller
+awaits for the resource or enters with `async with`. Operation functions, client
+methods and resource methods all do. A `ResourceCall` is a coroutine, so
+`asyncio.create_task` takes it. nexgen emits it in the package's
+`_resource_call.py`, which both packages share, next to `resource_call`, the
+decorator that makes a call return one. A result record that holds the resource
+isn't a `ResourceCall`, and a caller enters the record's resource field.
+
+TypeScript and .NET don't get a close hook yet. Their dispose doesn't see the
+block's error, so it would close a failed block's resource as completed. Go and
+Java don't get one either.
+
+nexgen refuses a second `@nexus.close` on a resource, a required parameter of
+the method, a `failure` that names no parameter of the
+`temporal.api.failure.v1.Failure` type, `@nexus.close` on an operation, and a
+close method that binds to no operation. Python also refuses an operation named
+`resource-call` in a package with a call that returns a closable resource.
 
 ### Items, Wrapped Values and One Result Field
 
@@ -2423,6 +2468,16 @@ converted to UpperCamelCase is used (e.g., `signal-with-start-workflow` becomes
 /// @nexus.operation name="SignalWithStartWorkflowExecution"
 signal-with-start-workflow: func(...) -> ...;
 ```
+
+---
+
+### @nexus.close
+
+**Placement:** Resource method whose parameters are optional **Syntax:**
+`@nexus.close [failure="<parameter>"]`
+
+Marks the method that ends the resource, at the end of `async with`. See
+[Closing a Resource](#closing-a-resource).
 
 ---
 

@@ -30,6 +30,7 @@ from ..models import (
 from ._resources import Stream
 import temporal_support as _support
 from .._poll import PollIterator
+from .._resource_call import resource_call
 
 if typing.TYPE_CHECKING:
     import temporal_support
@@ -135,6 +136,7 @@ class StreamServiceClientExtension(abc.ABC):
         )
         return resource
 
+    @resource_call
     async def create_stream(
         self,
         definition: type[temporal_support.StreamDefinition[BodyT]],

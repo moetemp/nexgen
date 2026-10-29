@@ -1,0 +1,22 @@
+package test:close-unbound@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  resource job {
+    constructor(id: string);
+
+    // No operation is named `close`, so the method would be a stub that each block's end calls.
+    /// @nexus.close
+    close: func(reason: option<string>);
+  }
+
+  type job-result = own<job>;
+
+  record open-job-request {
+    id: string,
+  }
+
+  open-job: func(request: open-job-request) -> job-result;
+}

@@ -852,7 +852,7 @@ async def publish(self, *values: BodyT) -> int:
   method takes the list's items as positional arguments. The optional `name`
   gives the API name of that parameter, since name binding uses its WIT name. It
   defaults to the WIT name. Python takes `*values` and makes the other
-  parameters keyword-only.
+  parameters keyword-only, and TypeScript takes `...values`.
 - `@nexus.result-field` makes the method return one field of the response
   record. An `option` number, bool or string of a proto with no presence returns
   its zero value when the response leaves it unset, so `publish` returns `0` for
@@ -864,9 +864,9 @@ with `@nexus.flatten-in-api`. It refuses `@nexus.varargs` on a method whose last
 parameter isn't a list, on an operation, with a `name` of another parameter, or
 on a method with a function parameter that takes varargs. It refuses a
 `@nexus.result-field` value that isn't a field of the response, or that is a
-field with `@nexus.omit`, or on a method whose result isn't a record. Python
-generates the three directives, TypeScript and .NET ignore them, and Go refuses
-each of them.
+field with `@nexus.omit`, or on a method whose result isn't a record. Python and
+TypeScript generate the three directives, .NET ignores them, and Go refuses each
+of them.
 
 ### Edge Cases and Error Conditions
 
@@ -1739,8 +1739,8 @@ separate the targets with commas.
   selected API. Other languages represent resources as data classes.
 - `workflow` selects the API for Workflow code.
 - `client` writes the same API for code outside a Workflow, in a `client`
-  package inside the output directory. Only Python System Nexus client
-  generation is supported, so this target requires `--system-nexus`. It can be
+  package inside the output directory. Python and TypeScript support it, and
+  only with System Nexus, so this target requires `--system-nexus`. It can be
   selected independently or alongside `workflow`. nexgen refuses it for a
   service with no `@nexus.endpoint`.
 
@@ -1881,6 +1881,43 @@ stream = client.get_stream(id="chat-1:turns", backend="redis", body_type=Turn)
 same = client.get_stream(ref=StreamRef(id="chat-1:turns"), body_type=Turn)
 ```
 
+In TypeScript, the `client/` package has `index.ts`, `extension.ts`,
+`resources.ts` and `nexus-client.ts`. `<Service>ClientExtension(Base)` is a
+mixin. A client class extends it and implements `createNexusClient`, which takes
+the service definition and the endpoint and returns a `NexusServiceClient`, an
+object with the `startOperation` of the `NexusServiceClient` of
+`@temporalio/client`. A call takes the request object, and the factory of a
+resource is `get<Resource>`, with the identity fields as parameters. As in
+Python, the mixin has only the standalone operations and the resource factories.
+The mixin throws a `TypeError` when `Base` already has one of its public names,
+on its prototype or as an instance field.
+
+```ts
+import { Client } from "@temporalio/client";
+import type * as nexus from "nexus-rpc";
+import {
+  type NexusServiceClient,
+  StreamServiceClientExtension,
+} from "./stream-service/client";
+
+class StreamClient extends StreamServiceClientExtension(Client) {
+  createNexusClient<T extends nexus.ServiceDefinition>(options: {
+    service: T;
+    endpoint: string;
+  }): NexusServiceClient<T> {
+    return this.nexus.createServiceClient(options);
+  }
+}
+
+const stream = await new StreamClient({ connection }).createStream({ id: "s1" });
+await stream.publish(...turns);
+```
+
+A TypeScript client resource keeps its Nexus client in a private field, so the
+handle still converts as data. nexgen refuses an operation whose client method
+would be `createNexusClient`, and a type with the name `NexusServiceClient`,
+since both would clash in the client package.
+
 Sources work in the client target as well. Restrict workflow-only helpers with
 `targets="workflow"`. If a required resource-method request field has neither an
 applicable source nor a resource field or method parameter supplying it,
@@ -1994,7 +2031,7 @@ The catalog currently declares these restrictions:
 | `@nexus.facade`                         | go                   | not required by catalog |
 | `@nexus.operations-class`               | dotnet               | required                |
 | `@nexus.delay-load-temporalio-workflow` | none                 | required                |
-| `@nexus.poll`                           | python               | required                |
+| `@nexus.poll`                           | python, typescript   | required                |
 
 <!-- annotation-availability:end -->
 
@@ -2742,18 +2779,19 @@ type or transform expression refers to an otherwise-unavailable module.
 ### @nexus.poll
 
 **Placement:** Operation (function) **Syntax:**
-`@nexus.poll python="<support-helper>" targets="client"`, with optional
-`items="<field>"` and `python-resume="<support-helper>"`
+`@nexus.poll python="<support-helper>" typescript="<support-helper>" targets="client"`,
+with optional `items="<field>"` and `python-resume="<support-helper>"`
 
-Generates an `iter_<name>` async iterator on the client extension, and on each
-client resource method that binds the operation. The iterator sends the request,
-yields the response, and calls `<support-helper>(request, response)` for the
-next request. The helper is a sync function in the `--support-package`. It
-returns `None` to stop.
+Generates an async iterator on the client extension, and on each client resource
+method that binds the operation. Its name is `iter_<name>` in Python and
+`iter<Name>` in TypeScript. The iterator sends the request, yields the response,
+and calls `<support-helper>(request, response)` for the next request. The helper
+is a sync function in the `--support-package`. It returns `None` (`undefined` in
+TypeScript) to stop.
 
 ```wit
 /// @nexus.operation name="ReadRecords"
-/// @nexus.poll python="next_read_request" targets="client"
+/// @nexus.poll python="next_read_request" typescript="nextReadRequest" targets="client"
 read-records: func(request: read-records-request) -> read-records-response;
 ```
 
@@ -2767,9 +2805,9 @@ def next_read_request(request, response):
     return dataclasses.replace(request, from_offset=response.next_offset)
 ```
 
-With `items="<field>"`, nexgen also generates `iter_<name>_items`. It takes the
-parameters of `iter_<name>`, reads its pages, and yields the items of the list
-field `<field>` of each response. It returns a `PollIterator`, whose
+In Python, with `items="<field>"`, nexgen also generates `iter_<name>_items`. It
+takes the parameters of `iter_<name>`, reads its pages, and yields the items of
+the list field `<field>` of each response. It returns a `PollIterator`, whose
 `next_request` is the request to resume with:
 
 - After an item, the `python-resume` helper gives it. The helper takes the
@@ -2796,15 +2834,16 @@ resource method's iterator takes only the method's parameters, such as
 `from_offset` of the Stream's `iter_read_items`.
 
 The stream sample's full helpers are in
-[`temporal_support/poll.py`](advanced/samples/python/temporal_support/poll.py).
+[`temporal_support/poll.py`](advanced/samples/python/temporal_support/poll.py)
+and [`support/poll.ts`](advanced/samples/typescript/support/poll.ts).
 
 - `iter_<name>` yields pages, and `iter_<name>_items` yields the items in them.
 - All pages use one Nexus client. Each page is a new operation with a new random
   operation ID.
-- Only the Python client target generates the iterator, so `targets` must be
-  `client`.
+- Only the client target generates the iterator, so `targets` must be `client`.
 - nexgen refuses the directive on a resource method, on an operation that it
-  can't poll, and when an iterator clashes with another member.
+  can't poll, and when an iterator clashes with another member. TypeScript also
+  refuses a request with type parameters.
 - nexgen refuses an `items` field that the response doesn't have, a field with
   `@nexus.omit`, or a field that isn't a list in the model, such as a proto
   `bytes` field. It also refuses `python-resume` without `items`, and `items` in

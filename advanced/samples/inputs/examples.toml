@@ -50,6 +50,8 @@ languages = ["python"]
 targets = []
 
 [stream-service.workflow]
+# TypeScript has the client target, so its Workflow API is in the output with both APIs.
+languages = ["python", "dotnet"]
 targets = ["workflow"]
 
 [stream-service.client]
@@ -57,7 +59,7 @@ languages = ["python"]
 targets = ["client"]
 
 [stream-service.both]
-languages = ["python"]
+languages = ["python", "typescript"]
 targets = ["workflow", "client"]
 
 # A System Nexus operation that returns a resource.

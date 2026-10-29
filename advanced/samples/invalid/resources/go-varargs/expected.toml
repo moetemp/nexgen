@@ -1,0 +1,6 @@
+languages = ["go"]
+targets = ["workflow"]
+
+[error]
+kind = "unsupported-go-type"
+contains = ["Go code generation does not support resource method `batch.add-items`: Go doesn't support `@nexus.varargs`"]

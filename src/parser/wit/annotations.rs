@@ -329,6 +329,33 @@ const CATALOG: &[Annotation] = {
             languages: None,
             system_nexus: false,
         },
+        Annotation {
+            name: "unwrap",
+            sites: &[Record],
+            keys: &[],
+            language_keys: &[],
+            repeatable: false,
+            languages: None,
+            system_nexus: false,
+        },
+        Annotation {
+            name: "varargs",
+            sites: &[Method],
+            keys: &["name"],
+            language_keys: &[],
+            repeatable: false,
+            languages: None,
+            system_nexus: false,
+        },
+        Annotation {
+            name: "result-field",
+            sites: &[Method],
+            keys: &["value"],
+            language_keys: &[],
+            repeatable: false,
+            languages: None,
+            system_nexus: false,
+        },
     ]
 };
 

@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["invalid WIT directive `@nexus.varargs` on interface `batch-service` resource `Batch` method `AddItems`", "needs a method whose last parameter is a list, not an `option`"]

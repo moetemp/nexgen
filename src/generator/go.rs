@@ -742,6 +742,33 @@ fn generate_in_tree(
             resource: resource.name.clone(),
         });
     }
+    // A Go resource method takes its parameters as they are, and returns the whole response.
+    for resource in api_plan
+        .services
+        .iter()
+        .flat_map(|service| &service.resources)
+    {
+        for method in &resource.methods {
+            let directive = if method.varargs.is_some() {
+                Some("@nexus.varargs")
+            } else if method.result_field.is_some() {
+                Some("@nexus.result-field")
+            } else if method.params.iter().any(|param| {
+                matches!(&param.field_type, crate::planning::PlannedType::List(item)
+                    if crate::planning::unwrapped_field(api_plan, item.as_ref()).is_some())
+            }) {
+                Some("@nexus.unwrap")
+            } else {
+                None
+            };
+            if let Some(directive) = directive {
+                return Err(Error::UnsupportedGoType {
+                    context: format!("resource method `{}.{}`", resource.name, method.name),
+                    reason: format!("Go doesn't support `{directive}`"),
+                });
+            }
+        }
+    }
     // A Go call takes a whole request field, so nexgen can't promote some fields of one.
     if let Some((record, field_name)) = api_plan.records().find_map(|(_, record)| {
         record

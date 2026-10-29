@@ -94,9 +94,9 @@ async def test_a_workflow_publish_fills_the_workflow_producer(
     ref = StreamRef(id="s1")
     stream = Stream(body_type=str, ref=ref, created=None)
 
-    appended = await stream.publish(records=[AppendRecord(body="hi")])
+    last_offset = await stream.publish("hi")
 
-    assert appended.last_offset == 1
+    assert last_offset == 1
     assert nexus_client.inputs == [
         AppendRecordsRequest(
             ref=ref,

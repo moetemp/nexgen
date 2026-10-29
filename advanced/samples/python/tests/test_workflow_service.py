@@ -83,6 +83,7 @@ async def test_generated_system_nexus_terminal_enters_interception_boundary() ->
         id="workflow-id",
         task_queue="task-queue",
         signal="signal",
+        id_reuse_policy=temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE,
         namespace="default",
     )
 
@@ -350,7 +351,6 @@ class WorkflowServiceCallerWorkflow:
         minimal_handle = await workflow_service.signal_with_start_workflow(
             workflow="ExampleWorkflow",
             id=MINIMAL_WORKFLOW_ID,
-            task_queue=task_queue,
             signal="wake_up",
             cron_schedule=CRON_SCHEDULE,
         )
@@ -423,6 +423,7 @@ def test_generated_metadata() -> None:
         id="target-workflow-id",
         task_queue=TASK_QUEUE,
         signal="wake_up",
+        id_reuse_policy=temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE,
         namespace="target-namespace",
     )
     serialization_context = signal_operation_info.serialization_context(request)

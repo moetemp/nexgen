@@ -606,11 +606,11 @@ temporalio.converter.transfer_type_convertible(_CallbackNexusTransferTypeConvert
 )  # pyright: ignore[reportUnusedCallResult]
 
 
-@dataclasses.dataclass(slots=True)
+@dataclasses.dataclass(slots=True, kw_only=True)
 class NamespaceInfo:
     name: str | None = None
     data: dict[str, str] | None = dataclasses.field(default_factory=dict)
-    state: NamespaceState = NamespaceState.NamespaceStateRegistered
+    state: NamespaceState
 
 
 class _NamespaceInfoTransferTypeConverter(
@@ -628,10 +628,11 @@ class _NamespaceInfoTransferTypeConverter(
         value: temporalio.api.namespace.v1.message_pb2.NamespaceInfo,
         type_hint: type[NamespaceInfo],
     ) -> NamespaceInfo:
+        state = NamespaceState(value.state)
         return NamespaceInfo(
             name=value.name if bool(value.name) else None,
             data={key: item for key, item in value.data.items()},
-            state=NamespaceState(value.state),
+            state=state,
         )
 
     @typing_extensions.override

@@ -502,7 +502,7 @@ export const callbackNexusTransferTypeConverter = {
 export interface NamespaceInfo {
   name?: string;
   data?: Record<string, string>;
-  state?: NamespaceState;
+  state: NamespaceState;
 }
 
 function namespaceInfoFromProto(
@@ -518,10 +518,15 @@ function namespaceInfoFromProto(
               ([key, value]: [string, any]) => [key, value as string],
             ),
           ) as Record<string, string>),
-    state:
-      proto.state == null
-        ? NamespaceState.NamespaceStateRegistered
-        : (proto.state as number as NamespaceState),
+    state: requiredField(
+      requiredField(
+        proto.state ?? undefined,
+        "NamespaceInfo",
+        "state",
+      ) as number as NamespaceState,
+      "NamespaceInfo",
+      "state",
+    ),
   };
 }
 
@@ -538,9 +543,11 @@ function namespaceInfoToProto(
               ([key, value]: [string, any]) => [key, value],
             ),
           ),
-    state: (model.state == null
-      ? NamespaceState.NamespaceStateRegistered
-      : model.state) as number as temporal.api.enums.v1.NamespaceState,
+    state: requiredField(
+      model.state,
+      "NamespaceInfo",
+      "state",
+    ) as number as temporal.api.enums.v1.NamespaceState,
   };
 }
 

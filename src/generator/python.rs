@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use heck::{ToShoutySnakeCase, ToSnakeCase, ToUpperCamelCase};
+use heck::{ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
 use crate::error::{Error, Result};
@@ -21,10 +21,10 @@ use crate::planning::{
 };
 use crate::planning::{RequestPlan, ResolvedResourceBindingSource};
 use crate::spec::{
-    AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec,
-    FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, LanguageImportSpec,
-    LanguageImportStyle, ModulePath, OperationSpec, RecordFieldSpec, RecordFieldVisibility,
-    RecordSpec, SelectedTextSpec, TypeDeclSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
+    AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FlagsSpec, FunctionArgsSpec,
+    FunctionFieldSpec, FunctionResultSpec, LanguageImportSpec, LanguageImportStyle, ModulePath,
+    OperationSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec, SelectedTextSpec,
+    TypeDeclSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpec, ApiSpecBranch, ApiSpecNode};
 
@@ -601,6 +601,12 @@ impl<'a> ApiPlanner<'a> {
         let operation_model_names = model_names
             .iter()
             .cloned()
+            .chain(self.flags.values().flat_map(|flags| {
+                flags
+                    .flags
+                    .iter()
+                    .map(move |flag| format!("{}{}", flags.name, flag.name))
+            }))
             .chain(planned_module_import_names(self.api_plan))
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -1030,6 +1036,7 @@ impl<'a> ApiPlanner<'a> {
                         method,
                         operation,
                         &result_annotation,
+                        self.api_plan,
                     );
                 } else {
                     render_resource_method_operation_body(
@@ -1038,6 +1045,7 @@ impl<'a> ApiPlanner<'a> {
                         method,
                         operation,
                         &result_annotation,
+                        self.api_plan,
                     );
                 }
             }
@@ -1421,7 +1429,6 @@ impl<'a> ApiPlanner<'a> {
         let mut request_fields = Vec::new();
         let mut flattened_messages = Vec::new();
         let mut parameter_sources = BTreeMap::<String, String>::new();
-
         for ((_field_name, planned_field), rendered_field) in planned_model
             .fields
             .iter()
@@ -1463,8 +1470,21 @@ impl<'a> ApiPlanner<'a> {
             )?;
             parameters.push(RenderedUnpackedInputField {
                 attr_name: rendered_field.attr_name.clone(),
-                annotation: rendered_field.annotation.clone(),
-                default_kind: rendered_field.default_kind.clone(),
+                annotation: if !planned_field.api_required() && planned_field.required {
+                    format!("{} | None", rendered_field.annotation)
+                } else {
+                    rendered_field.annotation.clone()
+                },
+                default_kind: if planned_field
+                    .default_value
+                    .as_ref()
+                    .and_then(|text| text.value())
+                    .is_some()
+                {
+                    PythonFieldDefaultKind::None
+                } else {
+                    rendered_field.default_kind.clone()
+                },
                 doc: planned_field
                     .doc
                     .as_ref()
@@ -1473,7 +1493,7 @@ impl<'a> ApiPlanner<'a> {
             });
             request_fields.push(RenderedUnpackedRequestField {
                 attr_name: rendered_field.attr_name.clone(),
-                value_expr: rendered_field.attr_name.clone(),
+                value_expr: python_input_default_expr(planned_field, &rendered_field.attr_name),
                 default_kind: rendered_field.default_kind.clone(),
             });
         }
@@ -1559,16 +1579,35 @@ impl<'a> ApiPlanner<'a> {
                                 .field_flattened_annotation(nested_field_name)
                                 .and_then(|annotation| annotation.value())
                                 .map(|annotation| {
-                                    if nested_planned_field.required {
+                                    if nested_planned_field.api_required() {
                                         annotation.to_string()
                                     } else {
                                         format!("{annotation} | None")
                                     }
                                 })
-                                .unwrap_or_else(|| nested_rendered_field.annotation.clone()),
+                                .unwrap_or_else(|| {
+                                    if nested_planned_field.required
+                                        && !nested_planned_field.api_required()
+                                    {
+                                        format!("{} | None", nested_rendered_field.annotation)
+                                    } else {
+                                        nested_rendered_field.annotation.clone()
+                                    }
+                                }),
                             value_expr: nested_rendered_field.attr_name.clone(),
-                            default_kind: if nested_planned_field.required {
+                            initialized_expr: python_input_default_expr(
+                                nested_planned_field,
+                                &nested_rendered_field.attr_name,
+                            ),
+                            default_kind: if nested_planned_field.api_required() {
                                 PythonFieldDefaultKind::Required
+                            } else if nested_planned_field
+                                .default_value
+                                .as_ref()
+                                .and_then(|text| text.value())
+                                .is_some()
+                            {
+                                PythonFieldDefaultKind::None
                             } else {
                                 nested_rendered_field.default_kind.clone()
                             },
@@ -1738,8 +1777,30 @@ impl<'a> ApiPlanner<'a> {
                     format!("dict[{}, {}]", key_type.annotation, value_type.annotation),
                     false,
                 ),
-                default_kind: PythonFieldDefaultKind::EmptyDict,
-                default_expr: Some("dataclasses.field(default_factory=dict)".to_string()),
+                default_kind: if field
+                    .default_value
+                    .as_ref()
+                    .and_then(|text| text.value())
+                    .is_some()
+                {
+                    if field.required {
+                        PythonFieldDefaultKind::Required
+                    } else {
+                        PythonFieldDefaultKind::None
+                    }
+                } else {
+                    PythonFieldDefaultKind::EmptyDict
+                },
+                default_expr: if field
+                    .default_value
+                    .as_ref()
+                    .and_then(|text| text.value())
+                    .is_some()
+                {
+                    (!field.required).then(|| "None".to_string())
+                } else {
+                    Some("dataclasses.field(default_factory=dict)".to_string())
+                },
                 wire_value_type: value_type,
                 imports,
             });
@@ -1761,42 +1822,36 @@ impl<'a> ApiPlanner<'a> {
                     format!("list[{}]", resolved_type.annotation),
                     false,
                 ),
-                default_kind: PythonFieldDefaultKind::EmptyList,
-                default_expr: Some("dataclasses.field(default_factory=list)".to_string()),
+                default_kind: if field
+                    .default_value
+                    .as_ref()
+                    .and_then(|text| text.value())
+                    .is_some()
+                {
+                    if field.required {
+                        PythonFieldDefaultKind::Required
+                    } else {
+                        PythonFieldDefaultKind::None
+                    }
+                } else {
+                    PythonFieldDefaultKind::EmptyList
+                },
+                default_expr: if field
+                    .default_value
+                    .as_ref()
+                    .and_then(|text| text.value())
+                    .is_some()
+                {
+                    (!field.required).then(|| "None".to_string())
+                } else {
+                    Some("dataclasses.field(default_factory=list)".to_string())
+                },
                 wire_value_type: resolved_type.clone(),
                 imports: resolved_type.imports,
             });
         }
 
         let imports = resolved_type.imports.clone();
-
-        if field.default_value.is_some() {
-            let default_value = field
-                .data
-                .default_enum_value
-                .as_ref()
-                .expect("planned field default enum value should be resolved");
-            let default_expr = if matches!(field.field_type.validation_type(), PlannedType::Enum(_))
-            {
-                format!("{}.{}", resolved_type.annotation, default_value.name)
-            } else {
-                enum_default_expr(&resolved_type, default_value)
-            };
-            return Ok(RenderedField {
-                attr_name: attr_name.clone(),
-                annotation: python_field_annotation(
-                    record,
-                    field_name,
-                    field,
-                    resolved_type.annotation.clone(),
-                    false,
-                ),
-                default_kind: PythonFieldDefaultKind::Expression(default_expr.clone()),
-                default_expr: Some(default_expr.clone()),
-                wire_value_type: resolved_type.clone(),
-                imports,
-            });
-        }
 
         if field.required {
             return Ok(RenderedField {
@@ -2301,6 +2356,16 @@ fn render_record_wire_block_lines(output: &mut String, lines: &[String]) {
     }
 }
 
+fn python_input_default_expr(field: &RecordFieldSpec<PlannedFamily>, value: &str) -> String {
+    if field.required
+        && let Some(default) = field.default_value.as_ref().and_then(|text| text.value())
+    {
+        format!("(({default}) if {value} is None else {value})")
+    } else {
+        value.to_string()
+    }
+}
+
 fn model_needs_keyword_only_dataclass(model: &RenderedModel) -> bool {
     let mut saw_defaulted_field = false;
     for field in &model.fields {
@@ -2690,7 +2755,7 @@ fn sort_python_model_names(
     });
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(in crate::generator) struct RenderedModel {
     pub(in crate::generator) full_name: String,
     pub(in crate::generator) name: String,
@@ -2700,7 +2765,7 @@ pub(in crate::generator) struct RenderedModel {
     pub(in crate::generator) fields: Vec<RenderedField>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(in crate::generator) struct RenderedField {
     pub(in crate::generator) attr_name: String,
     pub(in crate::generator) annotation: String,
@@ -2763,6 +2828,7 @@ struct RenderedFlattenedMessageField {
     attr_name: String,
     annotation: String,
     value_expr: String,
+    initialized_expr: String,
     default_kind: PythonFieldDefaultKind,
     doc: Option<String>,
 }
@@ -3362,18 +3428,6 @@ fn python_function_annotation_from_args(
     } else {
         callable_annotation
     }
-}
-
-pub(in crate::generator) fn enum_default_expr(
-    resolved_type: &ResolvedFieldType,
-    enum_value: &EnumValueSpec,
-) -> String {
-    let value_name = if resolved_type.wire_conversion.is_some() {
-        enum_value.name.to_shouty_snake_case()
-    } else {
-        enum_value.name.clone()
-    };
-    format!("{}.{}", resolved_type.annotation, value_name)
 }
 
 fn render_definitions_only_package_init(
@@ -5412,6 +5466,7 @@ fn render_resource_method_inline_operation_body(
     method: &PlannedResourceMethod,
     operation: &RenderedOperation<'_>,
     result_annotation: &str,
+    api_plan: &PlannedSpec,
 ) {
     let PlannedResourceMethodBindingSpec::Operation {
         request_plan,
@@ -5422,7 +5477,7 @@ fn render_resource_method_inline_operation_body(
         return;
     };
 
-    render_resource_method_request(output, method, operation, request_plan);
+    render_resource_method_request(output, method, operation, request_plan, api_plan);
     output.push_str("        nexus_client = getattr(self, \"_nexus_client\")\n");
     let returns_direct = operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
@@ -5528,8 +5583,9 @@ fn render_resource_method_request(
     method: &PlannedResourceMethod,
     operation: &RenderedOperation<'_>,
     request_plan: &RequestPlan,
+    api_plan: &PlannedSpec,
 ) {
-    let request_expr = render_request_plan_python(method, request_plan);
+    let request_expr = render_request_plan_python(method, request_plan, api_plan);
     output.push_str("        request = ");
     if let Some(unpacked_input) = &operation.unpacked_input {
         output.push_str(&unpacked_input.model_name);
@@ -5538,13 +5594,21 @@ fn render_resource_method_request(
     }
     output.push_str("(\n");
     match request_plan {
-        RequestPlan::Construct { fields, .. } => {
+        RequestPlan::Construct {
+            fields,
+            message_name,
+        } => {
             for field in fields {
                 output.push_str("            ");
                 output.push_str(&python_field_name(&field.field_name));
                 output.push('=');
-                output.push_str(&render_request_plan_python(method, &field.value));
+                output.push_str(&render_request_plan_python(method, &field.value, api_plan));
                 output.push_str(",\n");
+            }
+            for (name, expression) in
+                python_missing_request_defaults(api_plan, message_name, fields)
+            {
+                output.push_str(&format!("            {name}=({expression}),\n"));
             }
         }
         RequestPlan::Source(_) => {
@@ -5582,6 +5646,7 @@ fn render_resource_method_operation_body(
     method: &PlannedResourceMethod,
     operation: &RenderedOperation<'_>,
     result_annotation: &str,
+    api_plan: &PlannedSpec,
 ) {
     let PlannedResourceMethodBindingSpec::Operation {
         request_plan,
@@ -5593,7 +5658,7 @@ fn render_resource_method_operation_body(
     };
 
     let operation_attr_name = request_operation_function_name(service, operation);
-    render_resource_method_request(output, method, operation, request_plan);
+    render_resource_method_request(output, method, operation, request_plan, api_plan);
     if *direct_return {
         if result_annotation == "None" {
             output.push_str("        await ");
@@ -5628,7 +5693,47 @@ fn render_resource_operation_call_args(output: &mut String, service: &RenderedSe
     }
 }
 
-fn render_request_plan_python(method: &PlannedResourceMethod, plan: &RequestPlan) -> String {
+fn python_missing_request_defaults<'a>(
+    spec: &'a PlannedSpec,
+    name: &str,
+    supplied: &[crate::planning::RequestPlanField],
+) -> Vec<(String, &'a str)> {
+    let Some(record) = spec.record(name).or_else(|| {
+        spec.records().map(|(_, record)| record).find(|record| {
+            record
+                .source
+                .as_ref()
+                .and_then(ExternalTypeSourceSpec::proto_type)
+                .is_some_and(|proto| proto.full_name() == name.trim_start_matches('.'))
+        })
+    }) else {
+        return Vec::new();
+    };
+    record
+        .model_fields()
+        .filter_map(|(_, field)| {
+            let name = python_field_name(&field.name);
+            (field.required
+                && !supplied
+                    .iter()
+                    .any(|field| python_field_name(&field.field_name) == name))
+            .then(|| {
+                field
+                    .default_value
+                    .as_ref()
+                    .and_then(|text| text.value())
+                    .map(|expression| (name, expression))
+            })
+            .flatten()
+        })
+        .collect()
+}
+
+fn render_request_plan_python(
+    method: &PlannedResourceMethod,
+    plan: &RequestPlan,
+    api_plan: &PlannedSpec,
+) -> String {
     let render_method_param = |name: &str| {
         let is_list = method
             .params
@@ -5644,7 +5749,12 @@ fn render_request_plan_python(method: &PlannedResourceMethod, plan: &RequestPlan
         plan,
         python_field_name,
         |name, value| format!("{name}={value}"),
-        |message_name, fields| {
+        |message_name, mut fields, supplied| {
+            fields.extend(
+                python_missing_request_defaults(api_plan, message_name, supplied)
+                    .into_iter()
+                    .map(|(name, expression)| format!("{name}=({expression})")),
+            );
             let model_name = message_model_name(message_name);
             if fields.is_empty() {
                 format!("{model_name}()")
@@ -7668,7 +7778,7 @@ fn render_flattened_message_setup(
             output.push_str("        ");
             output.push_str(&field.attr_name);
             output.push('=');
-            output.push_str(&field.value_expr);
+            output.push_str(&field.initialized_expr);
             output.push_str(",\n");
         }
         output.push_str("    )\n");
@@ -7693,7 +7803,7 @@ fn render_flattened_message_setup(
         output.push_str("            ");
         output.push_str(&field.attr_name);
         output.push('=');
-        output.push_str(&field.value_expr);
+        output.push_str(&field.initialized_expr);
         output.push_str(",\n");
     }
     output.push_str("        )\n");
@@ -7947,46 +8057,6 @@ mod tests {
             super::python_dataclass_source_default_expr(&with_args),
             "_support.Helpers.namespace(request.id, fallback='default')"
         );
-    }
-
-    #[test]
-    fn enum_defaults_use_resolved_identity_for_native_and_converter_aliases() {
-        let mut resolved_type = super::ResolvedFieldType {
-            annotation: "AliasPolicy".to_string(),
-            imports: super::PythonImports::default(),
-            kind: super::ResolvedFieldKind::Enum,
-            wire_conversion: None,
-        };
-        let mut default_value = crate::spec::EnumValueSpec {
-            name: "AllowDuplicate".to_string(),
-            wire_name: "allow-duplicate".to_string(),
-            number: 7,
-        };
-        let native_default = super::enum_default_expr(&resolved_type, &default_value);
-        assert_eq!(native_default, "AliasPolicy.AllowDuplicate");
-        assert_eq!(
-            super::python_parameter_default_expr(&super::PythonFieldDefaultKind::Expression(
-                native_default
-            )),
-            Some("AliasPolicy.AllowDuplicate".to_string())
-        );
-
-        // A proto descriptor name can include a prefix absent from the resolved
-        // semantic name. SDK enum members still use SHOUTY_SNAKE casing.
-        default_value.wire_name = "WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE".to_string();
-        resolved_type.annotation = "WorkflowIDReusePolicy".to_string();
-        resolved_type.wire_conversion = Some(super::WireValueConversion {
-            annotation: "int".to_string(),
-            from_wire: "WorkflowIDReusePolicy({wire})".to_string(),
-            to_wire: "int({value})".to_string(),
-            imports: super::PythonImports::default(),
-            supports_unpacked_input: false,
-        });
-        let sdk_default = super::enum_default_expr(&resolved_type, &default_value);
-        assert_eq!(sdk_default, "WorkflowIDReusePolicy.ALLOW_DUPLICATE");
-        let mut rendered = String::new();
-        super::render_python_default_expr(&mut rendered, &sdk_default, "    ");
-        assert_eq!(rendered, " = WorkflowIDReusePolicy.ALLOW_DUPLICATE");
     }
 
     #[test]

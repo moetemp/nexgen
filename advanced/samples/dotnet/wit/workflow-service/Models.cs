@@ -79,12 +79,13 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Initializes a new instance of the <see cref="SignalWithStartWorkflowRequest"/> class.
         /// </summary>
-        public SignalWithStartWorkflowRequest(string workflow, string id, string taskQueue, string signal, string @namespace)
+        public SignalWithStartWorkflowRequest(string workflow, string id, string taskQueue, string signal, Temporalio.Api.Enums.V1.WorkflowIdReusePolicy idReusePolicy, string @namespace)
         {
             Workflow = workflow;
             Id = id;
             TaskQueue = taskQueue;
             Signal = signal;
+            IdReusePolicy = idReusePolicy;
             Namespace = @namespace;
         }
 
@@ -101,7 +102,7 @@ namespace Temporalio.Workflows
         /// </summary>
         public string Id { get; init; }
         /// <summary>
-        /// Task queue to run the workflow on.
+        /// Task queue to run the workflow on. Defaults to the calling workflow's task queue.
         /// </summary>
         public string TaskQueue { get; init; }
         /// <summary>
@@ -127,7 +128,7 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Behavior when a closed workflow with the same ID exists. Default is allow-duplicate.
         /// </summary>
-        public Temporalio.Api.Enums.V1.WorkflowIdReusePolicy? IdReusePolicy { get; init; }
+        public Temporalio.Api.Enums.V1.WorkflowIdReusePolicy IdReusePolicy { get; init; }
         /// <summary>
         /// Behavior when a workflow is currently running with the same ID. Set to use-existing for idempotent deduplication on workflow ID. Cannot be set if id-reuse-policy is terminate-if-running. Defaults to use-existing.
         /// </summary>
@@ -175,14 +176,13 @@ namespace Temporalio.Workflows
 
         internal static SignalWithStartWorkflowRequest FromTransferType(Temporalio.Api.WorkflowService.V1.SignalWithStartWorkflowExecutionRequest wire)
         {
-            return new SignalWithStartWorkflowRequest(Nexgen.Support.ProtoExtensions.FromWorkflowTypeProto(wire.WorkflowType), wire.WorkflowId, Nexgen.Support.ProtoExtensions.FromTaskQueueProto(wire.TaskQueue), wire.SignalName, wire.Namespace)
+            return new SignalWithStartWorkflowRequest(Nexgen.Support.ProtoExtensions.FromWorkflowTypeProto(wire.WorkflowType), wire.WorkflowId, Nexgen.Support.ProtoExtensions.FromTaskQueueProto(wire.TaskQueue), wire.SignalName, wire.WorkflowIdReusePolicy, wire.Namespace)
             {
                 Args = wire.Input == null ? null : Nexgen.Support.ProtoExtensions.FromPayloads(wire.Input),
                 SignalArgs = wire.SignalInput == null ? null : Nexgen.Support.ProtoExtensions.FromPayloads(wire.SignalInput),
                 ExecutionTimeout = wire.WorkflowExecutionTimeout == null ? null : Nexgen.Support.ProtoExtensions.FromDurationProto(wire.WorkflowExecutionTimeout),
                 RunTimeout = wire.WorkflowRunTimeout == null ? null : Nexgen.Support.ProtoExtensions.FromDurationProto(wire.WorkflowRunTimeout),
                 TaskTimeout = wire.WorkflowTaskTimeout == null ? null : Nexgen.Support.ProtoExtensions.FromDurationProto(wire.WorkflowTaskTimeout),
-                IdReusePolicy = (int)wire.WorkflowIdReusePolicy == 0 ? null : wire.WorkflowIdReusePolicy,
                 IdConflictPolicy = (int)wire.WorkflowIdConflictPolicy == 0 ? null : wire.WorkflowIdConflictPolicy,
                 RetryPolicy = wire.RetryPolicy == null ? null : Nexgen.Support.ProtoExtensions.FromRetryPolicyProto(wire.RetryPolicy),
                 CronSchedule = string.IsNullOrEmpty(wire.CronSchedule) ? null : wire.CronSchedule,
@@ -224,14 +224,7 @@ namespace Temporalio.Workflows
             {
                 proto.WorkflowTaskTimeout = taskTimeout.ToProto();
             }
-            if (IdReusePolicy is { } idReusePolicy)
-            {
-                proto.WorkflowIdReusePolicy = idReusePolicy;
-            }
-            else
-            {
-                proto.WorkflowIdReusePolicy = Temporalio.Api.Enums.V1.WorkflowIdReusePolicy.AllowDuplicate;
-            }
+            proto.WorkflowIdReusePolicy = IdReusePolicy;
             if (IdConflictPolicy is { } idConflictPolicy)
             {
                 proto.WorkflowIdConflictPolicy = idConflictPolicy;

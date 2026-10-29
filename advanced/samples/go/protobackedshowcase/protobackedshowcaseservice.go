@@ -24,7 +24,7 @@ import (
 
 type namespaceInfo struct {
 	Name  *string
-	State *NamespaceState
+	State NamespaceState
 	Data  map[string]string
 }
 
@@ -32,7 +32,7 @@ func (m namespaceInfo) GetName() *string {
 	return m.Name
 }
 
-func (m namespaceInfo) GetState() *NamespaceState {
+func (m namespaceInfo) GetState() NamespaceState {
 	return m.State
 }
 
@@ -45,11 +45,7 @@ func namespaceInfoToProto(m *namespaceInfo) (*namespace.NamespaceInfo, error) {
 	if m.Name != nil {
 		message.Name = (*m.Name)
 	}
-	if m.State != nil {
-		message.State = enums.NamespaceState((*m.State))
-	} else {
-		message.State = enums.NamespaceState(1)
-	}
+	message.State = enums.NamespaceState(m.State)
 	if len(m.Data) > 0 {
 		message.Data = make(map[string]string, len(m.Data))
 		for k, v := range m.Data {
@@ -65,10 +61,7 @@ func namespaceInfoFromProto(proto *namespace.NamespaceInfo, out *namespaceInfo) 
 		converted := proto.GetName()
 		out.Name = &converted
 	}
-	{
-		converted := NamespaceState(int32(proto.GetState()))
-		out.State = &converted
-	}
+	out.State = NamespaceState(int32(proto.GetState()))
 	if len(proto.GetData()) > 0 {
 		out.Data = make(map[string]string, len(proto.GetData()))
 		for k, v := range proto.GetData() {
@@ -872,9 +865,11 @@ func NamespaceInfoOperation(ctx workflow.Context, opts NamespaceInfoOperationOpt
 	if opts.Name != "" {
 		name = &opts.Name
 	}
-	var state *NamespaceState
+	var state NamespaceState
 	if opts.State != 0 {
-		state = &opts.State
+		state = opts.State
+	} else {
+		state = NamespaceStateNamespaceStateRegistered
 	}
 	return namespaceInfoOperation(ctx, namespaceInfo{
 		Name:  name,

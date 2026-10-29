@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { describe, expect, expectTypeOf, test, vi } from "vitest";
 import * as workflow from "@temporalio/workflow";
+import * as common from "@temporalio/common";
 import * as nexus from "nexus-rpc";
 
 import { signalWithStartWorkflow } from "../wit/workflow-service/index.ts";
@@ -53,6 +54,7 @@ describe("workflow-service generated output", () => {
       const result = await executeWorkflowWithNexus<{
         runId: string | undefined;
         workflowId: string;
+        taskQueue: string;
       }>(env, {
         endpoint: "temporal-system",
         nexusServices: [handler],
@@ -63,6 +65,7 @@ describe("workflow-service generated output", () => {
       expect(result).toEqual({
         runId: "run-123",
         workflowId: "workflow-id",
+        taskQueue: expect.any(String),
       });
       expect(calls).toHaveLength(1);
 
@@ -70,7 +73,7 @@ describe("workflow-service generated output", () => {
       expect(request?.namespace).toBe("default");
       expect(request?.workflow).toBe("exampleWorkflow");
       expect(request?.id).toBe("workflow-id");
-      expect(request?.taskQueue).toBe("demo-task-queue");
+      expect(request?.taskQueue).toBe(result.taskQueue);
       expect(request?.signal).toBe("wake-up");
       expect(request?.cronSchedule).toBe("");
     });
@@ -100,6 +103,7 @@ if (false) {
     cronSchedule,
     staticSummary: "Workflow summary",
     staticDetails: "Workflow details",
+    idReusePolicy: common.WorkflowIdReusePolicy.ALLOW_DUPLICATE,
     namespace: "default",
   };
 

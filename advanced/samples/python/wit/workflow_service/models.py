@@ -32,9 +32,7 @@ class SignalWithStartWorkflowRequest:
     execution_timeout: datetime.timedelta | None = None
     run_timeout: datetime.timedelta | None = None
     task_timeout: datetime.timedelta | None = None
-    id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = (
-        temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE
-    )
+    id_reuse_policy: temporalio.common.WorkflowIDReusePolicy
     id_conflict_policy: temporalio.common.WorkflowIDConflictPolicy | None = None
     retry_policy: temporalio.common.RetryPolicy | None = None
     cron_schedule: str | None = None
@@ -85,6 +83,9 @@ class _SignalWithStartWorkflowRequestTransferTypeConverter(
                 "missing required field SignalWithStartWorkflowRequest.signal"
             )
         signal = value.signal_name
+        id_reuse_policy = _support.workflow_id_reuse_policy_from_proto(
+            value.workflow_id_reuse_policy
+        )
         return SignalWithStartWorkflowRequest(
             workflow=workflow,
             args=_support.payloads_from_proto(value.input)
@@ -107,9 +108,7 @@ class _SignalWithStartWorkflowRequestTransferTypeConverter(
             task_timeout=_support.duration_from_proto(value.workflow_task_timeout)
             if value.HasField("workflow_task_timeout")
             else None,
-            id_reuse_policy=_support.workflow_id_reuse_policy_from_proto(
-                value.workflow_id_reuse_policy
-            ),
+            id_reuse_policy=id_reuse_policy,
             id_conflict_policy=_support.workflow_id_conflict_policy_from_proto(
                 value.workflow_id_conflict_policy
             )

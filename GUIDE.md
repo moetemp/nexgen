@@ -820,8 +820,7 @@ by the target SDK or generated operation helpers.
 An enum annotated with `@nexus.proto` likewise remains a generated public enum
 unless a type replacement selects an external model. Fields use the authored
 enum's name and members, even when its name differs from the protobuf enum's.
-Converters bridge the model and protobuf enum by number, and `@nexus.default`
-continues to name a WIT case.
+Converters bridge the model and protobuf enum by number.
 
 ### Transfer-Type Conversion
 
@@ -1752,26 +1751,38 @@ Cannot be combined with `@nexus.default`.
 
 ### @nexus.default
 
-**Placement:** Record field (whose type is a WIT enum or a protobuf-enum alias)
-**Syntax:** `@nexus.default "<enum-case-name>"`
+**Placement:** Record field **Syntax:**
+`@nexus.default python="<expression>" typescript="<expression>" go="<expression>" dotnet="<expression>"`
 
-Sets a default value for an enum field, making it optional in the generated API.
-For a protobuf-enum alias, the case name is validated against the descriptor.
+Makes an operation argument omittable and calculates its value when the
+generated operation prepares its outbound request. The field must have a
+non-option type: `@nexus.default` is rejected on `option<T>`, including aliases
+to option types.
 
 ```wit
-/// @nexus.default "allow-duplicate"
+/// @nexus.default
+///   python="temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE"
+///   typescript="common.WorkflowIdReusePolicy.ALLOW_DUPLICATE"
+///   go="enums.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE"
+///   dotnet="Temporalio.Api.Enums.V1.WorkflowIdReusePolicy.AllowDuplicate"
 id-reuse-policy: workflow-id-reuse-policy,
 ```
 
-**Python:**
+The operation evaluates an expression only when its argument is missing and only
+once per invocation. Support helpers must explicitly use `_support` in Python,
+`support` in Go and TypeScript, or a class in the configured .NET support
+namespace. Go expressions can use `ctx`.
 
-```python
-id_reuse_policy: temporalio.common.WorkflowIDReusePolicy = (
-    temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE
-)
-```
+Python uses `None` as the omission marker; TypeScript uses `undefined`; and .NET
+uses null on the options surface. Go uses default-punning: empty strings, false,
+zero, and nil represent an omitted argument.
 
-Cannot be combined with `@nexus.source`.
+Defaults apply only to exposed operation arguments, including flattened
+arguments. Supplied nested records must be complete and pass through unchanged;
+defaults are not applied to their fields or to records inside lists or maps.
+Constructors and encoding/decoding do not evaluate defaults.
+
+A default cannot be combined with `@nexus.source`.
 
 ---
 

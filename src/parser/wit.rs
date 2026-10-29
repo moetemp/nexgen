@@ -3037,6 +3037,15 @@ fn build_resource(
         .map(|function| build_resource_method(resolve, function, path, &context, language))
         .collect::<Result<Vec<_>>>()?;
 
+    if methods.iter().filter(|method| method.close).count() > 1 {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context,
+            directive: "@nexus.close".to_string(),
+            reason: "marks more than one method of the resource".to_string(),
+        });
+    }
+
     for function in interface.functions.values() {
         match function.kind {
             FunctionKind::Static(id) | FunctionKind::AsyncStatic(id) if id == resource_id => {
@@ -3163,6 +3172,7 @@ fn build_resource_method(
         .map(|ty| build_resource_result(resolve, ty, path, &context, language))
         .transpose()?;
     let varargs = build_resource_method_varargs(&params, &directives, path, &context)?;
+    let close = build_resource_method_close(&params, &directives, path, &context)?;
     let result_field = match directive(&directives, "result-field", path, &context)? {
         Some(result_field) => {
             let invalid = |reason: String| Error::InvalidWitDirective {
@@ -3205,7 +3215,33 @@ fn build_resource_method(
         operation_name: build_resource_method_operation_name(&directives, path, &context)?,
         varargs,
         result_field,
+        close,
     })
+}
+
+/// Whether a method has `@nexus.close`, which ends the resource. The end of a scope calls it with
+/// no argument, so each parameter is optional.
+fn build_resource_method_close(
+    params: &[ResourceFieldSpec],
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<bool> {
+    if directive(directives, "close", path, context)?.is_none() {
+        return Ok(false);
+    }
+    if let Some(param) = params.iter().find(|param| !param.optional) {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.close".to_string(),
+            reason: format!(
+                "needs optional parameters, but `{}` is required",
+                param.name
+            ),
+        });
+    }
+    Ok(true)
 }
 
 /// The API name of the last parameter of a method with `@nexus.varargs`, which takes the items of

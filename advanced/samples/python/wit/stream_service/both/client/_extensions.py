@@ -18,6 +18,7 @@ from ..models import (
 )
 from ._resources.stream import Stream
 import temporal_support as _support
+from .._resource_call import resource_call
 
 
 _NexusServiceT = typing.TypeVar("_NexusServiceT")
@@ -99,6 +100,7 @@ class StreamServiceClientExtension(abc.ABC):
         )
         return resource
 
+    @resource_call
     async def create_stream(
         self,
         body_type: type[BodyT],

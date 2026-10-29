@@ -15,6 +15,7 @@ from ...models import (
 )
 from .._resources import Stream
 import temporal_support as _support
+from ..._resource_call import resource_call
 
 
 BodyT = typing.TypeVar("BodyT")
@@ -43,6 +44,7 @@ async def _create_stream(
     )
 
 
+@resource_call
 async def create_stream(
     body_type: type[BodyT],
     *,

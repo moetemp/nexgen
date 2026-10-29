@@ -6,6 +6,7 @@ interceptor answers each Nexus call in the process, so the test needs no server.
 
 from __future__ import annotations
 
+import asyncio
 import collections.abc
 import dataclasses
 import datetime
@@ -151,6 +152,8 @@ class _AnswersOutbound(temporalio.client.OutboundInterceptor):
         if isinstance(answer, list):
             # A list answers each call in turn.
             answer = typing.cast(list[object], answer).pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
         # A payload answer decodes with the result type, as the System Nexus converter does.
         if isinstance(answer, Payload) and input.result_type is not None:
             return SYSTEM_CONVERTER.from_payload(answer, input.result_type)
@@ -356,6 +359,75 @@ def test_a_factory_takes_the_handle_fields_or_the_handle() -> None:
         _ = client.get_stream(body_type=str)
     with pytest.raises(TypeError, match="not both"):
         _ = client.get_stream(id="s1", ref=StreamRef(id="s1"), body_type=str)
+
+
+def closing_client(*close_answers: object) -> tuple[Client, Answers]:
+    return connect(
+        Client,
+        {
+            "CreateStream": CreateStreamResult(ref=StreamRef(id="s1")),
+            "CloseStream": list(close_answers) or [CloseStreamResponse()],
+        },
+    )
+
+
+def closes(answers: Answers) -> list[CloseStreamRequest]:
+    return [
+        typing.cast(CloseStreamRequest, started.arg)
+        for started in answers.started
+        if started.operation == "CloseStream"
+    ]
+
+
+async def test_a_clean_block_closes_its_stream() -> None:
+    client, answers = closing_client()
+
+    async with client.create_stream(str, id="s1") as stream:
+        _ = assert_type(stream, Stream[str])
+
+    assert closes(answers) == [
+        CloseStreamRequest(ref=stream.ref, producer=Producer(id="client:sample"))
+    ]
+
+
+async def test_a_failed_block_closes_its_stream() -> None:
+    client, answers = closing_client()
+
+    with pytest.raises(ValueError, match="boom"):
+        async with client.create_stream(str, id="s1"):
+            raise ValueError("boom")
+
+    assert len(closes(answers)) == 1
+
+
+async def test_a_canceled_block_closes_its_stream() -> None:
+    client, answers = closing_client()
+
+    with pytest.raises(asyncio.CancelledError):
+        async with client.create_stream(str, id="s1"):
+            raise asyncio.CancelledError("stop")
+
+    assert len(closes(answers)) == 1
+
+
+async def test_an_interrupted_block_leaves_its_stream_open() -> None:
+    client, answers = closing_client()
+
+    with pytest.raises(KeyboardInterrupt):
+        async with client.create_stream(str, id="s1"):
+            raise KeyboardInterrupt
+
+    assert closes(answers) == []
+
+
+async def test_a_failed_close_raises_with_the_block_error_as_its_context() -> None:
+    client, _ = closing_client(RuntimeError("close failed"))
+
+    with pytest.raises(RuntimeError, match="close failed") as raised:
+        async with client.create_stream(str, id="s1"):
+            raise ValueError("boom")
+
+    assert isinstance(raised.value.__context__, ValueError)
 
 
 async def test_a_stored_stream_ref_rebuilds_the_resource() -> None:

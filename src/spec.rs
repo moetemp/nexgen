@@ -763,6 +763,9 @@ pub struct ResourceMethodSpec<F: TypeFamily = AuthoredFamily> {
     pub varargs: Option<String>,
     /// The key of the response field that the method returns, from `@nexus.result-field`.
     pub result_field: Option<String>,
+    /// Set by `@nexus.close`, which marks the method that ends the resource. The end of a scope
+    /// calls it.
+    pub close: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -830,6 +833,7 @@ impl<F: TypeFamily> ResourceMethodSpec<F> {
             operation_name: self.operation_name,
             varargs: self.varargs,
             result_field: self.result_field,
+            close: self.close,
         }
     }
 }

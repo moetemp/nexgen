@@ -20,7 +20,8 @@ interface stream-service {
   };
 
   /// @nexus.doc "The value type of a Stream's Records. A Stream definition sets it."
-  type body-t = payload;
+  /// @nexus.type-parameter
+  type body-t = placeholder;
 
   /// @nexus.proto "google.protobuf.Timestamp"
   record timestamp {
@@ -382,6 +383,7 @@ interface stream-service {
   // A stream never changes, since offsets are values that its methods return. Only a create's
   // response sets created, so a stream built from a handle has none.
   /// @nexus.doc "One Stream. Build it from a stream-handle, or get it from a create."
+  /// @nexus.type-parameter "body-t"
   /// @nexus.definition python="temporalio.common.StreamDefinition"
   ///   typescript="StreamDefinition" typescript-import="@temporalio/common"
   ///   dotnet="Temporalio.Common.StreamDefinition"

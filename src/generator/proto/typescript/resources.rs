@@ -34,6 +34,7 @@ pub(super) fn render_resource(
                 field.optional,
                 field.function.as_ref(),
                 bindings.field_is_proto(&field.name),
+                api,
             )
         },
         |method, param| {
@@ -42,6 +43,7 @@ pub(super) fn render_resource(
                 false,
                 param.function.as_ref(),
                 bindings.proto_methods.contains(&method.name),
+                api,
             )
         },
     );

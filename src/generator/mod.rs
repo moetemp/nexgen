@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 pub(crate) mod dotnet;
+mod error_enum;
 pub(crate) mod go;
 pub(crate) mod java;
 pub(crate) mod json_schema;
@@ -18,6 +19,7 @@ use crate::planning::{PlannedFamily, PlannedSpec, PlannedType};
 use crate::spec::{ApiSpec, RecordSpec};
 use crate::spec::{ApiSpecNode, ApiSpecTree};
 
+pub(crate) use error_enum::{ErrorClasses, error_classes};
 pub(crate) use resource_plan::render_request_plan;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -518,7 +520,7 @@ pub(crate) fn generate_files_from_planned_tree(
         language => Err(Error::UnsupportedLanguage { language }),
     }?;
     generated.warnings = if !targets.is_empty() {
-        generation_warnings_for_tree(tree)
+        generation_warnings_for_tree(tree, language)
     } else {
         Vec::new()
     };
@@ -594,8 +596,9 @@ pub fn generate_source_with_targets(
     })
 }
 
-fn generation_warnings(plan: &PlannedSpec) -> Vec<String> {
-    plan.services
+fn generation_warnings(plan: &PlannedSpec, language: Language) -> Vec<String> {
+    let mut warnings: Vec<String> = plan
+        .services
         .iter()
         .flat_map(|service| {
             service.resources.iter().flat_map(|resource| {
@@ -613,23 +616,44 @@ fn generation_warnings(plan: &PlannedSpec) -> Vec<String> {
                 })
             })
         })
-        .collect()
+        .collect();
+    // Only Python, TypeScript and .NET make the classes, from `<language>-extends`.
+    let makes_classes = matches!(
+        language,
+        Language::Python | Language::TypeScript | Language::Dotnet
+    );
+    warnings.extend(plan.types.values().filter_map(|entry| {
+        let crate::spec::TypeDeclSpec::Enum(enumeration) = &entry.declaration else {
+            return None;
+        };
+        let error = enumeration.error.as_ref()?;
+        (!makes_classes || error.extends.value().is_none()).then(|| {
+            format!(
+                "`@nexus.error` on `{}` gives no error classes in {language}",
+                enumeration.full_name
+            )
+        })
+    }));
+    warnings
 }
 
-fn generation_warnings_for_tree(tree: &ApiSpecTree<PlannedFamily>) -> Vec<String> {
-    fn collect(node: &ApiSpecNode<PlannedFamily>, warnings: &mut Vec<String>) {
+fn generation_warnings_for_tree(
+    tree: &ApiSpecTree<PlannedFamily>,
+    language: Language,
+) -> Vec<String> {
+    fn collect(node: &ApiSpecNode<PlannedFamily>, language: Language, warnings: &mut Vec<String>) {
         match node {
-            ApiSpecNode::Leaf(leaf) => warnings.extend(generation_warnings(&leaf.spec)),
+            ApiSpecNode::Leaf(leaf) => warnings.extend(generation_warnings(&leaf.spec, language)),
             ApiSpecNode::Branch(branch) => {
                 for child in branch.children.values() {
-                    collect(child, warnings);
+                    collect(child, language, warnings);
                 }
             }
         }
     }
 
     let mut warnings = Vec::new();
-    collect(&tree.root, &mut warnings);
+    collect(&tree.root, language, &mut warnings);
     warnings
 }
 

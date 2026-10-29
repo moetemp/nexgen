@@ -1,0 +1,24 @@
+package test:error-class-name-clash@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  // The name of the first case is the derived name of the second in Python and TypeScript.
+  /// @nexus.error details="job-error-details" field="reason" name="job-error"
+  ///   python-extends="temporalio.exceptions.ApplicationError"
+  ///   typescript-extends="ApplicationFailure"
+  enum job-error-reason {
+    job-error-reason-unspecified,
+    /// @nexus.error name="JobMissingError"
+    job-error-reason-gone,
+    /// @nexus.error
+    job-error-reason-missing,
+  }
+
+  record job-error-details { reason: option<job-error-reason>, note: option<string> }
+
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}

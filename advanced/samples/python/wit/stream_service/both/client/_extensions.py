@@ -23,6 +23,7 @@ from ..models import (
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
+    StreamErrorDetails,
     StreamReadStart,
     StreamRecord,
     StreamRef,
@@ -31,6 +32,7 @@ from ._resources import Stream
 import temporal_support as _support
 from .._poll import PollIterator
 from .._resource_call import resource_call
+from ..errors import StreamError, stream_error
 
 if typing.TYPE_CHECKING:
     import temporal_support
@@ -113,28 +115,37 @@ class StreamServiceClientExtension(abc.ABC):
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> Stream[BodyT]:
-        nexus_client = self._create_nexus_client(
-            service="temporal.api.streamservice.v1.StreamService",
-            endpoint="__temporal_system",
-        )
-        handle = await nexus_client.start_operation(
-            operation="CreateStream",
-            arg=request,
-            id=_operation_id(),
-            result_type=CreateStreamResult,
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        result = await handle.result()
-        if result.stream is None:
-            raise RuntimeError("CreateStream answered without `stream`")
-        resource = Stream(
-            nexus_client,
-            body_type=body_type,
-            stream=result.stream,
-            created=result.created or None,
-        )
-        return resource
+        try:
+            nexus_client = self._create_nexus_client(
+                service="temporal.api.streamservice.v1.StreamService",
+                endpoint="__temporal_system",
+            )
+            handle = await nexus_client.start_operation(
+                operation="CreateStream",
+                arg=request,
+                id=_operation_id(),
+                result_type=CreateStreamResult,
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            result = await handle.result()
+            if result.stream is None:
+                raise RuntimeError("CreateStream answered without `stream`")
+            resource = Stream(
+                nexus_client,
+                body_type=body_type,
+                stream=result.stream,
+                created=result.created or None,
+            )
+            return resource
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     @resource_call
     async def create_stream(
@@ -176,19 +187,28 @@ class StreamServiceClientExtension(abc.ABC):
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> AppendRecordsResponse:
-        nexus_client = self._create_nexus_client(
-            service="temporal.api.streamservice.v1.StreamService",
-            endpoint="__temporal_system",
-        )
-        handle = await nexus_client.start_operation(
-            operation="AppendRecords",
-            arg=request,
-            id=_operation_id(),
-            result_type=AppendRecordsResponse,
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        return await handle.result()
+        try:
+            nexus_client = self._create_nexus_client(
+                service="temporal.api.streamservice.v1.StreamService",
+                endpoint="__temporal_system",
+            )
+            handle = await nexus_client.start_operation(
+                operation="AppendRecords",
+                arg=request,
+                id=_operation_id(),
+                result_type=AppendRecordsResponse,
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            return await handle.result()
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def append_records(
         self,
@@ -217,19 +237,28 @@ class StreamServiceClientExtension(abc.ABC):
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseStreamResponse:
-        nexus_client = self._create_nexus_client(
-            service="temporal.api.streamservice.v1.StreamService",
-            endpoint="__temporal_system",
-        )
-        handle = await nexus_client.start_operation(
-            operation="CloseStream",
-            arg=request,
-            id=_operation_id(),
-            result_type=CloseStreamResponse,
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        return await handle.result()
+        try:
+            nexus_client = self._create_nexus_client(
+                service="temporal.api.streamservice.v1.StreamService",
+                endpoint="__temporal_system",
+            )
+            handle = await nexus_client.start_operation(
+                operation="CloseStream",
+                arg=request,
+                id=_operation_id(),
+                result_type=CloseStreamResponse,
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            return await handle.result()
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def close_stream(
         self,
@@ -258,19 +287,28 @@ class StreamServiceClientExtension(abc.ABC):
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> ReadRecordsResponse[BodyT]:
-        nexus_client = self._create_nexus_client(
-            service="temporal.api.streamservice.v1.StreamService",
-            endpoint="__temporal_system",
-        )
-        handle = await nexus_client.start_operation(
-            operation="ReadRecords",
-            arg=request,
-            id=_operation_id(),
-            result_type=ReadRecordsResponse[body_type],
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        return await handle.result()
+        try:
+            nexus_client = self._create_nexus_client(
+                service="temporal.api.streamservice.v1.StreamService",
+                endpoint="__temporal_system",
+            )
+            handle = await nexus_client.start_operation(
+                operation="ReadRecords",
+                arg=request,
+                id=_operation_id(),
+                result_type=ReadRecordsResponse[body_type],
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            return await handle.result()
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def read_records(
         self,
@@ -377,15 +415,24 @@ class StreamServiceClientExtension(abc.ABC):
         ) -> tuple[
             ReadRecordsRequest | None, collections.abc.Sequence[StreamRecord[BodyT]]
         ]:
-            handle = await nexus_client.start_operation(
-                operation="ReadRecords",
-                arg=request,
-                id=_operation_id(),
-                result_type=ReadRecordsResponse[body_type],
-                rpc_metadata=rpc_metadata or {},
-                rpc_timeout=rpc_timeout,
-            )
-            response = await handle.result()
+            try:
+                handle = await nexus_client.start_operation(
+                    operation="ReadRecords",
+                    arg=request,
+                    id=_operation_id(),
+                    result_type=ReadRecordsResponse[body_type],
+                    rpc_metadata=rpc_metadata or {},
+                    rpc_timeout=rpc_timeout,
+                )
+                response = await handle.result()
+            except StreamError:
+                raise
+            except Exception as err:
+                found = _support.error_details(err, StreamErrorDetails)
+                if found is None:
+                    raise
+                details, message = found
+                raise stream_error(details, message) from err
             return _support.next_read_request(request, response), response.records or []
 
         return PollIterator(request, read, _support.resume_read_request)
@@ -397,19 +444,28 @@ class StreamServiceClientExtension(abc.ABC):
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> DescribeStreamResponse:
-        nexus_client = self._create_nexus_client(
-            service="temporal.api.streamservice.v1.StreamService",
-            endpoint="__temporal_system",
-        )
-        handle = await nexus_client.start_operation(
-            operation="DescribeStream",
-            arg=request,
-            id=_operation_id(),
-            result_type=DescribeStreamResponse,
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        return await handle.result()
+        try:
+            nexus_client = self._create_nexus_client(
+                service="temporal.api.streamservice.v1.StreamService",
+                endpoint="__temporal_system",
+            )
+            handle = await nexus_client.start_operation(
+                operation="DescribeStream",
+                arg=request,
+                id=_operation_id(),
+                result_type=DescribeStreamResponse,
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            return await handle.result()
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def describe_stream(
         self,

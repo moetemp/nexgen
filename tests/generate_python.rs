@@ -837,3 +837,60 @@ $defs:
         fs::remove_dir_all(temp_dir).unwrap();
     }
 }
+
+#[test]
+fn python_warns_that_an_error_enum_with_no_python_extends_gives_no_classes() {
+    let temp_dir = unique_output_path("python-error-enum");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("jobs.wit");
+    fs::write(
+        &wit_path,
+        r#"package test:jobs@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  /// @nexus.error details="job-error-details" field="reason" name="job-error"
+  ///   typescript-extends="ApplicationFailure"
+  enum job-error-reason {
+    job-error-reason-unspecified,
+    /// @nexus.error
+    job-error-reason-missing,
+  }
+
+  record job-error-details { reason: option<job-error-reason> }
+
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}
+"#,
+    )
+    .unwrap();
+    let output_path = temp_dir.join("output");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
+        .args([
+            "python",
+            wit_path.to_str().unwrap(),
+            "--support-package",
+            "temporal_support",
+            "--targets",
+            "workflow",
+            "--output",
+            output_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    fs::remove_dir_all(temp_dir).unwrap();
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "stderr: {stderr}");
+    assert!(
+        stderr.contains(
+            "`@nexus.error` on `job-service.job-error-reason` gives no error classes in python"
+        ),
+        "stderr: {stderr}"
+    );
+}

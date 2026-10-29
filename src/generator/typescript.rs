@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use heck::{ToKebabCase, ToLowerCamelCase, ToUpperCamelCase};
+use heck::{ToKebabCase, ToLowerCamelCase, ToShoutySnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
 use crate::error::{Error, Result};
@@ -15,7 +15,8 @@ use crate::generator::proto::typescript::{
 use crate::generator::render_request_plan;
 use crate::generator::resource_plan::{request_plan_fills_source, resource_method_fills_source};
 use crate::generator::{
-    ExternalModelBackend, GeneratedFileMap, GeneratedFileOrigin, GeneratedFiles, TsDateTimeTypes,
+    ErrorClasses, ExternalModelBackend, GeneratedFileMap, GeneratedFileOrigin, GeneratedFiles,
+    TsDateTimeTypes, error_classes,
 };
 use crate::language::Language;
 use crate::nexgen_config::GenerationTarget;
@@ -29,10 +30,10 @@ use crate::planning::{
 };
 use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{
-    AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FieldOrigin, FlagsSpec,
-    FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, IntSpec, LanguageImportSpec,
-    LanguageImportStyle, ModulePath, OperationSpec, RecordFieldSpec, RecordSpec, SelectedTextSpec,
-    TypeReplacementSpec, TypeSpec, VariantSpec,
+    AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FieldOrigin,
+    FlagsSpec, FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, IntSpec,
+    LanguageImportSpec, LanguageImportStyle, ModulePath, OperationSpec, RecordFieldSpec,
+    RecordSpec, SelectedTextSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 
@@ -3768,6 +3769,17 @@ fn render_module_files(
     for name in &rendered_types.model_value_exports {
         index_exports.push(format!("export {{ {name} }} from './models';"));
     }
+    if let Some((errors, names)) = render_errors_module(api_plan)? {
+        index_exports.push(format!(
+            "export {{ {} }} from './errors';",
+            names.join(", ")
+        ));
+        files.insert(
+            "errors.ts",
+            errors,
+            GeneratedFileOrigin::fixed("generated TypeScript error classes"),
+        )?;
+    }
     files.insert(
         "index.ts",
         if targets.workflow {
@@ -6753,6 +6765,146 @@ fn render_resource_long_import(
     } else {
         render_typescript_requirement_imports(output, requirements);
     }
+}
+
+/// Renders `errors.ts`, with a class per case of each error enum under one base, and the function
+/// that gives the class of a failed call's details. It returns the exported names.
+fn render_errors_module(api_plan: &PlannedSpec) -> Result<Option<(String, Vec<String>)>> {
+    let error_classes = error_classes(api_plan, Language::TypeScript, "Error")?;
+    if error_classes.is_empty() {
+        return Ok(None);
+    }
+    let mut sdk_imports = BTreeMap::<&str, BTreeSet<&str>>::new();
+    let mut detail_names = BTreeSet::new();
+    let mut enum_names = BTreeSet::new();
+    let mut body = String::new();
+    let mut names = Vec::new();
+    for classes in &error_classes {
+        sdk_imports
+            .entry(classes.extends_import.unwrap_or("@temporalio/common"))
+            .or_default()
+            .insert(classes.extends);
+        detail_names.insert(classes.details.name.as_str());
+        enum_names.insert(classes.enumeration.name.as_str());
+        render_error_classes(&mut body, classes, &mut names);
+    }
+    let mut output = String::from(GENERATED_HEADER);
+    output.push_str("\n\n");
+    for (module, classes) in &sdk_imports {
+        output.push_str(&format!(
+            "import {{ {} }} from {};\n",
+            classes.iter().copied().collect::<Vec<_>>().join(", "),
+            typescript_string_literal(module)
+        ));
+    }
+    let model_imports = detail_names
+        .iter()
+        .map(|name| format!("type {name}"))
+        .chain(enum_names.iter().map(|name| name.to_string()))
+        .collect::<Vec<_>>();
+    output.push_str(&format!(
+        "import {{ {} }} from \"./models\";\n",
+        model_imports.join(", ")
+    ));
+    output.push_str(&body);
+    Ok(Some((output, names)))
+}
+
+/// Renders the classes of one error enum, with the map from each case to its class and the
+/// function that reads the map.
+fn render_error_classes(output: &mut String, classes: &ErrorClasses<'_>, names: &mut Vec<String>) {
+    let enum_name = &classes.enumeration.name;
+    let member = |value: &EnumValueSpec| format!("{enum_name}.{}", value.name);
+    let base = &classes.base.name;
+    let field = typescript_generated_field_name(&classes.field.name);
+    let details_value = if field == "reason" {
+        "{ reason }".to_string()
+    } else {
+        format!("{{ {field}: reason }}")
+    };
+    output.push_str(&format!(
+        concat!(
+            "\n/**\n",
+            " * A failed call, with its `{enum_name}`. A reason with no class of its own throws\n",
+            " * this class.\n",
+            " */\n",
+            "export class {base} extends {extends} {{\n",
+            "  public constructor(\n",
+            "    message: string,\n",
+            "    public readonly reason: {enum_name} = {unspecified},\n",
+            "    type: string = \"{failure_type}\",\n",
+            "    nonRetryable: boolean = true,\n",
+            "  ) {{\n",
+            "    const details: {details} = {details_value};\n",
+            "    super(message, type, nonRetryable, [details]);\n",
+            "  }}\n",
+            "}}\n",
+        ),
+        enum_name = enum_name,
+        base = base,
+        extends = classes.extends,
+        unspecified = member(classes.unspecified),
+        failure_type = classes.base.failure_type,
+        details = classes.details.name,
+        details_value = details_value,
+    ));
+    names.push(base.clone());
+    for case in &classes.cases {
+        output.push_str(&format!(
+            concat!(
+                "\n/** The error of `{member}`. */\n",
+                "export class {class} extends {base} {{\n",
+                "  public constructor(message: string, reason: {enum_name} = {member}) {{\n",
+                "    super(message, reason, \"{failure_type}\", {non_retryable});\n",
+                "  }}\n",
+                "}}\n",
+            ),
+            member = member(case.value),
+            class = case.name,
+            base = base,
+            enum_name = enum_name,
+            failure_type = case.failure_type,
+            non_retryable = !case.retryable,
+        ));
+        names.push(case.name.clone());
+    }
+    let map_name = format!("{}S", classes.error.name.to_shouty_snake_case());
+    let function = classes.error.name.to_lower_camel_case();
+    output.push_str(&format!(
+        concat!(
+            "\nconst {map_name}: Partial<\n",
+            "  Record<{enum_name}, new (message: string, reason: {enum_name}) => {base}>\n",
+            "> = {{\n",
+        ),
+        map_name = map_name,
+        enum_name = enum_name,
+        base = base,
+    ));
+    for case in &classes.cases {
+        output.push_str(&format!("  [{}]: {},\n", member(case.value), case.name));
+    }
+    output.push_str("};\n");
+    output.push_str(&format!(
+        concat!(
+            "\n/**\n",
+            " * The error of the reason in the details of",
+            " a failed call. A reason with no class of\n",
+            " * its own, or one that this code doesn't know, gives `{base}`.\n",
+            " */\n",
+            "export function {function}(details: {details}, message: string): {base} {{\n",
+            "  const reason = details.{field} ?? {unspecified};\n",
+            "  const ErrorClass = {map_name}[reason] ?? {base};\n",
+            "  return new ErrorClass(message, reason);\n",
+            "}}\n",
+        ),
+        base = base,
+        function = function,
+        details = classes.details.name,
+        field = field,
+        unspecified = member(classes.unspecified),
+        map_name = map_name,
+    ));
+    names.push(function);
 }
 
 fn typescript_resource_method_result_type(

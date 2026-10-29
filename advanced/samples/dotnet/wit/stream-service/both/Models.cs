@@ -31,6 +31,26 @@ namespace Temporalio.Workflows
     }
 
     [GeneratedCode("nexgen", null)]
+    public enum StreamErrorReason
+    {
+        StreamErrorReasonUnspecified = 0,
+        StreamErrorReasonNotFound = 1,
+        StreamErrorReasonExpired = 2,
+        StreamErrorReasonClosed = 3,
+        StreamErrorReasonFenced = 4,
+        StreamErrorReasonSequence = 5,
+        StreamErrorReasonSeqDivergent = 6,
+        StreamErrorReasonNotOwner = 7,
+        StreamErrorReasonFormatTooNew = 8,
+        StreamErrorReasonOffset = 9,
+        StreamErrorReasonTooLarge = 10,
+        StreamErrorReasonInvalid = 11,
+        StreamErrorReasonStorage = 12,
+        StreamErrorReasonUnknownWriter = 13,
+        StreamErrorReasonUnsupported = 14,
+    }
+
+    [GeneratedCode("nexgen", null)]
     public enum StreamProducerKind
     {
         StreamProducerKindUnspecified = 0,
@@ -1118,6 +1138,50 @@ namespace Temporalio.Workflows
 
             /// <summary>Converts a transfer-type value to this model.</summary>
             public object? FromTransferType(object? transferType) => transferType is null ? null : StreamData<TBody>.FromTransferType((Temporalio.Api.Stream.V1.StreamData)transferType);
+        }
+
+    }
+
+    /// <summary>
+    /// The details of a failed Stream call.
+    /// </summary>
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(StreamErrorDetails.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record StreamErrorDetails
+    {
+        public StreamErrorReason? Reason { get; init; }
+
+        internal static StreamErrorDetails FromTransferType(Temporalio.Api.Stream.V1.StreamErrorDetails wire)
+        {
+            return new StreamErrorDetails()
+            {
+                Reason = (int)wire.Reason == 0 ? null : (System.Enum.IsDefined(typeof(StreamErrorReason), (int)wire.Reason) ? (StreamErrorReason)wire.Reason : StreamErrorReason.StreamErrorReasonUnspecified),
+            };
+        }
+
+        internal Temporalio.Api.Stream.V1.StreamErrorDetails ToTransferType()
+        {
+            var proto = new Temporalio.Api.Stream.V1.StreamErrorDetails();
+            if (Reason is { } reason)
+            {
+                proto.Reason = (Temporalio.Api.Enums.V1.StreamErrorReason)reason;
+            }
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(Temporalio.Api.Stream.V1.StreamErrorDetails);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((StreamErrorDetails)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : StreamErrorDetails.FromTransferType((Temporalio.Api.Stream.V1.StreamErrorDetails)transferType);
         }
 
     }

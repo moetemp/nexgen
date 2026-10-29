@@ -1,0 +1,1 @@
+`@nexus.error` on an enum makes an exception class per case of a failed call, in Python, TypeScript and .NET. Only Python's calls raise the class of a failed call's reason. Go and Java get no classes, with a warning.

@@ -43,6 +43,27 @@ fn prune(spec: &mut PlannedSpec) {
         .types
         .values()
         .any(|entry| entry.module_export != ModuleExport::Unscoped);
+    // A failed call of a service holds the error enum of its interface in a details record,
+    // which no operation names. An error enum of a used package stays out.
+    let service_interfaces = spec
+        .services
+        .iter()
+        .map(|service| service.name.as_str())
+        .collect::<BTreeSet<_>>();
+    for (name, entry) in &spec.types {
+        if let TypeDeclSpec::Enum(enumeration) = &entry.declaration
+            && let Some(error) = &enumeration.error
+            && enumeration
+                .full_name
+                .split_once('.')
+                .is_some_and(|(interface, _)| {
+                    service_interfaces.contains(interface.to_upper_camel_case().as_str())
+                })
+        {
+            reachable.insert(name.clone());
+            add_name(spec, &error.details, &mut reachable);
+        }
+    }
     for service in &spec.services {
         for operation in &service.operations {
             pending.extend(

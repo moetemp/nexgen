@@ -20,6 +20,8 @@ namespace Nexgen.DotNetExamples.Tests
         private const string StreamService = "temporal.api.streamservice.v1.StreamService";
         private const string SystemEndpoint = "__temporal_system";
 
+        public sealed record Turn(string Role);
+
         [Fact]
         public async Task ACreatedStreamPublishesOnTheSystemEndpoint()
         {
@@ -27,9 +29,9 @@ namespace Nexgen.DotNetExamples.Tests
             var client = FakeTemporalClient.Create(
                 ("CreateStream", new Models.CreateStreamResult { Stream = streamRef, Created = true }),
                 ("AppendRecords", new Models.AppendRecordsResponse { LastOffset = 0 }));
-            var records = Array.Empty<Models.AppendRecord>();
+            var records = Array.Empty<Models.AppendRecord<Turn>>();
 
-            var stream = await client.CreateStreamAsync(new StreamClient.CreateStreamOptions("s1"));
+            var stream = await client.CreateStreamAsync<Turn>(new StreamClient.CreateStreamOptions("s1"));
             var response = await stream.PublishAsync(records);
 
             Assert.Equal((streamRef, (bool?)true), (stream.StreamValue, stream.Created));
@@ -43,7 +45,7 @@ namespace Nexgen.DotNetExamples.Tests
                 },
                 calls.Select(call => (call.Endpoint, call.Service, call.Operation)));
             Assert.Equal(new Models.CreateStreamRequest("s1"), calls[0].Input);
-            Assert.Equal(new Models.AppendRecordsRequest(streamRef, records), calls[1].Input);
+            Assert.Equal(new Models.AppendRecordsRequest<Turn>(streamRef, records), calls[1].Input);
         }
 
         [Fact]
@@ -53,7 +55,7 @@ namespace Nexgen.DotNetExamples.Tests
             var client = FakeTemporalClient.Create(
                 ("DescribeStream", new Models.DescribeStreamResponse { LastOffset = 7 }));
 
-            var response = await client.GetStream(streamRef, null).DescribeAsync();
+            var response = await client.GetStream<Turn>(streamRef, null).DescribeAsync();
 
             Assert.Equal(7, response.LastOffset);
             Assert.Equal(
@@ -73,7 +75,7 @@ namespace Nexgen.DotNetExamples.Tests
             var client = FakeTemporalClient.Create(
                 pages.Select(page => ("ReadRecords", (object?)page)).ToArray());
 
-            var stream = client.GetStream(streamRef, null);
+            var stream = client.GetStream<Turn>(streamRef, null);
 
             var read = await ReadAll(stream.ReadPagesAsync(1, null, null, null, null, null));
 
@@ -105,7 +107,7 @@ namespace Nexgen.DotNetExamples.Tests
             var client = FakeTemporalClient.Create(
                 pages.Select(page => ("ReadRecords", (object?)page)).ToArray());
 
-            var stream = client.GetStream(streamRef, null);
+            var stream = client.GetStream<Turn>(streamRef, null);
 
             var read = await ReadAll(stream.ReadPagesAsync(1, null, null, wait, null, null));
 
@@ -135,7 +137,7 @@ namespace Nexgen.DotNetExamples.Tests
                 new[] { ("CreateStream", (object?)new Models.CreateStreamResult { Stream = streamRef }) }
                     .Concat(pages.Select(page => ("ReadRecords", (object?)page)))
                     .ToArray());
-            var stream = await client.CreateStreamAsync(new StreamClient.CreateStreamOptions("s1"));
+            var stream = await client.CreateStreamAsync<Turn>(new StreamClient.CreateStreamOptions("s1"));
 
             var read = await ReadAll(stream.ReadPagesAsync(
                 null, Models.StreamReadStart.StreamReadStartEnd, null, wait, null, null));
@@ -164,7 +166,7 @@ namespace Nexgen.DotNetExamples.Tests
             var pages = new[] { Page(nextOffset: 1, done: true, offsets: new long[] { 0 }) };
             var client = FakeTemporalClient.Create(("ReadRecords", pages[0]));
 
-            var stream = client.GetStream(streamRef, null);
+            var stream = client.GetStream<Turn>(streamRef, null);
 
             var read = await ReadAll(stream.ReadPagesAsync(null, null, null, null, null, null));
 
@@ -181,7 +183,7 @@ namespace Nexgen.DotNetExamples.Tests
             var streamRef = new Models.StreamRef("s1");
             var client = FakeTemporalClient.Create(("ReadRecords", Page(done: true)));
 
-            await ReadAll(client.GetStream(streamRef, null)
+            await ReadAll(client.GetStream<Turn>(streamRef, null)
                 .ReadPagesAsync(null, null, null, null, null, null, cancellation.Token));
 
             Assert.All(
@@ -195,14 +197,14 @@ namespace Nexgen.DotNetExamples.Tests
             Assert.NotNull(typeof(Models.Operations).GetMethod(
                 "ReadRecordsAsync", new[] { typeof(Models.ReadRecordsOptions) }));
             Assert.Null(typeof(Models.Operations).GetMethod("ReadRecordsPagesAsync"));
-            Assert.Null(typeof(Models.Stream).GetMethod("ReadPagesAsync"));
-            Assert.NotNull(typeof(StreamClient.Stream).GetMethod("ReadPagesAsync"));
+            Assert.Null(typeof(Models.Stream<>).GetMethod("ReadPagesAsync"));
+            Assert.NotNull(typeof(StreamClient.Stream<>).GetMethod("ReadPagesAsync"));
         }
 
-        private static Models.ReadRecordsResponse Page(
+        private static Models.ReadRecordsResponse<Turn> Page(
             long? nextOffset = null, bool? done = null, long[]? offsets = null) =>
             new((offsets ?? Array.Empty<long>())
-                .Select(offset => new Models.StreamRecord { Offset = offset })
+                .Select(offset => new Models.StreamRecord<Turn> { Offset = offset })
                 .ToArray())
             {
                 NextOffset = nextOffset,

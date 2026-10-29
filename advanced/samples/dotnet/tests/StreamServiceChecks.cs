@@ -1,6 +1,7 @@
 extern alias Streams;
 
 using System.Linq;
+using System.Threading.Tasks;
 using Temporalio.Converters;
 using Xunit;
 using static Nexgen.DotNetExamples.Tests.TransferTypeTestSupport;
@@ -13,13 +14,17 @@ namespace Nexgen.DotNetExamples.Tests
 {
     public class StreamServiceChecks
     {
+        public sealed record Turn(string Role);
+
         [Fact]
         public void StreamWithItsOwnFieldNameRoundTrips()
         {
             var converter = DataConverter.Default.PayloadConverter;
-            var stream = new StreamServiceExample.Stream(new StreamServiceExample.StreamRef("stream-1"), null);
+            var stream = new StreamServiceExample.Stream<Turn>(
+                new StreamServiceExample.StreamRef("stream-1"), null);
 
-            var decoded = converter.ToValue<StreamServiceExample.Stream>(converter.ToPayload(stream));
+            var decoded = converter.ToValue<StreamServiceExample.Stream<Turn>>(
+                converter.ToPayload(stream));
 
             Assert.Equal("stream-1", decoded.StreamValue.Id);
         }
@@ -29,17 +34,17 @@ namespace Nexgen.DotNetExamples.Tests
         [Fact]
         public void ReadItemsRoundTripAsTheirRecords()
         {
-            var model = new StreamServiceExample.ReadRecordsResponse(new[]
+            var model = new StreamServiceExample.ReadRecordsResponse<Turn>(new[]
             {
-                new StreamServiceExample.StreamRecord
+                new StreamServiceExample.StreamRecord<Turn>
                 {
-                    Item = new StreamServiceExample.StreamItem.Superseded(
+                    Item = new StreamServiceExample.StreamItem<Turn>.Superseded(
                         new StreamServiceExample.Supersession("workflow-1", new long[] { 7 })),
                     Offset = 2,
                 },
-                new StreamServiceExample.StreamRecord
+                new StreamServiceExample.StreamRecord<Turn>
                 {
-                    Item = new StreamServiceExample.StreamItem.Close(
+                    Item = new StreamServiceExample.StreamItem<Turn>.Close(
                         new StreamServiceExample.StreamClose
                         {
                             Status = StreamServiceExample.StreamCloseStatus
@@ -50,7 +55,7 @@ namespace Nexgen.DotNetExamples.Tests
             });
 
             var wire = Assert.IsType<WireReadRecordsResponse>(
-                CreateSdkConverter(typeof(StreamServiceExample.ReadRecordsResponse))
+                CreateSdkConverter(typeof(StreamServiceExample.ReadRecordsResponse<Turn>))
                     .ToTransferType(model));
             Assert.Equal(
                 new[]
@@ -60,12 +65,13 @@ namespace Nexgen.DotNetExamples.Tests
                 },
                 wire.Records.Select(record => record.ItemCase));
 
-            var decoded = FromPayload<StreamServiceExample.ReadRecordsResponse>(ToPayload(model));
-            var superseded = Assert.IsType<StreamServiceExample.StreamItem.Superseded>(
+            var decoded = FromPayload<StreamServiceExample.ReadRecordsResponse<Turn>>(
+                ToPayload(model));
+            var superseded = Assert.IsType<StreamServiceExample.StreamItem<Turn>.Superseded>(
                 decoded.Records[0].Item);
             Assert.Equal("workflow-1", superseded.Value.ProducerId);
             Assert.Equal(new long[] { 7 }, superseded.Value.FailedTasks);
-            var close = Assert.IsType<StreamServiceExample.StreamItem.Close>(
+            var close = Assert.IsType<StreamServiceExample.StreamItem<Turn>.Close>(
                 decoded.Records[1].Item);
             Assert.Equal(
                 StreamServiceExample.StreamCloseStatus.StreamCloseStatusCompleted,
@@ -87,5 +93,10 @@ namespace Nexgen.DotNetExamples.Tests
                 converter.FromTransferType(wire));
             Assert.Equal(StreamServiceExample.StreamStatus.StreamStatusUnspecified, decoded.Status);
         }
+
+        // The read of a Stream<Turn> returns a ReadRecordsResponse<Turn>, with no type argument.
+        private static Task<StreamServiceExample.ReadRecordsResponse<Turn>> ReadTurns(
+            StreamServiceExample.Stream<Turn> stream) =>
+            stream.ReadAsync(null, null, null, null, null, null);
     }
 }

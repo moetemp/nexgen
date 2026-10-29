@@ -2,6 +2,7 @@
 
 import type * as common from "@temporalio/common";
 import type Long from "long";
+import { createReadRecordsResponseTransferTypeConverter } from "../models";
 import type {
   StreamReadStart,
   StreamRef,
@@ -15,18 +16,25 @@ import { streamService } from "../services";
 import { type NexusServiceClient, operationId } from "./nexus-client";
 import * as support from "../../../../support/temporal_model_converters";
 
-export class Stream {
+export class Stream<BodyT = unknown> {
   readonly #nexusClient: NexusServiceClient<typeof streamService>;
+  readonly #bodyType: common.TypeInfo<BodyT> | undefined;
 
   public constructor(
     nexusClient: NexusServiceClient<typeof streamService>,
     public readonly stream: StreamRef,
     public readonly created: boolean | undefined,
+    bodyType?: common.TypeInfo<BodyT>,
   ) {
     this.#nexusClient = nexusClient;
+    this.#bodyType = bodyType;
   }
 
-  public async publish(records: AppendRecord[]): Promise<AppendRecordsResponse> {
+  public get bodyType(): common.TypeInfo<BodyT> | undefined {
+    return this.#bodyType;
+  }
+
+  public async publish(records: AppendRecord<BodyT>[]): Promise<AppendRecordsResponse> {
     const request = { stream: this.stream, records: records };
     const handle = await this.#nexusClient.startOperation(
       streamService.operations.appendRecords,
@@ -53,7 +61,7 @@ export class Stream {
     wait?: common.Duration,
     createWait?: common.Duration,
     maxBytes?: Long,
-  ): Promise<ReadRecordsResponse> {
+  ): Promise<ReadRecordsResponse<BodyT>> {
     const request = {
       stream: this.stream,
       fromOffset: fromOffset,
@@ -64,7 +72,14 @@ export class Stream {
       maxBytes: maxBytes,
     };
     const handle = await this.#nexusClient.startOperation(
-      streamService.operations.readRecords,
+      {
+        ...streamService.operations.readRecords,
+        outputType: {
+          transferTypeConverter: createReadRecordsResponseTransferTypeConverter<BodyT>({
+            bodyT: this.bodyType,
+          }),
+        },
+      },
       request,
       { id: operationId() },
     );
@@ -83,7 +98,7 @@ export class Stream {
     wait?: common.Duration,
     createWait?: common.Duration,
     maxBytes?: Long,
-  ): AsyncGenerator<ReadRecordsResponse, void> {
+  ): AsyncGenerator<ReadRecordsResponse<BodyT>, void> {
     let request: ReadRecordsRequest = {
       stream: this.stream,
       fromOffset: fromOffset,
@@ -95,7 +110,15 @@ export class Stream {
     };
     while (true) {
       const handle = await this.#nexusClient.startOperation(
-        streamService.operations.readRecords,
+        {
+          ...streamService.operations.readRecords,
+          outputType: {
+            transferTypeConverter:
+              createReadRecordsResponseTransferTypeConverter<BodyT>({
+                bodyT: this.bodyType,
+              }),
+          },
+        },
         request,
         { id: operationId() },
       );

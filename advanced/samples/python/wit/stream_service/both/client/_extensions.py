@@ -18,6 +18,7 @@ from ._resources.stream import Stream
 
 
 _NexusServiceT = typing.TypeVar("_NexusServiceT")
+BodyT = typing.TypeVar("BodyT")
 
 
 class StreamServiceClientExtension(abc.ABC):
@@ -44,7 +45,8 @@ class StreamServiceClientExtension(abc.ABC):
         *,
         stream: StreamRef,
         created: bool | None,
-    ) -> Stream:
+        body_type: type[BodyT] | None = None,
+    ) -> Stream[BodyT]:
         """Return the ``Stream`` handle that has these identity fields."""
         return Stream(
             self.create_nexus_client(
@@ -53,12 +55,14 @@ class StreamServiceClientExtension(abc.ABC):
             ),
             stream=stream,
             created=created,
+            body_type=body_type,
         )
 
     async def _stream_service_create_stream(
         self,
         request: CreateStreamRequest,
-    ) -> Stream:
+        body_type: type[BodyT],
+    ) -> Stream[BodyT]:
         nexus_client = self.create_nexus_client(
             service=StreamService,
             endpoint="__temporal_system",
@@ -73,6 +77,7 @@ class StreamServiceClientExtension(abc.ABC):
             raise RuntimeError("CreateStream answered without `stream`")
         resource = Stream(
             nexus_client,
+            body_type=body_type,
             stream=result.stream,
             created=result.created or None,
         )
@@ -80,13 +85,14 @@ class StreamServiceClientExtension(abc.ABC):
 
     async def create_stream(
         self,
+        body_type: type[BodyT],
         *,
         id: str,
         retention: datetime.timedelta | None = None,
         withdraw_run: str | None = None,
         owner: Producer | None = None,
         ref: StreamRef | None = None,
-    ) -> Stream:
+    ) -> Stream[BodyT]:
         """
         Args:
             id: The Stream id. Required, and never empty.
@@ -106,4 +112,4 @@ class StreamServiceClientExtension(abc.ABC):
             owner=owner,
             ref=ref,
         )
-        return await self._stream_service_create_stream(request)
+        return await self._stream_service_create_stream(request, body_type)

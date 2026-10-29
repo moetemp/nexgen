@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import typing
 import datetime
 import temporalio.workflow
 
@@ -14,9 +15,13 @@ from ..models import (
 from .._resources import Stream
 
 
+BodyT = typing.TypeVar("BodyT")
+
+
 async def _create_stream(
     request: CreateStreamRequest,
-) -> Stream:
+    body_type: type[BodyT],
+) -> Stream[BodyT]:
     nexus_client = temporalio.workflow.create_nexus_client(
         service="temporal.api.streamservice.v1.StreamService",
         endpoint="__temporal_system",
@@ -30,19 +35,21 @@ async def _create_stream(
     if result.stream is None:
         raise RuntimeError("CreateStream answered without `stream`")
     return Stream(
+        body_type=body_type,
         stream=result.stream,
         created=result.created or None,
     )
 
 
 async def create_stream(
+    body_type: type[BodyT],
     *,
     id: str,
     retention: datetime.timedelta | None = None,
     withdraw_run: str | None = None,
     owner: Producer | None = None,
     ref: StreamRef | None = None,
-) -> Stream:
+) -> Stream[BodyT]:
     """
     Args:
         id: The Stream id. Required, and never empty.
@@ -59,4 +66,4 @@ async def create_stream(
         owner=owner,
         ref=ref,
     )
-    return await _create_stream(request)
+    return await _create_stream(request, body_type)

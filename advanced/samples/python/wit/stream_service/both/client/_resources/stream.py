@@ -25,8 +25,11 @@ from ...models import (
 import temporal_support as _support
 
 
+BodyT = typing.TypeVar("BodyT")
+
+
 @dataclasses.dataclass(init=False)
-class Stream:
+class Stream(typing.Generic[BodyT]):
     """A handle on one Stream. Build it from a stream-ref, or get it from a create."""
 
     stream: StreamRef
@@ -39,14 +42,20 @@ class Stream:
         *,
         stream: StreamRef,
         created: bool | None,
+        body_type: type[BodyT] | None = None,
     ) -> None:
         self._nexus_client: temporalio.client.NexusClient[typing.Any] = nexus_client
         self.stream = stream
         self.created = created
+        # Not a dataclass field, so the converter doesn't encode it. A
+        # decoded handle decodes its generic values as `typing.Any`.
+        self.body_type: type[BodyT] = body_type or typing.cast(
+            "type[BodyT]", typing.Any
+        )
 
     async def publish(
         self,
-        records: list[AppendRecord] | None = None,
+        records: list[AppendRecord[BodyT]] | None = None,
     ) -> AppendRecordsResponse:
         """Publish values, and return the offset of the last one."""
         request = AppendRecordsRequest(
@@ -86,7 +95,7 @@ class Stream:
         wait: datetime.timedelta | None = None,
         create_wait: datetime.timedelta | None = None,
         max_bytes: int | None = None,
-    ) -> ReadRecordsResponse:
+    ) -> ReadRecordsResponse[BodyT]:
         """Read one page of Records. The poll iterator reads them all."""
         request = ReadRecordsRequest(
             stream=self.stream,
@@ -98,9 +107,10 @@ class Stream:
             max_bytes=max_bytes,
         )
         handle = await self._nexus_client.start_operation(
-            operation=StreamService.read_records,
+            operation="ReadRecords",
             arg=request,
             id=f"{_uuid.uuid4()}",
+            result_type=ReadRecordsResponse[self.body_type],
         )
         return await handle.result()
 
@@ -112,7 +122,7 @@ class Stream:
         wait: datetime.timedelta | None = None,
         create_wait: datetime.timedelta | None = None,
         max_bytes: int | None = None,
-    ) -> collections.abc.AsyncGenerator[ReadRecordsResponse, None]:
+    ) -> collections.abc.AsyncGenerator[ReadRecordsResponse[BodyT], None]:
         """Yield each response of ``read`` until the poll helper stops.
 
         Read one page of Records. The poll iterator reads them all.
@@ -143,9 +153,10 @@ class Stream:
         nexus_client = self._nexus_client
         while True:
             handle = await nexus_client.start_operation(
-                operation=StreamService.read_records,
+                operation="ReadRecords",
                 arg=request,
                 id=f"{_uuid.uuid4()}",
+                result_type=ReadRecordsResponse[self.body_type],
             )
             response = await handle.result()
             next_request = _support.next_read_request(request, response)

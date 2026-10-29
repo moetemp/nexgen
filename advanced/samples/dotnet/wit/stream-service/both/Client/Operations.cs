@@ -64,23 +64,23 @@ namespace Temporalio.Workflows.Client
         /// Returns the <c>Stream</c> handle that has these identity fields.
         /// </summary>
         [GeneratedCode("nexgen", null)]
-        public static Stream GetStream(this Temporalio.Client.ITemporalClient client, StreamRef streamValue, bool? created) =>
+        public static Stream<TBody> GetStream<TBody>(this Temporalio.Client.ITemporalClient client, StreamRef streamValue, bool? created) =>
             new(client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService"), streamValue, created);
 
         /// <param name="client">The client that starts the operation.</param>
         /// <param name="request">Create a Stream, or get the open one. A closed, expired or another owner's Stream fails.</param>
         [GeneratedCode("nexgen", null)]
-        private static async Task<Stream> CreateStreamAsync(this Temporalio.Client.ITemporalClient client, CreateStreamRequest request)
+        private static async Task<Stream<TBody>> CreateStreamAsync<TBody>(this Temporalio.Client.ITemporalClient client, CreateStreamRequest request)
         {
             var nexusClient = client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService");
             var result = await nexusClient.ExecuteNexusOperationAsync<CreateStreamResult>("CreateStream", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
-            return new Stream(nexusClient, (result.Stream ?? throw new System.InvalidOperationException("CreateStream answered without `stream`")), result.Created);
+            return new Stream<TBody>(nexusClient, (result.Stream ?? throw new System.InvalidOperationException("CreateStream answered without `stream`")), result.Created);
         }
 
         /// <param name="client">The client that starts the operation.</param>
         /// <param name="options">Create a Stream, or get the open one. A closed, expired or another owner's Stream fails.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<Stream> CreateStreamAsync(this Temporalio.Client.ITemporalClient client, CreateStreamOptions options)
+        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(this Temporalio.Client.ITemporalClient client, CreateStreamOptions options)
         {
             var request = new CreateStreamRequest(options.Id)
             {
@@ -89,7 +89,7 @@ namespace Temporalio.Workflows.Client
                 Owner = options.Owner,
                 Ref = options.Ref,
             };
-            return CreateStreamAsync(client, request);
+            return CreateStreamAsync<TBody>(client, request);
         }
 
     }

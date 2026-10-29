@@ -20,7 +20,8 @@ interface stream-service {
   };
 
   /// @nexus.doc "The value type of a Stream's Records. A Stream definition sets it."
-  type body-t = payload;
+  /// @nexus.type-parameter
+  type body-t = placeholder;
 
   /// @nexus.proto "google.protobuf.Timestamp"
   record timestamp {
@@ -359,6 +360,7 @@ interface stream-service {
   // A handle never changes, since offsets are values that its methods return. Only a create's
   // response sets created, so a handle built from a ref has none.
   /// @nexus.doc "A handle on one Stream. Build it from a stream-ref, or get it from a create."
+  /// @nexus.type-parameter "body-t"
   /// @nexus.definition python="temporal_support.StreamDefinition"
   ///   typescript="StreamDefinition" typescript-import="../../support/temporal_model_converters"
   ///   dotnet="Nexgen.Support.StreamDefinition"

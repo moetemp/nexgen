@@ -7,8 +7,8 @@ namespace Nexgen.Support
     // the sample's generated requests.
     internal static class StreamPoll
     {
-        internal static ReadRecordsRequest? NextReadRequest(
-            ReadRecordsRequest request, ReadRecordsResponse response)
+        internal static ReadRecordsRequest? NextReadRequest<TBody>(
+            ReadRecordsRequest request, ReadRecordsResponse<TBody> response)
         {
             if (response.Done == true)
             {

@@ -7,11 +7,11 @@ import {
   StreamNotFoundError,
   StreamStorageUnavailableError,
   streamError,
-} from "../wit/stream-service/workflow/errors.ts";
+} from "../wit/stream-service/both/errors.ts";
 import {
   StreamErrorReason,
   streamErrorDetailsTransferTypeConverter,
-} from "../wit/stream-service/workflow/models.ts";
+} from "../wit/stream-service/both/models.ts";
 
 test("gives each reason with a class its class and retryability", () => {
   const notFound = streamError(

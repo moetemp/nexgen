@@ -1,4 +1,4 @@
-languages = ["typescript", "go", "dotnet"]
+languages = ["go", "dotnet"]
 system_nexus = true
 targets = ["client"]
 

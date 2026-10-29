@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["`job-error-details.note` doesn't hold `job-error-reason`"]

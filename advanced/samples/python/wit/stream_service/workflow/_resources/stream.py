@@ -19,10 +19,12 @@ from ..models import (
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
+    StreamErrorDetails,
     StreamReadStart,
     StreamRef,
 )
 import temporal_support as _support
+from ..errors import StreamError, stream_error
 
 if typing.TYPE_CHECKING:
     import temporal_support
@@ -76,9 +78,18 @@ class Stream(typing.Generic[BodyT]):
             records=[AppendRecord(body=value) for value in values],
             producer=_support.workflow_producer(),
         )
-        handle = await _append_records(request)
-        response = await handle
-        return response.last_offset or 0
+        try:
+            handle = await _append_records(request)
+            response = await handle
+            return response.last_offset or 0
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def close(
         self,
@@ -92,8 +103,17 @@ class Stream(typing.Generic[BodyT]):
             failure=failure,
             producer=_support.workflow_producer(),
         )
-        handle = await _close_stream(request)
-        await handle
+        try:
+            handle = await _close_stream(request)
+            await handle
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def read(
         self,
@@ -114,8 +134,17 @@ class Stream(typing.Generic[BodyT]):
             create_wait=create_wait,
             max_bytes=max_bytes,
         )
-        handle = await _read_records(request, self.body_type)
-        return await handle
+        try:
+            handle = await _read_records(request, self.body_type)
+            return await handle
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def describe(
         self,
@@ -124,8 +153,17 @@ class Stream(typing.Generic[BodyT]):
         request = DescribeStreamRequest(
             stream=self.stream,
         )
-        handle = await _describe_stream(request)
-        return await handle
+        try:
+            handle = await _describe_stream(request)
+            return await handle
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
 
 def stream(
@@ -158,11 +196,20 @@ async def _append_records(
         service="temporal.api.streamservice.v1.StreamService",
         endpoint="__temporal_system",
     )
-    return await nexus_client.start_operation(
-        operation="AppendRecords",
-        input=request,
-        output_type=AppendRecordsResponse,
-    )
+    try:
+        return await nexus_client.start_operation(
+            operation="AppendRecords",
+            input=request,
+            output_type=AppendRecordsResponse,
+        )
+    except StreamError:
+        raise
+    except Exception as err:
+        found = _support.error_details(err, StreamErrorDetails)
+        if found is None:
+            raise
+        details, message = found
+        raise stream_error(details, message) from err
 
 
 async def append_records(
@@ -186,11 +233,20 @@ async def _close_stream(
         service="temporal.api.streamservice.v1.StreamService",
         endpoint="__temporal_system",
     )
-    return await nexus_client.start_operation(
-        operation="CloseStream",
-        input=request,
-        output_type=CloseStreamResponse,
-    )
+    try:
+        return await nexus_client.start_operation(
+            operation="CloseStream",
+            input=request,
+            output_type=CloseStreamResponse,
+        )
+    except StreamError:
+        raise
+    except Exception as err:
+        found = _support.error_details(err, StreamErrorDetails)
+        if found is None:
+            raise
+        details, message = found
+        raise stream_error(details, message) from err
 
 
 async def close_stream(
@@ -216,11 +272,20 @@ async def _read_records(
         service="temporal.api.streamservice.v1.StreamService",
         endpoint="__temporal_system",
     )
-    return await nexus_client.start_operation(
-        operation="ReadRecords",
-        input=request,
-        output_type=ReadRecordsResponse[body_type],
-    )
+    try:
+        return await nexus_client.start_operation(
+            operation="ReadRecords",
+            input=request,
+            output_type=ReadRecordsResponse[body_type],
+        )
+    except StreamError:
+        raise
+    except Exception as err:
+        found = _support.error_details(err, StreamErrorDetails)
+        if found is None:
+            raise
+        details, message = found
+        raise stream_error(details, message) from err
 
 
 async def read_records(
@@ -268,11 +333,20 @@ async def _describe_stream(
         service="temporal.api.streamservice.v1.StreamService",
         endpoint="__temporal_system",
     )
-    return await nexus_client.start_operation(
-        operation="DescribeStream",
-        input=request,
-        output_type=DescribeStreamResponse,
-    )
+    try:
+        return await nexus_client.start_operation(
+            operation="DescribeStream",
+            input=request,
+            output_type=DescribeStreamResponse,
+        )
+    except StreamError:
+        raise
+    except Exception as err:
+        found = _support.error_details(err, StreamErrorDetails)
+        if found is None:
+            raise
+        details, message = found
+        raise stream_error(details, message) from err
 
 
 async def describe_stream(

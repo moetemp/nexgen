@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["`job-failure` isn't a type of the interface"]

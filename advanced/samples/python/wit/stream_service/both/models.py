@@ -88,6 +88,32 @@ def _stream_status_from_proto(value: int) -> StreamStatus:
         return StreamStatus.StreamStatusUnspecified
 
 
+class StreamErrorReason(enum.IntEnum):
+    StreamErrorReasonUnspecified = 0
+    StreamErrorReasonNotFound = 1
+    StreamErrorReasonExpired = 2
+    StreamErrorReasonClosed = 3
+    StreamErrorReasonFenced = 4
+    StreamErrorReasonSequence = 5
+    StreamErrorReasonSeqDivergent = 6
+    StreamErrorReasonNotOwner = 7
+    StreamErrorReasonFormatTooNew = 8
+    StreamErrorReasonOffset = 9
+    StreamErrorReasonTooLarge = 10
+    StreamErrorReasonInvalid = 11
+    StreamErrorReasonStorage = 12
+    StreamErrorReasonUnknownWriter = 13
+    StreamErrorReasonUnsupported = 14
+
+
+def _stream_error_reason_from_proto(value: int) -> StreamErrorReason:
+    try:
+        return StreamErrorReason(value)
+    except ValueError:
+        # A newer peer can send a case that this enum doesn't know.
+        return StreamErrorReason.StreamErrorReasonUnspecified
+
+
 BodyT = typing.TypeVar("BodyT")
 
 
@@ -1453,6 +1479,54 @@ class _DescribeStreamResponseTransferTypeConverter(
 temporalio.converter.transfer_type_convertible(
     _DescribeStreamResponseTransferTypeConverter
 )(DescribeStreamResponse)  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True)
+class StreamErrorDetails:
+    """The details of a failed Stream call."""
+
+    reason: StreamErrorReason | None = None
+
+
+class _StreamErrorDetailsTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        StreamErrorDetails, temporalio.api.stream.v1.message_pb2.StreamErrorDetails
+    ]
+):
+    transfer_type: (
+        type[temporalio.api.stream.v1.message_pb2.StreamErrorDetails] | None
+    ) = temporalio.api.stream.v1.message_pb2.StreamErrorDetails
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: temporalio.api.stream.v1.message_pb2.StreamErrorDetails,
+        type_hint: type[StreamErrorDetails],
+    ) -> StreamErrorDetails:
+        return StreamErrorDetails(
+            reason=_stream_error_reason_from_proto(value.reason)
+            if value.reason != 0
+            else None,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: StreamErrorDetails,
+    ) -> temporalio.api.stream.v1.message_pb2.StreamErrorDetails:
+        message = temporalio.api.stream.v1.message_pb2.StreamErrorDetails()
+        if value.reason is not None:
+            message.reason = (
+                temporalio.api.enums.v1.stream_pb2.StreamErrorReason.ValueType(
+                    value.reason
+                )
+            )
+        return message
+
+
+temporalio.converter.transfer_type_convertible(
+    _StreamErrorDetailsTransferTypeConverter
+)(StreamErrorDetails)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)

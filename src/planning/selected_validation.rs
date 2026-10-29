@@ -179,6 +179,24 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
             }
         }
     }
+    // Each operation of an interface converts the failures of its one error enum.
+    let mut error_enums = BTreeMap::<&str, &str>::new();
+    for entry in spec.types.values() {
+        let crate::spec::TypeDeclSpec::Enum(enumeration) = &entry.declaration else {
+            continue;
+        };
+        if enumeration.error.is_none() {
+            continue;
+        }
+        let name = enumeration.full_name.as_str();
+        let interface = name.rsplit_once('.').map_or("", |(interface, _)| interface);
+        if let Some(first) = error_enums.insert(interface, name) {
+            return Err(invalid(format!(
+                "`{first}` and `{name}` both have `@nexus.error`, but an interface has one error \
+                 enum"
+            )));
+        }
+    }
 
     // A record that holds a resource builds it from the record's message, with no type argument.
     let generic_resources = spec

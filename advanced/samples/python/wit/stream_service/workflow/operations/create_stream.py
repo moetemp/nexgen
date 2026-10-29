@@ -9,11 +9,13 @@ import temporalio.workflow
 from ..models import (
     CreateStreamRequest,
     CreateStreamResult,
+    StreamErrorDetails,
     StreamRef,
 )
 from .._resources import Stream
 import temporal_support as _support
 from .._resource_call import resource_call
+from ..errors import StreamError, stream_error
 
 if typing.TYPE_CHECKING:
     import temporal_support
@@ -30,19 +32,28 @@ async def _create_stream(
         service="temporal.api.streamservice.v1.StreamService",
         endpoint="__temporal_system",
     )
-    handle = await nexus_client.start_operation(
-        operation="CreateStream",
-        input=request,
-        output_type=CreateStreamResult,
-    )
-    result = await handle
-    if result.stream is None:
-        raise RuntimeError("CreateStream answered without `stream`")
-    return Stream(
-        body_type=body_type,
-        stream=result.stream,
-        created=result.created or None,
-    )
+    try:
+        handle = await nexus_client.start_operation(
+            operation="CreateStream",
+            input=request,
+            output_type=CreateStreamResult,
+        )
+        result = await handle
+        if result.stream is None:
+            raise RuntimeError("CreateStream answered without `stream`")
+        return Stream(
+            body_type=body_type,
+            stream=result.stream,
+            created=result.created or None,
+        )
+    except StreamError:
+        raise
+    except Exception as err:
+        found = _support.error_details(err, StreamErrorDetails)
+        if found is None:
+            raise
+        details, message = found
+        raise stream_error(details, message) from err
 
 
 @resource_call

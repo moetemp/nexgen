@@ -190,8 +190,8 @@ async def test_workflow_apis_call_the_stream_service(
         temporalio.workflow, "info", lambda: FakeWorkflowInfo("wf-1", "r1", "r2")
     )
     stream = await api.create_stream(Texts)
-    response = await stream.publish(records=[])
-    assert response.last_offset == 3
+    last_offset = await stream.publish()
+    assert last_offset == 3
     # The Workflow target fills the id, the owner and the producer from its sources.
     run = model_types.Producer(id="wf:r2", run_id="r2")
     owner = model_types.Execution(

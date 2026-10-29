@@ -28,14 +28,13 @@ namespace Nexgen.DotNetExamples.Tests
             var streamRef = new Models.StreamRef("s1");
             var client = FakeTemporalClient.Create(
                 ("CreateStream", new Models.CreateStreamResult { Stream = streamRef, Created = true }),
-                ("AppendRecords", new Models.AppendRecordsResponse { LastOffset = 0 }));
-            var records = Array.Empty<Models.AppendRecord<Turn>>();
+                ("AppendRecords", new Models.AppendRecordsResponse { LastOffset = 2 }));
 
             var stream = await client.CreateStreamAsync<Turn>(new StreamClient.CreateStreamOptions("s1"));
-            var response = await stream.PublishAsync(records);
+            var lastOffset = await stream.PublishAsync(new Turn("user"));
 
             Assert.Equal((streamRef, (bool?)true), (stream.StreamValue, stream.Created));
-            Assert.Equal(0, response.LastOffset);
+            Assert.Equal(2, lastOffset);
             var calls = FakeTemporalClient.Calls(client);
             Assert.Equal(
                 new[]
@@ -49,10 +48,12 @@ namespace Nexgen.DotNetExamples.Tests
             Assert.Equal(
                 new Models.CreateStreamRequest("s1", null) { Ref = streamRef },
                 calls[0].Input);
-            Assert.Equal(
-                new Models.AppendRecordsRequest<Turn>(
-                    streamRef, records, Array.Empty<long>(), new Models.Producer("client:sample"), null),
-                calls[1].Input);
+            // The publish wraps each value in a record.
+            var append = Assert.IsType<Models.AppendRecordsRequest<Turn>>(calls[1].Input);
+            Assert.Equal(streamRef, append.Stream);
+            Assert.Equal(new[] { new Models.AppendRecord<Turn>(new Turn("user")) }, append.Records);
+            Assert.Empty(append.FailedTasks);
+            Assert.Equal(new Models.Producer("client:sample"), append.Producer);
         }
 
         [Fact]

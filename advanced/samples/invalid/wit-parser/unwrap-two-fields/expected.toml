@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.unwrap", "needs a record with exactly one field that isn't omitted"]

@@ -1,0 +1,31 @@
+package test:result-field-without-result@1.0.0;
+
+world system { export batch-service; }
+
+/// @nexus.endpoint "batches"
+interface batch-service {
+  /// @nexus.unwrap
+  record batch-item {
+    value: string,
+  }
+
+  resource batch {
+    constructor(batch-id: string);
+
+    // A method with no result has no field to return.
+    /// @nexus.result-field "last-item-id"
+    add-items: func(items: list<batch-item>);
+  }
+
+  record add-items-request {
+    batch-id: string,
+    items: list<batch-item>,
+    label: option<string>,
+  }
+
+  record add-items-response {
+    last-item-id: option<string>,
+  }
+
+  add-items: func(request: add-items-request) -> add-items-response;
+}

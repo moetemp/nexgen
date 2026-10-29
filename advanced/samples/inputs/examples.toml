@@ -26,9 +26,9 @@ descriptors = "temporal"
 languages = ["python", "dotnet", "typescript"]
 descriptors = "temporal"
 
-# Brook's Stream service WIT, byte for byte. Its records bind to the Stream protos of
-# temporalio/api#895 in descriptors/streams/, which no SDK has yet. Python imports them from
-# temporalio, which doesn't have them.
+# Brook's Stream service WIT. Its records bind to the Stream protos of temporalio/api#895 in
+# descriptors/streams/, which no SDK has yet. So only this copy has the python-import attributes,
+# which make Python import those protos from the sample's own streamprotos package.
 [stream-service]
 languages = ["python", "typescript", "dotnet"]
 descriptors = ["temporal_api.bin", "streams.bin"]

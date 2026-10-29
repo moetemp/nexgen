@@ -29,6 +29,7 @@ interface stream-service {
   // percent-encoded. So a caller that knows the first run id can build the id with no call.
   /// @nexus.doc "Identifies one Stream. The id is opaque to callers."
   /// @nexus.proto "temporal.api.stream.v1.StreamRef"
+  ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record stream-ref {
     /// @nexus.doc "The Stream id. 1 to 4096 bytes after encoding."
     id: string,
@@ -57,6 +58,7 @@ interface stream-service {
   }
 
   /// @nexus.proto "temporal.api.enums.v1.StreamProducerKind"
+  ///   python-import="streamprotos.temporal.api.enums.v1.stream_pb2"
   enum stream-producer-kind {
     stream-producer-kind-unspecified,
     stream-producer-kind-workflow,
@@ -73,6 +75,7 @@ interface stream-service {
   // attempt-scheduled-time, then attempt. A client epoch has attempt.
   /// @nexus.doc "The ordered attempt of a Producer. A higher epoch supersedes a lower one."
   /// @nexus.proto "temporal.api.stream.v1.ProducerEpoch"
+  ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record producer-epoch {
     /// @nexus.doc "The started event id of the Workflow Task."
     task-started-event-id: option<s64>,
@@ -88,6 +91,7 @@ interface stream-service {
 
   /// @nexus.doc "The Producer of a batch."
   /// @nexus.proto "temporal.api.stream.v1.Producer"
+  ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record producer {
     /// @nexus.doc "Stable across attempts. The proposal gives the form per kind."
     id: string,
@@ -99,6 +103,7 @@ interface stream-service {
 
   /// @nexus.doc "A Workflow Task attempt of the run."
   /// @nexus.proto "temporal.api.stream.v1.WorkflowTaskEpoch"
+  ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record workflow-task-epoch {
     started-event-id: option<s64>,
     attempt: option<s32>,
@@ -107,6 +112,7 @@ interface stream-service {
 
   /// @nexus.doc "One Record to append."
   /// @nexus.proto "temporal.api.stream.v1.AppendRecord"
+  ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record append-record {
     /// @nexus.doc "The value. It goes through the payload codec."
     body: payload,
@@ -119,6 +125,7 @@ interface stream-service {
   // a lower epoch than c or t. No task in that range can have completed.
   /// @nexus.doc "Which earlier Records a Superseded item withdraws."
   /// @nexus.proto "temporal.api.stream.v1.Supersession"
+  ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record supersession {
     producer-id: string,
     /// @nexus.doc "Workflow only. Started event ids of failed or timed out Workflow Tasks."
@@ -135,6 +142,7 @@ interface stream-service {
 
   /// @nexus.doc "How a Stream closed. Only the owner's end on the server terminates or times out."
   /// @nexus.proto "temporal.api.enums.v1.StreamCloseStatus"
+  ///   python-import="streamprotos.temporal.api.enums.v1.stream_pb2"
   enum stream-close-status {
     stream-close-status-unspecified,
     stream-close-status-completed,
@@ -146,6 +154,7 @@ interface stream-service {
 
   /// @nexus.doc "One Record that a Producer appended."
   /// @nexus.proto "temporal.api.stream.v1.StreamData"
+  ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record stream-data {
     /// @nexus.doc "The value. It goes through the payload codec."
     body: payload,
@@ -154,6 +163,7 @@ interface stream-service {
 
   /// @nexus.doc "The close of a Stream. A read gives it last."
   /// @nexus.proto "temporal.api.stream.v1.StreamClose"
+  ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record stream-close {
     /// @nexus.doc "The Producer that closed the Stream."
     producer: option<producer>,
@@ -177,6 +187,7 @@ interface stream-service {
   // the read checks the offset against that Stream.
   /// @nexus.doc "One item that a read gives."
   /// @nexus.proto "temporal.api.stream.v1.StreamRecord"
+  ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record stream-record {
     item: stream-item,
     /// @nexus.doc "The place of this item in the Stream. Ordered and unique, with gaps."
@@ -185,6 +196,7 @@ interface stream-service {
 
   /// @nexus.doc "Create a Stream, or get the one that exists, which keeps its Retention."
   /// @nexus.proto "temporal.api.streamservice.v1.CreateStreamRequest"
+  ///   python-import="streamprotos.temporal.api.streamservice.v1.request_response_pb2"
   record create-stream-request {
     /// @nexus.doc "Required on Redis and memory. On native, empty asks the server for an id."
     stream-id: string,
@@ -207,6 +219,7 @@ interface stream-service {
   }
 
   /// @nexus.proto "temporal.api.enums.v1.StreamStatus"
+  ///   python-import="streamprotos.temporal.api.enums.v1.stream_pb2"
   enum stream-status {
     stream-status-unspecified,
     stream-status-open,
@@ -219,6 +232,7 @@ interface stream-service {
   /// @nexus.doc
   ///   "Append. FAILED_PRECONDITION if closed, fenced or format too new. NOT_FOUND if absent."
   /// @nexus.proto "temporal.api.streamservice.v1.AppendRecordsRequest"
+  ///   python-import="streamprotos.temporal.api.streamservice.v1.request_response_pb2"
   record append-records-request {
     %stream: stream-ref,
     records: list<append-record>,
@@ -242,6 +256,7 @@ interface stream-service {
   }
 
   /// @nexus.proto "temporal.api.streamservice.v1.AppendRecordsResponse"
+  ///   python-import="streamprotos.temporal.api.streamservice.v1.request_response_pb2"
   record append-records-response {
     first-offset: option<s64>,
     last-offset: option<s64>,
@@ -249,6 +264,7 @@ interface stream-service {
 
   /// @nexus.doc "Close a Stream. Readers drain what is left, then end. Later appends are refused."
   /// @nexus.proto "temporal.api.streamservice.v1.CloseStreamRequest"
+  ///   python-import="streamprotos.temporal.api.streamservice.v1.request_response_pb2"
   record close-stream-request {
     %stream: stream-ref,
     /// @nexus.doc "Workflow only. The run's failed or timed out Workflow Tasks."
@@ -270,10 +286,12 @@ interface stream-service {
   }
 
   /// @nexus.proto "temporal.api.streamservice.v1.CloseStreamResponse"
+  ///   python-import="streamprotos.temporal.api.streamservice.v1.request_response_pb2"
   record close-stream-response {
   }
 
   /// @nexus.proto "temporal.api.enums.v1.StreamReadStart"
+  ///   python-import="streamprotos.temporal.api.enums.v1.stream_pb2"
   enum stream-read-start {
     stream-read-start-unspecified,
     stream-read-start-beginning,
@@ -282,6 +300,7 @@ interface stream-service {
 
   /// @nexus.doc "Read Records from an offset."
   /// @nexus.proto "temporal.api.streamservice.v1.ReadRecordsRequest"
+  ///   python-import="streamprotos.temporal.api.streamservice.v1.request_response_pb2"
   record read-records-request {
     %stream: stream-ref,
     /// @nexus.doc "Start offset. Empty uses start. INVALID_ARGUMENT past the newest offset + 1."
@@ -310,6 +329,7 @@ interface stream-service {
   }
 
   /// @nexus.proto "temporal.api.streamservice.v1.ReadRecordsResponse"
+  ///   python-import="streamprotos.temporal.api.streamservice.v1.request_response_pb2"
   record read-records-response {
     records: list<stream-record>,
     /// @nexus.doc "The from-offset of the next read, which is the newest offset read + 1."
@@ -322,6 +342,7 @@ interface stream-service {
   }
 
   /// @nexus.proto "temporal.api.streamservice.v1.DescribeStreamRequest"
+  ///   python-import="streamprotos.temporal.api.streamservice.v1.request_response_pb2"
   record describe-stream-request {
     %stream: stream-ref,
     /// @nexus.omit
@@ -329,6 +350,7 @@ interface stream-service {
   }
 
   /// @nexus.proto "temporal.api.streamservice.v1.DescribeStreamResponse"
+  ///   python-import="streamprotos.temporal.api.streamservice.v1.request_response_pb2"
   record describe-stream-response {
     status: option<stream-status>,
     /// @nexus.doc "The offset of the newest Record. Empty when the Stream has no Record."
@@ -382,6 +404,7 @@ interface stream-service {
   // created is false when the Stream existed, whatever its Retention. status is closed when an
   // earlier create and close used the id.
   /// @nexus.proto "temporal.api.streamservice.v1.CreateStreamResponse"
+  ///   python-import="streamprotos.temporal.api.streamservice.v1.request_response_pb2"
   type create-stream-result = own<%stream>;
 
   /// @nexus.operation name="CreateStream"
@@ -409,6 +432,7 @@ interface stream-service {
   // per reason.
   /// @nexus.doc "Why a Stream call failed. Each reason has one gRPC status code."
   /// @nexus.proto "temporal.api.enums.v1.StreamErrorReason"
+  ///   python-import="streamprotos.temporal.api.enums.v1.stream_pb2"
   enum stream-error-reason {
     stream-error-reason-unspecified,
     stream-error-reason-not-found,
@@ -429,6 +453,7 @@ interface stream-service {
 
   /// @nexus.doc "The details of a failed Stream call."
   /// @nexus.proto "temporal.api.stream.v1.StreamErrorDetails"
+  ///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
   record stream-error-details {
     reason: option<stream-error-reason>,
   }

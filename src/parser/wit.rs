@@ -1031,6 +1031,7 @@ fn build_native_proto_source(
     } else {
         (proto_name, None)
     };
+    validate_python_import(proto_directive, oneof.is_some(), path, &context)?;
     let mut reference = LanguageStringSpec {
         default: Some(proto_name.to_string()),
         ..Default::default()
@@ -1042,6 +1043,32 @@ fn build_native_proto_source(
         reference,
         type_name: directive_prefixed_language_string(proto_directive, "type"),
     }))
+}
+
+// A bad module name fails here, not when the generated package is imported. A oneof takes the
+// module of its message's record, so nothing reads the attribute there.
+fn validate_python_import(
+    proto_directive: &Directive,
+    oneof: bool,
+    path: &Path,
+    context: &str,
+) -> Result<()> {
+    let Some(module) = proto_directive.value("python-import") else {
+        return Ok(());
+    };
+    let reason = if oneof {
+        "a `oneof` takes the module of its message, so set it on the message's record".to_string()
+    } else if !is_valid_support_helper_path(module) {
+        format!("`{module}` isn't a dotted Python module name")
+    } else {
+        return Ok(());
+    };
+    Err(Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.proto".to_string(),
+        reason,
+    })
 }
 
 fn wit_type_full_name(resolve: &Resolve, type_id: TypeId) -> String {
@@ -1083,6 +1110,7 @@ fn build_external_type_binding(
             reason: "missing required proto type name".to_string(),
         });
     };
+    validate_python_import(proto_directive, false, path, &context)?;
     let mut reference = LanguageStringSpec {
         default: Some(proto_name.clone()),
         ..Default::default()

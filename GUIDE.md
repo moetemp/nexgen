@@ -823,6 +823,30 @@ enum's name and members, even when its name differs from the protobuf enum's.
 Converters bridge the model and protobuf enum by number, and `@nexus.default`
 continues to name a WIT case.
 
+### Proto Modules
+
+Generated code imports each bound proto type from a module that its target
+language picks by default. Python imports a `temporal/...` proto from the
+`temporalio` package, for example `temporalio.api.common.v1.message_pb2`, and
+TypeScript imports it from `@temporalio/proto`. A proto that the installed SDK
+doesn't have yet, such as one of an API change that isn't released, needs its
+own module. `python-import` and `typescript-import` on `@nexus.proto` name that
+module.
+
+```wit
+/// @nexus.proto "temporal.api.stream.v1.StreamRef"
+///   python-import="streamprotos.temporal.api.stream.v1.message_pb2"
+///   typescript-import="#streamprotos"
+record stream-ref {
+  id: string,
+}
+```
+
+The `python-import` value is the dotted name of the module that holds the
+message or enum, so one value fits every type of a `.proto` file. Other types
+keep the default module. A `oneof` takes the module of its message's record, so
+nexgen refuses `python-import` on a variant.
+
 ### Transfer-Type Conversion
 
 ```wit

@@ -144,22 +144,24 @@ sourced maps. Native tests exercise conversions through the generated APIs.
 
 ### `stream-service`
 
-Brook's Stream service WIT, byte for byte. It is a nexgen input of the Brook
-crate, `temporalio-streams`. Its records bind to the Stream protos of the API
-proposal (`temporalio/api#895`), in
-[`descriptors/streams/`](descriptors/streams/).
+Brook's Stream service WIT, a nexgen input of the Brook crate,
+`temporalio-streams`. Its records bind to the Stream protos of the API proposal
+(`temporalio/api#895`), in [`descriptors/streams/`](descriptors/streams/). This
+copy differs from the crate's file only in its `python-import` attributes, which
+make Python import those protos from the sample's own `streamprotos` package.
+The crate doesn't take them, since sdk-python generates the Stream protos into
+`temporalio` and needs the default modules.
 
 Only part of today's output builds, so the sample leaves the rest out:
 
-- Python imports the Stream protos from `temporalio`, which doesn't have them.
-  basedpyright skips the service.
 - TypeScript passes a `number` where a resource method's proto request wants a
   `Long`. `tsc` skips the service, but the test still checks its models.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
-- Python: [`python/wit/stream_service/`](python/wit/stream_service/)
+- Python: [`python/wit/stream_service/`](python/wit/stream_service/),
+  [`python/tests/test_stream_service.py`](python/tests/test_stream_service.py)
 - TypeScript:
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
   [`typescript/tests/stream-service.test.ts`](typescript/tests/stream-service.test.ts)

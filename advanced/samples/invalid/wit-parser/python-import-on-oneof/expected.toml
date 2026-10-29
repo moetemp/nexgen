@@ -1,0 +1,5 @@
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit-directive"
+contains = ["a `oneof` takes the module of its message"]

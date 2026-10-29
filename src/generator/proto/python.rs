@@ -445,8 +445,7 @@ pub(crate) struct PythonReference {
 }
 
 pub(crate) fn message_python_ref(type_info: &PlannedProtoTypeInfo) -> Option<PythonReference> {
-    let module_path =
-        python_module_path_for_file_name(type_info.file_name.as_deref(), &type_info.package)?;
+    let module_path = proto_python_module_path(type_info)?;
     let relative_name = relative_descriptor_name(&type_info.full_name, &type_info.package);
     Some(PythonReference {
         type_ref: format!("{module_path}.{relative_name}"),
@@ -455,8 +454,7 @@ pub(crate) fn message_python_ref(type_info: &PlannedProtoTypeInfo) -> Option<Pyt
 }
 
 pub(crate) fn enum_python_ref(type_info: &PlannedProtoTypeInfo) -> Option<PythonReference> {
-    let module_path =
-        python_module_path_for_file_name(type_info.file_name.as_deref(), &type_info.package)?;
+    let module_path = proto_python_module_path(type_info)?;
     let relative_name = relative_descriptor_name(&type_info.full_name, &type_info.package);
     Some(PythonReference {
         type_ref: format!("{module_path}.{relative_name}.ValueType"),
@@ -1586,6 +1584,15 @@ fn oneof_field_write(oneof: &ProtoOneof, value_expr: &str, required: bool) -> Re
         }
     }
     RenderedWireWrite { lines }
+}
+
+// `python-import` names the module of a proto that the installed SDK doesn't have yet, such as
+// one of an API change that isn't released.
+fn proto_python_module_path(type_info: &PlannedProtoTypeInfo) -> Option<String> {
+    if let Some(module) = type_info.reference.import() {
+        return Some(module.to_string());
+    }
+    python_module_path_for_file_name(type_info.file_name.as_deref(), &type_info.package)
 }
 
 fn python_module_path_for_file_name(file_name: Option<&str>, package: &str) -> Option<String> {

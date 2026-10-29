@@ -1,0 +1,14 @@
+package temporal:nexus@1.0.0;
+
+world system {
+  export models;
+}
+
+interface models {
+  /// @nexus.proto "temporal.api.workflowservice.v1.PauseActivityRequest.activity"
+  ///   python-import="local_protos.temporal.api.workflowservice.v1.request_response_pb2"
+  variant activity-selection {
+    id(string),
+    %type(string),
+  }
+}

@@ -1,0 +1,5 @@
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit-directive"
+contains = ["`local-protos/message_pb2` isn't a dotted Python module name"]

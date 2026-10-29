@@ -961,3 +961,46 @@ interface api {
     assert!(!ping.contains("import PongRequest\n"), "{ping}");
     fs::remove_dir_all(temp_dir).unwrap();
 }
+
+#[test]
+fn python_import_names_the_module_of_a_bound_proto() {
+    let root = project_root();
+    let temp_dir = unique_output_path("python-import");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let wit_path = temp_dir.join("python-import.wit");
+    fs::write(
+        &wit_path,
+        r#"package temporal:nexus@1.0.0;
+
+world system { export models; }
+
+interface models {
+  /// @nexus.proto "temporal.api.common.v1.WorkflowType"
+  ///   python-import="local_protos.temporal.api.common.v1.message_pb2"
+  record workflow-type {
+    name: string,
+  }
+
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution"
+  record workflow-execution {
+    workflow-id: string,
+    run-id: string,
+  }
+}
+"#,
+    )
+    .unwrap();
+    let files = generate_python_package_files(&[wit_path], &[descriptor_path(&root)]);
+    fs::remove_dir_all(temp_dir).unwrap();
+    let models = &files[&PathBuf::from("models.py")];
+
+    // Both messages are in one proto file, but only the bound type names a module.
+    assert!(
+        models.contains("local_protos.temporal.api.common.v1.message_pb2.WorkflowType"),
+        "{models}"
+    );
+    assert!(
+        models.contains("temporalio.api.common.v1.message_pb2.WorkflowExecution"),
+        "{models}"
+    );
+}

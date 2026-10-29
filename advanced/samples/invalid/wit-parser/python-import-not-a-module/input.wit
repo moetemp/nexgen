@@ -1,0 +1,13 @@
+package temporal:nexus@1.0.0;
+
+world system {
+  export models;
+}
+
+interface models {
+  /// @nexus.proto "temporal.api.common.v1.WorkflowType"
+  ///   python-import="local-protos/message_pb2"
+  record workflow-type {
+    name: string,
+  }
+}

@@ -1,0 +1,23 @@
+package temporal:dotnet-result-record-resource@1.0.0;
+
+world system { export api; }
+
+// The shared result record holds the Workflow class, so the .NET client can't return its own.
+/// @nexus.endpoint "runs"
+interface api {
+  resource workflow-run {
+    constructor(run-id: option<string>);
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.GetSystemInfoRequest"
+  record start-run-request {
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.StartWorkflowExecutionResponse"
+  record start-run-result {
+    run: own<workflow-run>,
+    started: option<bool>,
+  }
+
+  start-run: func(request: start-run-request) -> start-run-result;
+}

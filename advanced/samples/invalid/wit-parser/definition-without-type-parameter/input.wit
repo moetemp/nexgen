@@ -1,0 +1,10 @@
+package test:definition-without-type-parameter;
+
+world system { export models; }
+
+interface models {
+  /// @nexus.definition python="sdk.HolderDefinition"
+  resource holder {
+    constructor(id: string);
+  }
+}

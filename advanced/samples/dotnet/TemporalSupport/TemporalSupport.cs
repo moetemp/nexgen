@@ -16,6 +16,22 @@ using ApiWorkflow = Temporalio.Api.Workflow.V1;
 
 namespace Nexgen.Support
 {
+    /// <summary>
+    /// A Stream's name. The type argument is the type of its values.
+    /// </summary>
+    public class StreamDefinition<T>
+    {
+        /// <summary>
+        /// Initializes a definition of the Stream with this name.
+        /// </summary>
+        public StreamDefinition(string name) => Name = name;
+
+        /// <summary>
+        /// The name of the Stream.
+        /// </summary>
+        public string Name { get; }
+    }
+
     internal static class TemporalWorkflowContext
     {
         internal static string WorkflowNamespace() => Workflow.Info.Namespace;

@@ -17,12 +17,17 @@ from temporalio.converter import PayloadConverter
 import temporalio.nexus.system
 import temporalio.workflow
 
+import temporal_support
 from wit.stream_service.models import models as models_only
 from wit.stream_service.workflow import models as workflow_models
 from wit.stream_service.client import models as client_models
 from wit.stream_service.both import models as both_models
 from wit.stream_service import workflow as workflow_only
 from wit.stream_service.both import workflow as both_workflow
+
+
+class Texts(temporal_support.StreamDefinition[str]):
+    name: typing.ClassVar[str] = "texts"
 
 
 @pytest.fixture(
@@ -173,7 +178,7 @@ async def test_workflow_apis_call_the_stream_service(
         return NexusClient()
 
     monkeypatch.setattr(temporalio.workflow, "create_nexus_client", create_client)
-    stream = await api.create_stream(str, id="workflow-stream")
+    stream = await api.create_stream(Texts, id="workflow-stream")
     response = await stream.publish(records=[])
     assert response.last_offset == 3
     assert calls == [

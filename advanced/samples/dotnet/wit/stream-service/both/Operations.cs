@@ -166,9 +166,10 @@ namespace Temporalio.Workflows
             return new Stream<TBody>((result.Stream ?? throw new System.InvalidOperationException("CreateStream answered without `stream`")), result.Created);
         }
 
+        /// <param name="definition">Gives the type arguments of the resource.</param>
         /// <param name="options">Create a Stream, or get the open one. A closed, expired or another owner's Stream fails.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(CreateStreamOptions options)
+        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(Nexgen.Support.StreamDefinition<TBody> definition, CreateStreamOptions options)
         {
             var request = new CreateStreamRequest(options.Id)
             {

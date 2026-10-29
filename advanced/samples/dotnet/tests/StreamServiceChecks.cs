@@ -98,5 +98,11 @@ namespace Nexgen.DotNetExamples.Tests
         private static Task<StreamServiceExample.ReadRecordsResponse<Turn>> ReadTurns(
             StreamServiceExample.Stream<Turn> stream) =>
             stream.ReadAsync(null, null, null, null, null, null);
+
+        // A definition gives the type argument of a create.
+        private static Task<StreamServiceExample.Stream<Turn>> CreateTurns() =>
+            StreamServiceExample.Operations.CreateStreamAsync(
+                new Streams::Nexgen.Support.StreamDefinition<Turn>("turns"),
+                new StreamServiceExample.CreateStreamOptions("stream-1"));
     }
 }

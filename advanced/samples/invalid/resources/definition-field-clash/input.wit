@@ -1,0 +1,46 @@
+package temporal:nexus@1.0.0;
+
+world system { export job-service; }
+
+// The create takes the definition as `definition`, next to the fields of its request.
+interface job-service {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.type-parameter
+  type output-t = placeholder;
+
+  /// @nexus.proto "temporal.api.compute.v1.ComputeProvider"
+  record job-output {
+    /// @nexus.omit
+    %type: placeholder,
+    details: output-t,
+    /// @nexus.omit
+    nexus-endpoint: placeholder,
+  }
+
+  /// @nexus.type-parameter "output-t"
+  /// @nexus.definition python="temporal_support.JobDefinition"
+  ///   typescript="JobDefinition" typescript-import="../../support/definitions"
+  ///   dotnet="Nexgen.Support.JobDefinition"
+  resource job {
+    constructor(workflow-id: string, run-id: option<string>);
+
+    output: func() -> job-output;
+  }
+
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution"
+  type job-result = own<job>;
+
+  record start-job-request {
+    workflow-id: string,
+    definition: option<string>,
+  }
+
+  record output-request {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  start-job: func(request: start-job-request) -> job-result;
+  output: func(request: output-request) -> job-output;
+}

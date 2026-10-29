@@ -8,6 +8,7 @@ use indexmap::IndexMap;
 use crate::error::{Error, Result};
 use crate::generator::json_schema::typescript as typescript_json;
 use crate::generator::proto::typescript as typescript_proto;
+use crate::generator::proto::typescript::resources::ResourceAnnotations;
 use crate::generator::proto::typescript::{
     model_typescript_interface_ref, typescript_replacement_type_name,
 };
@@ -29,8 +30,8 @@ use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSou
 use crate::spec::{
     AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FieldExpression,
     FieldOrigin, FlagsSpec, FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec,
-    LanguageImportSpec, LanguageImportStyle, ModulePath, OperationSpec, RecordFieldSpec,
-    RecordSpec, SelectedTextSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
+    LanguageImportSpec, LanguageImportStyle, ModulePath, OperationPollSpec, OperationSpec,
+    RecordFieldSpec, RecordSpec, SelectedTextSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 
@@ -162,6 +163,7 @@ fn generate_tree_node(
         ApiSpecNode::Leaf(leaf) => {
             let mut generated = generate_leaf(
                 &leaf.spec,
+                &leaf.source_path,
                 support_package,
                 ts_date_time_types,
                 GeneratedFileOrigin::input_module(Language::TypeScript, &leaf.source_path),
@@ -419,13 +421,103 @@ impl<'a> ApiPlanner<'a> {
                     input_conversion.annotation.clone()
                 }
             };
-            let (annotation, default_initialization) = if let Some((model, record)) =
-                input_model.zip(input_full_name.and_then(|name| self.api_plan.record(name)))
-            {
-                typescript_operation_defaults(model, record, self.api_plan, &annotation)
-            } else {
-                (annotation, None)
+            let record = input_full_name.and_then(|name| self.api_plan.record(name));
+            let target_input = |target: GenerationTarget| {
+                let (annotation, default_initialization) = if let Some((model, record)) =
+                    input_model.zip(record)
+                {
+                    typescript_operation_defaults(model, record, self.api_plan, &annotation, target)
+                } else {
+                    (annotation.clone(), None)
+                };
+                RenderedTargetInput {
+                    annotation,
+                    api_omitted_fields: record
+                        .map(|record| {
+                            let mut fields = record
+                                .fields
+                                .values()
+                                .filter(|field| field.api_omitted_for(target))
+                                .map(|field| typescript_generated_field_name(&field.name))
+                                .collect::<Vec<_>>();
+                            fields.extend(
+                                record.sources_for(target).map(|(_, field, _)| {
+                                    typescript_generated_field_name(&field.name)
+                                }),
+                            );
+                            fields.extend(
+                                flattened_fields.iter().map(|flatten| flatten.name.clone()),
+                            );
+                            fields.sort();
+                            fields.dedup();
+                            fields
+                        })
+                        .unwrap_or_default(),
+                    sourced_fields: input_model
+                        .zip(record)
+                        .map(|(model, record)| {
+                            let mut fields = model
+                                .sourced_fields
+                                .iter()
+                                .filter(|field| field.source_expressions.contains_key(&target))
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            // The model needs a list that the target's API omits, so it's empty.
+                            fields.extend(
+                                record
+                                    .fields
+                                    .values()
+                                    .filter(|field| {
+                                        field.required
+                                            && field.api_omitted_for(target)
+                                            && matches!(field.field_type, PlannedType::List(_))
+                                    })
+                                    .filter_map(|field| {
+                                        let name = typescript_generated_field_name(&field.name);
+                                        model
+                                            .sourced_fields
+                                            .iter()
+                                            .find(|rendered| rendered.name == name)
+                                            .cloned()
+                                            .or_else(|| {
+                                                model
+                                                    .fields
+                                                    .iter()
+                                                    .find(|rendered| rendered.name == name)
+                                                    .map(|rendered| RenderedSourcedField {
+                                                        name: rendered.name.clone(),
+                                                        wire_name: rendered.wire_name.clone(),
+                                                        annotation: rendered.annotation.clone(),
+                                                        doc: rendered.doc.clone(),
+                                                        optional: false,
+                                                        source_expressions: BTreeMap::new(),
+                                                        visible: true,
+                                                        from_wire_expr: rendered
+                                                            .from_wire_expr
+                                                            .clone(),
+                                                        to_wire_expr: rendered.to_wire_expr.clone(),
+                                                    })
+                                            })
+                                    })
+                                    .map(|field| RenderedSourcedField {
+                                        source_expressions: BTreeMap::from([(
+                                            target,
+                                            "[]".to_string(),
+                                        )]),
+                                        ..field
+                                    }),
+                            );
+                            fields
+                        })
+                        .unwrap_or_default(),
+                    default_initialization,
+                }
             };
+            let workflow = target_input(GenerationTarget::Workflow);
+            let client = crate::nexgen_config::current()
+                .targets
+                .contains(&GenerationTarget::Client)
+                .then(|| target_input(GenerationTarget::Client));
             RenderedOperationInput {
                 operation_annotation: typescript_erased_model_annotation(
                     &self.operation_type_annotation(input),
@@ -434,85 +526,13 @@ impl<'a> ApiPlanner<'a> {
                 ),
                 model_name: model_name.clone(),
                 type_parameters,
-                annotation,
-                api_omitted_fields: input_full_name
-                    .and_then(|name| self.api_plan.record(name))
-                    .map(|record| {
-                        let mut fields = record
-                            .fields
-                            .values()
-                            .filter(|field| field.api_omitted_for(GenerationTarget::Workflow))
-                            .map(|field| typescript_generated_field_name(&field.name))
-                            .collect::<Vec<_>>();
-                        fields.extend(
-                            record
-                                .sources_for(GenerationTarget::Workflow)
-                                .map(|(_, field, _)| typescript_generated_field_name(&field.name)),
-                        );
-                        fields.extend(flattened_fields.iter().map(|flatten| flatten.name.clone()));
-                        fields.sort();
-                        fields.dedup();
-                        fields
-                    })
-                    .unwrap_or_default(),
-                sourced_fields: input_model
-                    .zip(input_full_name.and_then(|name| self.api_plan.record(name)))
-                    .map(|(model, record)| {
-                        let target = GenerationTarget::Workflow;
-                        let mut fields = model
-                            .sourced_fields
-                            .iter()
-                            .filter(|field| field.source_expressions.contains_key(&target))
-                            .cloned()
-                            .collect::<Vec<_>>();
-                        // The model needs a list that the Workflow API omits, so it's empty.
-                        fields.extend(
-                            record
-                                .fields
-                                .values()
-                                .filter(|field| {
-                                    field.required
-                                        && field.api_omitted_for(target)
-                                        && matches!(field.field_type, PlannedType::List(_))
-                                })
-                                .filter_map(|field| {
-                                    let name = typescript_generated_field_name(&field.name);
-                                    model
-                                        .sourced_fields
-                                        .iter()
-                                        .find(|rendered| rendered.name == name)
-                                        .cloned()
-                                        .or_else(|| {
-                                            model
-                                                .fields
-                                                .iter()
-                                                .find(|rendered| rendered.name == name)
-                                                .map(|rendered| RenderedSourcedField {
-                                                    name: rendered.name.clone(),
-                                                    wire_name: rendered.wire_name.clone(),
-                                                    annotation: rendered.annotation.clone(),
-                                                    doc: rendered.doc.clone(),
-                                                    optional: false,
-                                                    source_expressions: BTreeMap::new(),
-                                                    visible: true,
-                                                    from_wire_expr: rendered.from_wire_expr.clone(),
-                                                    to_wire_expr: rendered.to_wire_expr.clone(),
-                                                })
-                                        })
-                                })
-                                .map(|field| RenderedSourcedField {
-                                    source_expressions: BTreeMap::from([(
-                                        target,
-                                        "[]".to_string(),
-                                    )]),
-                                    ..field
-                                }),
-                        );
-                        fields
-                    })
-                    .unwrap_or_default(),
-                default_initialization,
+                request_annotation: annotation.clone(),
+                annotation: workflow.annotation,
+                api_omitted_fields: workflow.api_omitted_fields,
+                sourced_fields: workflow.sourced_fields,
+                default_initialization: workflow.default_initialization,
                 flattened_fields: flattened_fields.clone(),
+                client,
                 transfer_type_converter: input_conversion
                     .wire_function_names
                     .as_ref()
@@ -531,7 +551,11 @@ impl<'a> ApiPlanner<'a> {
 
         if let Some(input) = &rendered_input
             && !input.flattened_fields.is_empty()
-            && input.default_initialization.is_some()
+            && (input.default_initialization.is_some()
+                || input
+                    .client
+                    .as_ref()
+                    .is_some_and(|client| client.default_initialization.is_some()))
         {
             return Err(Error::UnsupportedTypeScriptFlatten {
                 operation: operation.name.clone(),
@@ -652,6 +676,8 @@ impl<'a> ApiPlanner<'a> {
                 .serialization_context
                 .value()
                 .map(support_reference),
+            poll: operation.poll.as_ref(),
+            output_none: operation.output_type().is_none(),
             runtime_type_parameters,
             output_record_type_parameters,
         })
@@ -2131,6 +2157,7 @@ pub(crate) fn generate(
     let generated = match &tree.root {
         ApiSpecNode::Leaf(leaf) => generate_leaf(
             &leaf.spec,
+            &leaf.source_path,
             support_package,
             ts_date_time_types,
             GeneratedFileOrigin::fixed("generated TypeScript package module"),
@@ -2180,6 +2207,7 @@ fn collect_tree_json_models_into(
 
 fn generate_leaf(
     api_plan: &PlannedSpec,
+    source_path: &Path,
     support_package: &str,
     ts_date_time_types: TsDateTimeTypes,
     module_origin: GeneratedFileOrigin,
@@ -2195,7 +2223,6 @@ fn generate_leaf(
                 .iter()
                 .map(|operation| planner.resolve_operation(operation))
                 .collect::<Result<Vec<_>>>()?;
-
             Ok(RenderedService {
                 name: service.name.as_str(),
                 attr_name: service
@@ -2223,6 +2250,13 @@ fn generate_leaf(
         for resource in &service.resources {
             planner.ensure_resource_field_types(resource);
         }
+    }
+    if crate::nexgen_config::current()
+        .targets
+        .contains(&GenerationTarget::Client)
+    {
+        validate_client_polls(&services, source_path)?;
+        validate_client_names(&services)?;
     }
     for record in api_plan.records().map(|(_, record)| record) {
         let model_type = TypeSpec::Record(PlannedRecordType {
@@ -3094,6 +3128,8 @@ struct RenderedOperation<'a> {
     output_model_name: Option<String>,
     output_transfer_type_converter: Option<String>,
     serialization_context_expr: Option<String>,
+    poll: Option<&'a OperationPollSpec<PlannedFamily>>,
+    output_none: bool,
     runtime_type_parameters: Vec<String>,
     output_record_type_parameters: Vec<String>,
 }
@@ -3184,6 +3220,19 @@ impl RenderedOperation<'_> {
             config.join(", ")
         );
         format!("{{ ...{definition}, outputType: {{ transferTypeConverter: {converter} }} }}")
+    }
+
+    fn poll_next(&self, target: GenerationTarget) -> Option<String> {
+        self.poll
+            .filter(|poll| poll.targets.contains(&target))
+            .and_then(|poll| poll.next.value())
+            .map(support_reference)
+    }
+
+    fn returns_direct(&self) -> bool {
+        self.output_transform_expr.is_some()
+            || self.output_resource_return.is_some()
+            || self.output_direct_result
     }
 }
 
@@ -3302,11 +3351,14 @@ struct RenderedOperationInput {
     operation_annotation: String,
     model_name: Option<String>,
     type_parameters: Vec<RenderedTypeParameter>,
+    request_annotation: String,
     annotation: String,
     api_omitted_fields: Vec<String>,
     sourced_fields: Vec<RenderedSourcedField>,
     default_initialization: Option<String>,
     flattened_fields: Vec<RenderedInputFlatten>,
+    /// The client target's own sources and defaults.
+    client: Option<RenderedTargetInput>,
     transfer_type_converter: Option<String>,
 }
 
@@ -3315,6 +3367,14 @@ struct RenderedInputFlatten {
     name: String,
     required: bool,
     promoted: Vec<(String, String, bool)>,
+}
+
+#[derive(Debug)]
+struct RenderedTargetInput {
+    annotation: String,
+    api_omitted_fields: Vec<String>,
+    sourced_fields: Vec<RenderedSourcedField>,
+    default_initialization: Option<String>,
 }
 
 #[derive(Debug)]
@@ -3655,7 +3715,21 @@ fn render_module_files(
             Ok(())
         },
         |files, target| {
-            debug_assert_eq!(target, crate::nexgen_config::GenerationTarget::Workflow);
+            if target == GenerationTarget::Client {
+                return render_client_package(
+                    files,
+                    enums,
+                    flags,
+                    variants,
+                    models,
+                    &module_model_names,
+                    services,
+                    language_imports,
+                    support_package,
+                    api_plan,
+                    module_origin.clone(),
+                );
+            }
             if crate::nexgen_config::current().system_nexus && !services.is_empty() {
                 files.insert(
                     "registry.ts",
@@ -4285,6 +4359,8 @@ fn render_endpoint_service_operation_body(
         output.push_str(&typescript_resource_return_value(
             resource_return,
             Some("this.client"),
+            None,
+            &[],
         ));
         output.push_str(";\n");
     } else if let Some(resource_return) = &operation.output_resource_return {
@@ -5952,11 +6028,12 @@ fn typescript_operation_defaults(
     record: &RecordSpec<PlannedFamily>,
     api_plan: &PlannedSpec,
     annotation: &str,
+    target: GenerationTarget,
 ) -> (String, Option<String>) {
     let mut overrides = Vec::new();
     let mut assignments = Vec::new();
     for (field_name, field) in record.model_fields() {
-        let default = field.default_for(crate::nexgen_config::GenerationTarget::Workflow);
+        let default = field.default_for(target);
         let Some(rendered) = model.fields.iter().find(|rendered| {
             rendered.wire_name == field_name
                 || rendered.name == typescript_generated_field_name(&field.name)
@@ -5970,7 +6047,7 @@ fn typescript_operation_defaults(
             let nested_record = api_plan
                 .record(&nested_type.full_name)
                 .expect("flattened record exists");
-            let present = if field.api_required(crate::nexgen_config::GenerationTarget::Workflow) {
+            let present = if field.api_required(target) {
                 "true".to_string()
             } else {
                 rendered
@@ -5986,9 +6063,7 @@ fn typescript_operation_defaults(
                     .find(|(_, spec)| typescript_generated_field_name(&spec.name) == child.name)
                     .map(|(_, spec)| spec)
                     .expect("flattened child exists");
-                let Some(default) =
-                    child_spec.default_for(crate::nexgen_config::GenerationTarget::Workflow)
-                else {
+                let Some(default) = child_spec.default_for(target) else {
                     continue;
                 };
                 overrides.push((child.name.clone(), child.annotation.clone()));
@@ -6026,11 +6101,11 @@ fn typescript_operation_defaults(
     let omitted = record
         .fields
         .values()
-        .filter(|field| field.api_omitted_for(GenerationTarget::Workflow))
+        .filter(|field| field.api_omitted_for(target))
         .map(|field| typescript_generated_field_name(&field.name))
         .chain(
             record
-                .sources_for(GenerationTarget::Workflow)
+                .sources_for(target)
                 .map(|(_, field, _)| typescript_generated_field_name(&field.name)),
         )
         .collect::<BTreeSet<_>>();
@@ -6230,44 +6305,13 @@ pub(in crate::generator) fn render_resource_with_annotations(
         output.push_str("  public async ");
         output.push_str(&typescript_generated_field_name(&method.name));
         output.push_str("(\n");
-        // TypeScript refuses an optional parameter before a required one, and WIT allows
-        // any order, so such a parameter takes `undefined` explicitly.
-        let last_required = method.params.iter().rposition(|param| !param.optional);
-        for (index, param) in method.params.iter().enumerate() {
-            let before_required = last_required.is_some_and(|last| index < last);
-            output.push_str("    ");
-            output.push_str(&typescript_generated_field_name(&param.name));
-            if param.optional && !before_required {
-                output.push('?');
-            }
-            output.push_str(": ");
-            // A list of a flattened record takes the values of its one field.
-            let rendered = match &param.kind {
-                PlannedType::List(item) => {
-                    flattened_list_field(api_plan, item).map(|(_, nested)| {
-                        let item = typescript_resource_field_type(
-                            &nested.field_type,
-                            false,
-                            None,
-                            true,
-                            api_plan,
-                        );
-                        ResolvedFieldType {
-                            annotation: typescript_array_annotation(&item.annotation),
-                            ..item
-                        }
-                    })
-                }
-                _ => None,
-            }
-            .unwrap_or_else(|| param_annotation(method, param));
-            requirements.merge(&rendered.requirements);
-            output.push_str(&rendered.annotation);
-            if param.optional && before_required {
-                output.push_str(" | undefined");
-            }
-            output.push_str(",\n");
-        }
+        render_resource_method_params(
+            output,
+            method,
+            &param_annotation,
+            &mut requirements,
+            api_plan,
+        );
         output.push_str("  ): Promise<");
         output.push_str(&result_annotation);
         output.push_str("> {\n");
@@ -6294,35 +6338,21 @@ pub(in crate::generator) fn render_resource_with_annotations(
                     request_plan,
                     crate::nexgen_config::GenerationTarget::Workflow,
                 );
-                if *direct_return {
-                    output.push_str(&render_resource_method_operation_body(
-                        4,
-                        service,
-                        resource,
-                        operation,
-                        endpoint_expr,
-                        client_expr,
-                        &result_annotation,
-                        request_plan,
-                        &branchable_params,
-                        true,
-                        fills_source,
-                    ));
-                } else {
-                    output.push_str(&render_resource_method_operation_body(
-                        4,
-                        service,
-                        resource,
-                        operation,
-                        endpoint_expr,
-                        client_expr,
-                        &result_annotation,
-                        request_plan,
-                        &branchable_params,
-                        false,
-                        fills_source,
-                    ));
-                }
+                let body = render_resource_method_operation_body(
+                    4,
+                    service,
+                    resource,
+                    operation,
+                    endpoint_expr,
+                    client_expr,
+                    &result_annotation,
+                    request_plan,
+                    &branchable_params,
+                    *direct_return,
+                    fills_source,
+                    GenerationTarget::Workflow,
+                );
+                output.push_str(&body);
             }
             PlannedResourceMethodBindingSpec::Stub => {
                 output.push_str("    throw new Error(");
@@ -6390,6 +6420,70 @@ pub(in crate::generator) fn render_resource_with_annotations(
         output.push_str("}\n");
     }
     requirements
+}
+
+/// Output with no Workflow API has fields only, so no method calls a missing operation.
+pub(in crate::generator) fn render_data_resource(
+    output: &mut String,
+    resource: &PlannedResource,
+    field_annotation: impl Fn(&PlannedResourceField) -> ResolvedFieldType,
+) -> TypeScriptRequirements {
+    let mut requirements = TypeScriptRequirements::default();
+    output.push_str("export class ");
+    output.push_str(&resource.type_name);
+    output.push_str(" {\n");
+    output.push_str("  public constructor(\n");
+    for field in &resource.fields {
+        output.push_str("    public readonly ");
+        output.push_str(&typescript_generated_field_name(&field.name));
+        output.push_str(": ");
+        let rendered = field_annotation(field);
+        requirements.merge(&rendered.requirements);
+        output.push_str(&rendered.annotation);
+        output.push_str(",\n");
+    }
+    output.push_str("  ) {}\n");
+    output.push_str("}\n");
+    requirements
+}
+
+/// TypeScript refuses an optional parameter before a required one, so it takes `undefined`.
+fn render_resource_method_params(
+    output: &mut String,
+    method: &PlannedResourceMethod,
+    param_annotation: &impl Fn(&PlannedResourceMethod, &PlannedResourceField) -> ResolvedFieldType,
+    requirements: &mut TypeScriptRequirements,
+    api_plan: &PlannedSpec,
+) {
+    let last_required = method.params.iter().rposition(|param| !param.optional);
+    for (index, param) in method.params.iter().enumerate() {
+        let before_required = last_required.is_some_and(|last| index < last);
+        output.push_str("    ");
+        output.push_str(&typescript_generated_field_name(&param.name));
+        if param.optional && !before_required {
+            output.push('?');
+        }
+        output.push_str(": ");
+        // A list of a flattened record takes the values of its one field.
+        let rendered = match &param.kind {
+            PlannedType::List(item) => flattened_list_field(api_plan, item).map(|(_, nested)| {
+                let item =
+                    typescript_resource_field_type(&nested.field_type, false, None, true, api_plan);
+                ResolvedFieldType {
+                    annotation: typescript_array_annotation(&item.annotation),
+                    ..item
+                }
+            }),
+            _ => None,
+        }
+        .unwrap_or_else(|| param_annotation(method, param));
+        requirements.merge(&rendered.requirements);
+        output.push_str(&rendered.annotation);
+        if param.optional && before_required {
+            output.push_str(" | undefined");
+        }
+        output.push_str(",\n");
+    }
 }
 
 fn typescript_resource_method_result_type(
@@ -6655,6 +6749,7 @@ fn render_resource_method_operation_body(
     branchable_params: &[String],
     direct_return: bool,
     fills_source: bool,
+    target: GenerationTarget,
 ) -> String {
     let indent_str = " ".repeat(indent);
     if let Some((param_name, remaining)) = branchable_params.split_first() {
@@ -6676,6 +6771,7 @@ fn render_resource_method_operation_body(
             remaining,
             direct_return,
             fills_source,
+            target,
         ));
         output.push_str(&indent_str);
         output.push_str("} else {\n");
@@ -6691,12 +6787,28 @@ fn render_resource_method_operation_body(
             remaining,
             direct_return,
             fills_source,
+            target,
         ));
         output.push_str(&indent_str);
         output.push_str("}\n");
         return output;
     }
 
+    let client_target = target == GenerationTarget::Client;
+    let (sourced_fields, default_initialization) = match &operation.input {
+        Some(input) if client_target => {
+            let client = client_target_input(input);
+            (
+                client.sourced_fields.as_slice(),
+                client.default_initialization.as_ref(),
+            )
+        }
+        Some(input) => (
+            input.sourced_fields.as_slice(),
+            input.default_initialization.as_ref(),
+        ),
+        None => (&[][..], None),
+    };
     // A standalone operation wrapper supplies its applicable sources itself;
     // do not pass those fields through its caller-only convenience signature.
     // Keep the shared plan intact for APIs that construct the raw model.
@@ -6704,45 +6816,27 @@ fn render_resource_method_operation_body(
     // The resource's value wins over a source, so a plan that fills a sourced field builds the
     // complete request, like a resource bound to a client, and fills the other sources itself.
     let complete_request = client_expr.is_some() || fills_source;
-    if !complete_request
-        && let RequestPlan::Construct { fields, .. } = &mut caller_plan
-        && let Some(input) = &operation.input
-    {
+    if !complete_request && let RequestPlan::Construct { fields, .. } = &mut caller_plan {
         fields.retain(|field| {
             let name = typescript_generated_field_name(&field.field_name);
-            input
-                .sourced_fields
-                .iter()
-                .all(|source| source.name != name)
+            sourced_fields.iter().all(|source| source.name != name)
         });
     }
-    let unfilled_sources = match (&operation.input, &caller_plan) {
-        (Some(input), RequestPlan::Construct { fields, .. }) if complete_request => input
-            .sourced_fields
+    let unfilled_sources = match &caller_plan {
+        RequestPlan::Construct { fields, .. } if complete_request => sourced_fields
             .iter()
             .filter(|source| {
                 fields
                     .iter()
                     .all(|field| typescript_generated_field_name(&field.field_name) != source.name)
             })
-            .map(|source| {
-                format!(
-                    "{}: {}",
-                    source.name,
-                    source.source_expressions[&GenerationTarget::Workflow]
-                )
-            })
+            .map(|source| format!("{}: {}", source.name, source.source_expressions[&target]))
             .collect(),
         _ => Vec::new(),
     };
     let request_expr = render_request_plan_typescript(&caller_plan, &unfilled_sources);
     let mut output = String::new();
-    if complete_request
-        && let Some(initialization) = operation
-            .input
-            .as_ref()
-            .and_then(|input| input.default_initialization.as_ref())
-    {
+    if complete_request && let Some(initialization) = default_initialization {
         output.push_str(&format!(
             "{indent_str}const requestInput = {request_expr};\n"
         ));
@@ -6797,6 +6891,31 @@ fn render_resource_method_operation_body(
         }
         return output;
     };
+
+    if client_target {
+        render_client_start_operation(
+            &mut output,
+            &indent_str,
+            service,
+            operation,
+            &client_expr,
+            "this.",
+        );
+        // A resource method returns a resource of its own service, so it gets this Nexus client.
+        let returned_resource = service.resources.iter().find(|resource| {
+            operation.output_direct_result && resource.type_name == operation.output_annotation
+        });
+        render_client_result(
+            &mut output,
+            &indent_str,
+            operation,
+            returned_resource,
+            Some(&client_expr),
+            result_annotation == "void",
+            "this.",
+        );
+        return output;
+    }
 
     let returns_direct = operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
@@ -6935,11 +7054,19 @@ fn render_request_plan_typescript(plan: &RequestPlan, top_level_fields: &[String
 fn typescript_resource_return_value(
     resource_return: &PlannedOperationResourceReturn,
     client: Option<&str>,
+    nexus_client: Option<&str>,
+    extra_args: &[String],
 ) -> String {
-    let args = resource_return
-        .bindings
-        .iter()
-        .map(resource_return_binding_expr_typescript)
+    let args = nexus_client
+        .map(str::to_string)
+        .into_iter()
+        .chain(
+            resource_return
+                .bindings
+                .iter()
+                .map(resource_return_binding_expr_typescript),
+        )
+        .chain(extra_args.iter().cloned())
         .collect::<Vec<_>>()
         .join(", ");
     let mut value = format!("new {}({args})", resource_return.resource_type_name);
@@ -7124,7 +7251,16 @@ fn render_operation_function(
                 &format!("...requestInput,\n{sourced}"),
             ));
         } else if !input.flattened_fields.is_empty() {
-            render_flattened_request(output, input);
+            render_flattened_request(
+                output,
+                "  ",
+                "const",
+                "requestInput",
+                &input.annotation,
+                &input.sourced_fields,
+                &input.flattened_fields,
+                GenerationTarget::Workflow,
+            );
         } else if !input.sourced_fields.is_empty() {
             output.push_str("  const request = ");
             output.push_str("{\n    ...requestInput,\n");
@@ -7215,7 +7351,12 @@ fn render_operation_function(
         {
             // The answer is the wire message, so the record and its resource are built from it.
             output.push_str("  return ");
-            output.push_str(&typescript_resource_return_value(resource_return, None));
+            output.push_str(&typescript_resource_return_value(
+                resource_return,
+                None,
+                None,
+                &[],
+            ));
             output.push_str(";\n");
         } else if let Some(resource_return) = &operation.output_resource_return {
             // The answer is the resource's wire message, so the resource is built from it.
@@ -7269,6 +7410,8 @@ fn render_operation_function(
         output.push_str(&typescript_resource_return_value(
             resource_return,
             service.endpoint.is_none().then_some("endpoint"),
+            None,
+            &[],
         ));
         output.push_str(";\n");
     } else if let Some(resource_return) = &operation.output_resource_return {
@@ -7361,32 +7504,51 @@ fn render_operation_input_alias(
     let Some(input) = &operation.input else {
         return;
     };
-    if input.api_omitted_fields.is_empty() && input.default_initialization.is_none() {
+    render_input_alias(
+        output,
+        &operation_input_alias_name(service, operation),
+        &input.type_parameters,
+        &input.annotation,
+        &input.api_omitted_fields,
+        input.default_initialization.is_some(),
+        &input.flattened_fields,
+    );
+}
+
+fn render_input_alias(
+    output: &mut String,
+    alias_name: &str,
+    type_parameters: &[RenderedTypeParameter],
+    annotation: &str,
+    api_omitted_fields: &[String],
+    has_defaults: bool,
+    flattens: &[RenderedInputFlatten],
+) {
+    if api_omitted_fields.is_empty() && !has_defaults {
         return;
     }
     output.push_str("type ");
-    output.push_str(&operation_input_alias_name(service, operation));
-    output.push_str(&render_type_parameter_list(&input.type_parameters));
+    output.push_str(alias_name);
+    output.push_str(&render_type_parameter_list(type_parameters));
     output.push_str(" = ");
-    if input.default_initialization.is_some() {
-        output.push_str(&input.annotation);
+    if has_defaults {
+        output.push_str(annotation);
         output.push_str(";\n\n");
         return;
     }
     output.push('(');
-    output.push_str(&input.annotation);
+    output.push_str(annotation);
     output.push(')');
     output.push_str(" extends infer Input\n  ? Input extends unknown\n    ? Omit<Input, ");
     output.push_str(
-        &input
-            .api_omitted_fields
+        &api_omitted_fields
             .iter()
             .map(|field| typescript_string_literal(field))
             .collect::<Vec<_>>()
             .join(" | "),
     );
     output.push_str("> & { ");
-    for (index, field) in input.api_omitted_fields.iter().enumerate() {
+    for (index, field) in api_omitted_fields.iter().enumerate() {
         if index > 0 {
             output.push_str("; ");
         }
@@ -7394,8 +7556,7 @@ fn render_operation_input_alias(
         output.push_str("?: never");
     }
     output.push_str(" }");
-    let promoted = input
-        .flattened_fields
+    let promoted = flattens
         .iter()
         .flat_map(|flatten| &flatten.promoted)
         .map(|(name, annotation, optional)| {
@@ -7412,49 +7573,6 @@ fn render_operation_input_alias(
         output.push_str(" }");
     }
     output.push_str("\n    : never\n  : never;\n\n");
-}
-
-fn render_flattened_request(output: &mut String, input: &RenderedOperationInput) {
-    let promoted = input
-        .flattened_fields
-        .iter()
-        .flat_map(|flatten| flatten.promoted.iter().map(|(name, _, _)| name.as_str()))
-        .collect::<Vec<_>>();
-    output.push_str(&format!(
-        "  const {{ {}, ...requestFields }} = requestInput;\n",
-        promoted.join(", ")
-    ));
-    output.push_str("  const request = {\n    ...requestFields,\n");
-    for source in &input.sourced_fields {
-        output.push_str(&format!(
-            "    {}: {},\n",
-            source.name,
-            source.source_expressions[&GenerationTarget::Workflow]
-        ));
-    }
-    for flatten in &input.flattened_fields {
-        let members = flatten
-            .promoted
-            .iter()
-            .map(|(name, _, _)| name.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        // An optional record is set when one of its fields is set.
-        let value = if flatten.required || flatten.promoted.iter().any(|(_, _, optional)| !optional)
-        {
-            format!("{{ {members} }}")
-        } else {
-            let unset = flatten
-                .promoted
-                .iter()
-                .map(|(name, _, _)| format!("{name} === undefined"))
-                .collect::<Vec<_>>()
-                .join(" && ");
-            format!("{unset} ? undefined : {{ {members} }}")
-        };
-        output.push_str(&format!("    {}: {value},\n", flatten.name));
-    }
-    output.push_str(&format!("  }} as {};\n", input.annotation));
 }
 
 fn render_resource_constructor(
@@ -7514,6 +7632,1389 @@ fn render_resource_structural_type(
 /// `_`, so it can't clash with an operation function.
 fn typescript_operation_request_function_name(operation: &RenderedOperation<'_>) -> String {
     format!("_{}", operation.attr_name)
+}
+
+const CLIENT_HOOK_NAME: &str = "createNexusClient";
+
+/// The client hook's return type. A model or resource of this name would clash with it.
+const CLIENT_NEXUS_CLIENT_NAME: &str = "NexusServiceClient";
+
+/// It has the `startOperation` of `@temporalio/client`, so `client.nexus` can supply it.
+const TYPESCRIPT_CLIENT_NEXUS_MODULE: &str = r#"/**
+ * Starts the operations of one Nexus service, like the `NexusServiceClient` of
+ * `@temporalio/client`.
+ */
+export interface NexusServiceClient<T extends nexus.ServiceDefinition> {
+  startOperation<O extends T["operations"][keyof T["operations"]]>(
+    operation: O,
+    input: nexus.OperationInput<O>,
+    options: { id: string },
+  ): Promise<{ result(): Promise<nexus.OperationOutput<O>> }>;
+}
+
+/**
+ * Returns a new random operation ID.
+ */
+export function operationId(): string {
+  return crypto.randomUUID();
+}
+"#;
+
+// A class expression can't export a protected member, so the hook is public.
+const TYPESCRIPT_CLIENT_EXTENSION_HOOK: &str = r#"    /**
+     * Returns the Nexus client that starts the operations of `service`.
+     */
+    public abstract createNexusClient<T extends nexus.ServiceDefinition>(options: {
+      service: T;
+      endpoint: string;
+    }): NexusServiceClient<T>;
+"#;
+
+#[allow(clippy::too_many_arguments)]
+fn render_client_package(
+    files: &mut GeneratedFileMap,
+    enums: &[&RenderedEnum],
+    flags: &[&RenderedFlags],
+    variants: &[&RenderedVariant],
+    models: &[&RenderedModel],
+    external_model_names: &BTreeSet<String>,
+    services: &[RenderedService<'_>],
+    language_imports: &[LanguageImportSpec],
+    support_package: &str,
+    api_plan: &PlannedSpec,
+    module_origin: GeneratedFileOrigin,
+) -> Result<()> {
+    if services.is_empty() {
+        return Ok(());
+    }
+    let package = "client";
+    let package_dir = api_plan.module_path.to_path_buf().join(&package);
+    let model_names = model_type_names(enums, flags, variants, models, external_model_names);
+    let resource_names = resource_type_names(services);
+    if let Some(name) = model_names
+        .iter()
+        .chain(&resource_names)
+        .find(|name| *name == CLIENT_NEXUS_CLIENT_NAME)
+    {
+        return Err(Error::TypeScriptGeneratedNameConflict {
+            name: CLIENT_NEXUS_CLIENT_NAME.to_string(),
+            generated_by: "the type that the client hook returns".to_string(),
+            conflicting_declaration: format!("type `{name}`"),
+        });
+    }
+
+    let mut index = String::from("export { ");
+    index.push_str(
+        &services
+            .iter()
+            .map(client_extension_name)
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    index.push_str(" } from './extension';\n");
+    index.push_str(&format!(
+        "export type {{ {CLIENT_NEXUS_CLIENT_NAME} }} from './nexus-client';\n"
+    ));
+    if !resource_names.is_empty() {
+        index.push_str("export { ");
+        index.push_str(&resource_names.join(", "));
+        index.push_str(" } from './resources';\n");
+    }
+    files.insert(
+        format!("{package}/index.ts"),
+        render_generated_module(String::new(), index),
+        module_origin.clone(),
+    )?;
+    files.insert(
+        format!("{package}/nexus-client.ts"),
+        render_generated_module(
+            "import type * as nexus from 'nexus-rpc';\n".to_string(),
+            TYPESCRIPT_CLIENT_NEXUS_MODULE.to_string(),
+        ),
+        module_origin.clone(),
+    )?;
+
+    // A client resource takes the integer types of the Workflow resource.
+    let mut annotations = ClientResourceAnnotations::new();
+    for (planned_service, service) in api_plan.services.iter().zip(services) {
+        for resource in &service.resources {
+            annotations.insert(
+                (service.name.to_string(), resource.type_name.clone()),
+                ResourceAnnotations::resolve(api_plan, planned_service, resource)?,
+            );
+        }
+    }
+    if !resource_names.is_empty() {
+        let mut body = String::new();
+        let mut requirements = TypeScriptRequirements::default();
+        for service in services {
+            for resource in &service.resources {
+                requirements.merge(&render_client_resource(
+                    &mut body,
+                    resource,
+                    service,
+                    &annotations[&(service.name.to_string(), resource.type_name.clone())],
+                    api_plan,
+                ));
+                body.push('\n');
+            }
+        }
+        let body = with_private_required_field(body);
+        let mut imports = String::new();
+        render_typescript_namespace_imports(
+            &mut imports,
+            &body,
+            &package_dir,
+            &default_language_imports(language_imports, services),
+            &[("common", "@temporalio/common", true)],
+        );
+        render_typescript_requirement_imports(&mut imports, &requirements);
+        render_value_imports(
+            &mut imports,
+            "../models",
+            &used_import_names(&body, &model_converter_factory_names(models)),
+        );
+        render_type_imports(
+            &mut imports,
+            "../models",
+            &used_import_names(&body, &model_names),
+        );
+        render_cross_module_model_type_imports(&mut imports, &package_dir, api_plan, &body);
+        render_client_service_imports(&mut imports, services, &body);
+        render_client_nexus_imports(&mut imports, &body);
+        render_support_import(&mut imports, support_package, &package_dir, &body);
+        files.insert(
+            format!("{package}/resources.ts"),
+            render_generated_module(imports, body),
+            module_origin.clone(),
+        )?;
+    }
+
+    let mut body = String::new();
+    for service in services {
+        for operation in standalone_operations(service) {
+            if let Some(input) = &operation.input {
+                let client = client_target_input(input);
+                render_input_alias(
+                    &mut body,
+                    &operation_input_alias_name(service, operation),
+                    &input.type_parameters,
+                    &client.annotation,
+                    &client.api_omitted_fields,
+                    client.default_initialization.is_some(),
+                    &input.flattened_fields,
+                );
+            }
+        }
+    }
+    let mut extension_requirements = TypeScriptRequirements::default();
+    for service in services {
+        render_client_extension(
+            &mut body,
+            services,
+            service,
+            &annotations,
+            &mut extension_requirements,
+        );
+        body.push('\n');
+    }
+    let body = with_private_required_field(body);
+    let mut imports = String::new();
+    render_typescript_namespace_imports(
+        &mut imports,
+        &body,
+        &package_dir,
+        language_imports,
+        &[
+            ("nexus", "nexus-rpc", true),
+            ("common", "@temporalio/common", true),
+        ],
+    );
+    render_value_imports(
+        &mut imports,
+        "../models",
+        &used_import_names(&body, &model_converter_factory_names(models)),
+    );
+    render_typescript_requirement_imports(&mut imports, &extension_requirements);
+    render_type_imports(
+        &mut imports,
+        "../models",
+        &used_import_names(&body, &model_names),
+    );
+    render_cross_module_model_type_imports(&mut imports, &package_dir, api_plan, &body);
+    render_output_transform_type_imports(
+        &mut imports,
+        services.iter().flat_map(|service| &service.operations),
+    );
+    render_client_service_imports(&mut imports, services, &body);
+    let (value_resources, type_resources) =
+        used_import_names(&body, &resource_names)
+            .into_iter()
+            .partition::<Vec<_>, _>(|resource| body.contains(&format!("new {resource}(")));
+    render_value_imports(&mut imports, "./resources", &value_resources);
+    render_type_imports(&mut imports, "./resources", &type_resources);
+    render_client_nexus_imports(&mut imports, &body);
+    render_support_import(&mut imports, support_package, &package_dir, &body);
+    files.insert(
+        format!("{package}/extension.ts"),
+        render_generated_module(imports, body),
+        module_origin,
+    )
+}
+
+fn client_target_input(input: &RenderedOperationInput) -> &RenderedTargetInput {
+    input
+        .client
+        .as_ref()
+        .expect("the client target should resolve the client request")
+}
+
+fn render_client_service_imports(
+    imports: &mut String,
+    services: &[RenderedService<'_>],
+    body: &str,
+) {
+    let names = services
+        .iter()
+        .map(|service| service.attr_name.clone())
+        .filter(|name| contains_identifier(body, name))
+        .collect::<Vec<_>>();
+    render_value_imports(imports, "../services", &names);
+}
+
+fn render_client_nexus_imports(imports: &mut String, body: &str) {
+    let mut names = Vec::new();
+    if contains_identifier(body, CLIENT_NEXUS_CLIENT_NAME) {
+        names.push(format!("type {CLIENT_NEXUS_CLIENT_NAME}"));
+    }
+    if contains_unqualified_identifier_followed_by(body, "operationId", '(') {
+        names.push("operationId".to_string());
+    }
+    render_value_imports(imports, "./nexus-client", &names);
+}
+
+/// The WIT gives each import relative to `operations`, a sibling of the client package.
+fn render_output_transform_type_imports<'a, 'o: 'a>(
+    imports: &mut String,
+    operations: impl Iterator<Item = &'a RenderedOperation<'o>>,
+) {
+    for operation in operations {
+        let Some(path) = &operation.output_transform_type_import else {
+            continue;
+        };
+        let path = match path.strip_prefix("./") {
+            Some(sibling) => format!("../operations/{sibling}"),
+            None => path.clone(),
+        };
+        render_type_imports(
+            imports,
+            &path,
+            std::slice::from_ref(&operation.output_annotation),
+        );
+    }
+}
+
+fn client_extension_name(service: &RenderedService<'_>) -> String {
+    format!("{}ClientExtension", service.name)
+}
+
+fn client_resource_factory_name(resource: &PlannedResource) -> String {
+    format!("get{}", resource.type_name)
+}
+
+/// A Nexus client parameter name that no field or method of the resource has.
+fn client_resource_nexus_client_name(resource: &PlannedResource) -> String {
+    let mut name = "nexusClient".to_string();
+    while resource
+        .fields
+        .iter()
+        .any(|field| typescript_generated_field_name(&field.name) == name)
+        || resource
+            .methods
+            .iter()
+            .any(|method| typescript_generated_field_name(&method.name) == name)
+    {
+        name.push('_');
+    }
+    name
+}
+
+fn client_resource_service<'s, 'a>(
+    services: &'s [RenderedService<'a>],
+    resource_type_name: &str,
+) -> Option<&'s RenderedService<'a>> {
+    services.iter().find(|service| {
+        service
+            .resources
+            .iter()
+            .any(|resource| resource.type_name == resource_type_name)
+    })
+}
+
+fn client_returned_resource<'s>(
+    services: &'s [RenderedService<'_>],
+    operation: &RenderedOperation<'_>,
+) -> Option<&'s PlannedResource> {
+    if !operation.output_direct_result {
+        return None;
+    }
+    services
+        .iter()
+        .flat_map(|service| &service.resources)
+        .find(|resource| resource.type_name == operation.output_annotation)
+}
+
+fn client_result_resource_type<'o>(operation: &'o RenderedOperation<'_>) -> Option<&'o str> {
+    if let Some(resource_return) = &operation.output_resource_return {
+        return Some(&resource_return.resource_type_name);
+    }
+    operation
+        .output_direct_result
+        .then_some(operation.output_annotation.as_str())
+}
+
+fn render_client_nexus_client_call(
+    output: &mut String,
+    indent: &str,
+    service: &RenderedService<'_>,
+) {
+    output.push_str("this.");
+    output.push_str(CLIENT_HOOK_NAME);
+    output.push_str("({\n");
+    output.push_str(indent);
+    output.push_str("  service: ");
+    output.push_str(&service.attr_name);
+    output.push_str(",\n");
+    output.push_str(indent);
+    output.push_str("  endpoint: ");
+    output.push_str(&typescript_service_endpoint_expr(service));
+    output.push_str(",\n");
+    output.push_str(indent);
+    output.push_str("})");
+}
+
+/// A handle starts the operations of its own service, and another service can return it.
+fn client_result_nexus_client(
+    services: &[RenderedService<'_>],
+    service: &RenderedService<'_>,
+    resource_type_name: &str,
+    nexus_client: &str,
+) -> String {
+    let owner = client_resource_service(services, resource_type_name)
+        .expect("the client target refuses a resource of another package");
+    if owner.wire_name == service.wire_name {
+        return nexus_client.to_string();
+    }
+    let mut call = String::new();
+    render_client_nexus_client_call(&mut call, "", owner);
+    call
+}
+
+fn render_client_start_operation(
+    output: &mut String,
+    indent: &str,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    nexus_client: &str,
+    receiver: &str,
+) {
+    output.push_str(indent);
+    output.push_str("const handle = await ");
+    output.push_str(nexus_client);
+    output.push_str(".startOperation(\n");
+    output.push_str(indent);
+    output.push_str("  ");
+    output.push_str(&operation.definition_expr(service, receiver));
+    output.push_str(",\n");
+    output.push_str(indent);
+    output.push_str("  ");
+    output.push_str(&typescript_operation_input_expr(operation));
+    output.push_str(",\n");
+    output.push_str(indent);
+    output.push_str("  { id: operationId() },\n");
+    output.push_str(indent);
+    output.push_str(");\n");
+}
+
+fn render_client_result(
+    output: &mut String,
+    indent: &str,
+    operation: &RenderedOperation<'_>,
+    returned_resource: Option<&PlannedResource>,
+    result_nexus_client: Option<&str>,
+    discard_result: bool,
+    receiver: &str,
+) {
+    if discard_result || operation.output_none {
+        output.push_str(indent);
+        output.push_str("await handle.result();\n");
+        return;
+    }
+    let runtime_type_args = operation
+        .runtime_type_parameters
+        .iter()
+        .map(|name| format!("{receiver}{}", typescript_runtime_type_argument_name(name)))
+        .collect::<Vec<_>>();
+    if let Some(transform_expr) = &operation.output_transform_expr {
+        output.push_str(indent);
+        output.push_str("const result = await handle.result();\n");
+        output.push_str(indent);
+        output.push_str("return ");
+        output.push_str(transform_expr);
+        output.push_str(";\n");
+    } else if let Some(resource_return) = &operation.output_resource_return {
+        output.push_str(indent);
+        output.push_str("const result = await handle.result();\n");
+        output.push_str(indent);
+        output.push_str("return ");
+        output.push_str(&typescript_resource_return_value(
+            resource_return,
+            None,
+            result_nexus_client,
+            &runtime_type_args,
+        ));
+        output.push_str(";\n");
+    } else if let Some(resource) = returned_resource {
+        output.push_str(indent);
+        output.push_str("const resource = await handle.result();\n");
+        output.push_str(indent);
+        output.push_str("return new ");
+        output.push_str(&resource.type_name);
+        output.push('(');
+        let args =
+            result_nexus_client
+                .map(str::to_string)
+                .into_iter()
+                .chain(resource.fields.iter().map(|field| {
+                    format!("resource.{}", typescript_generated_field_name(&field.name))
+                }))
+                .chain(runtime_type_args)
+                .collect::<Vec<_>>();
+        output.push_str(&args.join(", "));
+        output.push_str(");\n");
+    } else {
+        output.push_str(indent);
+        output.push_str("return await handle.result();\n");
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_flattened_request(
+    output: &mut String,
+    indent: &str,
+    declaration: &str,
+    request_input: &str,
+    annotation: &str,
+    sourced_fields: &[RenderedSourcedField],
+    flattens: &[RenderedInputFlatten],
+    target: GenerationTarget,
+) {
+    let promoted = flattens
+        .iter()
+        .flat_map(|flatten| flatten.promoted.iter().map(|(name, _, _)| name.as_str()))
+        .collect::<Vec<_>>();
+    output.push_str(&format!(
+        "{indent}const {{ {}, ...requestFields }} = {request_input};\n",
+        promoted.join(", ")
+    ));
+    output.push_str(&format!("{indent}{declaration} request = {{\n"));
+    output.push_str(&format!("{indent}  ...requestFields,\n"));
+    for source in sourced_fields {
+        output.push_str(&format!(
+            "{indent}  {}: {},\n",
+            source.name, source.source_expressions[&target]
+        ));
+    }
+    for flatten in flattens {
+        let members = flatten
+            .promoted
+            .iter()
+            .map(|(name, _, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        // An optional field is set when one of its promoted fields is set.
+        let value = if flatten.required || flatten.promoted.iter().any(|(_, _, optional)| !optional)
+        {
+            format!("{{ {members} }}")
+        } else {
+            let unset = flatten
+                .promoted
+                .iter()
+                .map(|(name, _, _)| format!("{name} === undefined"))
+                .collect::<Vec<_>>()
+                .join(" && ");
+            format!("{unset} ? undefined : {{ {members} }}")
+        };
+        output.push_str(&format!("{indent}  {}: {value},\n", flatten.name));
+    }
+    output.push_str(&format!("{indent}}} as {annotation};\n"));
+}
+
+fn render_client_request(
+    output: &mut String,
+    indent: &str,
+    input: &RenderedOperationInput,
+    request_input: &str,
+    mutable: bool,
+) {
+    let client = client_target_input(input);
+    let declaration = if mutable { "let" } else { "const" };
+    if let Some(initialization) = &client.default_initialization {
+        if request_input != "requestInput" {
+            output.push_str(&format!("{indent}const requestInput = {request_input};\n"));
+        }
+        let mut sourced = String::new();
+        for field in &client.sourced_fields {
+            sourced.push_str(&format!(
+                "    {}: {},\n",
+                field.name,
+                field.source_expressions[&GenerationTarget::Client]
+            ));
+        }
+        let initialization = initialization
+            .replace(
+                "...requestInput,\n",
+                &format!("...requestInput,\n{sourced}"),
+            )
+            .replacen("const request", &format!("{declaration} request"), 1);
+        for line in initialization.lines() {
+            output.push_str(indent);
+            output.push_str(line.trim_start());
+            output.push('\n');
+        }
+    } else if !input.flattened_fields.is_empty() {
+        render_flattened_request(
+            output,
+            indent,
+            declaration,
+            request_input,
+            &input.request_annotation,
+            &client.sourced_fields,
+            &input.flattened_fields,
+            GenerationTarget::Client,
+        );
+    } else if !client.sourced_fields.is_empty() {
+        output.push_str(&format!("{indent}{declaration} request = {{\n"));
+        output.push_str(&format!("{indent}  ...{request_input},\n"));
+        for field in &client.sourced_fields {
+            output.push_str(&format!(
+                "{indent}  {}: {},\n",
+                field.name,
+                field.source_expressions[&GenerationTarget::Client]
+            ));
+        }
+        output.push_str(&format!("{indent}}} as {};\n", input.request_annotation));
+    } else if request_input != "request" {
+        output.push_str(&format!(
+            "{indent}{declaration} request: {} = {request_input};\n",
+            input.request_annotation
+        ));
+    }
+}
+
+fn client_operation_doc_tags(operation: &RenderedOperation<'_>) -> Vec<(String, String)> {
+    let mut doc_tags = Vec::new();
+    if operation.input.is_some() {
+        doc_tags.push((
+            "@param request -".to_string(),
+            "Request for the operation.".to_string(),
+        ));
+    }
+    if let Some(return_doc) = &operation.return_doc {
+        doc_tags.push(("@returns".to_string(), return_doc.clone()));
+    }
+    doc_tags.extend(declaration_doc_tags(
+        operation.experimental,
+        operation.deprecated,
+    ));
+    doc_tags
+}
+
+fn render_client_method_signature(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    start: &str,
+    name: &str,
+) {
+    let type_parameters = operation.function_type_parameters();
+    if type_parameters.is_empty() {
+        output.push_str("    ");
+        output.push_str(start);
+        output.push_str(name);
+        output.push_str("(\n");
+    } else {
+        render_named_generic_function_start(
+            output,
+            &format!("    {start}{name}"),
+            &type_parameters,
+            4,
+        );
+    }
+    if let Some(input) = &operation.input {
+        let client = client_target_input(input);
+        let fills = !client.sourced_fields.is_empty()
+            || client.default_initialization.is_some()
+            || !input.flattened_fields.is_empty();
+        output.push_str(if fills {
+            "      requestInput: "
+        } else {
+            "      request: "
+        });
+        if client.api_omitted_fields.is_empty() && client.default_initialization.is_none() {
+            output.push_str(&input.request_annotation);
+        } else {
+            output.push_str(&operation_input_alias_reference(service, operation, input));
+        }
+        output.push_str(",\n");
+    }
+    operation.render_runtime_type_parameters(output, "      ");
+    output.push_str("    )");
+}
+
+fn client_request_input_name(operation: &RenderedOperation<'_>) -> &'static str {
+    match &operation.input {
+        Some(input) => {
+            let client = client_target_input(input);
+            if !client.sourced_fields.is_empty()
+                || client.default_initialization.is_some()
+                || !input.flattened_fields.is_empty()
+            {
+                "requestInput"
+            } else {
+                "request"
+            }
+        }
+        None => "request",
+    }
+}
+
+fn render_client_extension(
+    output: &mut String,
+    services: &[RenderedService<'_>],
+    service: &RenderedService<'_>,
+    annotations: &ClientResourceAnnotations,
+    requirements: &mut TypeScriptRequirements,
+) {
+    let name = client_extension_name(service);
+    render_typescript_doc_comment(
+        output,
+        "",
+        Some(&format!(
+            "Starts the operations of `{}` from code outside a Workflow.\n\nA client class \
+             extends `{name}(Base)` and implements `{CLIENT_HOOK_NAME}`.",
+            service.name
+        )),
+        &declaration_doc_tags(service.experimental, service.deprecated),
+    );
+    output.push_str("export function ");
+    output.push_str(&name);
+    output.push_str("<TBase extends abstract new (...args: any[]) => object>(\n");
+    output.push_str("  Base: TBase,\n");
+    output.push_str(") {\n");
+    let public_names = standalone_operations(service)
+        .flat_map(|operation| {
+            std::iter::once(operation.attr_name.clone()).chain(
+                operation
+                    .poll_next(GenerationTarget::Client)
+                    .map(|_| poll_function_name(&operation.attr_name)),
+            )
+        })
+        .chain(service.resources.iter().map(client_resource_factory_name))
+        .map(|name| typescript_string_literal(&name))
+        .collect::<Vec<_>>();
+    let clash = format!("`${{Base.name}} and {name} both have ${{name}}`");
+    if !public_names.is_empty() {
+        output.push_str(
+            "  // A subclass member hides a base member of the same name, with no error.\n",
+        );
+        output.push_str("  const names = [");
+        output.push_str(&public_names.join(", "));
+        output.push_str("];\n");
+        output.push_str("  for (const name of names) {\n");
+        output.push_str("    if (name in Base.prototype) {\n");
+        output.push_str("      throw new TypeError(");
+        output.push_str(&clash);
+        output.push_str(");\n");
+        output.push_str("    }\n");
+        output.push_str("  }\n\n");
+    }
+    // The class takes the mixin's name, which no model can have in this module.
+    output.push_str("  abstract class ");
+    output.push_str(&name);
+    output.push_str(" extends Base {\n");
+    if !public_names.is_empty() {
+        output.push_str("    public constructor(...args: any[]) {\n");
+        output.push_str("      super(...args);\n");
+        output
+            .push_str("      // The fields of `Base` are on the instance, not on its prototype.\n");
+        output.push_str("      for (const name of names) {\n");
+        output.push_str("        if (Object.hasOwn(this, name)) {\n");
+        output.push_str("          throw new TypeError(");
+        output.push_str(&clash);
+        output.push_str(");\n");
+        output.push_str("        }\n");
+        output.push_str("      }\n");
+        output.push_str("    }\n\n");
+    }
+    output.push_str(TYPESCRIPT_CLIENT_EXTENSION_HOOK);
+    for resource in &service.resources {
+        output.push('\n');
+        render_client_resource_factory(
+            output,
+            service,
+            resource,
+            &annotations[&(service.name.to_string(), resource.type_name.clone())],
+            requirements,
+        );
+    }
+    for operation in standalone_operations(service) {
+        output.push('\n');
+        render_client_operation_method(output, services, service, operation);
+        if let Some(next_expr) = operation.poll_next(GenerationTarget::Client) {
+            output.push('\n');
+            render_client_poll_method(output, service, operation, &next_expr);
+        }
+    }
+    output.push_str("  }\n");
+    output.push_str("  return ");
+    output.push_str(&name);
+    output.push_str(";\n");
+    output.push_str("}\n");
+}
+
+/// A client handle calls the bound operations, so the extension has only the others.
+fn standalone_operations<'a, 'spec>(
+    service: &'a RenderedService<'spec>,
+) -> impl Iterator<Item = &'a RenderedOperation<'spec>> {
+    service.operations.iter().filter(|operation| {
+        !service
+            .resources
+            .iter()
+            .flat_map(|resource| &resource.methods)
+            .any(|method| {
+                matches!(
+                    &method.binding,
+                    PlannedResourceMethodBindingSpec::Operation { operation_name, .. }
+                        if operation_name == operation.name
+                )
+            })
+    })
+}
+
+type ClientResourceAnnotations<'a> = BTreeMap<(String, String), ResourceAnnotations<'a>>;
+
+fn render_client_resource_factory(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    resource: &PlannedResource,
+    annotations: &ResourceAnnotations,
+    requirements: &mut TypeScriptRequirements,
+) {
+    render_typescript_doc_comment(
+        output,
+        "    ",
+        Some(&format!(
+            "Returns the `{}` handle that has these identity fields.",
+            resource.type_name
+        )),
+        &[],
+    );
+    let type_parameters = resource_type_parameter_names(resource);
+    output.push_str("    public ");
+    output.push_str(&client_resource_factory_name(resource));
+    if !type_parameters.is_empty() {
+        // A handle built with no runtime type decodes as the payload converter's plain value.
+        output.push('<');
+        output.push_str(
+            &type_parameters
+                .iter()
+                .map(|name| format!("{name} = unknown"))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        output.push('>');
+    }
+    output.push_str("(\n");
+    for field in &resource.fields {
+        output.push_str("      ");
+        output.push_str(&typescript_generated_field_name(&field.name));
+        output.push_str(": ");
+        let rendered = annotations.field(field);
+        requirements.merge(&rendered.requirements);
+        output.push_str(&rendered.annotation);
+        output.push_str(",\n");
+    }
+    for name in &type_parameters {
+        output.push_str("      ");
+        output.push_str(&typescript_runtime_type_argument_name(name));
+        output.push_str("?: common.TypeInfo<");
+        output.push_str(name);
+        output.push_str(">,\n");
+    }
+    output.push_str("    ): ");
+    output.push_str(&generic_type_annotation(
+        &resource.type_name,
+        &type_parameters,
+    ));
+    output.push_str(" {\n");
+    output.push_str("      return new ");
+    output.push_str(&resource.type_name);
+    output.push_str("(\n        ");
+    render_client_nexus_client_call(output, "        ", service);
+    output.push_str(",\n");
+    for name in resource
+        .fields
+        .iter()
+        .map(|field| typescript_generated_field_name(&field.name))
+        .chain(
+            type_parameters
+                .iter()
+                .map(|name| typescript_runtime_type_argument_name(name)),
+        )
+    {
+        output.push_str("        ");
+        output.push_str(&name);
+        output.push_str(",\n");
+    }
+    output.push_str("      );\n");
+    output.push_str("    }\n");
+}
+
+fn client_method_result_annotation<'o>(operation: &'o RenderedOperation<'_>) -> &'o str {
+    if operation.returns_direct() {
+        &operation.output_annotation
+    } else {
+        &operation.output_operation_annotation
+    }
+}
+
+fn render_client_operation_method(
+    output: &mut String,
+    services: &[RenderedService<'_>],
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) {
+    render_typescript_doc_comment(
+        output,
+        "    ",
+        operation.doc.as_deref(),
+        &client_operation_doc_tags(operation),
+    );
+    render_client_method_signature(
+        output,
+        service,
+        operation,
+        "public async ",
+        &operation.attr_name,
+    );
+    output.push_str(": Promise<");
+    output.push_str(client_method_result_annotation(operation));
+    output.push_str("> {\n");
+    if let Some(input) = &operation.input {
+        render_client_request(
+            output,
+            "      ",
+            input,
+            client_request_input_name(operation),
+            false,
+        );
+    }
+    output.push_str("      const nexusClient = ");
+    render_client_nexus_client_call(output, "      ", service);
+    output.push_str(";\n");
+    render_client_start_operation(output, "      ", service, operation, "nexusClient", "");
+    let result_nexus_client = client_result_resource_type(operation).map(|resource_type_name| {
+        client_result_nexus_client(services, service, resource_type_name, "nexusClient")
+    });
+    render_client_result(
+        output,
+        "      ",
+        operation,
+        client_returned_resource(services, operation),
+        result_nexus_client.as_deref(),
+        false,
+        "",
+    );
+    output.push_str("    }\n");
+}
+
+/// The helper runs before the yield, so a change to the yielded page doesn't change the next.
+fn render_client_poll_loop(
+    output: &mut String,
+    indent: &str,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    nexus_client: &str,
+    next_expr: &str,
+    receiver: &str,
+) {
+    output.push_str(indent);
+    output.push_str("while (true) {\n");
+    let body_indent = format!("{indent}  ");
+    render_client_start_operation(
+        output,
+        &body_indent,
+        service,
+        operation,
+        nexus_client,
+        receiver,
+    );
+    output.push_str(&body_indent);
+    output.push_str("const response = await handle.result();\n");
+    output.push_str(&body_indent);
+    output.push_str("const next = ");
+    output.push_str(next_expr);
+    output.push_str("(request, response);\n");
+    output.push_str(&body_indent);
+    output.push_str("yield response;\n");
+    output.push_str(&body_indent);
+    output.push_str("if (next === undefined) {\n");
+    output.push_str(&body_indent);
+    output.push_str("  return;\n");
+    output.push_str(&body_indent);
+    output.push_str("}\n");
+    output.push_str(&body_indent);
+    output.push_str("request = next;\n");
+    output.push_str(indent);
+    output.push_str("}\n");
+}
+
+fn poll_function_name(name: &str) -> String {
+    format!("iter{}", name.to_upper_camel_case())
+}
+
+fn poll_function_summary(name: &str, doc: Option<&str>) -> String {
+    let summary = format!("Yields each response of `{name}` until the poll helper stops.");
+    match doc.map(str::trim).filter(|doc| !doc.is_empty()) {
+        Some(doc) => format!("{summary}\n\n{doc}"),
+        None => summary,
+    }
+}
+
+fn render_client_poll_method(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    next_expr: &str,
+) {
+    render_typescript_doc_comment(
+        output,
+        "    ",
+        Some(&poll_function_summary(
+            &operation.attr_name,
+            operation.doc.as_deref(),
+        )),
+        &client_operation_doc_tags(operation),
+    );
+    render_client_method_signature(
+        output,
+        service,
+        operation,
+        "public async *",
+        &poll_function_name(&operation.attr_name),
+    );
+    output.push_str(": AsyncGenerator<");
+    output.push_str(&operation.output_operation_annotation);
+    output.push_str(", void> {\n");
+    if let Some(input) = &operation.input {
+        render_client_request(
+            output,
+            "      ",
+            input,
+            client_request_input_name(operation),
+            true,
+        );
+    }
+    output.push_str("      const nexusClient = ");
+    render_client_nexus_client_call(output, "      ", service);
+    output.push_str(";\n");
+    render_client_poll_loop(
+        output,
+        "      ",
+        service,
+        operation,
+        "nexusClient",
+        next_expr,
+        "",
+    );
+    output.push_str("    }\n");
+}
+
+/// It keeps its Nexus client in a private field, so the handle converts as data without it.
+fn render_client_resource(
+    output: &mut String,
+    resource: &PlannedResource,
+    service: &RenderedService<'_>,
+    annotations: &ResourceAnnotations,
+    api_plan: &PlannedSpec,
+) -> TypeScriptRequirements {
+    let mut requirements = TypeScriptRequirements::default();
+    let param_annotation = |method: &PlannedResourceMethod, param: &PlannedResourceField| {
+        annotations.param(method, param)
+    };
+    let nexus_client = client_resource_nexus_client_name(resource);
+    let nexus_client_type = format!("{CLIENT_NEXUS_CLIENT_NAME}<typeof {}>", service.attr_name);
+    output.push_str("export class ");
+    output.push_str(&resource_class_head(resource));
+    output.push_str(" {\n");
+    output.push_str("  readonly #nexusClient: ");
+    output.push_str(&nexus_client_type);
+    output.push_str(";\n");
+    render_resource_runtime_type_fields(output, resource);
+    output.push('\n');
+    output.push_str("  public constructor(\n");
+    output.push_str("    ");
+    output.push_str(&nexus_client);
+    output.push_str(": ");
+    output.push_str(&nexus_client_type);
+    output.push_str(",\n");
+    for field in &resource.fields {
+        output.push_str("    public readonly ");
+        output.push_str(&typescript_generated_field_name(&field.name));
+        output.push_str(": ");
+        let rendered = annotations.field(field);
+        requirements.merge(&rendered.requirements);
+        output.push_str(&rendered.annotation);
+        output.push_str(",\n");
+    }
+    render_resource_runtime_type_params(output, resource);
+    output.push_str("  ) {\n");
+    output.push_str("    this.#nexusClient = ");
+    output.push_str(&nexus_client);
+    output.push_str(";\n");
+    render_resource_runtime_type_assignments(output, resource);
+    output.push_str("  }\n");
+    render_resource_runtime_type_getters(output, resource);
+    for method in &resource.methods {
+        let result = typescript_resource_method_result_type(method, api_plan);
+        requirements.merge(&result.requirements);
+        let result_annotation = result.annotation;
+        output.push('\n');
+        output.push_str("  public async ");
+        output.push_str(&typescript_generated_field_name(&method.name));
+        output.push_str("(\n");
+        render_resource_method_params(
+            output,
+            method,
+            &param_annotation,
+            &mut requirements,
+            api_plan,
+        );
+        output.push_str("  ): Promise<");
+        output.push_str(&result_annotation);
+        output.push_str("> {\n");
+        match &method.binding {
+            PlannedResourceMethodBindingSpec::Operation {
+                operation_name,
+                request_plan,
+                direct_return,
+            } => {
+                let operation = service
+                    .operations
+                    .iter()
+                    .find(|operation| operation.name == operation_name)
+                    .expect("bound operation should exist on the resource service");
+                let branchable_params =
+                    branchable_request_method_params(method, request_plan, operation, api_plan);
+                let body = render_resource_method_operation_body(
+                    4,
+                    service,
+                    resource,
+                    operation,
+                    None,
+                    Some("this.#nexusClient".to_string()),
+                    &result_annotation,
+                    request_plan,
+                    &branchable_params,
+                    *direct_return,
+                    false,
+                    GenerationTarget::Client,
+                );
+                output.push_str(&body);
+            }
+            PlannedResourceMethodBindingSpec::Stub => {
+                output.push_str("    throw new Error(");
+                output.push_str(&typescript_string_literal(&format!(
+                    "{}.{} is not yet implemented",
+                    resource.name,
+                    typescript_generated_field_name(&method.name)
+                )));
+                output.push_str(");\n");
+            }
+        }
+        output.push_str("  }\n");
+        render_client_resource_poll_method(
+            output,
+            service,
+            method,
+            &param_annotation,
+            &mut requirements,
+            api_plan,
+        );
+    }
+    output.push_str("}\n");
+    requirements
+}
+
+fn render_client_resource_poll_method(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    method: &PlannedResourceMethod,
+    param_annotation: &impl Fn(&PlannedResourceMethod, &PlannedResourceField) -> ResolvedFieldType,
+    requirements: &mut TypeScriptRequirements,
+    api_plan: &PlannedSpec,
+) {
+    let PlannedResourceMethodBindingSpec::Operation {
+        operation_name,
+        request_plan,
+        ..
+    } = &method.binding
+    else {
+        return;
+    };
+    let operation = service
+        .operations
+        .iter()
+        .find(|operation| operation.name == operation_name)
+        .expect("bound operation should exist on the resource service");
+    let Some(next_expr) = operation.poll_next(GenerationTarget::Client) else {
+        return;
+    };
+    let method_name = typescript_generated_field_name(&method.name);
+    output.push('\n');
+    render_typescript_doc_comment(
+        output,
+        "  ",
+        Some(&poll_function_summary(&method_name, method.doc.as_deref())),
+        &experimental_doc_tag(operation.experimental),
+    );
+    output.push_str("  public async *");
+    output.push_str(&poll_function_name(&method_name));
+    output.push_str("(\n");
+    render_resource_method_params(output, method, param_annotation, requirements, api_plan);
+    output.push_str("  ): AsyncGenerator<");
+    output.push_str(&operation.output_operation_annotation);
+    output.push_str(", void> {\n");
+    let input = operation
+        .input
+        .as_ref()
+        .expect("a polled operation should have a request");
+    let unfilled_sources = client_unfilled_sources(input, request_plan);
+    let request_expr = render_request_plan_typescript(request_plan, &unfilled_sources);
+    render_client_request_from_plan(output, "    ", input, &request_expr, true);
+    render_client_poll_loop(
+        output,
+        "    ",
+        service,
+        operation,
+        "this.#nexusClient",
+        &next_expr,
+        "this.",
+    );
+    output.push_str("  }\n");
+}
+
+fn client_unfilled_sources(input: &RenderedOperationInput, plan: &RequestPlan) -> Vec<String> {
+    let RequestPlan::Construct { fields, .. } = plan else {
+        return Vec::new();
+    };
+    client_target_input(input)
+        .sourced_fields
+        .iter()
+        .filter(|source| {
+            fields
+                .iter()
+                .all(|field| typescript_generated_field_name(&field.field_name) != source.name)
+        })
+        .map(|source| {
+            format!(
+                "{}: {}",
+                source.name,
+                source.source_expressions[&GenerationTarget::Client]
+            )
+        })
+        .collect()
+}
+
+fn render_client_request_from_plan(
+    output: &mut String,
+    indent: &str,
+    input: &RenderedOperationInput,
+    request_expr: &str,
+    mutable: bool,
+) {
+    let declaration = if mutable { "let" } else { "const" };
+    if let Some(initialization) = &client_target_input(input).default_initialization {
+        output.push_str(&format!("{indent}const requestInput = {request_expr};\n"));
+        let initialization =
+            initialization.replacen("const request", &format!("{declaration} request"), 1);
+        for line in initialization.lines() {
+            output.push_str(indent);
+            output.push_str(line.trim_start());
+            output.push('\n');
+        }
+    } else {
+        output.push_str(&format!(
+            "{indent}{declaration} request: {} = {request_expr};\n",
+            input.request_annotation
+        ));
+    }
+}
+
+/// Both checks depend on TypeScript, so they stay here and not in `PollValidationPass`.
+fn validate_client_polls(services: &[RenderedService<'_>], source_path: &Path) -> Result<()> {
+    let operation_names = services
+        .iter()
+        .flat_map(|service| {
+            service.operations.iter().map(move |operation| {
+                (
+                    operation.attr_name.clone(),
+                    format!("operation `{}.{}`", service.name, operation.name),
+                )
+            })
+        })
+        .collect::<BTreeMap<_, _>>();
+    for service in services {
+        for operation in &service.operations {
+            if operation.poll_next(GenerationTarget::Client).is_none() {
+                continue;
+            }
+            // The helper returns the next request, which has no type arguments to infer.
+            if operation
+                .input
+                .as_ref()
+                .is_some_and(|input| !input.type_parameters.is_empty())
+            {
+                return Err(Error::UnsupportedPoll {
+                    path: source_path.to_path_buf(),
+                    operation: format!("{}.{}", service.name, operation.name),
+                    reason: "has a request with type parameters".to_string(),
+                });
+            }
+            let iterator_name = poll_function_name(&operation.attr_name);
+            if let Some(conflicting_declaration) = operation_names.get(&iterator_name) {
+                return Err(Error::TypeScriptGeneratedNameConflict {
+                    name: iterator_name,
+                    generated_by: format!(
+                        "the iterator of operation `{}.{}`",
+                        service.name, operation.name
+                    ),
+                    conflicting_declaration: conflicting_declaration.clone(),
+                });
+            }
+        }
+        for resource in &service.resources {
+            let member_names = resource
+                .methods
+                .iter()
+                .map(|method| {
+                    (
+                        typescript_generated_field_name(&method.name),
+                        "method",
+                        &method.name,
+                    )
+                })
+                .chain(resource.fields.iter().map(|field| {
+                    (
+                        typescript_generated_field_name(&field.name),
+                        "field",
+                        &field.name,
+                    )
+                }))
+                .collect::<Vec<_>>();
+            for method in &resource.methods {
+                let PlannedResourceMethodBindingSpec::Operation { operation_name, .. } =
+                    &method.binding
+                else {
+                    continue;
+                };
+                let polled = service.operations.iter().any(|operation| {
+                    operation.name == operation_name
+                        && operation.poll_next(GenerationTarget::Client).is_some()
+                });
+                let iterator_name =
+                    poll_function_name(&typescript_generated_field_name(&method.name));
+                let conflict = member_names
+                    .iter()
+                    .find(|(member_name, _, _)| *member_name == iterator_name);
+                if polled && let Some((_, kind, name)) = conflict {
+                    return Err(Error::TypeScriptGeneratedNameConflict {
+                        name: iterator_name,
+                        generated_by: format!(
+                            "the iterator of resource method `{}.{}`",
+                            resource.type_name, method.name
+                        ),
+                        conflicting_declaration: format!("{kind} `{}.{name}`", resource.type_name),
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Each method has one service, so one client class can extend every extension.
+fn validate_client_names(services: &[RenderedService<'_>]) -> Result<()> {
+    if let Some(service) = services.iter().find(|service| service.endpoint.is_none()) {
+        return Err(Error::UnsupportedClientTarget {
+            reason: format!(
+                "doesn't take service `{}` yet, which has no endpoint",
+                service.name
+            ),
+        });
+    }
+    let mut owners = BTreeMap::<String, &str>::new();
+    for service in services {
+        for operation in standalone_operations(service) {
+            if let Some(resource_type_name) = client_result_resource_type(operation)
+                && client_resource_service(services, resource_type_name).is_none()
+            {
+                return Err(Error::UnsupportedClientTarget {
+                    reason: format!(
+                        "doesn't take operation `{}.{}` yet, which returns resource \
+                         `{resource_type_name}` of another package",
+                        service.name, operation.name
+                    ),
+                });
+            }
+            let iterator_name = operation
+                .poll_next(GenerationTarget::Client)
+                .map(|_| poll_function_name(&operation.attr_name));
+            let names = [Some(operation.attr_name.clone()), iterator_name];
+            for name in names.into_iter().flatten() {
+                if name == CLIENT_HOOK_NAME {
+                    return Err(Error::TypeScriptGeneratedNameConflict {
+                        name,
+                        generated_by: "the hook of each client extension".to_string(),
+                        conflicting_declaration: format!(
+                            "a client method of operation `{}.{}`",
+                            service.name, operation.name
+                        ),
+                    });
+                }
+                if let Some(first_service) = owners.insert(name.clone(), service.name) {
+                    return Err(Error::ClientTargetNameConflict {
+                        name,
+                        first_service: first_service.to_string(),
+                        second_service: service.name.to_string(),
+                    });
+                }
+            }
+        }
+    }
+    // One client class extends every extension, so a factory clashes with any service's method.
+    for resource in services.iter().flat_map(|service| &service.resources) {
+        let factory = client_resource_factory_name(resource);
+        if let Some(owner) = owners.get(&factory) {
+            return Err(Error::TypeScriptGeneratedNameConflict {
+                name: factory,
+                generated_by: format!("the client factory of resource `{}`", resource.type_name),
+                conflicting_declaration: format!("a client method of service `{owner}`"),
+            });
+        }
+    }
+    Ok(())
 }
 
 fn typescript_operation_function_name(

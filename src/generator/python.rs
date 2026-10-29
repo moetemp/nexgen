@@ -2503,23 +2503,39 @@ impl<'a> ApiPlanner<'a> {
         };
         let full_name = &record.full_name;
         let nested_planned_model = self.api_plan.record(full_name)?;
-        if !nested_planned_model.flatten_in_api {
+        if !nested_planned_model.flatten_in_api && planned_field.flatten.is_none() {
             return None;
         }
         let nested_rendered_model = self.models.get(full_name)?;
+        let nested_fields = nested_planned_model
+            .fields
+            .iter()
+            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldOrigin::is_omitted))
+            .zip(nested_rendered_model.fields.iter())
+            .collect::<Vec<_>>();
+        // A field-level flatten promotes the fields in `fields`, in their order.
+        let promoted = match &planned_field.flatten {
+            Some(flatten) => flatten
+                .fields
+                .iter()
+                .filter_map(|key| nested_fields.iter().find(|((name, _), _)| *name == key))
+                .copied()
+                .collect::<Vec<_>>(),
+            None => nested_fields
+                .iter()
+                .filter(|((_, field), _)| {
+                    !field.api_omitted_for(target) && field.source_for(target).is_none()
+                })
+                .copied()
+                .collect(),
+        };
 
         Some(RenderedFlattenedMessage {
             local_name: rendered_field.attr_name.clone(),
             model_name: nested_rendered_model.name.clone(),
             required: planned_field.required,
-            fields: nested_planned_model
-                .fields
-                .iter()
-                .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldOrigin::is_omitted))
-                .zip(nested_rendered_model.fields.iter())
-                .filter(|((_, field), _)| {
-                    !field.api_omitted_for(target) && field.source_for(target).is_none()
-                })
+            fields: promoted
+                .into_iter()
                 .map(
                     |((nested_field_name, nested_planned_field), nested_rendered_field)| {
                         RenderedFlattenedMessageField {

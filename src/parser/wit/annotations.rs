@@ -265,8 +265,8 @@ const CATALOG: &[Annotation] = {
         },
         Annotation {
             name: "flatten-in-api",
-            sites: &[Record],
-            keys: &[],
+            sites: &[Record, Field],
+            keys: &["fields"],
             language_keys: &[],
             repeatable: false,
             languages: None,
@@ -380,6 +380,10 @@ impl Annotation {
         // An alias is the type parameter, and a resource names the alias of each one it has.
         if self.name == "type-parameter" {
             return site == Site::Resource && key == "value";
+        }
+        // A record flattens all of its fields, and a field lists the fields of its record.
+        if self.name == "flatten-in-api" {
+            return site == Site::Field && key == "fields";
         }
         if self.name == "type"
             && site == Site::Field

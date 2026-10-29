@@ -7,7 +7,8 @@ use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ApiSpecLeaf, CompilerPass, FunctionArgsSpec, FunctionResultSpec, ResourceSpec,
+    ApiSpec, ApiSpecLeaf, CompilerPass, ExternalTypeSpec, FieldFlattenSpec, FieldOrigin,
+    FunctionArgsSpec, FunctionResultSpec, RecordFieldSpec, RecordSpec, ResourceSpec,
     SelectedFamily, ServiceSpec, TypeSpec,
 };
 
@@ -127,6 +128,15 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
         }
     }
 
+    for (_, record) in spec.records() {
+        for (field_name, field) in &record.fields {
+            if let Some(flatten) = &field.flatten {
+                validate_field_flatten(spec, record, field_name, field, flatten, &invalid)?;
+            }
+        }
+        validate_promoted_names(spec, record, &invalid)?;
+    }
+
     // A record that holds a resource builds it from the record's message, with no type argument.
     let generic_resources = spec
         .services
@@ -143,6 +153,117 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
                 return Err(invalid(format!(
                     "record `{}` field `{field_name}` holds the generic resource `{resource}`, \
                      which is not supported",
+                    record.full_name
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A field-level flatten promotes fields of a proto-backed record, and the call must be able to
+/// give every required field of that record.
+fn validate_field_flatten(
+    spec: &ApiSpec<SelectedFamily>,
+    parent: &RecordSpec<SelectedFamily>,
+    field_name: &str,
+    field: &RecordFieldSpec<SelectedFamily>,
+    flatten: &FieldFlattenSpec,
+    invalid: &dyn Fn(String) -> Error,
+) -> Result<()> {
+    let context = format!("record `{}` field `{field_name}`", parent.full_name);
+    let nested = match field.field_type.without_option() {
+        TypeSpec::Record(record) => spec.record(record.as_str()),
+        TypeSpec::External(ExternalTypeSpec::Proto(proto)) => spec.record_for_proto(proto.as_str()),
+        _ => None,
+    };
+    let Some(nested) = nested.filter(|nested| nested.source.is_some()) else {
+        return Err(invalid(format!(
+            "{context} flattens fields, but its type isn't a proto-backed record"
+        )));
+    };
+    if nested.flatten_in_api {
+        return Err(invalid(format!(
+            "{context} flattens fields of `{}`, which flattens all of its fields already",
+            nested.full_name
+        )));
+    }
+    if field.origin.is_some() {
+        return Err(invalid(format!(
+            "{context} flattens fields, so it can't have a source, a default or an api-omit too"
+        )));
+    }
+    let omitted = |field: &RecordFieldSpec<SelectedFamily>| {
+        matches!(field.origin, Some(FieldOrigin::Omitted))
+    };
+    for key in &flatten.fields {
+        if nested.fields.get(key).is_none_or(omitted) {
+            return Err(invalid(format!(
+                "{context} promotes `{key}`, which `{}` omits",
+                nested.full_name
+            )));
+        }
+    }
+    if let Some((key, _)) = nested.fields.iter().find(|(key, nested_field)| {
+        nested_field.required && !omitted(nested_field) && !flatten.fields.contains(key)
+    }) {
+        return Err(invalid(format!(
+            "{context} flattens fields of `{}`, but doesn't promote its required field `{key}`",
+            nested.full_name
+        )));
+    }
+    Ok(())
+}
+
+/// The call takes each promoted field as a parameter next to the other fields, so no two of them
+/// can have one name. Each language changes the case and the separators of a name.
+fn validate_promoted_names(
+    spec: &ApiSpec<SelectedFamily>,
+    record: &RecordSpec<SelectedFamily>,
+    invalid: &dyn Fn(String) -> Error,
+) -> Result<()> {
+    let normalized = |name: &str| {
+        name.chars()
+            .filter(|character| !matches!(character, '-' | '_'))
+            .flat_map(char::to_lowercase)
+            .collect::<String>()
+    };
+    let parameters = record
+        .fields
+        .iter()
+        .filter(|(_, field)| {
+            !matches!(field.origin, Some(FieldOrigin::Omitted)) && field.flatten.is_none()
+        })
+        .map(|(field_name, field)| (normalized(&field.name), field_name))
+        .collect::<BTreeMap<_, _>>();
+    let mut promoted_names = BTreeMap::<String, String>::new();
+    for (field_name, field) in &record.fields {
+        let Some(flatten) = &field.flatten else {
+            continue;
+        };
+        let nested = match field.field_type.without_option() {
+            TypeSpec::Record(nested) => spec.record(nested.as_str()),
+            TypeSpec::External(ExternalTypeSpec::Proto(proto)) => {
+                spec.record_for_proto(proto.as_str())
+            }
+            _ => None,
+        };
+        for key in &flatten.fields {
+            let Some(promoted) = nested.and_then(|nested| nested.fields.get(key)) else {
+                continue;
+            };
+            let name = normalized(&promoted.name);
+            if let Some(sibling) = parameters.get(&name) {
+                return Err(invalid(format!(
+                    "record `{}` field `{field_name}` promotes `{key}`, whose name `{}` is also \
+                     the name of field `{sibling}`",
+                    record.full_name, promoted.name
+                )));
+            }
+            let owner = format!("`{key}` of field `{field_name}`");
+            if let Some(first) = promoted_names.insert(name, owner.clone()) {
+                return Err(invalid(format!(
+                    "record `{}` promotes {first} and {owner}, which have one parameter name",
                     record.full_name
                 )));
             }

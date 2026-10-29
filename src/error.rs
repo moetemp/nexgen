@@ -100,6 +100,11 @@ pub enum Error {
     },
 
     #[error(
+        "TypeScript can't flatten some fields of a request field of operation `{operation}`: {reason}"
+    )]
+    UnsupportedTypeScriptFlatten { operation: String, reason: String },
+
+    #[error(
         ".NET type parameter `{parameter}` in `{declaration}` maps to `{name}`, which conflicts with {conflicting}"
     )]
     DotnetTypeParameterNameConflict {

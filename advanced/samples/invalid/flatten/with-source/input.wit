@@ -1,0 +1,36 @@
+package temporal:nexus@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution"
+  record workflow-execution {
+    workflow-id: string,
+    run-id: string,
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.GetWorkflowExecutionHistoryRequest"
+  record get-history-request {
+    namespace: string,
+    // A source fills the whole field, so the call can't take some of its fields too.
+    /// @nexus.flatten-in-api fields="workflow-id run-id"
+    /// @nexus.source targets="workflow" python="workflow_execution()"
+    ///   typescript="workflowExecution()" go="WorkflowExecution(ctx)"
+    ///   dotnet="Context.WorkflowExecution()"
+    execution: option<workflow-execution>,
+    maximum-page-size: option<s32>,
+    /// @nexus.omit
+    next-page-token: placeholder,
+    /// @nexus.omit
+    wait-new-event: placeholder,
+    /// @nexus.omit
+    history-event-filter-type: placeholder,
+    /// @nexus.omit
+    skip-archival: placeholder,
+  }
+
+  get-history: func(request: get-history-request);
+}

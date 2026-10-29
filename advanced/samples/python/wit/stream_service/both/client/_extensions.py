@@ -95,7 +95,8 @@ class StreamServiceClientExtension(abc.ABC):
         self,
         body_type: type[BodyT],
         *,
-        stream_ref: StreamRef,
+        id: str,
+        backend: str | None = None,
         retention: datetime.timedelta | None = None,
         id_conflict_policy: StreamIdConflictPolicy | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
@@ -103,12 +104,18 @@ class StreamServiceClientExtension(abc.ABC):
     ) -> Stream[BodyT]:
         """
         Args:
-            stream_ref: The ref of the Stream to create. Its id is the Stream id.
+            id: The Stream id, 1 to 4096 bytes.
+            backend: Registered backend name, empty for the default. The Store never
+                reads it.
             retention: The age after which a Record is dropped. Empty is the Store
                 default.
             id_conflict_policy: What the create does when the Stream exists. Unspecified
                 is fail.
         """
+        stream_ref = StreamRef(
+            id=id,
+            backend=backend,
+        )
         request = CreateStreamRequest(
             stream_ref=stream_ref,
             retention=retention,

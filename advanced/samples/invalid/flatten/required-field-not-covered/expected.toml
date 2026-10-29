@@ -1,0 +1,6 @@
+inputs = ["input.wit", "../../../inputs/deps"]
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit"
+contains = ["record `history-service.get-history-request` field `execution` flattens fields of `history-service.workflow-execution`, but doesn't promote its required field `run_id`"]

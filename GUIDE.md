@@ -1125,6 +1125,36 @@ the optional nested record when none of its fields are supplied. Go uses nil
 pointers internally for wire presence, but its public options use
 default-punning: empty strings mean omitted.
 
+#### Flattening some fields of one field
+
+On a field, `@nexus.flatten-in-api` promotes the fields in `fields`. The call
+takes them as parameters, and builds the field from them.
+
+```wit
+record create-stream-request {
+  /// @nexus.flatten-in-api fields="id backend"
+  stream-ref: stream-ref,
+}
+```
+
+The call takes `id` and `backend`, and builds the ref:
+
+```python
+async def create_stream(..., id: str, backend: str | None = None, ...) -> ...:
+    stream_ref = StreamRef(id=id, backend=backend)
+    request = CreateStreamRequest(stream_ref=stream_ref, ...)
+```
+
+The call sets an optional field when it sets one of its promoted fields. The
+field's type must be a record that a proto backs, or an `option` of one. The
+call must give each required field of that record as a promoted field. `fields`
+has at least one field, and each field once. A promoted field can't have the
+name of a sibling or of another promoted field, in any case. The field can't
+have a source, a default, an api-omit or `@nexus.omit` too, and its record can't
+flatten all of its fields already. TypeScript takes the promoted fields in the
+request of each target. Go refuses a field-level flatten, and Java doesn't
+generate proto-backed models.
+
 ### Output Transforms
 
 An operation annotated with `@nexus.output-transform` transforms the raw
@@ -1685,7 +1715,7 @@ below, such as protobuf bindings, function signatures, and conflicting options.
 | `@nexus.poll`                           | freestanding function                                                                         |
 | `@nexus.serialization-context`          | freestanding function                                                                         |
 | `@nexus.output-transform`               | freestanding function                                                                         |
-| `@nexus.flatten-in-api`                 | record                                                                                        |
+| `@nexus.flatten-in-api`                 | record, record field                                                                          |
 | `@nexus.flattened-type`                 | record field                                                                                  |
 | `@nexus.function`                       | type alias, record field                                                                      |
 | `@nexus.function-args`                  | freestanding function                                                                         |
@@ -2486,11 +2516,14 @@ The stream sample's full helpers are in
 
 ### @nexus.flatten-in-api
 
-**Placement:** Record type (with `@nexus.proto`) **Syntax:**
-`@nexus.flatten-in-api` (no arguments)
+**Placement:** Record type (with `@nexus.proto`), or a field whose type is such
+a record **Syntax:** `@nexus.flatten-in-api` (no arguments) on a record,
+`@nexus.flatten-in-api fields="<field> ..."` on a field
 
 Flattens the record's fields into the parent record's generated API surface
-instead of creating a nested model.
+instead of creating a nested model. On a field, it flattens only the fields in
+`fields`. See
+[Flattening some fields of one field](#flattening-some-fields-of-one-field).
 
 ```wit
 /// @nexus.proto "temporal.api.sdk.v1.UserMetadata"
@@ -2500,8 +2533,6 @@ record user-metadata {
   static-details: option<payload>,
 }
 ```
-
-Only supported on record types.
 
 In Go, `@nexus.flatten-in-api` promotes the record's fields into the generated
 operation options struct. For a parent request with

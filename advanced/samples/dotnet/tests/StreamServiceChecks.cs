@@ -79,5 +79,10 @@ namespace Nexgen.DotNetExamples.Tests
         private static Task<StreamServiceExample.ReadRecordsResponse<Turn>> ReadTurns(
             StreamServiceExample.Stream<Turn> stream) =>
             stream.ReadAsync(null, null, null, null, null, null);
+
+        // The create takes the id and the backend of the ref as options.
+        private static Task<StreamServiceExample.Stream<Turn>> CreateTurnsOnBackend() =>
+            StreamServiceExample.Operations.CreateStreamAsync<Turn>(
+                new StreamServiceExample.CreateStreamOptions("turns") { Backend = "redis" });
     }
 }

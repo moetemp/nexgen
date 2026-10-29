@@ -10,12 +10,16 @@ import {
   readRecordsRequestTransferTypeConverter,
   readRecordsResponseTransferTypeConverter,
 } from "../wit/stream-service/workflow/models.ts";
+import { createStream } from "../wit/stream-service/workflow/operations/create-stream.ts";
 import { Stream } from "../wit/stream-service/workflow/resources.ts";
 
 const startOperation = vi.hoisted(() => vi.fn());
 vi.mock("@temporalio/workflow", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@temporalio/workflow")>()),
   createNexusServiceClient: () => ({ startOperation }),
+  // A first attempt, so `withdrawRun` gives nothing.
+  workflowInfo: () => ({ attempt: 1 }),
+  uuid4: () => "request-1",
 }));
 
 // A body goes through the payload converter of the Workflow.
@@ -93,6 +97,18 @@ describe("stream-service generated output", () => {
     expect(readRecordsRequestTransferTypeConverter.toTransferType(model).ref?.id).toBe(
       "stream-1",
     );
+  });
+
+  test("a Workflow create builds the ref from its id and backend", async () => {
+    startOperation.mockResolvedValue({
+      result: async () => ({ ref: { id: "turns" } }),
+    });
+
+    await createStream({ id: "turns", backend: "redis" });
+
+    const [, request] = startOperation.mock.calls[0];
+    expect(request.streamRef).toEqual({ id: "turns", backend: "redis" });
+    expect(request.requestId).toBe("request-1");
   });
 
   test("decodes an enum number that it doesn't know as the fallback case", () => {

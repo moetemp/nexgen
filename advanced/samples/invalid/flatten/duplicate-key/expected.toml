@@ -1,0 +1,6 @@
+inputs = ["input.wit", "../../../inputs/deps"]
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit-directive"
+contains = ["invalid WIT directive `@nexus.flatten-in-api` on type `history-service.get-history-request` field `execution`", "has `run_id` twice in `fields`"]

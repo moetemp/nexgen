@@ -968,6 +968,29 @@ fn build_wit_record_spec(
         &context,
         language,
     )?;
+    let unwrap = directive(&directives, "unwrap", path, &context)?.is_some();
+    if unwrap {
+        let invalid = |reason: &str| Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.clone(),
+            directive: "@nexus.unwrap".to_string(),
+            reason: reason.to_string(),
+        };
+        let kept = fields
+            .values()
+            .filter(|field| !field.origin.is_omitted())
+            .count();
+        if kept != 1 {
+            return Err(invalid(
+                "needs a record with exactly one field that isn't omitted",
+            ));
+        }
+        if flatten_in_api {
+            return Err(invalid(
+                "can't go with `@nexus.flatten-in-api` on the same record",
+            ));
+        }
+    }
 
     Ok(Some(RecordSpec {
         name: type_name.to_upper_camel_case(),
@@ -976,6 +999,7 @@ fn build_wit_record_spec(
         source,
         experimental,
         flatten_in_api,
+        unwrap,
         fields,
         data: (),
     }))
@@ -3453,6 +3477,38 @@ fn build_resource_method(
         .as_ref()
         .map(|ty| build_resource_result(resolve, ty, path, &context, language))
         .transpose()?;
+    let varargs = build_resource_method_varargs(&params, &directives, path, &context)?;
+    let result_field = match directive(&directives, "result-field", path, &context)? {
+        Some(result_field) => {
+            let invalid = |reason: String| Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context: context.clone(),
+                directive: "@nexus.result-field".to_string(),
+                reason,
+            };
+            let name = result_field
+                .value("value")
+                .ok_or_else(|| invalid("needs the name of a field of the response".to_string()))?;
+            let record = function
+                .result
+                .and_then(|ty| flattened_record(resolve, ty))
+                .ok_or_else(|| invalid("needs a method whose result is a record".to_string()))?;
+            let field = record
+                .fields
+                .iter()
+                .find(|field| field.name == name)
+                .ok_or_else(|| invalid(format!("`{name}` isn't a field of the response")))?;
+            let field_directives =
+                parse_directives(field.docs.contents.as_deref(), path, &context)?;
+            if directive(&field_directives, "omit", path, &context)?.is_some() {
+                return Err(invalid(format!(
+                    "`{name}` has `@nexus.omit`, so the response model has no such field"
+                )));
+            }
+            Some(record_field_key(field, path, &context)?)
+        }
+        None => None,
+    };
 
     Ok(ResourceMethodSpec {
         name: method_name,
@@ -3462,7 +3518,58 @@ fn build_resource_method(
         params,
         result,
         operation_name: build_resource_method_operation_name(&directives, path, &context)?,
+        varargs,
+        result_field,
     })
+}
+
+/// The API name of the last parameter of a method with `@nexus.varargs`, which takes the items of
+/// that list as positional arguments. Name binding still uses the WIT name.
+fn build_resource_method_varargs(
+    params: &[ResourceFieldSpec],
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<String>> {
+    let Some(varargs) = directive(directives, "varargs", path, context)? else {
+        return Ok(None);
+    };
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.varargs".to_string(),
+        reason,
+    };
+    let Some(last) = params
+        .last()
+        .filter(|last| !last.optional && matches!(last.field_type, TypeSpec::List(_)))
+    else {
+        return Err(invalid(
+            "needs a method whose last parameter is a list, not an `option`".to_string(),
+        ));
+    };
+    let name = varargs.value("name").unwrap_or(&last.name).to_string();
+    if let Some(other) = params[..params.len() - 1]
+        .iter()
+        .find(|param| param.name == name)
+    {
+        return Err(invalid(format!(
+            "`name=\"{name}\"` is also the name of parameter `{}`",
+            other.name
+        )));
+    }
+    // A function parameter with varargs takes its arguments as the trailing positional ones.
+    if let Some(function) = params.iter().find(|param| {
+        param.function.as_ref().is_some_and(|function| {
+            function.primary && matches!(function.args, FunctionArgsSpec::Varargs { .. })
+        })
+    }) {
+        return Err(invalid(format!(
+            "can't go with parameter `{}`, a function that takes its arguments as varargs",
+            function.name
+        )));
+    }
+    Ok(Some(name))
 }
 
 fn build_resource_method_operation_name(
@@ -3542,6 +3649,16 @@ fn build_operation(
     let directives = parse_directives(function.docs.contents.as_deref(), path, &context)?;
     reject_misplaced_type_parameter(&directives, path, &context)?;
     reject_misplaced_fallback(&directives, path, &context)?;
+    for name in ["varargs", "result-field"] {
+        if directive(&directives, name, path, &context)?.is_some() {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context,
+                directive: format!("@nexus.{name}"),
+                reason: "goes on a resource method, not on an operation".to_string(),
+            });
+        }
+    }
     let wire_operation_name =
         build_wire_operation_name(&directives, path, &context, &operation_name)?;
     let experimental = experimental_directive(&directives, path, &context)?;

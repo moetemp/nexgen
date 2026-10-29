@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["`name=\"label\"` is also the name of parameter `label`"]

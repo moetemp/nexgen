@@ -224,6 +224,8 @@ pub(crate) struct PlannedResourceMethod {
     pub(crate) varargs: Option<String>,
     /// The key of the response field that the method returns.
     pub(crate) result_field: Option<String>,
+    /// Set when the method ends the resource, at the end of a scope.
+    pub(crate) close: bool,
     pub(crate) binding: PlannedResourceMethodBindingSpec,
 }
 

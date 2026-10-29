@@ -1,0 +1,7 @@
+languages = ["typescript"]
+system_nexus = true
+targets = ["workflow", "client"]
+
+[error]
+kind = "unsupported-poll"
+contains = ["since the operation has a request with type parameters"]

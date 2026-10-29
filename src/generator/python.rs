@@ -587,6 +587,7 @@ impl<'a> ApiPlanner<'a> {
                 self.ensure_resource_field_types(resource)?;
             }
         }
+        validate_runtime_type_argument_names(&services)?;
         for record in api_plan.records().map(|(_, record)| record) {
             let model_type = TypeSpec::Record(PlannedRecordType {
                 full_name: record.full_name.clone(),
@@ -1000,9 +1001,20 @@ impl<'a> ApiPlanner<'a> {
             .flat_map(|service| service.operations.iter())
             .collect::<Vec<_>>();
         let mut body = String::new();
+        let resource_type_variables = services
+            .iter()
+            .flat_map(|service| &service.resources)
+            .flat_map(resource_type_variable_names)
+            .collect::<Vec<_>>();
         let type_parameters = operations
             .iter()
-            .flat_map(|operation| operation.model_input_type_parameters.iter())
+            .flat_map(|operation| {
+                operation
+                    .model_input_type_parameters
+                    .iter()
+                    .chain(&operation.runtime_type_arguments)
+            })
+            .chain(&resource_type_variables)
             .collect::<BTreeSet<_>>();
         for parameter in &type_parameters {
             body.push_str(parameter);
@@ -1105,7 +1117,8 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("(\n        ");
         output.push_str(&receiver);
         output.push_str(",\n");
-        if !resource.fields.is_empty() {
+        let type_variables = resource_type_variable_names(resource);
+        if !resource.fields.is_empty() || !type_variables.is_empty() {
             output.push_str("        *,\n");
         }
         for field in &resource.fields {
@@ -1119,8 +1132,12 @@ impl<'a> ApiPlanner<'a> {
                 )
             ));
         }
+        render_runtime_type_keyword_parameters(output, &type_variables);
         output.push_str("    ) -> ");
-        output.push_str(&resource.type_name);
+        output.push_str(&python_type_annotation_with_arguments(
+            &resource.type_name,
+            &type_variables,
+        ));
         output.push_str(":\n");
         render_python_docstring(
             output,
@@ -1147,8 +1164,16 @@ impl<'a> ApiPlanner<'a> {
                 .expect("the client target refuses a service with no endpoint"),
         ));
         output.push_str(",\n            ),\n");
-        for field in &resource.fields {
-            let name = python_field_name(&field.name);
+        for name in resource
+            .fields
+            .iter()
+            .map(|field| python_field_name(&field.name))
+            .chain(
+                type_variables
+                    .iter()
+                    .map(|name| python_runtime_type_argument_name(name)),
+            )
+        {
             output.push_str(&format!("            {name}={name},\n"));
         }
         output.push_str("        )\n");
@@ -1194,6 +1219,16 @@ impl<'a> ApiPlanner<'a> {
                 &function_fields,
                 &output_type_parameters,
             );
+            body.push_str("\n\n");
+        }
+        let type_variables = resource_type_variable_names(resource);
+        for name in &type_variables {
+            body.push_str(name);
+            body.push_str(" = typing.TypeVar(");
+            body.push_str(&python_string_literal(name));
+            body.push_str(")\n");
+        }
+        if !type_variables.is_empty() {
             body.push_str("\n\n");
         }
         let client = target == Some(GenerationTarget::Client);
@@ -1337,28 +1372,46 @@ impl<'a> ApiPlanner<'a> {
         target: Option<GenerationTarget>,
     ) {
         let client = target == Some(GenerationTarget::Client);
-        output.push_str(if client {
+        let type_variables = resource_type_variable_names(resource);
+        output.push_str(if client || !type_variables.is_empty() {
             "@dataclasses.dataclass(init=False)\n"
         } else {
             "@dataclasses.dataclass\n"
         });
         output.push_str("class ");
         output.push_str(&resource.type_name);
+        if !type_variables.is_empty() {
+            output.push_str("(typing.Generic[");
+            output.push_str(&type_variables.join(", "));
+            output.push_str("])");
+        }
         output.push_str(":\n");
         render_python_docstring(output, "    ", resource.doc.as_deref(), &[], None, false);
-        for field in &resource.fields {
+        let fields = resource
+            .fields
+            .iter()
+            .map(|field| {
+                (
+                    python_field_name(&field.name),
+                    self.python_resource_field_annotation(
+                        &field.kind,
+                        field.optional,
+                        field.function.as_ref(),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        for (name, annotation) in &fields {
             output.push_str("    ");
-            output.push_str(&python_field_name(&field.name));
+            output.push_str(name);
             output.push_str(": ");
-            output.push_str(&self.python_resource_field_annotation(
-                &field.kind,
-                field.optional,
-                field.function.as_ref(),
-            ));
+            output.push_str(annotation);
             output.push('\n');
         }
         if client {
             self.render_resource_constructor(output, resource);
+        } else if !type_variables.is_empty() {
+            render_generic_resource_init(output, &fields, &type_variables);
         }
         let Some(target) = target else {
             // With no API target, the class carries the fields only, so that no caller gets a
@@ -1400,7 +1453,8 @@ impl<'a> ApiPlanner<'a> {
         ));
         output.push_str(&parameter);
         output.push_str(": _NexusClient,\n        /,\n");
-        if !resource.fields.is_empty() {
+        let type_variables = resource_type_variable_names(resource);
+        if !resource.fields.is_empty() || !type_variables.is_empty() {
             output.push_str("        *,\n");
         }
         for field in &resource.fields {
@@ -1414,6 +1468,7 @@ impl<'a> ApiPlanner<'a> {
                 )
             ));
         }
+        render_runtime_type_keyword_parameters(output, &type_variables);
         output.push_str("    ) -> None:\n");
         output.push_str(&format!(
             "        {receiver}.{attribute}: _NexusClient = {parameter}\n"
@@ -1422,6 +1477,7 @@ impl<'a> ApiPlanner<'a> {
             let name = python_field_name(&field.name);
             output.push_str(&format!("        {receiver}.{name} = {name}\n"));
         }
+        render_runtime_type_attributes(output, receiver.as_str(), &type_variables);
     }
 
     fn render_resource_class_method(
@@ -1608,7 +1664,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("        nexus_client = self.");
         output.push_str(&resource_client_identifier(resource, "_nexus_client"));
         output.push('\n');
-        render_client_poll_loop(output, operation, next_expr);
+        render_client_poll_loop(output, operation, next_expr, "self.");
     }
 
     fn python_resource_method_result_annotation(&self, method: &PlannedResourceMethod) -> String {
@@ -1616,7 +1672,16 @@ impl<'a> ApiPlanner<'a> {
             return "None".to_string();
         };
         let annotation = match &result.kind {
-            PlannedResourceMethodResultKind::Resource { type_name } => type_name.clone(),
+            PlannedResourceMethodResultKind::Resource {
+                type_name,
+                type_parameters,
+            } => python_type_annotation_with_arguments(
+                type_name,
+                &type_parameters
+                    .iter()
+                    .map(|parameter| parameter.name.clone())
+                    .collect::<Vec<_>>(),
+            ),
             PlannedResourceMethodResultKind::Value(kind) => {
                 self.python_resource_field_annotation(kind, result.optional, None)
             }
@@ -1680,8 +1745,16 @@ impl<'a> ApiPlanner<'a> {
                 .model_type_annotation(value)
                 .expect("external resource value annotation should exist"),
             PlannedType::Flags(flags_type) => flags_type.name.clone(),
-            PlannedType::Variant(variant_type) => variant_type.name.clone(),
-            PlannedType::Record(record) => record.model_name.clone(),
+            PlannedType::Variant(variant_type) => python_generic_record_annotation(
+                &variant_type.name,
+                &self
+                    .api_plan
+                    .variant_type_parameters(&variant_type.full_name),
+            ),
+            PlannedType::Record(record) => python_generic_record_annotation(
+                &record.model_name,
+                &self.api_plan.record_type_parameters(&record.full_name),
+            ),
             PlannedType::Resource(resource) => resource.type_name.clone(),
             PlannedType::Option(inner) | PlannedType::List(inner) => {
                 format!(
@@ -1842,12 +1915,22 @@ impl<'a> ApiPlanner<'a> {
             .output_type()
             .map(|output| self.api_plan.type_parameters(output))
             .unwrap_or_default();
-        let generic_model_types =
-            !model_input_parameters.is_empty() || !model_output_parameters.is_empty();
+        let runtime_type_arguments = operation
+            .data
+            .runtime_type_parameters
+            .iter()
+            .map(|parameter| parameter.name.clone())
+            .collect::<Vec<_>>();
+        // The start call casts the handle when `output_type` names a generic model with no type
+        // arguments.
+        let generic_model_types = model_output_parameters
+            .iter()
+            .any(|usage| !runtime_type_arguments.contains(&usage.parameter.name));
         let model_output_only_parameters = model_output_parameters
             .into_iter()
             .filter(|usage| !model_input_identities.contains(usage.parameter.full_name.as_str()))
             .map(|usage| usage.parameter.name)
+            .filter(|name| !runtime_type_arguments.contains(name))
             .collect::<BTreeSet<_>>();
         let output_annotation_default =
             erase_python_type_parameters(&output_annotation_default, &model_output_only_parameters);
@@ -1859,7 +1942,12 @@ impl<'a> ApiPlanner<'a> {
                         .holder
                         .as_ref()
                         .map(|holder| holder.model_name.clone())
-                        .unwrap_or_else(|| resource.resource_type_name.clone())
+                        .unwrap_or_else(|| {
+                            python_type_annotation_with_arguments(
+                                &resource.resource_type_name,
+                                &runtime_type_arguments,
+                            )
+                        })
                 })
             })
             .unwrap_or_else(|| output_annotation_default.clone());
@@ -1897,6 +1985,15 @@ impl<'a> ApiPlanner<'a> {
                 &self.api_plan.record_type_parameters(&record.full_name),
             ),
             _ => output_ref.clone(),
+        };
+        let output_record_type_parameters = match operation.output_type() {
+            Some(PlannedType::Record(record)) => self
+                .api_plan
+                .record_type_parameters(&record.full_name)
+                .into_iter()
+                .map(|usage| usage.parameter.name)
+                .collect(),
+            _ => Vec::new(),
         };
         Ok(RenderedOperation {
             name: operation.name.as_str(),
@@ -1940,6 +2037,8 @@ impl<'a> ApiPlanner<'a> {
                 .map(|usage| usage.parameter.name)
                 .collect(),
             generic_model_types,
+            runtime_type_arguments,
+            output_record_type_parameters,
         })
     }
 
@@ -3233,9 +3332,70 @@ struct RenderedOperation<'a> {
     client_unpacked_input: Option<RenderedUnpackedInput>,
     model_input_type_parameters: Vec<String>,
     generic_model_types: bool,
+    /// The type parameters that the call takes as runtime types, by TypeVar name.
+    runtime_type_arguments: Vec<String>,
+    /// The type parameters of a record output, in order.
+    output_record_type_parameters: Vec<String>,
 }
 
 impl RenderedOperation<'_> {
+    /// The `output_type` of the start call. The data converter decodes a generic output with the
+    /// runtime types in it. `receiver` is `self.` in a resource method.
+    fn output_type_expr_for(&self, receiver: &str) -> String {
+        if !self
+            .output_record_type_parameters
+            .iter()
+            .any(|name| self.runtime_type_arguments.contains(name))
+        {
+            return self.output_type_expr.clone();
+        }
+        let arguments = self
+            .output_record_type_parameters
+            .iter()
+            .map(|name| {
+                if self.runtime_type_arguments.contains(name) {
+                    format!("{receiver}{}", python_runtime_type_argument_name(name))
+                } else {
+                    "typing.Any".to_string()
+                }
+            })
+            .collect::<Vec<_>>();
+        python_type_annotation_with_arguments(&self.output_type_expr, &arguments)
+    }
+
+    /// The runtime type arguments that a call passes on after its request.
+    fn runtime_type_args(&self, receiver: &str) -> String {
+        self.runtime_type_arguments
+            .iter()
+            .map(|name| format!(", {receiver}{}", python_runtime_type_argument_name(name)))
+            .collect()
+    }
+
+    /// The parameters of the runtime type arguments, one line each at `indent`.
+    fn render_runtime_type_parameters(&self, output: &mut String, indent: &str) {
+        for name in &self.runtime_type_arguments {
+            output.push_str(indent);
+            output.push_str(&python_runtime_type_argument_name(name));
+            output.push_str(": type[");
+            output.push_str(name);
+            output.push_str("],\n");
+        }
+    }
+
+    /// The bindings of the runtime type arguments in a returned resource, which `receiver` holds
+    /// in a resource method.
+    fn render_runtime_type_bindings(&self, output: &mut String, indent: &str, receiver: &str) {
+        for name in &self.runtime_type_arguments {
+            let argument = python_runtime_type_argument_name(name);
+            output.push_str(indent);
+            output.push_str(&argument);
+            output.push('=');
+            output.push_str(receiver);
+            output.push_str(&argument);
+            output.push_str(",\n");
+        }
+    }
+
     /// The poll helper, when the target gets the poll.
     fn poll_next(&self, target: GenerationTarget) -> Option<&str> {
         self.poll_next_expr
@@ -3814,6 +3974,23 @@ fn python_generic_record_annotation(
     }
 }
 
+fn python_type_annotation_with_arguments(name: &str, arguments: &[String]) -> String {
+    if arguments.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name}[{}]", arguments.join(", "))
+    }
+}
+
+/// The runtime type argument of a type parameter, such as `body_type` for `BodyT`.
+fn python_runtime_type_argument_name(type_var: &str) -> String {
+    let stem = type_var
+        .strip_suffix('T')
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or(type_var);
+    format!("{}_type", stem.to_snake_case())
+}
+
 fn python_erased_generic_record_annotation(
     model_name: &str,
     parameters: &[crate::spec::TypeParameterUsage],
@@ -4094,6 +4271,14 @@ fn package_export_names(
 
 fn operation_key(service_name: &str, operation_name: &str) -> String {
     format!("{service_name}::{operation_name}")
+}
+
+fn resource_type_variable_names(resource: &PlannedResource) -> Vec<String> {
+    resource
+        .type_parameters
+        .iter()
+        .map(|parameter| parameter.name.clone())
+        .collect()
 }
 
 fn resource_module_name(resource: &PlannedResource) -> String {
@@ -4900,6 +5085,27 @@ fn render_service_module(
             endpoint_client_body.push('\n');
         }
     }
+    let endpoint_client_type_parameters = endpoint_services
+        .iter()
+        .flat_map(|service| &service.operations)
+        .flat_map(|operation| {
+            operation
+                .model_input_type_parameters
+                .iter()
+                .chain(&operation.runtime_type_arguments)
+        })
+        .filter(|name| body_uses_python_symbol(&endpoint_client_body, name))
+        .collect::<BTreeSet<_>>();
+    if !endpoint_client_type_parameters.is_empty() {
+        let mut definitions = String::from("\n");
+        for name in endpoint_client_type_parameters {
+            definitions.push_str(name);
+            definitions.push_str(" = typing.TypeVar(");
+            definitions.push_str(&python_string_literal(name));
+            definitions.push_str(")\n");
+        }
+        endpoint_client_body.insert_str(0, &definitions);
+    }
     let runtime_model_names = endpoint_services
         .iter()
         .flat_map(|service| {
@@ -5113,13 +5319,18 @@ fn render_operation_module(
     }
 
     let mut body = String::new();
-    for parameter in &operation.model_input_type_parameters {
+    let type_parameters = operation
+        .model_input_type_parameters
+        .iter()
+        .chain(&operation.runtime_type_arguments)
+        .collect::<BTreeSet<_>>();
+    for parameter in &type_parameters {
         body.push_str(parameter);
         body.push_str(" = typing.TypeVar(");
         body.push_str(&python_string_literal(parameter));
         body.push_str(")\n");
     }
-    if !operation.model_input_type_parameters.is_empty() {
+    if !type_parameters.is_empty() {
         body.push_str("\n\n");
     }
     if let Some(unpacked_input) = &operation.unpacked_input
@@ -5402,8 +5613,10 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
     output.push_str(
         "async def _start_system_nexus_operation(\n    interceptor: _SystemNexusWorkflowOutboundInterceptorBase,\n    input: StartNexusOperationInput[_InputT, _OutputT],\n) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n",
     );
+    // An interceptor handles every type argument of a generic model, so the descriptor refs name
+    // the model with its type arguments erased to `typing.Any`.
     for (service, operation) in &operations {
-        let output_type = system_nexus_type_expr(&operation.output_type_expr);
+        let output_type = system_nexus_type_expr(&operation.descriptor_output_ref);
         output.push_str("    if input.service == ");
         output.push_str(&python_string_literal(service.wire_name));
         output.push_str(" and input.operation_name == ");
@@ -5411,7 +5624,7 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         output.push_str(
             ":\n        typed_input = typing.cast(\n            \"StartNexusOperationInput[",
         );
-        output.push_str(operation_input_type_ref(operation));
+        output.push_str(&system_nexus_input_type_expr(operation));
         output.push_str(", ");
         output.push_str(&output_type);
         output.push_str("]\",\n            input,\n        )\n        # The dispatch check above establishes that this operation's response type is _OutputT.\n        return typing.cast(\n            \"temporalio.workflow.NexusOperationHandle[_OutputT]\",\n            await interceptor.start_");
@@ -5426,11 +5639,11 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
     output.push_str("    @abc.abstractmethod\n    def _next_system_nexus_interceptor(\n        self,\n    ) -> _SystemNexusWorkflowOutboundInterceptorBase:\n        ...\n");
     output.push_str("\n    @abc.abstractmethod\n    async def start_system_nexus_operation(\n        self,\n        input: StartNexusOperationInput[_InputT, _OutputT],\n    ) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n        \"\"\"Intercept a System Nexus operation through the generic hook.\"\"\"\n        ...\n");
     for (_service, operation) in &operations {
-        let output_type = system_nexus_type_expr(&operation.output_type_expr);
+        let output_type = system_nexus_type_expr(&operation.descriptor_output_ref);
         output.push_str("\n    async def start_");
         output.push_str(&operation.attr_name);
         output.push_str("(\n        self, request: ");
-        output.push_str(operation_input_type_ref(operation));
+        output.push_str(&system_nexus_input_type_expr(operation));
         output.push_str("\n    ) -> temporalio.workflow.NexusOperationHandle[");
         output.push_str(&output_type);
         output.push_str("]:\n");
@@ -5445,11 +5658,11 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
     output.push_str("\n\nclass _SystemNexusWorkflowOutboundInterceptorTerminal(abc.ABC):\n");
     output.push_str("    @abc.abstractmethod\n    async def _intercept_system_nexus_operation(\n        self,\n        input: StartNexusOperationInput[_InputT, _OutputT],\n    ) -> temporalio.workflow.NexusOperationHandle[_OutputT]:\n        ...\n");
     for (service, operation) in operations {
-        let output_type = system_nexus_type_expr(&operation.output_type_expr);
+        let output_type = system_nexus_type_expr(&operation.descriptor_output_ref);
         output.push_str("\n    async def start_");
         output.push_str(&operation.attr_name);
         output.push_str("(\n        self, request: ");
-        output.push_str(operation_input_type_ref(operation));
+        output.push_str(&system_nexus_input_type_expr(operation));
         output.push_str("\n    ) -> temporalio.workflow.NexusOperationHandle[");
         output.push_str(&output_type);
         output.push_str("]:\n");
@@ -5464,11 +5677,32 @@ fn render_system_nexus_interceptor(services: &[RenderedService<'_>]) -> String {
         output.push_str(&python_string_literal(service.wire_name));
         output.push_str(",\n                operation=");
         output.push_str(&python_string_literal(operation.wire_name));
+        // The SDK decodes the result with `output_type`, and its converter takes a class, not a
+        // parameterized alias.
         output.push_str(",\n                input=request,\n                output_type=");
-        output.push_str(&output_type);
+        output.push_str(&system_nexus_output_class_expr(operation, &output_type));
         output.push_str(",\n                schedule_to_close_timeout=None,\n                schedule_to_start_timeout=None,\n                start_to_close_timeout=None,\n                cancellation_type=NexusOperationCancellationType.WAIT_COMPLETED,\n                headers=None,\n                summary=None,\n            )\n        )\n");
     }
     output
+}
+
+fn system_nexus_output_class_expr(operation: &RenderedOperation<'_>, output_type: &str) -> String {
+    let class = system_nexus_type_expr(&operation.output_type_expr);
+    if class == output_type {
+        class
+    } else {
+        format!(
+            "typing.cast({}, {class})",
+            python_string_literal(&format!("type[{output_type}]"))
+        )
+    }
+}
+
+fn system_nexus_input_type_expr(operation: &RenderedOperation<'_>) -> String {
+    operation.input.as_ref().map_or_else(
+        || "None".to_string(),
+        |input| system_nexus_type_expr(&input.descriptor_type_ref),
+    )
 }
 
 fn system_nexus_type_expr(type_expr: &str) -> String {
@@ -5729,6 +5963,7 @@ fn render_endpoint_service_object_operation_method(
         output.push_str(&input.annotation);
         output.push_str(",\n");
     }
+    operation.render_runtime_type_parameters(output, "        ");
     output.push_str("    ) -> ");
     output.push_str(&operation_public_return_annotation(service, operation));
     output.push_str(":\n");
@@ -5750,6 +5985,7 @@ fn render_endpoint_service_object_unpacked_method(
     output.push_str(&operation.attr_name);
     output.push_str("(\n");
     output.push_str("        self,\n");
+    operation.render_runtime_type_parameters(output, "        ");
     output.push_str("        *,\n");
     for field in &unpacked_input.parameters {
         output.push_str("        ");
@@ -5803,7 +6039,7 @@ fn render_endpoint_service_object_operation_body(
             output.push_str(operation_input_wire_expr(operation));
             output.push_str(",\n");
             output.push_str("            output_type=");
-            output.push_str(&operation.output_type_expr);
+            output.push_str(&operation.output_type_expr_for(""));
             output.push_str(",\n");
             output.push_str("        )\n");
             if operation.output_module_path.as_deref() == Some("._resources") {
@@ -5834,7 +6070,7 @@ fn render_endpoint_service_object_operation_body(
         output.push_str(",\n");
         if !operation.output_none {
             output.push_str("            output_type=");
-            output.push_str(&operation.output_type_expr);
+            output.push_str(&operation.output_type_expr_for(""));
             output.push_str(",\n");
         }
         output.push_str("        )\n");
@@ -5849,6 +6085,7 @@ fn render_endpoint_service_object_operation_body(
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
+            operation.render_runtime_type_bindings(output, "            ", "");
             for binding in &resource_return.bindings {
                 output.push_str("            ");
                 output.push_str(&python_field_name(&binding.field_name));
@@ -5881,7 +6118,7 @@ fn render_endpoint_service_object_operation_body(
     output.push_str(",\n");
     if !operation.output_none {
         output.push_str("            output_type=");
-        output.push_str(&operation.output_type_expr);
+        output.push_str(&operation.output_type_expr_for(""));
         output.push_str(",\n");
     }
     output.push_str("        )\n");
@@ -6031,6 +6268,54 @@ fn validate_client_names(services: &[RenderedService<'_>]) -> Result<()> {
                 generated_by: format!("the client factory of resource `{}`", resource.type_name),
                 conflicting_declaration: format!("a client method of service `{owner}`"),
             });
+        }
+    }
+    Ok(())
+}
+
+/// A runtime type argument takes its name from its type parameter, so a field or parameter with
+/// that name would make a duplicate argument or attribute.
+fn validate_runtime_type_argument_names(services: &[RenderedService<'_>]) -> Result<()> {
+    let conflict = |parameter: &str, conflicting: String| Error::RuntimeTypeArgumentNameConflict {
+        language: Language::Python,
+        name: python_runtime_type_argument_name(parameter),
+        parameter: parameter.to_string(),
+        conflicting,
+    };
+    for service in services {
+        for resource in &service.resources {
+            for parameter in resource_type_variable_names(resource) {
+                let name = python_runtime_type_argument_name(&parameter);
+                if let Some(field) = resource
+                    .fields
+                    .iter()
+                    .find(|field| python_field_name(&field.name) == name)
+                {
+                    return Err(conflict(
+                        &parameter,
+                        format!("field `{}` of resource `{}`", field.name, resource.name),
+                    ));
+                }
+            }
+        }
+        for operation in &service.operations {
+            for parameter in &operation.runtime_type_arguments {
+                let name = python_runtime_type_argument_name(parameter);
+                if let Some(input) = operation
+                    .unpacked_input
+                    .iter()
+                    .chain(&operation.client_unpacked_input)
+                    .find(|input| input.parameters.iter().any(|field| field.attr_name == name))
+                {
+                    return Err(conflict(
+                        parameter,
+                        format!(
+                            "a field of `{}`, the request of `{}`",
+                            input.model_name, operation.name
+                        ),
+                    ));
+                }
+            }
         }
     }
     Ok(())
@@ -6405,18 +6690,75 @@ fn render_variant(output: &mut String, variant: &RenderedVariant) {
 }
 
 fn render_resource_client_binder(output: &mut String, resource: &PlannedResource) {
+    let resource_annotation = python_type_annotation_with_arguments(
+        &resource.type_name,
+        &resource_type_variable_names(resource),
+    );
     output.push_str("def ");
     output.push_str(&resource_client_bind_function_name(resource));
     output.push_str("(\n");
     output.push_str("    resource: ");
-    output.push_str(&resource.type_name);
+    output.push_str(&resource_annotation);
     output.push_str(",\n");
     output.push_str("    nexus_client: typing.Any,\n");
     output.push_str(") -> ");
-    output.push_str(&resource.type_name);
+    output.push_str(&resource_annotation);
     output.push_str(":\n");
     output.push_str("    setattr(resource, \"_nexus_client\", nexus_client)\n");
     output.push_str("    return resource\n");
+}
+
+/// The `__init__` of a generic resource, which takes its runtime types as keywords.
+fn render_generic_resource_init(
+    output: &mut String,
+    fields: &[(String, String)],
+    type_variables: &[String],
+) {
+    output.push_str("\n    def __init__(\n        self,\n");
+    for (name, annotation) in fields {
+        output.push_str("        ");
+        output.push_str(name);
+        output.push_str(": ");
+        output.push_str(annotation);
+        output.push_str(",\n");
+    }
+    output.push_str("        *,\n");
+    render_runtime_type_keyword_parameters(output, type_variables);
+    output.push_str("    ) -> None:\n");
+    for (name, _) in fields {
+        output.push_str("        self.");
+        output.push_str(name);
+        output.push_str(" = ");
+        output.push_str(name);
+        output.push('\n');
+    }
+    render_runtime_type_attributes(output, "self", type_variables);
+}
+
+/// The keyword parameter of each runtime type of a generic resource.
+fn render_runtime_type_keyword_parameters(output: &mut String, type_variables: &[String]) {
+    for name in type_variables {
+        output.push_str("        ");
+        output.push_str(&python_runtime_type_argument_name(name));
+        output.push_str(": type[");
+        output.push_str(name);
+        output.push_str("] | None = None,\n");
+    }
+}
+
+/// The attribute of each runtime type of a generic resource, set from its parameter.
+fn render_runtime_type_attributes(output: &mut String, receiver: &str, type_variables: &[String]) {
+    if type_variables.is_empty() {
+        return;
+    }
+    output.push_str("        # Not a dataclass field, so the converter doesn't encode it. A\n");
+    output.push_str("        # decoded handle decodes its generic values as `typing.Any`.\n");
+    for name in type_variables {
+        let argument = python_runtime_type_argument_name(name);
+        output.push_str(&format!(
+            "        {receiver}.{argument}: type[{name}] = {argument} or typing.cast(\"type[{name}]\", typing.Any)\n"
+        ));
+    }
 }
 
 fn render_resource_method_inline_operation_body(
@@ -6446,6 +6788,7 @@ fn render_resource_method_inline_operation_body(
             output,
             operation,
             operation_input_wire_expr(operation),
+            "self.",
         );
         return;
     }
@@ -6457,6 +6800,7 @@ fn render_resource_method_inline_operation_body(
                 output,
                 operation,
                 operation_input_wire_expr(operation),
+                "self.",
             );
             if operation.output_module_path.as_deref() == Some("._resources") {
                 output.push_str("        resource = await handle\n");
@@ -6485,6 +6829,7 @@ fn render_resource_method_inline_operation_body(
             output,
             operation,
             operation_input_wire_expr(operation),
+            "self.",
         );
         if let Some(transform_expr) = &operation.output_transform_expr {
             output.push_str("        result = await handle\n");
@@ -6497,6 +6842,7 @@ fn render_resource_method_inline_operation_body(
             output.push_str("        resource = ");
             output.push_str(&resource_return.resource_type_name);
             output.push_str("(\n");
+            operation.render_runtime_type_bindings(output, "            ", "self.");
             for binding in &resource_return.bindings {
                 output.push_str("            ");
                 output.push_str(&python_field_name(&binding.field_name));
@@ -6524,7 +6870,12 @@ fn render_resource_method_inline_operation_body(
     }
 
     output.push_str("        handle = await ");
-    render_resource_nexus_start_operation(output, operation, operation_input_wire_expr(operation));
+    render_resource_nexus_start_operation(
+        output,
+        operation,
+        operation_input_wire_expr(operation),
+        "self.",
+    );
     if result_annotation == "None" {
         output.push_str("        await handle\n");
     } else {
@@ -6542,6 +6893,7 @@ fn render_resource_nexus_start_operation(
     output: &mut String,
     operation: &RenderedOperation<'_>,
     input_expr: &str,
+    receiver: &str,
 ) {
     output.push_str("nexus_client.start_operation(\n");
     output.push_str("            operation=");
@@ -6552,7 +6904,7 @@ fn render_resource_nexus_start_operation(
     output.push_str(",\n");
     if !operation.output_none {
         output.push_str("            output_type=");
-        output.push_str(&operation.output_type_expr);
+        output.push_str(&operation.output_type_expr_for(receiver));
         output.push_str(",\n");
     }
     output.push_str("        )\n");
@@ -6569,22 +6921,23 @@ fn render_resource_method_operation_body(
         return;
     };
 
-    let operation_attr_name = request_operation_function_name(operation);
+    let call = format!(
+        "{}(request{})\n",
+        request_operation_function_name(operation),
+        operation.runtime_type_args("self.")
+    );
     render_resource_method_request(output, request_expr);
     if *direct_return {
         if result_annotation == "None" {
             output.push_str("        await ");
-            output.push_str(&operation_attr_name);
-            output.push_str("(request)\n");
+            output.push_str(&call);
         } else {
             output.push_str("        return await ");
-            output.push_str(&operation_attr_name);
-            output.push_str("(request)\n");
+            output.push_str(&call);
         }
     } else {
         output.push_str("        handle = await ");
-        output.push_str(&operation_attr_name);
-        output.push_str("(request)\n");
+        output.push_str(&call);
         if result_annotation == "None" {
             output.push_str("        await handle\n");
         } else {
@@ -7352,6 +7705,7 @@ fn render_function_unpacked_overload(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
+    operation.render_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
 
     let primary_function = primary_function(&unpacked_input.functions);
     let primary_case = primary_function.and_then(|function| {
@@ -7860,6 +8214,7 @@ fn render_operation_poll_function(
     let target = GenerationTarget::Client;
     let body_indent = target_body_indent(target);
     render_operation_signature_start(output, target, &poll_function_name(&operation.attr_name));
+    operation.render_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
     let unpacked_input = operation.target_unpacked_input(target);
     if let Some(unpacked_input) = unpacked_input {
         if !unpacked_input.parameters.is_empty() {
@@ -7918,7 +8273,7 @@ fn render_operation_poll_function(
     }
     // The iteration uses one Nexus client for every page.
     render_inline_nexus_client(output, target, service);
-    render_client_poll_loop(output, operation, next_expr);
+    render_client_poll_loop(output, operation, next_expr, "");
 }
 
 /// The loop of a client poll iterator, after the first request and the Nexus client. Each page
@@ -7927,6 +8282,7 @@ fn render_client_poll_loop(
     output: &mut String,
     operation: &RenderedOperation<'_>,
     next_expr: &str,
+    receiver: &str,
 ) {
     let target = GenerationTarget::Client;
     start_line(output, target, "    while True:\n");
@@ -7941,7 +8297,7 @@ fn render_client_poll_loop(
     start_line(output, target, "            arg=request,\n");
     start_line(output, target, "            id=_operation_id(),\n");
     start_line(output, target, "            result_type=");
-    output.push_str(&operation.output_type_expr);
+    output.push_str(&operation.output_type_expr_for(receiver));
     output.push_str(",\n");
     start_line(output, target, "        )\n");
     if operation.generic_model_types {
@@ -8006,6 +8362,7 @@ fn render_client_operation_method(
         output.push_str(&input.annotation);
         output.push_str(",\n");
     }
+    operation.render_runtime_type_parameters(output, "        ");
     start_line(output, target, ") -> ");
     output.push_str(&operation_result_annotation(operation));
     output.push_str(":\n");
@@ -8020,6 +8377,8 @@ fn render_client_operation_body(
     discard_result: bool,
 ) {
     let target = GenerationTarget::Client;
+    // A resource method holds its runtime types, and an extension method takes them.
+    let receiver = if client.is_some() { "self." } else { "" };
     if let Some(client) = client {
         start_line(output, target, "    nexus_client = ");
         output.push_str(client);
@@ -8044,7 +8403,7 @@ fn render_client_operation_body(
         if operation.client_resource.is_some() {
             output.push_str(&client_resource_data_type(&operation.output_ref));
         } else {
-            output.push_str(&operation.output_type_expr);
+            output.push_str(&operation.output_type_expr_for(receiver));
         }
         output.push_str(",\n");
     }
@@ -8080,6 +8439,7 @@ fn render_client_operation_body(
         output.push_str(&resource_return.resource_type_name);
         output.push_str("(\n");
         start_line(output, target, "        nexus_client,\n");
+        operation.render_runtime_type_bindings(output, "            ", receiver);
         for binding in &resource_return.bindings {
             start_line(output, target, "        ");
             output.push_str(&python_field_name(&binding.field_name));
@@ -8157,6 +8517,7 @@ fn render_client_request_method(
         output.push_str(operation_input_annotation(operation));
         output.push_str(",\n");
     }
+    operation.render_runtime_type_parameters(output, "        ");
     start_line(output, target, ") -> ");
     output.push_str(&operation_result_annotation(operation));
     output.push_str(":\n");
@@ -8164,7 +8525,9 @@ fn render_client_request_method(
     start_line(output, target, "    return await self.");
     output.push_str(&client_operation_name(service, operation));
     if operation.input.is_some() {
-        output.push_str("(request)\n");
+        output.push_str("(request");
+        output.push_str(&operation.runtime_type_args(""));
+        output.push_str(")\n");
     } else {
         output.push_str("()\n");
     }
@@ -8252,6 +8615,7 @@ fn render_request_only_operation_function(
         output.push_str(&input.annotation);
         output.push_str(",\n");
     }
+    operation.render_runtime_type_parameters(output, "    ");
     if operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
         || operation.output_direct_result
@@ -8323,7 +8687,7 @@ fn render_request_only_operation_function(
                 output.push_str("    ");
             }
             output.push_str("output_type=");
-            output.push_str(&operation.output_type_expr);
+            output.push_str(&operation.output_type_expr_for(""));
             output.push_str(",\n");
         }
         if operation.generic_model_types {
@@ -8357,7 +8721,7 @@ fn render_request_only_operation_function(
         output.push_str(operation_input_wire_expr(operation));
         output.push_str(",\n");
         output.push_str("        output_type=");
-        output.push_str(&operation.output_type_expr);
+        output.push_str(&operation.output_type_expr_for(""));
         output.push_str(",\n");
         output.push_str("    )\n");
         output.push_str("    return await handle\n");
@@ -8374,7 +8738,7 @@ fn render_request_only_operation_function(
     output.push_str(",\n");
     if !operation.output_none {
         output.push_str("        output_type=");
-        output.push_str(&operation.output_type_expr);
+        output.push_str(&operation.output_type_expr_for(""));
         output.push_str(",\n");
     }
     output.push_str("    )\n");
@@ -8398,6 +8762,7 @@ fn render_request_only_operation_function(
         output.push_str("    return ");
         output.push_str(&resource_return.resource_type_name);
         output.push_str("(\n");
+        operation.render_runtime_type_bindings(output, "        ", "");
         for binding in &resource_return.bindings {
             output.push_str("        ");
             output.push_str(&python_field_name(&binding.field_name));
@@ -8777,6 +9142,7 @@ fn render_unpacked_operation_function(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
+    operation.render_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
     if !unpacked_input.parameters.is_empty() {
         start_line(output, target, "    *,\n");
     }
@@ -8811,7 +9177,9 @@ fn render_unpacked_operation_function(
     start_line(output, target, "    )\n");
     start_line(output, target, "    return await ");
     output.push_str(&operation_call_target(target, service, operation));
-    output.push_str("(request)\n");
+    output.push_str("(request");
+    output.push_str(&operation.runtime_type_args(""));
+    output.push_str(")\n");
 }
 
 /// The return annotation of an unpacked operation. A Workflow function returns the operation
@@ -8907,6 +9275,7 @@ fn render_function_unpacked_implementation(
         );
     }
     render_operation_signature_start(output, target, &operation.attr_name);
+    operation.render_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
 
     let primary_function = primary_function(&unpacked_input.functions);
     if let Some(function) = primary_function {
@@ -9070,7 +9439,9 @@ fn render_function_unpacked_implementation(
     start_line(output, target, "    )\n");
     start_line(output, target, "    return await ");
     output.push_str(&operation_call_target(target, service, operation));
-    output.push_str("(request)\n");
+    output.push_str("(request");
+    output.push_str(&operation.runtime_type_args(""));
+    output.push_str(")\n");
 }
 
 fn rendered_function_implementation_renders_field(

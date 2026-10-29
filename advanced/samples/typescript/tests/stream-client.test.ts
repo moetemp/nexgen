@@ -1,6 +1,7 @@
+import * as common from "@temporalio/common";
 import Long from "long";
 import type * as nexus from "nexus-rpc";
-import { describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   type NexusServiceClient,
@@ -30,6 +31,7 @@ interface Call {
 class Client extends StreamServiceClientExtension(Object) {
   public readonly calls: Call[] = [];
   public readonly operationIds: string[] = [];
+  public readonly outputTypes: (nexus.TypeInfo<unknown, unknown> | undefined)[] = [];
   public nexusClients = 0;
 
   public constructor(private readonly answers: Record<string, unknown[]>) {
@@ -50,12 +52,33 @@ class Client extends StreamServiceClientExtension(Object) {
           input,
         });
         this.operationIds.push(id);
+        this.outputTypes.push(operation.outputType);
         const answer = this.answers[operation.name].shift();
         return { result: async () => answer as never };
       },
     };
   }
 }
+
+// The model converters decode a body with the payload converter of the Workflow.
+beforeEach(() => {
+  vi.stubGlobal("__TEMPORAL_ACTIVATOR__", {
+    payloadConverter: common.defaultPayloadConverter,
+  });
+});
+
+afterEach(() => vi.unstubAllGlobals());
+
+class Turn {
+  public constructor(public readonly role: string) {}
+}
+
+const turnType: common.TypeInfo<Turn, { role: string }> = {
+  transferTypeConverter: {
+    toTransferType: (turn) => ({ role: turn.role }),
+    fromTransferType: (value) => new Turn(value.role),
+  },
+};
 
 async function readAll<T>(pages: AsyncIterable<T>): Promise<T[]> {
   const read: T[] = [];
@@ -117,7 +140,7 @@ describe("stream-service client target", () => {
 
   test("a read that doesn't wait stops at an empty page that didn't move", async () => {
     const ref: StreamRef = { id: "s1" };
-    const pages: ReadRecordsResponse[] = [
+    const pages: ReadRecordsResponse<unknown>[] = [
       {
         records: [{ offset: Long.fromNumber(1) }, { offset: Long.fromNumber(2) }],
         nextOffset: Long.fromNumber(3),
@@ -145,7 +168,7 @@ describe("stream-service client target", () => {
 
   test("a waiting read goes on after an empty page at the same offset", async () => {
     const ref: StreamRef = { id: "s1" };
-    const pages: ReadRecordsResponse[] = [
+    const pages: ReadRecordsResponse<unknown>[] = [
       { records: [{ offset: Long.fromNumber(1) }], nextOffset: Long.fromNumber(2) },
       { nextOffset: Long.fromNumber(2) },
       { done: true },
@@ -170,7 +193,7 @@ describe("stream-service client target", () => {
 
   test("a stream read from the end stays at the first next offset", async () => {
     const ref: StreamRef = { id: "s1" };
-    const pages: ReadRecordsResponse[] = [
+    const pages: ReadRecordsResponse<unknown>[] = [
       { nextOffset: Long.fromNumber(5) },
       { records: [{ offset: Long.fromNumber(5) }], nextOffset: Long.fromNumber(6) },
       { done: true },
@@ -197,7 +220,7 @@ describe("stream-service client target", () => {
 
   test("a done first page ends the read", async () => {
     const ref: StreamRef = { id: "s1" };
-    const pages: ReadRecordsResponse[] = [
+    const pages: ReadRecordsResponse<unknown>[] = [
       {
         records: [{ offset: Long.fromNumber(0) }],
         nextOffset: Long.fromNumber(1),
@@ -233,6 +256,46 @@ describe("stream-service client target", () => {
       { stream: ref, fromOffset: Long.fromNumber(1), wait: "30s" },
       { stream: ref, fromOffset: Long.fromNumber(2), wait: "30s" },
     ]);
+  });
+
+  test("a handle decodes the bodies of a read with its body type", async () => {
+    const client = new Client({
+      CreateStream: [{ stream: { id: "s1" } }],
+      ReadRecords: [{ done: true }],
+    });
+    const stream = await client.createStream({ id: "s1" }, turnType);
+
+    await stream.read();
+
+    expect(stream.bodyType).toBe(turnType);
+    // The type info of the started operation decodes the answer with the body type.
+    const decoded = client.outputTypes[1]?.transferTypeConverter?.fromTransferType({
+      records: [
+        {
+          item: "data",
+          data: { body: common.defaultPayloadConverter.toPayload({ role: "model" }) },
+          offset: Long.fromNumber(1),
+        },
+      ],
+    }) as ReadRecordsResponse<Turn>;
+    expect(decoded.records?.[0].item).toEqual({
+      tag: "data",
+      value: { body: new Turn("model") },
+    });
+  });
+
+  test("a client stream converts as its fields", async () => {
+    const client = new Client({
+      CreateStream: [{ stream: { id: "s1" }, created: false }],
+    });
+    const stream = await client.createStream({ id: "s1" }, turnType);
+    const converter = common.defaultPayloadConverter;
+
+    // The Nexus client and the body type aren't data.
+    expect(converter.fromPayload(converter.toPayload(stream))).toStrictEqual({
+      stream: { id: "s1" },
+      created: false,
+    });
   });
 
   test("a client class can't get an operation from two bases", () => {

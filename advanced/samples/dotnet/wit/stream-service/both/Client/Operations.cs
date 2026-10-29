@@ -51,19 +51,19 @@ namespace Temporalio.Workflows.Client
     /// Append one batch. Workflow code makes the call from a Local Activity.
     /// </summary>
     [GeneratedCode("nexgen", null)]
-    public class AppendRecordsOptions
+    public class AppendRecordsOptions<TBody>
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="AppendRecordsOptions"/> class.
+        /// Initializes a new instance of the <see cref="AppendRecordsOptions{TBody}"/> class.
         /// </summary>
-        public AppendRecordsOptions(StreamRef stream, IReadOnlyList<AppendRecord> records)
+        public AppendRecordsOptions(StreamRef stream, IReadOnlyList<AppendRecord<TBody>> records)
         {
             Stream = stream;
             Records = records;
         }
 
         public StreamRef Stream { get; set; }
-        public IReadOnlyList<AppendRecord> Records { get; set; }
+        public IReadOnlyList<AppendRecord<TBody>> Records { get; set; }
         /// <summary>
         /// Required outside a Workflow. In a Workflow the transport sets it.
         /// </summary>
@@ -163,23 +163,23 @@ namespace Temporalio.Workflows.Client
         /// Returns the <c>Stream</c> handle that has these identity fields.
         /// </summary>
         [GeneratedCode("nexgen", null)]
-        public static Stream GetStream(this Temporalio.Client.ITemporalClient client, StreamRef streamValue, bool? created) =>
+        public static Stream<TBody> GetStream<TBody>(this Temporalio.Client.ITemporalClient client, StreamRef streamValue, bool? created) =>
             new(client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService"), streamValue, created);
 
         /// <param name="client">The client that starts the operation.</param>
         /// <param name="request">Create a Stream, or get the open one. A closed, expired or another owner's Stream fails.</param>
         [GeneratedCode("nexgen", null)]
-        private static async Task<Stream> CreateStreamAsync(this Temporalio.Client.ITemporalClient client, CreateStreamRequest request)
+        private static async Task<Stream<TBody>> CreateStreamAsync<TBody>(this Temporalio.Client.ITemporalClient client, CreateStreamRequest request)
         {
             var nexusClient = client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService");
             var result = await nexusClient.ExecuteNexusOperationAsync<CreateStreamResult>("CreateStream", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
-            return new Stream(nexusClient, (result.Stream ?? throw new System.InvalidOperationException("CreateStream answered without `stream`")), result.Created);
+            return new Stream<TBody>(nexusClient, (result.Stream ?? throw new System.InvalidOperationException("CreateStream answered without `stream`")), result.Created);
         }
 
         /// <param name="client">The client that starts the operation.</param>
         /// <param name="options">Create a Stream, or get the open one. A closed, expired or another owner's Stream fails.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<Stream> CreateStreamAsync(this Temporalio.Client.ITemporalClient client, CreateStreamOptions options)
+        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(this Temporalio.Client.ITemporalClient client, CreateStreamOptions options)
         {
             var request = new CreateStreamRequest(options.Id)
             {
@@ -188,7 +188,7 @@ namespace Temporalio.Workflows.Client
                 Owner = options.Owner,
                 Ref = options.Ref,
             };
-            return CreateStreamAsync(client, request);
+            return CreateStreamAsync<TBody>(client, request);
         }
 
         /// <summary>
@@ -197,7 +197,7 @@ namespace Temporalio.Workflows.Client
         /// <param name="client">The client that starts the operation.</param>
         /// <param name="request">Append. FAILED_PRECONDITION if closed, fenced or format too new. NOT_FOUND if absent.</param>
         [GeneratedCode("nexgen", null)]
-        private static async Task<AppendRecordsResponse> AppendRecordsAsync(this Temporalio.Client.ITemporalClient client, AppendRecordsRequest request)
+        private static async Task<AppendRecordsResponse> AppendRecordsAsync<TBody>(this Temporalio.Client.ITemporalClient client, AppendRecordsRequest<TBody> request)
         {
             var nexusClient = client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService");
             var result = await nexusClient.ExecuteNexusOperationAsync<AppendRecordsResponse>("AppendRecords", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
@@ -210,9 +210,9 @@ namespace Temporalio.Workflows.Client
         /// <param name="client">The client that starts the operation.</param>
         /// <param name="options">Append. FAILED_PRECONDITION if closed, fenced or format too new. NOT_FOUND if absent.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<AppendRecordsResponse> AppendRecordsAsync(this Temporalio.Client.ITemporalClient client, AppendRecordsOptions options)
+        public static Task<AppendRecordsResponse> AppendRecordsAsync<TBody>(this Temporalio.Client.ITemporalClient client, AppendRecordsOptions<TBody> options)
         {
-            var request = new AppendRecordsRequest(options.Stream, options.Records)
+            var request = new AppendRecordsRequest<TBody>(options.Stream, options.Records)
             {
                 Producer = options.Producer,
             };
@@ -249,10 +249,10 @@ namespace Temporalio.Workflows.Client
         /// <param name="client">The client that starts the operation.</param>
         /// <param name="request">Read Records from an offset.</param>
         [GeneratedCode("nexgen", null)]
-        private static async Task<ReadRecordsResponse> ReadRecordsAsync(this Temporalio.Client.ITemporalClient client, ReadRecordsRequest request)
+        private static async Task<ReadRecordsResponse<TBody>> ReadRecordsAsync<TBody>(this Temporalio.Client.ITemporalClient client, ReadRecordsRequest request)
         {
             var nexusClient = client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService");
-            var result = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
+            var result = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse<TBody>>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
             return result;
         }
 
@@ -262,7 +262,7 @@ namespace Temporalio.Workflows.Client
         /// <param name="client">The client that starts the operation.</param>
         /// <param name="options">Read Records from an offset.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<ReadRecordsResponse> ReadRecordsAsync(this Temporalio.Client.ITemporalClient client, ReadRecordsOptions options)
+        public static Task<ReadRecordsResponse<TBody>> ReadRecordsAsync<TBody>(this Temporalio.Client.ITemporalClient client, ReadRecordsOptions options)
         {
             var request = new ReadRecordsRequest(options.Stream)
             {
@@ -274,17 +274,17 @@ namespace Temporalio.Workflows.Client
                 Last = options.Last,
                 MaxBytes = options.MaxBytes,
             };
-            return ReadRecordsAsync(client, request);
+            return ReadRecordsAsync<TBody>(client, request);
         }
 
         #if NETCOREAPP3_0_OR_GREATER
         [GeneratedCode("nexgen", null)]
-        private static async IAsyncEnumerable<ReadRecordsResponse> ReadRecordsPagesAsync(this Temporalio.Client.ITemporalClient client, ReadRecordsRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken = default)
+        private static async IAsyncEnumerable<ReadRecordsResponse<TBody>> ReadRecordsPagesAsync<TBody>(this Temporalio.Client.ITemporalClient client, ReadRecordsRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken = default)
         {
             var nexusClient = client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService");
             while (true)
             {
-                var response = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions(cancellationToken)).ConfigureAwait(false);
+                var response = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse<TBody>>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions(cancellationToken)).ConfigureAwait(false);
                 var nextRequest = Nexgen.Support.StreamPoll.NextReadRequest(request, response);
                 yield return response;
                 if (nextRequest == null)
@@ -305,7 +305,7 @@ namespace Temporalio.Workflows.Client
         /// <param name="options">Read Records from an offset.</param>
         /// <param name="cancellationToken">Cancels the poll, and the read in flight.</param>
         [GeneratedCode("nexgen", null)]
-        public static IAsyncEnumerable<ReadRecordsResponse> ReadRecordsPagesAsync(this Temporalio.Client.ITemporalClient client, ReadRecordsOptions options, System.Threading.CancellationToken cancellationToken = default)
+        public static IAsyncEnumerable<ReadRecordsResponse<TBody>> ReadRecordsPagesAsync<TBody>(this Temporalio.Client.ITemporalClient client, ReadRecordsOptions options, System.Threading.CancellationToken cancellationToken = default)
         {
             var request = new ReadRecordsRequest(options.Stream)
             {
@@ -317,7 +317,7 @@ namespace Temporalio.Workflows.Client
                 Last = options.Last,
                 MaxBytes = options.MaxBytes,
             };
-            return ReadRecordsPagesAsync(client, request, cancellationToken);
+            return ReadRecordsPagesAsync<TBody>(client, request, cancellationToken);
         }
         #endif
 

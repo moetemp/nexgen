@@ -33,7 +33,7 @@ def user_payload_converter(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_read_items_round_trip_as_their_records() -> None:
-    converter = models._ReadRecordsResponseTransferTypeConverter()
+    converter = models._ReadRecordsResponseTransferTypeConverter[dict[str, str]]()
     model = ReadRecordsResponse(
         records=[
             StreamRecord(
@@ -72,7 +72,7 @@ def test_read_items_round_trip_as_their_records() -> None:
 
 
 def test_a_record_of_an_unknown_item_kind_has_no_item() -> None:
-    converter = models._StreamRecordTransferTypeConverter()
+    converter = models._StreamRecordTransferTypeConverter[object]()
     # Offset 1, and an item in field 5, which only a newer server knows.
     wire = message_pb2.StreamRecord.FromString(b"\x08\x01\x2a\x00")
 
@@ -82,7 +82,7 @@ def test_a_record_of_an_unknown_item_kind_has_no_item() -> None:
 
 
 def test_a_request_without_its_stream_is_refused() -> None:
-    converter = models._AppendRecordsRequestTransferTypeConverter()
+    converter = models._AppendRecordsRequestTransferTypeConverter[object]()
     wire = converter.to_transfer_type(AppendRecordsRequest(stream=StreamRef(id="s-1")))
     assert wire.stream.id == "s-1"
 

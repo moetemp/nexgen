@@ -88,6 +88,9 @@ def _stream_status_from_proto(value: int) -> StreamStatus:
         return StreamStatus.StreamStatusUnspecified
 
 
+BodyT = typing.TypeVar("BodyT")
+
+
 @dataclasses.dataclass(slots=True)
 class CreateStreamRequest:
     """Create a Stream, or get the open one. A closed, expired or another owner's Stream
@@ -521,13 +524,13 @@ temporalio.converter.transfer_type_convertible(
 
 
 @dataclasses.dataclass(slots=True)
-class AppendRecordsRequest:
+class AppendRecordsRequest(typing.Generic[BodyT]):
     """Append. FAILED_PRECONDITION if closed, fenced or format too new. NOT_FOUND if
     absent.
     """
 
     handle: StreamHandle
-    records: list[AppendRecord]
+    records: list[AppendRecord[BodyT]]
     producer: Producer | None = None
     sequence: int | None = None
     withdraw_run: str | None = None
@@ -535,7 +538,7 @@ class AppendRecordsRequest:
 
 class _AppendRecordsRequestTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        AppendRecordsRequest,
+        AppendRecordsRequest[BodyT],
         temporalio.api.streamservice.v1.request_response_pb2.AppendRecordsRequest,
     ]
 ):
@@ -548,15 +551,21 @@ class _AppendRecordsRequestTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.streamservice.v1.request_response_pb2.AppendRecordsRequest,
-        type_hint: type[AppendRecordsRequest],
-    ) -> AppendRecordsRequest:
+        type_hint: type[AppendRecordsRequest[BodyT]],
+    ) -> AppendRecordsRequest[BodyT]:
+        (body_type,) = typing.get_args(type_hint) or (typing.Any,)
         if not value.HasField("handle"):
             raise ValueError("missing required field AppendRecordsRequest.handle")
         handle = _StreamHandleTransferTypeConverter().from_transfer_type(
             value.handle, StreamHandle
         )
         records = [
-            _AppendRecordTransferTypeConverter().from_transfer_type(item, AppendRecord)
+            typing.cast(
+                AppendRecord[BodyT],
+                _AppendRecordTransferTypeConverter().from_transfer_type(
+                    item, AppendRecord[body_type]
+                ),
+            )
             for item in value.records
         ]
         return AppendRecordsRequest(
@@ -574,7 +583,7 @@ class _AppendRecordsRequestTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: AppendRecordsRequest,
+        value: AppendRecordsRequest[BodyT],
     ) -> temporalio.api.streamservice.v1.request_response_pb2.AppendRecordsRequest:
         message = (
             temporalio.api.streamservice.v1.request_response_pb2.AppendRecordsRequest()
@@ -599,20 +608,20 @@ class _AppendRecordsRequestTransferTypeConverter(
 
 
 temporalio.converter.transfer_type_convertible(
-    _AppendRecordsRequestTransferTypeConverter
+    _AppendRecordsRequestTransferTypeConverter[typing.Any]
 )(AppendRecordsRequest)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)
-class AppendRecord:
+class AppendRecord(typing.Generic[BodyT]):
     """One Record to append."""
 
-    body: typing.Any
+    body: BodyT
 
 
 class _AppendRecordTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        AppendRecord, temporalio.api.stream.v1.message_pb2.AppendRecord
+        AppendRecord[BodyT], temporalio.api.stream.v1.message_pb2.AppendRecord
     ]
 ):
     transfer_type: type[temporalio.api.stream.v1.message_pb2.AppendRecord] | None = (
@@ -623,11 +632,12 @@ class _AppendRecordTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.stream.v1.message_pb2.AppendRecord,
-        type_hint: type[AppendRecord],
-    ) -> AppendRecord:
+        type_hint: type[AppendRecord[BodyT]],
+    ) -> AppendRecord[BodyT]:
+        (body_type,) = typing.get_args(type_hint) or (typing.Any,)
         if not value.HasField("body"):
             raise ValueError("missing required field AppendRecord.body")
-        body = _support.payload_from_proto(value.body)
+        body = typing.cast(BodyT, _support.payload_from_proto(value.body, body_type))
         return AppendRecord(
             body=body,
         )
@@ -635,16 +645,16 @@ class _AppendRecordTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: AppendRecord,
+        value: AppendRecord[BodyT],
     ) -> temporalio.api.stream.v1.message_pb2.AppendRecord:
         message = temporalio.api.stream.v1.message_pb2.AppendRecord()
         message.body.CopyFrom(_support.payload_to_proto(value.body))
         return message
 
 
-temporalio.converter.transfer_type_convertible(_AppendRecordTransferTypeConverter)(
-    AppendRecord
-)  # pyright: ignore[reportUnusedCallResult]
+temporalio.converter.transfer_type_convertible(
+    _AppendRecordTransferTypeConverter[typing.Any]
+)(AppendRecord)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)
@@ -898,15 +908,15 @@ temporalio.converter.transfer_type_convertible(
 
 
 @dataclasses.dataclass(slots=True)
-class ReadRecordsResponse:
-    records: list[StreamRecord]
+class ReadRecordsResponse(typing.Generic[BodyT]):
+    records: list[StreamRecord[BodyT]]
     next_offset: int | None = None
     done: bool | None = None
 
 
 class _ReadRecordsResponseTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        ReadRecordsResponse,
+        ReadRecordsResponse[BodyT],
         temporalio.api.streamservice.v1.request_response_pb2.ReadRecordsResponse,
     ]
 ):
@@ -919,10 +929,16 @@ class _ReadRecordsResponseTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.streamservice.v1.request_response_pb2.ReadRecordsResponse,
-        type_hint: type[ReadRecordsResponse],
-    ) -> ReadRecordsResponse:
+        type_hint: type[ReadRecordsResponse[BodyT]],
+    ) -> ReadRecordsResponse[BodyT]:
+        (body_type,) = typing.get_args(type_hint) or (typing.Any,)
         records = [
-            _StreamRecordTransferTypeConverter().from_transfer_type(item, StreamRecord)
+            typing.cast(
+                StreamRecord[BodyT],
+                _StreamRecordTransferTypeConverter().from_transfer_type(
+                    item, StreamRecord[body_type]
+                ),
+            )
             for item in value.records
         ]
         return ReadRecordsResponse(
@@ -934,7 +950,7 @@ class _ReadRecordsResponseTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: ReadRecordsResponse,
+        value: ReadRecordsResponse[BodyT],
     ) -> temporalio.api.streamservice.v1.request_response_pb2.ReadRecordsResponse:
         message = (
             temporalio.api.streamservice.v1.request_response_pb2.ReadRecordsResponse()
@@ -952,21 +968,21 @@ class _ReadRecordsResponseTransferTypeConverter(
 
 
 temporalio.converter.transfer_type_convertible(
-    _ReadRecordsResponseTransferTypeConverter
+    _ReadRecordsResponseTransferTypeConverter[typing.Any]
 )(ReadRecordsResponse)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)
-class StreamRecord:
+class StreamRecord(typing.Generic[BodyT]):
     """One item that a read gives."""
 
-    item: StreamItem | None = None
+    item: StreamItem[BodyT] | None = None
     offset: int | None = None
 
 
 class _StreamRecordTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        StreamRecord, temporalio.api.stream.v1.message_pb2.StreamRecord
+        StreamRecord[BodyT], temporalio.api.stream.v1.message_pb2.StreamRecord
     ]
 ):
     transfer_type: type[temporalio.api.stream.v1.message_pb2.StreamRecord] | None = (
@@ -977,14 +993,20 @@ class _StreamRecordTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.stream.v1.message_pb2.StreamRecord,
-        type_hint: type[StreamRecord],
-    ) -> StreamRecord:
-        _oneof_item: StreamItemData | StreamItemSuperseded | StreamItemClose | None
+        type_hint: type[StreamRecord[BodyT]],
+    ) -> StreamRecord[BodyT]:
+        (body_type,) = typing.get_args(type_hint) or (typing.Any,)
+        _oneof_item: (
+            StreamItemData[BodyT] | StreamItemSuperseded | StreamItemClose | None
+        )
         match value.WhichOneof("item"):
             case "data":
                 _oneof_item = StreamItemData(
-                    _StreamDataTransferTypeConverter().from_transfer_type(
-                        value.data, StreamData
+                    typing.cast(
+                        StreamData[BodyT],
+                        _StreamDataTransferTypeConverter().from_transfer_type(
+                            value.data, StreamData[body_type]
+                        ),
                     )
                 )
             case "superseded":
@@ -1009,7 +1031,7 @@ class _StreamRecordTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: StreamRecord,
+        value: StreamRecord[BodyT],
     ) -> temporalio.api.stream.v1.message_pb2.StreamRecord:
         message = temporalio.api.stream.v1.message_pb2.StreamRecord()
         if value.item is not None:
@@ -1037,22 +1059,22 @@ class _StreamRecordTransferTypeConverter(
         return message
 
 
-temporalio.converter.transfer_type_convertible(_StreamRecordTransferTypeConverter)(
-    StreamRecord
-)  # pyright: ignore[reportUnusedCallResult]
+temporalio.converter.transfer_type_convertible(
+    _StreamRecordTransferTypeConverter[typing.Any]
+)(StreamRecord)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)
-class StreamData:
+class StreamData(typing.Generic[BodyT]):
     """One Record that a Producer appended."""
 
-    body: typing.Any
+    body: BodyT
     producer: Producer | None = None
 
 
 class _StreamDataTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        StreamData, temporalio.api.stream.v1.message_pb2.StreamData
+        StreamData[BodyT], temporalio.api.stream.v1.message_pb2.StreamData
     ]
 ):
     transfer_type: type[temporalio.api.stream.v1.message_pb2.StreamData] | None = (
@@ -1063,11 +1085,12 @@ class _StreamDataTransferTypeConverter(
     def from_transfer_type(
         self,
         value: temporalio.api.stream.v1.message_pb2.StreamData,
-        type_hint: type[StreamData],
-    ) -> StreamData:
+        type_hint: type[StreamData[BodyT]],
+    ) -> StreamData[BodyT]:
+        (body_type,) = typing.get_args(type_hint) or (typing.Any,)
         if not value.HasField("body"):
             raise ValueError("missing required field StreamData.body")
-        body = _support.payload_from_proto(value.body)
+        body = typing.cast(BodyT, _support.payload_from_proto(value.body, body_type))
         return StreamData(
             body=body,
             producer=_ProducerTransferTypeConverter().from_transfer_type(
@@ -1080,7 +1103,7 @@ class _StreamDataTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self,
-        value: StreamData,
+        value: StreamData[BodyT],
     ) -> temporalio.api.stream.v1.message_pb2.StreamData:
         message = temporalio.api.stream.v1.message_pb2.StreamData()
         message.body.CopyFrom(_support.payload_to_proto(value.body))
@@ -1091,9 +1114,9 @@ class _StreamDataTransferTypeConverter(
         return message
 
 
-temporalio.converter.transfer_type_convertible(_StreamDataTransferTypeConverter)(
-    StreamData
-)  # pyright: ignore[reportUnusedCallResult]
+temporalio.converter.transfer_type_convertible(
+    _StreamDataTransferTypeConverter[typing.Any]
+)(StreamData)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)
@@ -1421,8 +1444,8 @@ temporalio.converter.transfer_type_convertible(
 
 
 @dataclasses.dataclass(slots=True)
-class StreamItemData:
-    value: StreamData
+class StreamItemData(typing.Generic[BodyT]):
+    value: StreamData[BodyT]
 
 
 @dataclasses.dataclass(slots=True)
@@ -1435,5 +1458,5 @@ class StreamItemClose:
     value: StreamClose
 
 
-StreamItem = StreamItemData | StreamItemSuperseded | StreamItemClose
+StreamItem = StreamItemData[BodyT] | StreamItemSuperseded | StreamItemClose
 """A read item: a Record, a Superseded item or the close."""

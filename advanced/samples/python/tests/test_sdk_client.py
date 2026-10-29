@@ -33,6 +33,7 @@ from wit.stream_service.client.client import (
 )
 from wit.stream_service.client import models as client_models
 from wit.stream_service.both.models import (
+    AppendRecord,
     AppendRecordsRequest,
     AppendRecordsResponse,
     CloseStreamRequest,
@@ -213,11 +214,11 @@ async def test_an_operation_starts_through_the_sdk_nexus_client() -> None:
         assert not hasattr(client, f"_stream_service_{name}")
 
     stream = await client.create_stream(str, id="s1")
-    response = await stream.publish(records=[])
+    last_offset = await stream.publish()
     await stream.close()
 
     assert stream.ref.id == "s1"
-    assert response.last_offset == 7
+    assert last_offset == 7
     assert len(client.created_clients) == 1
     create, append, close = answers.started
     assert (create.service, create.endpoint, create.operation) == (
@@ -269,7 +270,7 @@ async def test_a_client_append_sends_the_writer_of_its_activity(
     )
     stream = client.get_stream(ref=StreamRef(id="s1"), created=None, body_type=str)
 
-    _ = await stream.publish(records=[])
+    _ = await stream.publish()
 
     (append,) = answers.started
     writer = StreamWriter(
@@ -286,6 +287,33 @@ async def test_a_client_append_sends_the_writer_of_its_activity(
     assert not wire.writer.HasField("previous_completed_task")
     assert list(wire.writer.failed_tasks) == []
     assert wire.writer.withdraw_run == ""
+
+
+async def test_a_publish_wraps_each_value_and_returns_the_last_offset() -> None:
+    ref = StreamRef(id="s1")
+    client, answers = connect(
+        Client,
+        {
+            "AppendRecords": [
+                AppendRecordsResponse(first_offset=4, last_offset=5),
+                AppendRecordsResponse(),
+            ]
+        },
+    )
+    stream = client.get_stream(ref=ref, body_type=str)
+
+    last_offset = await stream.publish("a", "b")
+    empty = await stream.publish()
+
+    _ = assert_type(last_offset, int)
+    assert last_offset == 5
+    assert answers.started[0].arg == AppendRecordsRequest(
+        ref=ref,
+        records=[AppendRecord(body="a"), AppendRecord(body="b")],
+        writer=StreamWriter(producer=Producer(id="client:sample"), failed_tasks=[]),
+    )
+    # `last_offset` has no presence on the wire, so an empty publish answers 0.
+    assert empty == 0
 
 
 async def test_a_create_takes_the_handle_fields_as_parameters() -> None:

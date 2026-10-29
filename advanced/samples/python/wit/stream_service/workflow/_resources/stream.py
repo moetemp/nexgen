@@ -49,16 +49,17 @@ class Stream(typing.Generic[BodyT]):
 
     async def publish(
         self,
-        records: list[AppendRecord[BodyT]],
-    ) -> AppendRecordsResponse:
+        *values: BodyT,
+    ) -> int:
         """Publish values, and return the offset of the last one."""
         request = AppendRecordsRequest(
             ref=self.ref,
-            records=records,
+            records=[AppendRecord(body=value) for value in values],
             writer=_support.workflow_writer(),
         )
         handle = await _append_records(request)
-        return await handle
+        response = await handle
+        return response.last_offset or 0
 
     async def close(
         self,

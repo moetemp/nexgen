@@ -199,8 +199,8 @@ async def test_workflow_apis_call_the_stream_service(
     request_id = uuid.UUID(int=7)
     monkeypatch.setattr(temporalio.workflow, "uuid4", lambda: request_id)
     stream = await api.create_stream(str, id="workflow-stream")
-    response = await stream.publish(records=[])
-    assert response.last_offset == 3
+    last_offset = await stream.publish()
+    assert last_offset == 3
     # The Workflow API fills the request id and the writer from its sources.
     writer = model_types.StreamWriter(
         producer=model_types.Producer(id="wf:r2", run_id="r2"), failed_tasks=[]

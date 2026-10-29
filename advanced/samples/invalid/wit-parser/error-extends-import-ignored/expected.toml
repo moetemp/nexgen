@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["invalid WIT directive `@nexus.error` on type `job-service.job-error-reason`", "`python-extends-import` has no effect, since `python-extends` is a dotted path"]

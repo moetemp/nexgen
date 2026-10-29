@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit"
+contains = ["`job-service.job-error-reason` and `job-service.queue-error-reason` both have `@nexus.error`, but an interface has one error enum"]

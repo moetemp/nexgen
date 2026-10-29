@@ -19,12 +19,14 @@ from ...models import (
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
+    StreamErrorDetails,
     StreamReadStart,
     StreamRecord,
     StreamRef,
 )
 import temporal_support as _support
 from .._poll import PollIterator
+from ...errors import StreamError, stream_error
 
 
 BodyT = typing.TypeVar("BodyT")
@@ -81,15 +83,24 @@ class Stream(typing.Generic[BodyT]):
             previous_completed_task=_support.local_activity_previous_completed_task(),
             withdraw_run=_support.withdraw_run(),
         )
-        handle = await self._nexus_client.start_operation(
-            operation=StreamService.append_records,
-            arg=request,
-            id=f"{_uuid.uuid4()}",
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        response = await handle.result()
-        return response.last_offset or 0
+        try:
+            handle = await self._nexus_client.start_operation(
+                operation=StreamService.append_records,
+                arg=request,
+                id=f"{_uuid.uuid4()}",
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            response = await handle.result()
+            return response.last_offset or 0
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def close(
         self,
@@ -102,14 +113,23 @@ class Stream(typing.Generic[BodyT]):
             ref=self.ref,
             producer=_support.client_producer(),
         )
-        handle = await self._nexus_client.start_operation(
-            operation=StreamService.close_stream,
-            arg=request,
-            id=f"{_uuid.uuid4()}",
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        _ = await handle.result()
+        try:
+            handle = await self._nexus_client.start_operation(
+                operation=StreamService.close_stream,
+                arg=request,
+                id=f"{_uuid.uuid4()}",
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            _ = await handle.result()
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def read(
         self,
@@ -133,15 +153,24 @@ class Stream(typing.Generic[BodyT]):
             create_wait=create_wait,
             max_bytes=max_bytes,
         )
-        handle = await self._nexus_client.start_operation(
-            operation="ReadRecords",
-            arg=request,
-            id=f"{_uuid.uuid4()}",
-            result_type=ReadRecordsResponse[self.body_type],
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        return await handle.result()
+        try:
+            handle = await self._nexus_client.start_operation(
+                operation="ReadRecords",
+                arg=request,
+                id=f"{_uuid.uuid4()}",
+                result_type=ReadRecordsResponse[self.body_type],
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            return await handle.result()
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def iter_read(
         self,
@@ -184,15 +213,24 @@ class Stream(typing.Generic[BodyT]):
         )
         nexus_client = self._nexus_client
         while True:
-            operation_handle = await nexus_client.start_operation(
-                operation="ReadRecords",
-                arg=request,
-                id=f"{_uuid.uuid4()}",
-                result_type=ReadRecordsResponse[self.body_type],
-                rpc_metadata=rpc_metadata or {},
-                rpc_timeout=rpc_timeout,
-            )
-            response = await operation_handle.result()
+            try:
+                operation_handle = await nexus_client.start_operation(
+                    operation="ReadRecords",
+                    arg=request,
+                    id=f"{_uuid.uuid4()}",
+                    result_type=ReadRecordsResponse[self.body_type],
+                    rpc_metadata=rpc_metadata or {},
+                    rpc_timeout=rpc_timeout,
+                )
+                response = await operation_handle.result()
+            except StreamError:
+                raise
+            except Exception as err:
+                found = _support.error_details(err, StreamErrorDetails)
+                if found is None:
+                    raise
+                details, message = found
+                raise stream_error(details, message) from err
             next_request = _support.next_read_request(request, response)
             yield response
             if next_request is None:
@@ -268,14 +306,23 @@ class Stream(typing.Generic[BodyT]):
         request = DescribeStreamRequest(
             ref=self.ref,
         )
-        handle = await self._nexus_client.start_operation(
-            operation=StreamService.describe_stream,
-            arg=request,
-            id=f"{_uuid.uuid4()}",
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        return await handle.result()
+        try:
+            handle = await self._nexus_client.start_operation(
+                operation=StreamService.describe_stream,
+                arg=request,
+                id=f"{_uuid.uuid4()}",
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            return await handle.result()
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
 
 __all__ = ["Stream"]

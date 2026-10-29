@@ -1,0 +1,20 @@
+package test:error-without-name@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  // The base class needs its name.
+  /// @nexus.error details="job-error-details" field="reason"
+  enum job-error-reason {
+    job-error-reason-unspecified,
+    /// @nexus.error
+    job-error-reason-missing,
+  }
+
+  record job-error-details { reason: option<job-error-reason>, note: option<string> }
+
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}

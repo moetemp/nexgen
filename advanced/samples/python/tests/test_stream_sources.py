@@ -9,6 +9,9 @@ import inspect
 import uuid
 
 import pytest
+from temporalio.api.enums.v1 import stream_pb2
+from temporalio.api.stream.v1 import message_pb2
+import temporalio.exceptions
 import temporalio.workflow
 from typing_extensions import assert_type
 
@@ -16,6 +19,7 @@ import temporal_support
 import wit.stream_service.both.workflow as stream_service
 import wit.stream_service.both.workflow._resources.stream as stream_module
 from wit.stream_service.both.workflow._resources import Stream
+from wit.stream_service.both.errors import StreamFencedError, StreamUnsupportedError
 from wit.stream_service.both.models import (
     AppendRecord,
     AppendRecordsRequest,
@@ -23,6 +27,8 @@ from wit.stream_service.both.models import (
     CreateStreamRequest,
     CreateStreamResult,
     Producer,
+    StreamErrorDetails,
+    StreamErrorReason,
     StreamRef,
 )
 from wit.stream_service.both.workflow.operations.create_stream import create_stream
@@ -141,3 +147,73 @@ def test_a_workflow_factory_builds_a_handle_on_the_run_operations() -> None:
     assert handle.ref == StreamRef(id="turns", backend="redis")
     assert handle.created is None
     assert handle.body_type is str
+
+
+async def test_workflow_code_raises_the_class_of_a_local_activity_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    error = temporalio.exceptions.ActivityError(
+        "failed",
+        scheduled_event_id=1,
+        started_event_id=2,
+        identity="worker",
+        activity_type="append",
+        activity_id="1",
+        retry_state=None,
+    )
+    error.__cause__ = temporalio.exceptions.ApplicationError(
+        "fenced",
+        message_pb2.StreamErrorDetails(reason=stream_pb2.STREAM_ERROR_REASON_FENCED),
+        type="StreamFencedError",
+    )
+
+    class FailingNexusClient:
+        async def start_operation(
+            self, operation: str, input: object, *, output_type: object
+        ) -> collections.abc.Awaitable[object]:
+            del operation, input, output_type
+
+            async def result() -> object:
+                raise error
+
+            return result()
+
+    def create_nexus_client(**_: object) -> FailingNexusClient:
+        return FailingNexusClient()
+
+    monkeypatch.setattr(temporalio.workflow, "create_nexus_client", create_nexus_client)
+    monkeypatch.setattr(temporalio.workflow, "info", lambda: FakeWorkflowInfo("r2"))
+    stream = Stream(ref=StreamRef(id="s1"), created=None, body_type=str)
+
+    # The handle's result fails, after the start, and the method converts that too.
+    with pytest.raises(StreamFencedError) as raised:
+        _ = await stream.publish("a")
+
+    assert raised.value.__cause__ is error
+    assert raised.value.message == "fenced"
+
+
+async def test_a_workflow_create_raises_the_class_of_its_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    details = StreamErrorDetails(reason=StreamErrorReason.StreamErrorReasonUnsupported)
+    failure = temporalio.exceptions.ApplicationError("no such backend", details)
+
+    class FailingNexusClient:
+        async def start_operation(
+            self, operation: str, input: object, *, output_type: object
+        ) -> collections.abc.Awaitable[object]:
+            del operation, input, output_type
+            raise failure
+
+    def create_nexus_client(**_: object) -> FailingNexusClient:
+        return FailingNexusClient()
+
+    monkeypatch.setattr(temporalio.workflow, "create_nexus_client", create_nexus_client)
+    monkeypatch.setattr(temporalio.workflow, "info", lambda: FakeWorkflowInfo("r2"))
+
+    # The operation function converts too, not only the calls of a handle.
+    with pytest.raises(StreamUnsupportedError, match="no such backend") as raised:
+        _ = await create_stream(str, id="turns", backend="nowhere")
+
+    assert raised.value.__cause__ is failure

@@ -1,0 +1,21 @@
+package test:error-field-unknown@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  // `kind` isn't a field of the details.
+  /// @nexus.error details="job-error-details" field="kind" name="job-error"
+  ///   python-extends="temporalio.exceptions.ApplicationError"
+  enum job-error-reason {
+    job-error-reason-unspecified,
+    /// @nexus.error
+    job-error-reason-missing,
+  }
+
+  record job-error-details { reason: option<job-error-reason> }
+
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}

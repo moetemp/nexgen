@@ -1,0 +1,21 @@
+package test:error-details-not-a-record@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  // A failed call holds the reason in a field of a record.
+  /// @nexus.error details="job-error-note" field="reason" name="job-error"
+  ///   python-extends="temporalio.exceptions.ApplicationError"
+  enum job-error-reason {
+    job-error-reason-unspecified,
+    /// @nexus.error
+    job-error-reason-missing,
+  }
+
+  type job-error-note = string;
+
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}

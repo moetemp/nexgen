@@ -58,6 +58,34 @@ function streamStatusFromNumber(value: number): StreamStatus {
   return StreamStatus.StreamStatusUnspecified;
 }
 
+export enum StreamErrorReason {
+  StreamErrorReasonUnspecified = 0,
+  StreamErrorReasonNotFound = 1,
+  StreamErrorReasonExpired = 2,
+  StreamErrorReasonClosed = 3,
+  StreamErrorReasonFenced = 4,
+  StreamErrorReasonSequenceTooLow = 5,
+  StreamErrorReasonSeqDivergent = 6,
+  StreamErrorReasonNotOwner = 7,
+  StreamErrorReasonFormatTooNew = 8,
+  StreamErrorReasonOffsetTooHigh = 9,
+  StreamErrorReasonTooLarge = 10,
+  StreamErrorReasonInvalid = 11,
+  StreamErrorReasonStorageUnavailable = 12,
+  StreamErrorReasonUnknownWriter = 13,
+  StreamErrorReasonUnsupported = 14,
+  StreamErrorReasonAlreadyExists = 15,
+  StreamErrorReasonStorageCorrupt = 16,
+}
+
+function streamErrorReasonFromNumber(value: number): StreamErrorReason {
+  if (value in StreamErrorReason) {
+    return value as StreamErrorReason;
+  }
+  // A newer peer can send a case that this enum doesn't know.
+  return StreamErrorReason.StreamErrorReasonUnspecified;
+}
+
 /**
  * The epoch of each kind of Producer.
  */
@@ -1366,5 +1394,44 @@ export const describeStreamRequestTransferTypeConverter = {
     value: DescribeStreamRequest,
   ): temporal.api.streamservice.v1.IDescribeStreamRequest {
     return describeStreamRequestToProto(value);
+  },
+};
+export interface StreamErrorDetails {
+  reason?: StreamErrorReason;
+}
+
+function streamErrorDetailsFromProto(
+  proto: temporal.api.stream.v1.IStreamErrorDetails,
+): StreamErrorDetails {
+  return {
+    reason:
+      proto.reason == null
+        ? undefined
+        : streamErrorReasonFromNumber(proto.reason as number),
+  };
+}
+
+function streamErrorDetailsToProto(
+  model: StreamErrorDetails,
+): temporal.api.stream.v1.IStreamErrorDetails {
+  return {
+    reason:
+      model.reason == null
+        ? undefined
+        : (model.reason as number as temporal.api.enums.v1.StreamErrorReason),
+  };
+}
+
+export const streamErrorDetailsTransferTypeConverter = {
+  fromTransferType(
+    value: temporal.api.stream.v1.IStreamErrorDetails,
+  ): StreamErrorDetails {
+    return streamErrorDetailsFromProto(value);
+  },
+
+  toTransferType(
+    value: StreamErrorDetails,
+  ): temporal.api.stream.v1.IStreamErrorDetails {
+    return streamErrorDetailsToProto(value);
   },
 };

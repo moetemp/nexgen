@@ -1,0 +1,21 @@
+package test:error-unknown-details@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  // `job-failure` isn't a type of the interface.
+  /// @nexus.error details="job-failure" field="reason" name="job-error"
+  ///   python-extends="temporalio.exceptions.ApplicationError"
+  enum job-error-reason {
+    job-error-reason-unspecified,
+    /// @nexus.error
+    job-error-reason-missing,
+  }
+
+  record job-error-details { reason: option<job-error-reason>, note: option<string> }
+
+  record run-request { id: string }
+
+  run: func(request: run-request);
+}

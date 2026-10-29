@@ -1,14 +1,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
-use heck::{ToSnakeCase, ToUpperCamelCase};
+use heck::{ToShoutySnakeCase, ToSnakeCase, ToUpperCamelCase};
 use indexmap::IndexMap;
 
 use crate::error::{Error, Result};
 use crate::generator::json_schema::python as python_json;
 use crate::generator::proto::python as python_proto;
 use crate::generator::{
-    ExternalModelBackend, GeneratedFileMap, GeneratedFileOrigin, GeneratedFiles,
+    ErrorClasses, ExternalModelBackend, GeneratedFileMap, GeneratedFileOrigin, GeneratedFiles,
+    error_classes,
 };
 use crate::language::Language;
 use crate::nexgen_config::GenerationTarget;
@@ -24,8 +25,8 @@ use crate::planning::{
     RequestPlan, RequestPlanField, RequestPlanSource, ResolvedResourceBindingSource,
 };
 use crate::spec::{
-    AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FieldOrigin, FlagsSpec,
-    FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, LanguageImportSpec,
+    AliasTypeSpec, EnumSpec, EnumValueSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FieldOrigin,
+    FlagsSpec, FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, LanguageImportSpec,
     LanguageImportStyle, ModulePath, OperationPollSpec, OperationSpec, RecordFieldSpec, RecordSpec,
     SelectedTextSpec, TypeDeclSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
@@ -548,6 +549,7 @@ impl<'a> ApiPlanner<'a> {
 
     fn build(mut self, module_origin: GeneratedFileOrigin) -> Result<PythonGenerationResult> {
         let api_plan = self.api_plan;
+        let error_classes = error_classes(api_plan, Language::Python, "Error")?;
         let services = api_plan
             .services
             .iter()
@@ -572,6 +574,10 @@ impl<'a> ApiPlanner<'a> {
                         .iter()
                         .map(|resource| resource.data.clone())
                         .collect(),
+                    error_conversion: error_classes
+                        .iter()
+                        .find(|classes| classes.service == service.name)
+                        .map(python_error_conversion),
                 })
             })
             .collect::<Result<Vec<_>>>()?;
@@ -821,6 +827,13 @@ impl<'a> ApiPlanner<'a> {
                             module_origin.clone(),
                         )?;
                     }
+                }
+                if let Some(errors) = self.render_errors_module()? {
+                    files.insert(
+                        "errors.py",
+                        errors,
+                        GeneratedFileOrigin::fixed("generated Python error classes"),
+                    )?;
                 }
                 Ok(())
             },
@@ -1264,9 +1277,61 @@ impl<'a> ApiPlanner<'a> {
         render_support_import(&mut output, &body, self.support_package, false);
         render_poll_iterator_import(&mut output, &body, "._poll");
         render_resource_call_import(&mut output, &body, ".._resource_call");
+        render_error_function_import(
+            &mut output,
+            &body,
+            "..errors",
+            &services.iter().collect::<Vec<_>>(),
+        );
         output.push_str("\n\n");
         output.push_str(&body);
         Ok(output)
+    }
+
+    /// Renders `errors.py`, with a class per case of each error enum under one base, and the
+    /// function that gives the class of a failed call's details.
+    fn render_errors_module(&self) -> Result<Option<String>> {
+        let error_classes = error_classes(self.api_plan, Language::Python, "Error")?;
+        if error_classes.is_empty() {
+            return Ok(None);
+        }
+        let mut modules = BTreeSet::new();
+        let mut model_names = BTreeSet::new();
+        let mut body = String::new();
+        for classes in &error_classes {
+            let field = self
+                .model_field_attr(&classes.details.full_name, &classes.error.field)
+                .unwrap_or_else(|| python_field_name(&classes.field.name));
+            if let Some((module, _)) = classes.extends.rsplit_once('.') {
+                modules.insert(module.to_string());
+            }
+            model_names.insert(classes.details.name.clone());
+            model_names.insert(classes.enumeration.name.clone());
+            render_error_classes(&mut body, classes, &field);
+        }
+        let mut output = String::new();
+        render_generated_file_header(&mut output);
+        output.push_str(
+            "
+import typing
+
+",
+        );
+        for module in &modules {
+            output.push_str(&format!(
+                "import {module}
+"
+            ));
+        }
+        if !modules.is_empty() {
+            output.push('\n');
+        }
+        output.push_str(&format!(
+            "from .models import {}\n",
+            model_names.into_iter().collect::<Vec<_>>().join(", ")
+        ));
+        output.push_str(&body);
+        Ok(Some(output))
     }
 
     /// A public method that builds a client handle from the identity fields of a resource, for
@@ -1703,6 +1768,7 @@ impl<'a> ApiPlanner<'a> {
             ".."
         };
         render_resource_call_import(&mut output, &body, &format!("{shared}_resource_call"));
+        render_error_function_import(&mut output, &body, &format!("{shared}errors"), &[service]);
         if !body.is_empty() {
             output.push('\n');
             output.push('\n');
@@ -1966,6 +2032,7 @@ impl<'a> ApiPlanner<'a> {
                         &result_annotation,
                         &request_expr,
                         result_expr,
+                        service.error_conversion.as_ref(),
                     );
                 }
             }
@@ -2199,7 +2266,14 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("        nexus_client = self.");
         output.push_str(&resource_client_identifier(resource, "_nexus_client"));
         output.push('\n');
-        render_client_poll_loop(output, service, operation, &next_expr, "self.");
+        render_client_poll_loop(
+            output,
+            service,
+            operation,
+            &next_expr,
+            "self.",
+            service.error_conversion.as_ref(),
+        );
         let Some((_, item)) = &operation.poll_items else {
             return;
         };
@@ -3866,6 +3940,17 @@ struct RenderedService<'a> {
     delay_load_temporalio_workflow: bool,
     operations: Vec<RenderedOperation<'a>>,
     resources: Vec<PlannedResource>,
+    /// How the calls turn a failed call into the class of its error enum.
+    error_conversion: Option<PythonErrorConversion>,
+}
+
+/// The details model of an interface's error enum, its base class, and the function that gives
+/// the error class of a failed call's details.
+#[derive(Debug, Clone)]
+struct PythonErrorConversion {
+    details_model: String,
+    base_class: String,
+    function: String,
 }
 
 #[derive(Debug)]
@@ -5906,6 +5991,15 @@ fn render_workflow_clients_module(
         &body,
         &python_api_root_module_import(GenerationTarget::Workflow, 1, "_resource_call"),
     );
+    render_error_function_import(
+        &mut output,
+        &body,
+        &python_api_root_module_import(GenerationTarget::Workflow, 1, "errors"),
+        &services
+            .iter()
+            .filter(|service| service.endpoint.is_none())
+            .collect::<Vec<_>>(),
+    );
     output.push_str("\n\n");
     output.push_str(&body);
     output
@@ -6008,6 +6102,12 @@ fn render_operation_module(
         &mut output,
         &body,
         &python_api_root_module_import(GenerationTarget::Workflow, 2, "_resource_call"),
+    );
+    render_error_function_import(
+        &mut output,
+        &body,
+        &python_api_root_module_import(GenerationTarget::Workflow, 2, "errors"),
+        &[service],
     );
     output.push('\n');
     output.push('\n');
@@ -6615,7 +6715,9 @@ fn render_endpoint_service_object_operation_method(
     output.push_str("    ) -> ");
     output.push_str(&operation_public_return_annotation(service, operation));
     output.push_str(":\n");
-    render_endpoint_service_object_operation_body(output, service, operation);
+    let mut call = String::new();
+    render_endpoint_service_object_operation_body(&mut call, service, operation);
+    render_error_conversion(output, "        ", &call, service.error_conversion.as_ref());
 }
 
 fn render_endpoint_service_object_unpacked_method(
@@ -6668,7 +6770,9 @@ fn render_endpoint_service_object_unpacked_method(
         output.push_str(",\n");
     }
     output.push_str("        )\n");
-    render_endpoint_service_object_operation_body(output, service, operation);
+    let mut call = String::new();
+    render_endpoint_service_object_operation_body(&mut call, service, operation);
+    render_error_conversion(output, "        ", &call, service.error_conversion.as_ref());
 }
 
 fn render_endpoint_service_object_operation_body(
@@ -7333,6 +7437,158 @@ fn validate_workflow_factory_names(services: &[RenderedService<'_>]) -> Result<(
     Ok(())
 }
 
+/// The conversion of a failed call of a service whose interface has an error enum.
+fn python_error_conversion(classes: &ErrorClasses<'_>) -> PythonErrorConversion {
+    PythonErrorConversion {
+        details_model: classes.details.name.clone(),
+        base_class: classes.base.name.clone(),
+        function: error_function_name(classes),
+    }
+}
+
+fn error_function_name(classes: &ErrorClasses<'_>) -> String {
+    classes.error.name.to_snake_case()
+}
+
+/// Renders the classes of one error enum, with the map from each case to its class and the
+/// function that reads the map.
+fn render_error_classes(body: &mut String, classes: &ErrorClasses<'_>, field: &str) {
+    let enum_name = &classes.enumeration.name;
+    let member = |value: &EnumValueSpec| format!("{enum_name}.{}", value.name);
+    let base = &classes.base.name;
+    body.push_str(&format!("\n\nclass {base}({}):\n", classes.extends));
+    let doc = format!(
+        "A failed call, with its ``{enum_name}``. A reason with no class of its own raises this \
+         class."
+    );
+    render_python_docstring(body, "    ", Some(&doc), &[], None, false);
+    body.push_str(&format!(
+        concat!(
+            "\n    _reason: typing.ClassVar[{enum_name}] = {unspecified}\n",
+            "    _failure_type: typing.ClassVar[str] = \"{failure_type}\"\n",
+            "    _retryable: typing.ClassVar[bool] = False\n\n",
+            "    def __init__(self, message: str, *, reason: {enum_name} | None = None) -> None:\n",
+            "        reason = self._reason if reason is None else reason\n",
+            "        super().__init__(\n",
+            "            message,\n",
+            "            {details}({field}=reason),\n",
+            "            type=self._failure_type,\n",
+            "            non_retryable=not self._retryable,\n",
+            "        )\n",
+            "        self.reason: {enum_name} = reason\n",
+        ),
+        enum_name = enum_name,
+        unspecified = member(classes.unspecified),
+        failure_type = classes.base.failure_type,
+        details = classes.details.name,
+        field = field,
+    ));
+    for case in &classes.cases {
+        body.push_str(&format!("\n\nclass {}({base}):\n", case.name));
+        render_python_docstring(
+            body,
+            "    ",
+            Some(&format!("The error of ``{}``.", member(case.value))),
+            &[],
+            None,
+            false,
+        );
+        body.push_str(&format!(
+            "\n    _reason: typing.ClassVar[{enum_name}] = {}\n",
+            member(case.value)
+        ));
+        body.push_str(&format!(
+            "    _failure_type: typing.ClassVar[str] = \"{}\"\n",
+            case.failure_type
+        ));
+        if case.retryable {
+            body.push_str("    _retryable: typing.ClassVar[bool] = True\n");
+        }
+    }
+    let map_name = format!("_{}S", classes.error.name.to_shouty_snake_case());
+    body.push_str(&format!(
+        "\n\n{map_name}: dict[{enum_name}, type[{base}]] = {{\n"
+    ));
+    for case in &classes.cases {
+        body.push_str(&format!("    {}: {},\n", member(case.value), case.name));
+    }
+    body.push_str("}\n");
+    body.push_str(&format!(
+        concat!(
+            "\n\ndef {function}(details: {details}, message: str) -> {base}:\n",
+            "    \"\"\"The error of the reason in the details of a failed call. A reason with no \
+             class of its\n",
+            "    own, or one that this code doesn't know, gives ``{base}``.\n",
+            "    \"\"\"\n",
+            "    reason = details.{field} or {unspecified}\n",
+            "    return {map_name}.get(reason, {base})(message, reason=reason)\n",
+        ),
+        function = error_function_name(classes),
+        details = classes.details.name,
+        base = base,
+        field = field,
+        unspecified = member(classes.unspecified),
+        map_name = map_name,
+    ));
+}
+
+/// Wraps the call of an operations object in a `try`, which raises the class of the failed
+/// call's error reason from the original error. Other errors propagate.
+fn render_error_conversion(
+    output: &mut String,
+    indent: &str,
+    call: &str,
+    conversion: Option<&PythonErrorConversion>,
+) {
+    let Some(conversion) = conversion else {
+        output.push_str(call);
+        return;
+    };
+    output.push_str(&format!("{indent}try:\n"));
+    for line in call.lines() {
+        if line.is_empty() {
+            output.push('\n');
+        } else {
+            output.push_str(&format!("    {line}\n"));
+        }
+    }
+    // An inner call that converts raised the class already, so it passes through as is.
+    output.push_str(&format!(
+        concat!(
+            "{indent}except {base}:\n",
+            "{indent}    raise\n",
+            "{indent}except Exception as err:\n",
+            "{indent}    found = _support.error_details(err, {details})\n",
+            "{indent}    if found is None:\n",
+            "{indent}        raise\n",
+            "{indent}    details, message = found\n",
+            "{indent}    raise {function}(details, message) from err\n",
+        ),
+        indent = indent,
+        base = conversion.base_class,
+        details = conversion.details_model,
+        function = conversion.function,
+    ));
+}
+
+/// Imports the error class and function of each interface whose calls the body converts.
+fn render_error_function_import(
+    output: &mut String,
+    body: &str,
+    module: &str,
+    services: &[&RenderedService<'_>],
+) {
+    let conversions = services
+        .iter()
+        .filter_map(|service| service.error_conversion.as_ref())
+        .filter(|conversion| body.contains(&format!("raise {}(details", conversion.function)))
+        .map(|conversion| (conversion.base_class.as_str(), conversion.function.as_str()))
+        .collect::<BTreeSet<_>>();
+    for (base_class, function) in conversions {
+        output.push_str(&format!("from {module} import {base_class}, {function}\n"));
+    }
+}
+
 /// The keyword arguments with which a factory builds its handle.
 fn render_resource_factory_arguments(
     output: &mut String,
@@ -7682,11 +7938,33 @@ fn render_resource_method_inline_operation_body(
     };
 
     render_resource_method_request(output, request_expr);
+    let mut call = String::new();
+    render_resource_method_inline_call(
+        &mut call,
+        service,
+        operation,
+        *direct_return,
+        result_annotation,
+        result_field,
+    );
+    render_error_conversion(output, "        ", &call, service.error_conversion.as_ref());
+}
+
+/// Starts the operation of a method of a service with no endpoint through the Nexus client that
+/// the handle holds, after the request.
+fn render_resource_method_inline_call(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    direct_return: bool,
+    result_annotation: &str,
+    result_field: Option<&str>,
+) {
     output.push_str("        nexus_client = getattr(self, \"_nexus_client\")\n");
     let returns_direct = operation.output_transform_expr.is_some()
         || operation.output_resource_return.is_some()
         || operation.output_direct_result;
-    if !returns_direct && *direct_return {
+    if !returns_direct && direct_return {
         if result_annotation == "None" {
             output.push_str("        await ");
         } else {
@@ -7905,13 +8183,15 @@ fn render_resource_from_data(output: &mut String, indent: &str, operation: &Rend
     output.push_str(")\n");
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_resource_method_operation_body(
-    output: &mut String,
+    out: &mut String,
     method: &PlannedResourceMethod,
     operation: &RenderedOperation<'_>,
     result_annotation: &str,
     request_expr: &str,
     result_field: Option<&str>,
+    conversion: Option<&PythonErrorConversion>,
 ) {
     let PlannedResourceMethodBindingSpec::Operation { direct_return, .. } = &method.binding else {
         return;
@@ -7922,7 +8202,10 @@ fn render_resource_method_operation_body(
         request_operation_function_name(operation),
         operation.runtime_type_args("self.")
     );
-    render_resource_method_request(output, request_expr);
+    render_resource_method_request(out, request_expr);
+    // The operation function converts a failure to start, and the handle's result can fail too.
+    let mut body = String::new();
+    let output = &mut body;
     if *direct_return {
         if result_annotation == "None" {
             output.push_str("        await ");
@@ -7943,6 +8226,7 @@ fn render_resource_method_operation_body(
             render_result_field_return(output, result_field);
         }
     }
+    render_error_conversion(out, "        ", &body, conversion);
 }
 
 fn python_missing_request_defaults<'a>(
@@ -9293,7 +9577,14 @@ fn render_operation_poll_function(
     render_poll_function_request(output, operation);
     // The iteration uses one Nexus client for every page.
     render_inline_nexus_client(output, target, service);
-    render_client_poll_loop(output, service, operation, next_expr, "");
+    render_client_poll_loop(
+        output,
+        service,
+        operation,
+        next_expr,
+        "",
+        service.error_conversion.as_ref(),
+    );
 }
 
 /// The item iterator of a polled operation, with the parameters of its page iterator.
@@ -9452,9 +9743,42 @@ fn render_client_poll_loop(
     operation: &RenderedOperation<'_>,
     next_expr: &str,
     receiver: &str,
+    conversion: Option<&PythonErrorConversion>,
 ) {
     let target = GenerationTarget::Client;
     start_line(output, target, "    while True:\n");
+    render_client_poll_response(output, service, operation, receiver, conversion);
+    // The helper runs first, so a change to the yielded page doesn't change the next request.
+    start_line(output, target, "        next_request = ");
+    output.push_str(next_expr);
+    output.push_str("(request, response)\n");
+    start_line(output, target, "        yield response\n");
+    start_line(output, target, "        if next_request is None:\n");
+    start_line(output, target, "            return\n");
+    start_line(output, target, "        request = next_request\n");
+}
+
+/// Starts one page of a client poll as a new operation, and sets `response`.
+fn render_client_poll_response(
+    out: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    receiver: &str,
+    conversion: Option<&PythonErrorConversion>,
+) {
+    let mut call = String::new();
+    render_client_poll_page(&mut call, service, operation, receiver);
+    render_error_conversion(out, "            ", &call, conversion);
+}
+
+/// Starts one page of a client poll, and sets `response`.
+fn render_client_poll_page(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    receiver: &str,
+) {
+    let target = GenerationTarget::Client;
     // A standalone iterator takes the request fields as parameters, so `handle` can be one of them.
     start_line(
         output,
@@ -9492,14 +9816,6 @@ fn render_client_poll_loop(
             "        response = await operation_handle.result()\n",
         );
     }
-    // The helper runs first, so a change to the yielded page doesn't change the next request.
-    start_line(output, target, "        next_request = ");
-    output.push_str(next_expr);
-    output.push_str("(request, response)\n");
-    start_line(output, target, "        yield response\n");
-    start_line(output, target, "        if next_request is None:\n");
-    start_line(output, target, "            return\n");
-    start_line(output, target, "        request = next_request\n");
 }
 
 /// The `operation` of a client start call. Only the overload that takes the operation name takes
@@ -9658,6 +9974,32 @@ fn render_client_operation_method(
 /// The body of a client call. A resource method with `result_field` returns that field of the
 /// response.
 fn render_client_operation_body(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    client: Option<&str>,
+    discard_result: bool,
+    result_field: Option<&str>,
+) {
+    let mut call = String::new();
+    render_client_operation_call(
+        &mut call,
+        service,
+        operation,
+        client,
+        discard_result,
+        result_field,
+    );
+    render_error_conversion(
+        output,
+        target_body_indent(GenerationTarget::Client),
+        &call,
+        service.error_conversion.as_ref(),
+    );
+}
+
+/// The call of a client operation, from its Nexus client to its result.
+fn render_client_operation_call(
     output: &mut String,
     service: &RenderedService<'_>,
     operation: &RenderedOperation<'_>,
@@ -9906,17 +10248,14 @@ fn render_request_only_operation_function(
         output.push_str(",\n");
     }
     operation.render_runtime_type_parameters(output, "    ");
-    if operation.output_transform_expr.is_some()
-        || operation.output_resource_return.is_some()
-        || operation.output_direct_result
-    {
-        output.push_str(") -> ");
+    let returns_direct = operation_returns_direct(operation);
+    output.push_str(") -> ");
+    if returns_direct {
         output.push_str(&function_unpacked_implementation_return_annotation(
             service, operation,
         ));
         output.push_str(":\n");
     } else {
-        output.push_str(") -> ");
         output.push_str(&temporalio_workflow_type_ref(
             service,
             "NexusOperationHandle",
@@ -9929,16 +10268,29 @@ fn render_request_only_operation_function(
         ));
         output.push_str(",\n");
         output.push_str("]:\n");
-        if render_request_doc {
-            render_operation_docstring(output, "    ", operation, &[], None);
-        }
-        render_temporalio_workflow_runtime_imports(
-            output,
-            service,
-            &temporalio_workflow_operation_runtime_names(service, operation),
-            "    ",
-        );
-        render_inline_nexus_client(output, GenerationTarget::Workflow, service);
+    }
+    if render_request_doc {
+        render_operation_docstring(output, "    ", operation, &[], None);
+    }
+    render_temporalio_workflow_runtime_imports(
+        output,
+        service,
+        &temporalio_workflow_operation_runtime_names(service, operation),
+        "    ",
+    );
+    render_inline_nexus_client(output, GenerationTarget::Workflow, service);
+    let mut call = String::new();
+    render_request_only_operation_call(&mut call, service, operation);
+    render_error_conversion(output, "    ", &call, service.error_conversion.as_ref());
+}
+
+/// The call of a Workflow operation function, after its Nexus client.
+fn render_request_only_operation_call(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+) {
+    if !operation_returns_direct(operation) {
         if operation.generic_model_types {
             output.push_str("    return typing.cast(\n");
             output.push_str("        ");
@@ -9989,19 +10341,7 @@ fn render_request_only_operation_function(
         return;
     }
 
-    if render_request_doc {
-        render_operation_docstring(output, "    ", operation, &[], None);
-    }
-
-    render_temporalio_workflow_runtime_imports(
-        output,
-        service,
-        &temporalio_workflow_operation_runtime_names(service, operation),
-        "    ",
-    );
-
     if operation.output_direct_result {
-        render_inline_nexus_client(output, GenerationTarget::Workflow, service);
         output.push_str("    handle = await nexus_client.start_operation(\n");
         output.push_str("        operation=");
         output.push_str(&python_string_literal(operation.wire_name));
@@ -10023,7 +10363,6 @@ fn render_request_only_operation_function(
         return;
     }
 
-    render_inline_nexus_client(output, GenerationTarget::Workflow, service);
     output.push_str("    handle = await nexus_client.start_operation(\n");
     output.push_str("        operation=");
     output.push_str(&python_string_literal(operation.wire_name));

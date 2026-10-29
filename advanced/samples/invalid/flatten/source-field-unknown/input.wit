@@ -1,0 +1,21 @@
+package test:source-field-unknown@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  record get-history-request {
+    namespace: string,
+    // `owner` isn't a field of `workflow-execution`.
+    /// @nexus.flatten-in-api fields="workflow-id"
+    /// @nexus.source field="owner" targets="workflow" python="workflow_owner()"
+    execution: option<workflow-execution>,
+  }
+
+  get-history: func(request: get-history-request);
+}

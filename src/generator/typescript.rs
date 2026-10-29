@@ -394,6 +394,11 @@ impl<'a> ApiPlanner<'a> {
             PlannedType::Record(record) => Some(record.full_name.as_str()),
             _ => None,
         });
+        let api_plan = self.api_plan;
+        let flattened_fields = input_full_name
+            .and_then(|name| api_plan.record(name))
+            .map(|record| self.input_flattened_fields(record))
+            .unwrap_or_default();
         let rendered_input = input.map(|input| {
             let input_conversion = self.resolve_message_value_conversion(input);
             let input_model =
@@ -439,6 +444,10 @@ impl<'a> ApiPlanner<'a> {
                                 record.sources_for(target).map(|(_, field, _)| {
                                     typescript_generated_field_name(&field.name)
                                 }),
+                            );
+                            // The input takes the promoted fields of a flattened field instead.
+                            fields.extend(
+                                flattened_fields.iter().map(|flatten| flatten.name.clone()),
                             );
                             fields.sort();
                             fields.dedup();
@@ -546,6 +555,7 @@ impl<'a> ApiPlanner<'a> {
                 api_omitted_fields: workflow.api_omitted_fields,
                 sourced_fields: workflow.sourced_fields,
                 default_initialization: workflow.default_initialization,
+                flattened_fields: flattened_fields.clone(),
                 client,
                 transfer_type_converter: input_conversion
                     .wire_function_names
@@ -562,6 +572,20 @@ impl<'a> ApiPlanner<'a> {
                     .or_else(|| self.external_models.transfer_type_converter(input)),
             }
         });
+
+        if let Some(input) = &rendered_input
+            && !input.flattened_fields.is_empty()
+            && (input.default_initialization.is_some()
+                || input
+                    .client
+                    .as_ref()
+                    .is_some_and(|client| client.default_initialization.is_some()))
+        {
+            return Err(Error::UnsupportedTypeScriptFlatten {
+                operation: operation.name.clone(),
+                reason: "its request has a `@nexus.default` too".to_string(),
+            });
+        }
 
         // The final public return annotation may already contain type arguments.
         // Service definitions and operation handles apply their own arguments, so
@@ -694,6 +718,68 @@ impl<'a> ApiPlanner<'a> {
                 },
             ),
         })
+    }
+
+    fn input_flattened_fields(
+        &mut self,
+        record: &RecordSpec<PlannedFamily>,
+    ) -> Vec<RenderedInputFlatten> {
+        let api_plan = self.api_plan;
+        record
+            .fields
+            .values()
+            .filter_map(|field| {
+                let flatten = field.flatten.as_ref()?;
+                let PlannedType::Record(nested) = &field.field_type else {
+                    return None;
+                };
+                let nested = api_plan.record(&nested.full_name)?;
+                let proto_backed = matches!(nested.source, Some(ExternalTypeSourceSpec::Proto(_)));
+                let long_ints = std::mem::replace(&mut self.long_ints, proto_backed);
+                let promoted = flatten
+                    .fields
+                    .iter()
+                    .filter_map(|key| {
+                        let nested_field = nested.fields.get(key)?;
+                        let value = self.resolve_planned_value_type(&nested_field.field_type);
+                        Some((
+                            typescript_generated_field_name(&nested_field.name),
+                            value.annotation,
+                            !nested_field.required,
+                        ))
+                    })
+                    .collect();
+                self.long_ints = long_ints;
+                let fills = flatten
+                    .fills
+                    .iter()
+                    .filter_map(|(inner, outer)| {
+                        let sibling = record.fields.get(outer)?;
+                        Some((
+                            typescript_generated_field_name(&nested.fields.get(inner)?.name),
+                            typescript_generated_field_name(&sibling.name),
+                            sibling.required,
+                        ))
+                    })
+                    .collect();
+                let sources = flatten
+                    .sources
+                    .iter()
+                    .filter_map(|(key, origin)| {
+                        Some((
+                            typescript_generated_field_name(&nested.fields.get(key)?.name),
+                            origin.clone()?,
+                        ))
+                    })
+                    .collect();
+                Some(RenderedInputFlatten {
+                    name: typescript_generated_field_name(&field.name),
+                    promoted,
+                    fills,
+                    sources,
+                })
+            })
+            .collect()
     }
 
     /// The public model interface name for `model_type`, when it's defined in
@@ -3374,10 +3460,26 @@ struct RenderedOperationInput {
     api_omitted_fields: Vec<String>,
     sourced_fields: Vec<RenderedSourcedField>,
     default_initialization: Option<String>,
+    /// The fields whose `@nexus.flatten-in-api` makes each target take some of their fields.
+    flattened_fields: Vec<RenderedInputFlatten>,
     /// The parts of the request that differ for the client target, which has its own sources and
     /// defaults.
     client: Option<RenderedTargetInput>,
     transfer_type_converter: Option<String>,
+}
+
+/// A field-level flatten of an operation input. The input takes the promoted fields in place of
+/// the field, and the call builds the field from them and from its fills.
+#[derive(Debug, Clone)]
+struct RenderedInputFlatten {
+    name: String,
+    /// The promoted fields, by name, with their annotations and optionality.
+    promoted: Vec<(String, String, bool)>,
+    /// Each filled field, with the name of the sibling field that fills it and whether the
+    /// sibling always has a value.
+    fills: Vec<(String, String, bool)>,
+    /// Each field that a source fills, by name, with the source's origin.
+    sources: Vec<(String, FieldOrigin)>,
 }
 
 /// The parts of an operation's request that depend on the API target.
@@ -7227,7 +7329,10 @@ fn render_operation_function(
     operation.render_definition_parameter(output, "  ");
     if let Some(input) = &operation.input {
         output.push_str(
-            if input.sourced_fields.is_empty() && input.default_initialization.is_none() {
+            if input.sourced_fields.is_empty()
+                && input.default_initialization.is_none()
+                && input.flattened_fields.is_empty()
+            {
                 "  request: "
             } else {
                 "  requestInput: "
@@ -7265,6 +7370,17 @@ fn render_operation_function(
                 "...requestInput,\n",
                 &format!("...requestInput,\n{sourced}"),
             ));
+        } else if !input.flattened_fields.is_empty() {
+            render_flattened_request(
+                output,
+                "  ",
+                "const",
+                "requestInput",
+                &input.annotation,
+                &input.sourced_fields,
+                &input.flattened_fields,
+                GenerationTarget::Workflow,
+            );
         } else if !input.sourced_fields.is_empty() {
             output.push_str("  const request = ");
             output.push_str("{\n    ...requestInput,\n");
@@ -7515,6 +7631,7 @@ fn render_operation_input_alias(
         &input.annotation,
         &input.api_omitted_fields,
         input.default_initialization.is_some(),
+        &input.flattened_fields,
     );
 }
 
@@ -7526,6 +7643,7 @@ fn render_input_alias(
     annotation: &str,
     api_omitted_fields: &[String],
     has_defaults: bool,
+    flattens: &[RenderedInputFlatten],
 ) {
     if api_omitted_fields.is_empty() && !has_defaults {
         return;
@@ -7558,7 +7676,24 @@ fn render_input_alias(
         output.push_str(field);
         output.push_str("?: never");
     }
-    output.push_str(" }\n    : never\n  : never;\n\n");
+    output.push_str(" }");
+    let promoted = flattens
+        .iter()
+        .flat_map(|flatten| &flatten.promoted)
+        .map(|(name, annotation, optional)| {
+            if *optional {
+                format!("{name}?: {annotation}")
+            } else {
+                format!("{name}: {annotation}")
+            }
+        })
+        .collect::<Vec<_>>();
+    if !promoted.is_empty() {
+        output.push_str(" & { ");
+        output.push_str(&promoted.join("; "));
+        output.push_str(" }");
+    }
+    output.push_str("\n    : never\n  : never;\n\n");
 }
 
 fn render_resource_constructor(
@@ -7797,6 +7932,7 @@ fn render_client_package(
                     &client.annotation,
                     &client.api_omitted_fields,
                     client.default_initialization.is_some(),
+                    &input.flattened_fields,
                 );
             }
         }
@@ -8107,6 +8243,107 @@ fn render_client_result(
     }
 }
 
+/// Declares `request` from `request_input`, which takes the promoted fields of each flattened
+/// field. A source fills its field, and a flattened field is built from its promoted fields and its
+/// fills.
+#[allow(clippy::too_many_arguments)]
+fn render_flattened_request(
+    output: &mut String,
+    indent: &str,
+    declaration: &str,
+    request_input: &str,
+    annotation: &str,
+    sourced_fields: &[RenderedSourcedField],
+    flattens: &[RenderedInputFlatten],
+    target: GenerationTarget,
+) {
+    let promoted = flattens
+        .iter()
+        .flat_map(|flatten| flatten.promoted.iter().map(|(name, _, _)| name.as_str()))
+        .collect::<Vec<_>>();
+    let filled_siblings = flattens
+        .iter()
+        .flat_map(|flatten| flatten.fills.iter().map(|(_, sibling, _)| sibling.as_str()))
+        .collect::<BTreeSet<_>>();
+    output.push_str(&format!(
+        "{indent}const {{ {}, ...requestFields }} = {request_input};\n",
+        promoted.join(", ")
+    ));
+    // A fill reads its sibling, so a sourced sibling runs once, into a local.
+    let mut values = BTreeMap::<&str, String>::new();
+    for source in sourced_fields {
+        if filled_siblings.contains(source.name.as_str()) {
+            output.push_str(&format!(
+                "{indent}const {} = {};\n",
+                source.name, source.source_expr
+            ));
+            values.insert(&source.name, source.name.clone());
+        } else {
+            values.insert(&source.name, source.source_expr.clone());
+        }
+    }
+    let member = |name: &str, value: &str| {
+        if name == value {
+            name.to_string()
+        } else {
+            format!("{name}: {value}")
+        }
+    };
+    output.push_str(&format!("{indent}{declaration} request = {{\n"));
+    output.push_str(&format!("{indent}  ...requestFields,\n"));
+    for source in sourced_fields {
+        output.push_str(&format!(
+            "{indent}  {},\n",
+            member(&source.name, &values[source.name.as_str()])
+        ));
+    }
+    for flatten in flattens {
+        let fill_values = flatten
+            .fills
+            .iter()
+            .map(|(inner, sibling, required)| {
+                let value = values
+                    .get(sibling.as_str())
+                    .cloned()
+                    .unwrap_or_else(|| format!("requestFields.{sibling}"));
+                (inner, value, *required)
+            })
+            .collect::<Vec<_>>();
+        // A source sets its field when the record is built, but doesn't build it.
+        let members = flatten
+            .promoted
+            .iter()
+            .map(|(name, _, _)| name.clone())
+            .chain(
+                fill_values
+                    .iter()
+                    .map(|(inner, value, _)| member(inner, value)),
+            )
+            .chain(flatten.sources.iter().filter_map(|(name, origin)| {
+                let source = origin.source_for(target)?;
+                Some(member(name, &sourced_support_call(source)))
+            }))
+            .collect::<Vec<_>>()
+            .join(", ");
+        // The field is set when a promoted field is set or a fill has a value.
+        let value = if fill_values.iter().any(|(_, _, required)| *required) {
+            format!("{{ {members} }}")
+        } else {
+            let unset = flatten
+                .promoted
+                .iter()
+                .map(|(name, _, _)| name.clone())
+                .chain(fill_values.iter().map(|(_, value, _)| value.clone()))
+                .map(|value| format!("{value} === undefined"))
+                .collect::<Vec<_>>()
+                .join(" && ");
+            format!("{unset} ? undefined : {{ {members} }}")
+        };
+        output.push_str(&format!("{indent}  {}: {value},\n", flatten.name));
+    }
+    output.push_str(&format!("{indent}}} as {annotation};\n"));
+}
+
 /// Declares `request` from `request_input`, with the client target's sources and defaults.
 fn render_client_request(
     output: &mut String,
@@ -8136,6 +8373,17 @@ fn render_client_request(
             output.push_str(line.trim_start());
             output.push('\n');
         }
+    } else if !input.flattened_fields.is_empty() {
+        render_flattened_request(
+            output,
+            indent,
+            declaration,
+            request_input,
+            &input.request_annotation,
+            &client.sourced_fields,
+            &input.flattened_fields,
+            GenerationTarget::Client,
+        );
     } else if !client.sourced_fields.is_empty() {
         output.push_str(&format!("{indent}{declaration} request = {{\n"));
         output.push_str(&format!("{indent}  ...{request_input},\n"));
@@ -8197,7 +8445,9 @@ fn render_client_method_signature(
     }
     if let Some(input) = &operation.input {
         let client = client_target_input(input);
-        let fills = !client.sourced_fields.is_empty() || client.default_initialization.is_some();
+        let fills = !client.sourced_fields.is_empty()
+            || client.default_initialization.is_some()
+            || !input.flattened_fields.is_empty();
         output.push_str(if fills {
             "      requestInput: "
         } else {
@@ -8218,7 +8468,10 @@ fn client_request_input_name(operation: &RenderedOperation<'_>) -> &'static str 
     match &operation.input {
         Some(input) => {
             let client = client_target_input(input);
-            if !client.sourced_fields.is_empty() || client.default_initialization.is_some() {
+            if !client.sourced_fields.is_empty()
+                || client.default_initialization.is_some()
+                || !input.flattened_fields.is_empty()
+            {
                 "requestInput"
             } else {
                 "request"

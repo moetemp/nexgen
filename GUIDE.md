@@ -1138,6 +1138,60 @@ the optional nested record when none of its fields are supplied. Go uses nil
 pointers internally for wire presence, but its public options use
 default-punning: empty strings mean omitted.
 
+#### Flattening some fields of one field
+
+On a field, `@nexus.flatten-in-api` promotes the fields that `fields` names. A
+`fill` sets a field of the record to the value of a sibling field, which the
+call takes as a parameter or gets from its source. A sourced sibling's source
+runs once, and the request and the fill take its value.
+
+```wit
+record create-stream-request {
+  /// @nexus.name python="id" typescript="id" dotnet="Id"
+  stream-id: string,
+  /// @nexus.flatten-in-api fields="backend" fill="id=stream-id"
+  %ref: option<stream-ref>,
+}
+```
+
+The call takes `backend`, and the ref copies the id. The call sets the field
+when it sets a promoted field or a fill applies, so this create always sets
+`ref`.
+
+```python
+async def create_stream(..., id: str, backend: str | None = None, ...) -> ...:
+    ref = StreamRef(backend=backend, id=id)
+    request = CreateStreamRequest(id=id, ref=ref)
+```
+
+The field's type must be a record that a proto backs, or an `option` of one. The
+call must give each required field of that record, as a promoted field or with a
+fill. `fields` names at least one field, and a field of the record is in
+`fields` or `fill` once. A promoted field can't have the name of a sibling or of
+another promoted field, in any case. A fill can't change the type, and it can't
+fill a required field from an optional sibling. The call must set the sibling as
+a value, so an api-omitted, flattened or function field can't fill. The field
+can't have a source, a default, an api-omit or `@nexus.omit` too, and its record
+can't flatten all of its fields already. A record-level flatten takes no
+arguments. TypeScript takes the promoted fields in the request of each target.
+Go refuses a field-level flatten, and Java doesn't generate proto-backed models.
+
+An `@nexus.source` with `field` on the same field fills a field of the record
+from a source, in the targets that it names. The Store refuses a Workflow create
+whose ref doesn't name the run chain, so the Workflow target sets the owner:
+
+```wit
+  /// @nexus.flatten-in-api fields="backend" fill="id=stream-id"
+  /// @nexus.source field="owner" targets="workflow" python="workflow_handle_owner()"
+  ///   typescript="workflowHandleOwner()" dotnet="StreamWorkflowContext.HandleOwner()"
+  %ref: option<stream-ref>,
+```
+
+The source sets its field when the call builds the record, but it doesn't make
+the call build it. `field` names an `option<T>` field of the record that
+`fields` and `fill` don't name, since a target with no source leaves it unset.
+Each target has one source for a field.
+
 ### Output Transforms
 
 An operation annotated with `@nexus.output-transform` transforms the raw
@@ -2100,7 +2154,7 @@ Cannot be combined with `@nexus.source`, `@nexus.type`, `@nexus.function`,
 ### @nexus.source
 
 **Placement:** Record field (within a `@nexus.proto` record) **Syntax:**
-`@nexus.source [targets="workflow,client"] python="<helper-call>" typescript="<helper-call>" go="<helper-call>" dotnet="<helper-call>"`
+`@nexus.source [field="<field>"] [targets="workflow,client"] python="<helper-call>" typescript="<helper-call>" go="<helper-call>" dotnet="<helper-call>"`
 
 Provides a field value through a helper in the package specified by
 `--support-package`. The field is not an argument in operation convenience APIs.
@@ -2118,6 +2172,10 @@ The sample's workflow API calls `_support.workflow_namespace()` in Python or
 this helper to the workflow target with `targets="workflow"`. Without a target
 list, a source applies to all targets. A field can have one source for each
 target. Models and wire conversion never evaluate the source.
+
+On a field with a field-level `@nexus.flatten-in-api`, `field="<field>"` names a
+field of the record that the source fills. See
+[Flattening some fields of one field](#flattening-some-fields-of-one-field).
 
 Cannot be combined with `@nexus.default`.
 
@@ -2412,11 +2470,16 @@ The stream sample's full helpers are in
 
 ### @nexus.flatten-in-api
 
-**Placement:** Record type (with `@nexus.proto`) **Syntax:**
-`@nexus.flatten-in-api` (no arguments)
+**Placement:** Record type (with `@nexus.proto`), or a field whose type is such
+a record **Syntax:** `@nexus.flatten-in-api` (no arguments) on a record,
+`@nexus.flatten-in-api fields="<field> ..." fill="<field>=<sibling> ..."` on a
+field
 
 Flattens the record's fields into the parent record's generated API surface
-instead of creating a nested model.
+instead of creating a nested model. On a field, it flattens only the fields that
+`fields` names, `fill` copies sibling fields into the record, and an
+`@nexus.source field=` fills a field of the record from a source. See
+[Flattening some fields of one field](#flattening-some-fields-of-one-field).
 
 ```wit
 /// @nexus.proto "temporal.api.sdk.v1.UserMetadata"
@@ -2426,8 +2489,6 @@ record user-metadata {
   static-details: option<payload>,
 }
 ```
-
-Only supported on record types.
 
 In Go, `@nexus.flatten-in-api` promotes the record's fields into the generated
 operation options struct. For a parent request with

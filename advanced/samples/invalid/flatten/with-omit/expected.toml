@@ -1,0 +1,6 @@
+inputs = ["input.wit", "../../../inputs/deps"]
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.omit", "cannot be combined with `@nexus.flatten-in-api`"]

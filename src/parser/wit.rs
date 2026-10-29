@@ -944,7 +944,7 @@ fn build_wit_record_spec(
     let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
     let experimental = experimental_directive(&directives, path, &context)?;
     let source = build_type_source(type_def, path, interface_name)?;
-    let flatten_in_api = directive(&directives, "flatten-in-api", path, &context)?.is_some();
+    let flatten_in_api = record_flatten_in_api(&directives, path, &context)?;
     if directive(&directives, "omit", path, &context)?.is_some() {
         return Err(Error::InvalidWitDirective {
             path: path.to_path_buf(),
@@ -1166,7 +1166,7 @@ fn build_external_type_binding(
 
     let replacement = build_type_replacement(&directives, path, &context, &proto_name, language)?;
 
-    let flatten_in_api = directive(&directives, "flatten-in-api", path, &context)?.is_some();
+    let flatten_in_api = record_flatten_in_api(&directives, path, &context)?;
     let authored_record = matches!(type_def.kind, TypeDefKind::Record(_));
     if flatten_in_api && !authored_record {
         return Err(Error::InvalidWitDirective {
@@ -1264,8 +1264,14 @@ fn build_fields_from_record(
                 });
             }
 
-            for conflicting_directive in ["source", "type", "flattened-type", "function", "default"]
-            {
+            for conflicting_directive in [
+                "source",
+                "type",
+                "flattened-type",
+                "function",
+                "default",
+                "flatten-in-api",
+            ] {
                 if directive(&directives, conflicting_directive, path, &field_context)?.is_some() {
                     return Err(Error::InvalidWitDirective {
                         path: path.to_path_buf(),
@@ -1308,6 +1314,7 @@ fn build_fields_from_record(
                         default: Some(FieldOrigin::Omitted),
                         ..Default::default()
                     },
+                    flatten: None,
                     function: None,
                     data: (),
                 },
@@ -1332,6 +1339,11 @@ fn build_fields_from_record(
                 reason: "cannot be used on option<T> fields; use T and omit the operation argument instead".to_string(),
             });
         }
+        // A source with `field` fills a field of the record that the field's flatten builds.
+        let (nested_sources, directives): (Vec<_>, Vec<_>) =
+            directives.iter().cloned().partition(|directive| {
+                directive.name == "source" && directive.value("field").is_some()
+            });
         let sources = build_source_calls(&directives, path, &field_context, language)?;
         if !sources.is_empty()
             && field_default
@@ -1359,6 +1371,15 @@ fn build_fields_from_record(
                     .to_string(),
             });
         }
+        let flatten = build_field_flatten(
+            resolve,
+            record,
+            &field.ty,
+            &directives,
+            &nested_sources,
+            path,
+            &field_context,
+        )?;
         let annotation =
             directive(&directives, "type", path, &field_context)?.map(directive_language_string);
         let flattened_annotation = directive(&directives, "flattened-type", path, &field_context)?
@@ -1391,6 +1412,7 @@ fn build_fields_from_record(
                     path,
                     &field_context,
                 )?,
+                flatten,
                 function,
                 data: (),
             },
@@ -1422,6 +1444,7 @@ fn build_fields_from_record(
                         ),
                         required: arg_field.required,
                         origin: Default::default(),
+                        flatten: None,
                         function: None,
                         data: (),
                     },
@@ -1933,6 +1956,187 @@ fn target_field_origin(
         workflow: origin(crate::nexgen_config::GenerationTarget::Workflow),
         client: origin(crate::nexgen_config::GenerationTarget::Client),
     }
+}
+
+/// Whether a record has `@nexus.flatten-in-api`, which flattens each of its fields. The arguments
+/// of a flatten of some fields go on the field that holds the record.
+fn record_flatten_in_api(directives: &[Directive], path: &Path, context: &str) -> Result<bool> {
+    let Some(flatten) = directive(directives, "flatten-in-api", path, context)? else {
+        return Ok(false);
+    };
+    if !flatten.args.is_empty() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.flatten-in-api".to_string(),
+            reason: "on a record, takes no arguments. Put `fields` and `fill` on the field that \
+                     holds the record"
+                .to_string(),
+        });
+    }
+    Ok(true)
+}
+
+/// The key of a record field, which is its proto field name.
+fn record_field_key(field: &wit_parser_crate::Field, path: &Path, context: &str) -> Result<String> {
+    let directives = parse_directives(field.docs.contents.as_deref(), path, context)?;
+    Ok(
+        directive_value(&directives, "proto-field", path, context, "value")?
+            .unwrap_or_else(|| field.name.to_snake_case()),
+    )
+}
+
+/// A field-level `@nexus.flatten-in-api`. It names fields of the field's record by WIT name, and
+/// each `fill` names a field of that record and a sibling field. Each `@nexus.source field=` names
+/// a field of that record that a source fills.
+fn build_field_flatten(
+    resolve: &Resolve,
+    parent: &Record,
+    ty: &Type,
+    directives: &[Directive],
+    nested_sources: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<FieldFlattenSpec>> {
+    let invalid_source = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.source".to_string(),
+        reason,
+    };
+    let Some(flatten) = directive(directives, "flatten-in-api", path, context)? else {
+        if !nested_sources.is_empty() {
+            return Err(invalid_source(
+                "with `field`, fills a field of the record that a field-level \
+                 `@nexus.flatten-in-api` builds, and the field has none"
+                    .to_string(),
+            ));
+        }
+        return Ok(None);
+    };
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.flatten-in-api".to_string(),
+        reason,
+    };
+    if let Some(key) = flatten
+        .args
+        .keys()
+        .find(|key| !["fields", "fill"].contains(&key.as_str()))
+    {
+        return Err(invalid(format!(
+            "on a field, takes `fields` and `fill`, not `{key}`"
+        )));
+    }
+    let Some(fields) = flatten.value("fields") else {
+        return Err(invalid(
+            "on a field, names the fields of its record to promote, such as `fields=\"backend\"`"
+                .to_string(),
+        ));
+    };
+    let mut ty = *ty;
+    let record = loop {
+        let Type::Id(id) = ty else {
+            return Err(invalid("the field's type isn't a record".to_string()));
+        };
+        match &resolve.types[id].kind {
+            TypeDefKind::Option(inner) | TypeDefKind::Type(inner) => ty = *inner,
+            TypeDefKind::Record(record) => break record,
+            _ => return Err(invalid("the field's type isn't a record".to_string())),
+        }
+    };
+    let key = |record: &Record, name: &str, owner: &str| -> Result<String> {
+        let field = record
+            .fields
+            .iter()
+            .find(|field| field.name == name)
+            .ok_or_else(|| invalid(format!("`{name}` isn't a field of the {owner}")))?;
+        record_field_key(field, path, context)
+    };
+    let fields = fields
+        .split_whitespace()
+        .map(|name| key(record, name, "field's record"))
+        .collect::<Result<Vec<_>>>()?;
+    if fields.is_empty() {
+        return Err(invalid(
+            "on a field, promotes at least one field of its record".to_string(),
+        ));
+    }
+    let fills = flatten
+        .value("fill")
+        .unwrap_or_default()
+        .split_whitespace()
+        .map(|fill| {
+            let Some((inner, outer)) = fill.split_once('=') else {
+                return Err(invalid(format!(
+                    "`{fill}` isn't a fill. Write `<field>=<sibling field>`"
+                )));
+            };
+            Ok((
+                key(record, inner, "field's record")?,
+                key(parent, outer, "parent record")?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    // A field of the record is a parameter or a copy of one sibling, once.
+    let mut named = BTreeSet::new();
+    if let Some(key) = fields
+        .iter()
+        .chain(fills.iter().map(|(inner, _)| inner))
+        .find(|key| !named.insert(key.as_str()))
+    {
+        return Err(invalid(format!(
+            "names `{key}` twice in `fields` and `fill`"
+        )));
+    }
+    // The sources of each field of the record, in the order of the first one.
+    let mut grouped = Vec::<(String, Vec<Directive>)>::new();
+    for source in nested_sources {
+        let name = source.value("field").expect("a nested source has `field`");
+        let key = key(record, name, "field's record")?;
+        if named.contains(key.as_str()) {
+            return Err(invalid_source(format!(
+                "names `{name}`, which `fields` or `fill` of the flatten already sets"
+            )));
+        }
+        let nested = record
+            .fields
+            .iter()
+            .find(|field| field.name == name)
+            .expect("the key names a field of the record");
+        if !is_optional_type(resolve, &nested.ty) {
+            return Err(invalid_source(format!(
+                "names `{name}`, which isn't an `option<T>`. A target with no source leaves it \
+                 unset"
+            )));
+        }
+        match grouped.iter_mut().find(|(grouped, _)| *grouped == key) {
+            Some((_, directives)) => directives.push(source.clone()),
+            None => grouped.push((key, vec![source.clone()])),
+        }
+    }
+    let sources = grouped
+        .into_iter()
+        .map(|(key, directives)| {
+            let mut origins = LanguageFieldOrigins::default();
+            for language in all_languages() {
+                let calls = build_source_calls(&directives, path, context, language)?;
+                if !calls.is_empty() {
+                    origins.by_language.insert(
+                        language,
+                        target_field_origin(&calls, crate::nexgen_config::GenerationTargets::NONE),
+                    );
+                }
+            }
+            Ok((key, origins))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(Some(FieldFlattenSpec {
+        fields,
+        fills,
+        sources,
+    }))
 }
 
 fn build_api_omit_targets(

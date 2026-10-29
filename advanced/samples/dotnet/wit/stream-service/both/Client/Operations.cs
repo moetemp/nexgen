@@ -34,9 +34,9 @@ namespace Temporalio.Workflows.Client
         /// </summary>
         public System.TimeSpan? Retention { get; set; }
         /// <summary>
-        /// The ref, whose id is stream-id. A create with an owner needs the ref's owner.
+        /// Registered backend name, empty for the default. The Store never reads it.
         /// </summary>
-        public StreamRef? Ref { get; set; }
+        public string? Backend { get; set; }
     }
 
     /// <summary>
@@ -171,7 +171,7 @@ namespace Temporalio.Workflows.Client
             var request = new CreateStreamRequest(options.Id, default)
             {
                 Retention = options.Retention,
-                Ref = options.Ref,
+                Ref = new StreamRef(options.Id) { Backend = options.Backend },
             };
             return CreateStreamAsync<TBody>(client, request);
         }

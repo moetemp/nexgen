@@ -2188,7 +2188,9 @@ impl<'a> ApiPlanner<'a> {
         for (field_name, field) in model.api_fields(api_target()) {
             if let Some(nested_model) = flattened_nested_model(field, self.api_plan) {
                 let _ = field_name;
-                for (nested_field_name, nested_field) in nested_model.api_fields(api_target()) {
+                for (nested_field_name, nested_field) in
+                    flattened_nested_fields(field, nested_model)
+                {
                     if !field_is_options_field(nested_model, nested_field_name, nested_field) {
                         continue;
                     }
@@ -2376,7 +2378,11 @@ impl<'a> ApiPlanner<'a> {
                 continue;
             }
             if let Some(nested_model) = flattened_nested_model(field, self.api_plan) {
-                for (nested_field_name, nested_field) in nested_model.public_fields() {
+                let nested_fields = match &field.flatten {
+                    Some(_) => flattened_nested_fields(field, nested_model),
+                    None => nested_model.public_fields().collect(),
+                };
+                for (nested_field_name, nested_field) in nested_fields {
                     if nested_field.function.is_none() {
                         continue;
                     }
@@ -3896,7 +3902,11 @@ fn flattened_method_parameter_docs(
             continue;
         }
         if let Some(nested_model) = flattened_nested_model(field, api_plan) {
-            for (_, nested_field) in nested_model.public_fields() {
+            let nested_fields = match &field.flatten {
+                Some(_) => flattened_nested_fields(field, nested_model),
+                None => nested_model.public_fields().collect(),
+            };
+            for (_, nested_field) in nested_fields {
                 if nested_field.function.is_none() {
                     continue;
                 }
@@ -4078,6 +4088,34 @@ fn render_flattened_method_body(
             output.push_str(");\n");
         }
     }
+    // A fill reads its sibling, so a sourced sibling runs once, into a local.
+    let mut sibling_values = BTreeMap::<&str, String>::new();
+    for outer in model
+        .fields
+        .values()
+        .filter_map(|field| field.flatten.as_ref())
+        .flat_map(|flatten| flatten.fills.iter().map(|(_, outer)| outer.as_str()))
+    {
+        let Some(field) = model.fields.get(outer) else {
+            continue;
+        };
+        if sibling_values.contains_key(outer) {
+            continue;
+        }
+        let value = match field.source_for(api_target()) {
+            Some(source_expr) => {
+                let local = csharp_parameter_name(&field.name);
+                output.push_str("        var ");
+                output.push_str(&local);
+                output.push_str(" = ");
+                output.push_str(&dotnet_source_expr(source_expr, support_namespace));
+                output.push_str(";\n");
+                local
+            }
+            None => option_field_expr(field, options_required),
+        };
+        sibling_values.insert(outer, value);
+    }
     output.push_str("        var request = new ");
     output.push_str(&csharp_type_name(&model.name));
     let model_parameters = api_plan.record_type_parameters(&model.full_name);
@@ -4103,6 +4141,7 @@ fn render_flattened_method_body(
                 overload,
                 support_namespace,
                 options_required,
+                &sibling_values,
             );
             let initialized = dotnet_input_default_expr(field, &value);
             (field_name, field, initialized)
@@ -4115,7 +4154,10 @@ fn render_flattened_method_body(
         .collect::<Vec<_>>();
     constructor_args.extend(model.sourced_fields().map(|(name, field, _)| {
         if let Some(source_expr) = field.source_for(api_target()) {
-            dotnet_source_expr(source_expr, support_namespace)
+            sibling_values
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| dotnet_source_expr(source_expr, support_namespace))
         } else if field.api_omitted_for(api_target()) {
             "default".to_string()
         } else {
@@ -4150,6 +4192,7 @@ fn render_flattened_method_body(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn flattened_request_field_expr(
     field_name: &str,
     field: &RecordFieldSpec<PlannedFamily>,
@@ -4158,9 +4201,25 @@ fn flattened_request_field_expr(
     overload: &FlattenedOverload,
     support_namespace: Option<&str>,
     options_required: bool,
+    sibling_values: &BTreeMap<&str, String>,
 ) -> String {
     if let Some(nested_model) = flattened_nested_model(field, api_plan) {
-        nested_model_init_expr(field, nested_model, options_required)
+        let fill_values = field
+            .flatten
+            .iter()
+            .flat_map(|flatten| &flatten.fills)
+            .filter_map(|(inner, outer)| {
+                let value = sibling_values.get(outer.as_str())?;
+                Some((inner.as_str(), (value.clone(), model.field_required(outer))))
+            })
+            .collect();
+        nested_model_init_expr(
+            field,
+            nested_model,
+            options_required,
+            &fill_values,
+            support_namespace,
+        )
     } else if field.function.is_some()
         && matches!(
             overload.function_mode(field_name),
@@ -4224,7 +4283,28 @@ fn flattened_nested_model<'a>(
         return None;
     };
     let nested_model = api_plan.record(&record.full_name)?;
-    nested_model.flatten_in_api.then_some(nested_model)
+    (nested_model.flatten_in_api || field.flatten.is_some()).then_some(nested_model)
+}
+
+/// The fields of a flattened record that the call takes. A field-level flatten takes the fields
+/// that it names, in its order, and the others take the API fields of the record.
+fn flattened_nested_fields<'a>(
+    field: &RecordFieldSpec<PlannedFamily>,
+    nested_model: &'a PlannedModel,
+) -> Vec<(&'a str, &'a RecordFieldSpec<PlannedFamily>)> {
+    match &field.flatten {
+        Some(flatten) => flatten
+            .fields
+            .iter()
+            .filter_map(|key| {
+                nested_model
+                    .fields
+                    .get_key_value(key)
+                    .map(|(key, field)| (key.as_str(), field))
+            })
+            .collect(),
+        None => nested_model.api_fields(api_target()).collect(),
+    }
 }
 
 fn render_operation_options_constructor(
@@ -4278,8 +4358,8 @@ fn service_definition_field_name(service: &PlannedService) -> String {
 fn model_has_options_fields(model: &PlannedModel, api_plan: &PlannedSpec) -> bool {
     model.api_fields(api_target()).any(|(field_name, field)| {
         if let Some(nested_model) = flattened_nested_model(field, api_plan) {
-            nested_model
-                .api_fields(api_target())
+            flattened_nested_fields(field, nested_model)
+                .into_iter()
                 .any(|(nested_field_name, nested_field)| {
                     field_is_options_field(nested_model, nested_field_name, nested_field)
                 })
@@ -4293,8 +4373,8 @@ fn model_options_required(model: &PlannedModel, api_plan: &PlannedSpec) -> bool 
     model.api_fields(api_target()).any(|(field_name, field)| {
         if let Some(nested_model) = flattened_nested_model(field, api_plan) {
             field.api_required(api_target())
-                && nested_model
-                    .api_fields(api_target())
+                && flattened_nested_fields(field, nested_model)
+                    .into_iter()
                     .any(|(nested_field_name, nested_field)| {
                         nested_field.api_required(api_target())
                             && field_is_options_field(nested_model, nested_field_name, nested_field)
@@ -4313,45 +4393,69 @@ fn field_is_options_field(
     field.function.is_none() && model.function_for_args_field(field_name).is_none()
 }
 
+/// Builds a flattened record from its options fields and from the values of its fills, by field
+/// key. The record is set when one of them is set.
 fn nested_model_init_expr(
     field: &RecordFieldSpec<PlannedFamily>,
     model: &PlannedModel,
     options_required: bool,
+    fill_values: &BTreeMap<&str, (String, bool)>,
+    support_namespace: Option<&str>,
 ) -> String {
-    let option_fields = model
-        .api_fields(api_target())
+    let promoted = flattened_nested_fields(field, model)
+        .into_iter()
         .filter(|(nested_field_name, nested_field)| {
             field_is_options_field(model, nested_field_name, nested_field)
         })
+        .map(|(key, _)| key)
         .collect::<Vec<_>>();
-    let checks = option_fields
+    // The constructor takes the required fields in the order of the record.
+    let field_exprs = model
+        .fields
         .iter()
-        .map(|(_, nested_field)| {
-            format!(
-                "{} != null",
-                option_nested_field_expr(field, nested_field, options_required)
-            )
+        .filter_map(|(key, nested_field)| {
+            if promoted.contains(&key.as_str()) {
+                let value = option_nested_field_expr(field, nested_field, options_required);
+                Some((nested_field, value, false))
+            } else {
+                fill_values
+                    .get(key.as_str())
+                    .map(|(value, required)| (nested_field, value.clone(), *required))
+            }
         })
+        .collect::<Vec<_>>();
+    let always = field.required || field_exprs.iter().any(|(_, _, required)| *required);
+    let checks = field_exprs
+        .iter()
+        .map(|(_, expr, _)| format!("{expr} != null"))
         .collect::<Vec<_>>()
         .join(" || ");
+    // A source sets its field when the record is built, but doesn't build it.
+    let source_exprs = field
+        .flatten
+        .iter()
+        .flat_map(|flatten| &flatten.sources)
+        .filter_map(|(key, origin)| {
+            let source = origin.as_ref()?.source_for(api_target())?;
+            Some((
+                model.fields.get(key)?,
+                qualify_dotnet_support_reference(source, support_namespace),
+            ))
+        })
+        .collect::<Vec<_>>();
     let init_expr = model_init_expr(
         &csharp_type_name(&model.name),
-        option_fields
+        field_exprs
             .into_iter()
-            .map(|(_, nested_field)| {
-                (
-                    nested_field,
-                    dotnet_input_default_expr(
-                        nested_field,
-                        &option_nested_field_expr(field, nested_field, options_required),
-                    ),
-                )
+            .map(|(nested_field, expr, _)| {
+                (nested_field, dotnet_input_default_expr(nested_field, &expr))
             })
+            .chain(source_exprs)
             .collect(),
         Vec::new(),
         false,
     );
-    if field.required {
+    if always {
         init_expr
     } else {
         format!("{checks} ? {init_expr} : null")

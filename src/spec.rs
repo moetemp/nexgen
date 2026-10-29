@@ -852,8 +852,23 @@ pub struct RecordFieldSpec<F: TypeFamily = AuthoredFamily> {
     pub field_type: TypeSpec<F>,
     pub required: bool,
     pub origin: F::Origin,
+    /// Set when `@nexus.flatten-in-api` on the field promotes some fields of its record.
+    pub flatten: Option<FieldFlattenSpec<F::Origin>>,
     pub function: Option<FunctionFieldSpec<F>>,
     pub data: F::FieldData,
+}
+
+/// A field-level `@nexus.flatten-in-api`. The call takes the named fields of the field's record as
+/// parameters, and it fills other fields of that record from sibling fields or from sources. Names
+/// are field keys.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldFlattenSpec<O = LanguageFieldOrigins> {
+    /// The fields of the record that become parameters, in order.
+    pub fields: Vec<String>,
+    /// Each field of the record that a sibling field of the parent record fills, with the sibling.
+    pub fills: Vec<(String, String)>,
+    /// Each field of the record that an `@nexus.source field=` fills, with the source's origin.
+    pub sources: Vec<(String, O)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1342,6 +1357,15 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             field_type: self.field_type.map_names_with(map),
             required: self.required,
             origin: map.map_origin(self.origin),
+            flatten: self.flatten.map(|flatten| FieldFlattenSpec {
+                fields: flatten.fields,
+                fills: flatten.fills,
+                sources: flatten
+                    .sources
+                    .into_iter()
+                    .map(|(key, origin)| (key, map.map_origin(origin)))
+                    .collect(),
+            }),
             function: self.function.map(|function| function.map_names_with(map)),
             data,
         }
@@ -1357,6 +1381,7 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
             && self.flattened_annotation.is_none()
             && !self.required
             && self.origin.is_none()
+            && self.flatten.is_none()
             && self.function.is_none()
     }
 }

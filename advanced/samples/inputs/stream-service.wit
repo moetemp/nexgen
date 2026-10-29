@@ -212,6 +212,9 @@ interface stream-service {
     /// @nexus.api-omit targets="client"
     owner: option<producer>,
     /// @nexus.doc "The ref, whose id is stream-id. A create with an owner needs the ref's owner."
+    /// @nexus.flatten-in-api fields="backend" fill="id=stream-id"
+    /// @nexus.source field="owner" targets="workflow" python="workflow_handle_owner()"
+    ///   typescript="workflowHandleOwner()" dotnet="StreamWorkflowContext.HandleOwner()"
     %ref: option<stream-ref>,
     // Native only. The SDK Stores don't read it.
     /// @nexus.omit

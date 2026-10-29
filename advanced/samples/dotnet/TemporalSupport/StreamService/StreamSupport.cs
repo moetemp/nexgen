@@ -10,6 +10,15 @@ namespace Nexgen.Support
         internal static string StreamId<T>(StreamDefinition<T> definition) =>
             $"{Workflow.Info.WorkflowId}:{Workflow.Info.FirstExecutionRunId}:{definition.Name}";
 
+        // The Workflow's run chain, which owns its Streams: its id and its first run id.
+        internal static Temporalio.Workflows.Execution HandleOwner() =>
+            new()
+            {
+                Type = Temporalio.Workflows.ExecutionType.ExecutionTypeWorkflow,
+                BusinessId = Workflow.Info.WorkflowId,
+                RunId = Workflow.Info.FirstExecutionRunId,
+            };
+
         internal static Temporalio.Workflows.Producer Owner() =>
             new($"wf:{Workflow.Info.RunId}") { RunId = Workflow.Info.RunId };
 

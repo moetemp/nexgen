@@ -1,0 +1,14 @@
+package test:close-failure-not-a-failure@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  resource job {
+    constructor(id: string);
+
+    // A string can't take the block's exception.
+    /// @nexus.close failure="reason"
+    close: func(reason: option<string>);
+  }
+}

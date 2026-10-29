@@ -1,0 +1,14 @@
+package test:close-on-operation@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  record cancel-job-request {
+    id: string,
+  }
+
+  // A block's end calls a method of the resource it holds, not an operation.
+  /// @nexus.close
+  cancel-job: func(request: cancel-job-request);
+}

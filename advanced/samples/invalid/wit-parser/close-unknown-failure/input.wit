@@ -1,0 +1,14 @@
+package test:close-unknown-failure@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  resource job {
+    constructor(id: string);
+
+    // `error` isn't a parameter of the close.
+    /// @nexus.close failure="error"
+    close: func(reason: option<string>);
+  }
+}

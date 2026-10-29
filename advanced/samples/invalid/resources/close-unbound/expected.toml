@@ -1,0 +1,5 @@
+targets = ["workflow"]
+
+[error]
+kind = "invalid-resource-method"
+contains = ["has `@nexus.close`, but binds to no operation"]

@@ -373,6 +373,15 @@ const CATALOG: &[Annotation] = {
             languages: None,
             system_nexus: false,
         },
+        Annotation {
+            name: "error",
+            sites: &[Enum, EnumCase],
+            keys: &["details", "field", "name", "retryable"],
+            language_keys: &["extends", "extends-import", "name"],
+            repeatable: false,
+            languages: None,
+            system_nexus: false,
+        },
     ]
 };
 
@@ -421,6 +430,18 @@ impl Annotation {
     }
 
     fn accepts_key(&self, key: &str, site: Site) -> bool {
+        // An enum gives its details and its base classes, and a case gives its class.
+        if self.name == "error" {
+            let known = self.keys.contains(&key) || self.argument_language(key).is_some();
+            let case_key = key == "retryable" || key == "name" || key.ends_with("-name");
+            let enum_key = key == "name" || !case_key;
+            return known
+                && if site == Site::EnumCase {
+                    case_key
+                } else {
+                    enum_key
+                };
+        }
         // A record flattens all of its fields. A field lists the fields of its record, and a
         // resource gives a constructor parameter and the fields of its record.
         if self.name == "flatten-in-api" {

@@ -2,6 +2,7 @@
 
 from .closing import deferred_closes as deferred_closes
 from .closing import exit_close as exit_close
+from .errors import error_details as error_details
 from .poll import next_read_request as next_read_request
 from .poll import resume_read_request as resume_read_request
 from .streams import client_writer as client_writer

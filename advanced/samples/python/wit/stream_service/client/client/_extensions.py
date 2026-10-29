@@ -13,12 +13,14 @@ import datetime
 from ..services import StreamService
 from ..models import (
     CreateStreamRequest,
+    StreamErrorDetails,
     StreamIdConflictPolicy,
     StreamRef,
 )
 from ._resources.stream import Stream
 import temporal_support as _support
 from .._resource_call import resource_call
+from ..errors import StreamError, stream_error
 
 
 _NexusServiceT = typing.TypeVar("_NexusServiceT")
@@ -78,27 +80,36 @@ class StreamServiceClientExtension(abc.ABC):
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> Stream[BodyT]:
-        nexus_client = self.create_nexus_client(
-            service=StreamService,
-            endpoint=temporalio.nexus.system.TEMPORAL_SYSTEM_ENDPOINT,
-        )
-        handle = await nexus_client.start_operation(
-            operation=StreamService.create_stream,
-            arg=request,
-            id=f"{_uuid.uuid4()}",
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        result = await handle.result()
-        if result.ref is None:
-            raise RuntimeError("CreateStream answered without `ref`")
-        resource = Stream(
-            nexus_client,
-            body_type=body_type,
-            ref=result.ref,
-            created=result.created or None,
-        )
-        return resource
+        try:
+            nexus_client = self.create_nexus_client(
+                service=StreamService,
+                endpoint=temporalio.nexus.system.TEMPORAL_SYSTEM_ENDPOINT,
+            )
+            handle = await nexus_client.start_operation(
+                operation=StreamService.create_stream,
+                arg=request,
+                id=f"{_uuid.uuid4()}",
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            result = await handle.result()
+            if result.ref is None:
+                raise RuntimeError("CreateStream answered without `ref`")
+            resource = Stream(
+                nexus_client,
+                body_type=body_type,
+                ref=result.ref,
+                created=result.created or None,
+            )
+            return resource
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     @resource_call
     async def create_stream(

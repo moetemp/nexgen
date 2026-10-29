@@ -423,38 +423,38 @@ interface stream-service {
   // of its reason, or the base class for a reason with no class.
   /// Why a Stream call failed. Each reason has one gRPC status code.
   /// @nexus.proto "temporal.api.enums.v1.StreamErrorReason"
-  // TODO: implement @nexus.error details="stream-error-details" field="reason" name="stream-error"
-  //   python-extends="temporalio.exceptions.ApplicationError"
-  //   typescript-extends="ApplicationFailure" typescript-extends-import="@temporalio/common"
-  //   dotnet-extends="Temporalio.Exceptions.ApplicationFailureException"
+  /// @nexus.error details="stream-error-details" field="reason" name="stream-error"
+  ///   python-extends="temporalio.exceptions.ApplicationError"
+  ///   typescript-extends="ApplicationFailure" typescript-extends-import="@temporalio/common"
+  ///   dotnet-extends="Temporalio.Exceptions.ApplicationFailureException"
   enum stream-error-reason {
     /// @nexus.fallback
     stream-error-reason-unspecified,
-    // TODO: implement @nexus.error.
+    /// @nexus.error
     stream-error-reason-not-found,
-    // TODO: implement @nexus.error.
+    /// @nexus.error
     stream-error-reason-expired,
-    // TODO: implement @nexus.error.
+    /// @nexus.error
     stream-error-reason-closed,
-    // TODO: implement @nexus.error.
+    /// @nexus.error
     stream-error-reason-fenced,
     stream-error-reason-sequence-too-low,
-    // TODO: implement @nexus.error.
+    /// @nexus.error
     stream-error-reason-seq-divergent,
-    // TODO: implement @nexus.error.
+    /// @nexus.error
     stream-error-reason-not-owner,
     stream-error-reason-format-too-new,
-    // TODO: implement @nexus.error.
+    /// @nexus.error
     stream-error-reason-offset-too-high,
-    // TODO: implement @nexus.error.
+    /// @nexus.error
     stream-error-reason-too-large,
     stream-error-reason-invalid,
-    // TODO: implement @nexus.error retryable=true.
+    /// @nexus.error retryable=true
     stream-error-reason-storage-unavailable,
     stream-error-reason-unknown-writer,
-    // TODO: implement @nexus.error.
+    /// @nexus.error
     stream-error-reason-unsupported,
-    // TODO: implement @nexus.error.
+    /// @nexus.error
     stream-error-reason-already-exists,
     stream-error-reason-storage-corrupt,
   }

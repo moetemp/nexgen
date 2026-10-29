@@ -90,5 +90,33 @@ namespace Nexgen.DotNetExamples.Tests
         private static Task<StreamServiceExample.Stream<Turn>> CreateTurnsOnBackend() =>
             StreamServiceExample.Operations.CreateStreamAsync<Turn>(
                 new StreamServiceExample.CreateStreamOptions("turns") { Backend = "redis" });
+
+        [Fact]
+        public void EachReasonGivesItsExceptionAndRetryability()
+        {
+            StreamServiceExample.StreamException From(
+                StreamServiceExample.StreamErrorReason reason) =>
+                StreamServiceExample.StreamErrors.From(
+                    new StreamServiceExample.StreamErrorDetails { Reason = reason }, "failed");
+
+            var notFound = From(StreamServiceExample.StreamErrorReason.StreamErrorReasonNotFound);
+            var storage = From(
+                StreamServiceExample.StreamErrorReason.StreamErrorReasonStorageUnavailable);
+            var sequence = From(
+                StreamServiceExample.StreamErrorReason.StreamErrorReasonSequenceTooLow);
+            var unknown = From((StreamServiceExample.StreamErrorReason)99);
+
+            Assert.IsType<StreamServiceExample.StreamNotFoundException>(notFound);
+            // The failure type is the same in each SDK.
+            Assert.Equal("StreamNotFoundError", notFound.ErrorType);
+            Assert.True(notFound.NonRetryable);
+            // Storage that is unavailable can come back on a retry.
+            Assert.IsType<StreamServiceExample.StreamStorageUnavailableException>(storage);
+            Assert.False(storage.NonRetryable);
+            // A reason with no class, or one that this code doesn't know, gives the base class.
+            Assert.IsType<StreamServiceExample.StreamException>(sequence);
+            Assert.IsType<StreamServiceExample.StreamException>(unknown);
+            Assert.Equal((StreamServiceExample.StreamErrorReason)99, unknown.Reason);
+        }
     }
 }

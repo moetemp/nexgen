@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::rc::Rc;
 
 use heck::{ToLowerCamelCase, ToUpperCamelCase};
@@ -41,6 +42,29 @@ const GENERATED_CODE_ATTRIBUTE: &str = "[GeneratedCode(\"nexgen\", null)]";
 /// member, and a signature names a deprecated type. Emitted only when the run
 /// has a deprecation, so the comment explains why it is there.
 pub(in crate::generator) const OBSOLETE_WARNING_PRAGMA: &str = "// Generated code refers to deprecated ([Obsolete]) declarations it also\n// generates; keep those references from raising CS0618.\n#pragma warning disable CS0618\n\n";
+
+thread_local! {
+    /// The API that the generator renders. A field's sources and defaults depend on it.
+    static API_TARGET: std::cell::Cell<GenerationTarget> =
+        const { std::cell::Cell::new(GenerationTarget::Workflow) };
+}
+
+fn api_target() -> GenerationTarget {
+    API_TARGET.with(std::cell::Cell::get)
+}
+
+/// Renders the API of `target` until the guard drops.
+fn api_target_scope(target: GenerationTarget) -> ApiTargetScope {
+    ApiTargetScope(API_TARGET.with(|current| current.replace(target)))
+}
+
+struct ApiTargetScope(GenerationTarget);
+
+impl Drop for ApiTargetScope {
+    fn drop(&mut self) {
+        API_TARGET.with(|current| current.set(self.0));
+    }
+}
 
 /// The access modifier of a generated `[NexusService]` contract interface.
 /// With the workflow target the generated `*Client` wrapper is the API callers use,
@@ -292,23 +316,28 @@ impl<'a> ApiPlanner<'a> {
         output
     }
 
-    fn render_resources_file(&self, namespace: &str) -> String {
+    /// Renders the resource classes of one target. Each target has its own classes, which call
+    /// the operations of that target.
+    fn render_resources_file(&self, namespace: &str, target: Option<GenerationTarget>) -> String {
         let mut imports = vec![
             "System",
             "System.CodeDom.Compiler",
             "System.Collections.Generic",
             "System.Threading.Tasks",
-            "Temporalio.Workflows",
         ];
+        if target != Some(GenerationTarget::Client) {
+            imports.push("Temporalio.Workflows");
+        }
         if let Some(support_namespace) = self.support_namespace {
             imports.push(support_namespace);
         }
         let module_imports = self.namespaces.module_imports(self.api_plan);
         imports.extend(module_imports.iter().map(String::as_str));
+        let _target = target.map(api_target_scope);
         let mut output = generated_file_prelude(namespace, &imports);
         for service in &self.api_plan.services {
             for resource in &service.resources {
-                self.render_resource(&mut output, service, &resource.data);
+                self.render_resource(&mut output, service, &resource.data, target);
             }
         }
         close_namespace(&mut output);
@@ -518,13 +547,18 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("}\n\n");
     }
 
+    /// Renders a resource class. The client target's class takes the Nexus client of its service,
+    /// and with no target the class has its fields only.
     fn render_resource(
         &self,
         output: &mut String,
         service: &PlannedService,
         resource: &PlannedResource,
+        target: Option<GenerationTarget>,
     ) {
         let type_name = csharp_type_name(&resource.type_name);
+        let client = target == Some(GenerationTarget::Client);
+        let nexus_client = client_resource_nexus_client_name(resource, &type_name);
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
         output.push_str("public class ");
@@ -533,15 +567,24 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    public ");
         output.push_str(&type_name);
         output.push('(');
-        for (index, field) in resource.fields.iter().enumerate() {
-            if index > 0 {
-                output.push_str(", ");
-            }
+        let mut has_parameters = false;
+        if client {
+            output.push_str("Temporalio.Client.NexusClient ");
+            output.push_str(&nexus_client);
+            has_parameters = true;
+        }
+        for field in &resource.fields {
+            render_parameter_separator(output, &mut has_parameters);
             output.push_str(&self.resource_field_type(&field.kind, field.optional));
             output.push(' ');
             output.push_str(&resource_parameter_name(&type_name, &field.name));
         }
         output.push_str(")\n    {\n");
+        if client {
+            output.push_str("        this.nexusClient = ");
+            output.push_str(&nexus_client);
+            output.push_str(";\n");
+        }
         for field in &resource.fields {
             output.push_str("        ");
             output.push_str(&resource_property_name(&type_name, &field.name));
@@ -557,7 +600,15 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(&resource_property_name(&type_name, &field.name));
             output.push_str(" { get; }\n");
         }
-        if service.endpoint.is_none() {
+        if client {
+            // A field, not a property, so the payload converter doesn't encode it.
+            output.push_str("\n    private readonly Temporalio.Client.NexusClient nexusClient;\n");
+        }
+        let Some(target) = target else {
+            output.push_str("}\n\n");
+            return;
+        };
+        if target == GenerationTarget::Workflow && service.endpoint.is_none() {
             output.push_str("\n    internal NexusWorkflowClient<I");
             output.push_str(&csharp_service_ident(service));
             output.push_str(">? NexgenClient { get; set; }\n");
@@ -580,13 +631,111 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(" methods require a service endpoint.\");\n");
             output.push_str("    }\n");
         }
-        if !resource.fields.is_empty() && !resource.methods.is_empty() {
+        if (client || !resource.fields.is_empty()) && !resource.methods.is_empty() {
             output.push('\n');
         }
         for method in &resource.methods {
-            self.render_resource_method(output, service, &type_name, method);
+            self.render_resource_method(output, service, &type_name, method, target);
+            if target == GenerationTarget::Client {
+                self.render_resource_poll_method(output, service, &type_name, method);
+            }
         }
         output.push_str("}\n\n");
+    }
+
+    /// The request that a resource method builds, or `None` for an operation with no input.
+    fn resource_method_request_expr(
+        &self,
+        operation: &PlannedOperation,
+        request_plan: &RequestPlan,
+    ) -> Option<String> {
+        if !self.operation_has_input(operation) {
+            return None;
+        }
+        let request_expr = resource_method_request_model_init_expr(
+            request_plan,
+            self.api_plan,
+            self.support_namespace,
+            None,
+            ResourceMethodRequestInitKind::AllFields,
+        )
+        .or_else(|| {
+            resource_method_operation_call_args(
+                operation,
+                request_plan,
+                self.api_plan,
+                self.support_namespace,
+            )
+            .and_then(|args| (args.len() == 1).then(|| args[0].clone()))
+        })
+        .expect("bound resource operation should have a renderable request plan");
+        Some(request_expr)
+    }
+
+    fn render_resource_method_params(&self, output: &mut String, method: &PlannedResourceMethod) {
+        for (index, param) in method.params.iter().enumerate() {
+            if index > 0 {
+                output.push_str(", ");
+            }
+            output.push_str(&self.resource_field_type(&param.kind, param.optional));
+            output.push(' ');
+            output.push_str(&csharp_parameter_name(&param.name));
+        }
+    }
+
+    /// The `<Method>PagesAsync` of a client resource method whose operation has a poll. Each page
+    /// uses the Nexus client of the handle, as the other methods do.
+    fn render_resource_poll_method(
+        &self,
+        output: &mut String,
+        service: &PlannedService,
+        type_name: &str,
+        method: &PlannedResourceMethod,
+    ) {
+        let PlannedResourceMethodBindingSpec::Operation {
+            operation_name,
+            request_plan,
+            ..
+        } = &method.binding
+        else {
+            return;
+        };
+        let Some(operation) = service.operation(operation_name) else {
+            return;
+        };
+        let Some(helper) = self.poll_helper(operation) else {
+            return;
+        };
+        output.push_str(ASYNC_ENUMERABLE_GUARD);
+        output.push_str("    ");
+        output.push_str(GENERATED_CODE_ATTRIBUTE);
+        output.push_str("\n    public async ");
+        output.push_str(&self.poll_return_type(operation));
+        output.push(' ');
+        output.push_str(&poll_method_name(&csharp_type_name(&method.name)));
+        output.push('(');
+        self.render_resource_method_params(output, method);
+        if !method.params.is_empty() {
+            output.push_str(", ");
+        }
+        output.push_str("[System.Runtime.CompilerServices.EnumeratorCancellation] ");
+        output.push_str(CANCELLATION_PARAMETER);
+        output.push_str(")\n    {\n");
+        let request_plan = &with_resource_property_names(request_plan, type_name);
+        let request_expr = self
+            .resource_method_request_expr(operation, request_plan)
+            .expect("a polled operation has a request");
+        output.push_str("        var request = ");
+        output.push_str(&request_expr);
+        output.push_str(";\n");
+        render_poll_loop(
+            output,
+            &self.client_operation_call(service, operation, "nexusClient", "cancellationToken"),
+            &helper,
+        );
+        output.push_str("    }\n");
+        output.push_str(ASYNC_ENUMERABLE_GUARD_END);
+        output.push('\n');
     }
 
     fn render_resource_method(
@@ -595,6 +744,7 @@ impl<'a> ApiPlanner<'a> {
         service: &PlannedService,
         type_name: &str,
         method: &PlannedResourceMethod,
+        target: GenerationTarget,
     ) {
         let operation = match &method.binding {
             PlannedResourceMethodBindingSpec::Operation { operation_name, .. } => service
@@ -608,7 +758,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
         output.push_str("    public ");
-        if service.endpoint.is_none()
+        if (service.endpoint.is_none() || target == GenerationTarget::Client)
             && matches!(
                 method.binding,
                 PlannedResourceMethodBindingSpec::Operation { .. }
@@ -621,14 +771,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str(&csharp_type_name(&method.name));
         output.push_str("Async");
         output.push('(');
-        for (index, param) in method.params.iter().enumerate() {
-            if index > 0 {
-                output.push_str(", ");
-            }
-            output.push_str(&self.resource_field_type(&param.kind, param.optional));
-            output.push(' ');
-            output.push_str(&csharp_parameter_name(&param.name));
-        }
+        self.render_resource_method_params(output, method);
         output.push(')');
         match &method.binding {
             PlannedResourceMethodBindingSpec::Operation {
@@ -640,7 +783,26 @@ impl<'a> ApiPlanner<'a> {
                     operation.expect("bound resource operation should exist on the service");
                 let request_plan = &with_resource_property_names(request_plan, type_name);
                 output.push_str("\n    {\n");
-                if service.endpoint.is_none() {
+                if target == GenerationTarget::Client {
+                    if let Some(request_expr) =
+                        self.resource_method_request_expr(operation, request_plan)
+                    {
+                        output.push_str("        var request = ");
+                        output.push_str(&request_expr);
+                        output.push_str(";\n");
+                    }
+                    // A resource method returns a resource of its own service, so the handle
+                    // gets this handle's Nexus client.
+                    let result = (return_type != "Task").then(|| client_result_local(method));
+                    self.render_client_operation_body(
+                        output,
+                        service,
+                        operation,
+                        "nexusClient",
+                        None,
+                        result.as_deref(),
+                    );
+                } else if service.endpoint.is_none() {
                     self.render_resource_method_inline_operation_body(
                         output,
                         operation,
@@ -837,24 +999,121 @@ impl<'a> ApiPlanner<'a> {
             );
         }
 
-        if has_input
-            && let PlannedType::Record(input_record) = operation.input_model()
-            && let Some(model) = self.api_plan.record(&input_record.full_name)
-            && operation_has_flattened_convenience(operation, model, self.api_plan)
-        {
+        if let Some(model) = self.flattened_input_model(operation) {
+            let receiver = if endpoint_parameter {
+                FlattenedReceiver::Endpoint
+            } else {
+                FlattenedReceiver::Static
+            };
             self.render_operation_flattened_extension(
                 output,
                 operation,
-                &method_name,
                 model,
-                &raw_return,
-                &high_level_return,
-                endpoint_parameter,
-                false,
-                None,
-                endpoint_parameter.then_some("endpoint"),
+                receiver,
+                &FlattenedCall::Operation,
             );
         }
+    }
+
+    /// The input record of an operation that has a flattened convenience method.
+    fn flattened_input_model(&self, operation: &PlannedOperation) -> Option<&'a PlannedModel> {
+        if !self.operation_has_input(operation) {
+            return None;
+        }
+        let PlannedType::Record(input_record) = operation.input_model() else {
+            return None;
+        };
+        let model = self.api_plan.record(&input_record.full_name)?;
+        operation_has_flattened_convenience(operation, model, self.api_plan).then_some(model)
+    }
+
+    /// The support helper of an operation's poll, when the client target is generated. Only the
+    /// client target has a poll for now.
+    fn poll_helper(&self, operation: &PlannedOperation) -> Option<String> {
+        if !crate::nexgen_config::current().targets.client
+            || !operation.poll_targets.contains(GenerationTarget::Client)
+        {
+            return None;
+        }
+        operation
+            .poll_next
+            .value()
+            .map(|helper| qualify_dotnet_support_reference(helper, self.support_namespace))
+    }
+
+    /// The client `<Name>PagesAsync` methods of a polled operation, one for each public request
+    /// method.
+    fn render_poll_methods(
+        &self,
+        output: &mut String,
+        service: &PlannedService,
+        operation: &PlannedOperation,
+        helper: &str,
+    ) {
+        let return_type = self.poll_return_type(operation);
+        let raw_input_type = self.operation_raw_input_type(operation.input_model());
+        let input_type = self.operation_input_type(operation.input_model());
+        let request_kind = if input_type == raw_input_type {
+            RequestArgumentKind::Raw
+        } else {
+            RequestArgumentKind::HighLevel
+        };
+        // The iterator takes the request. A convenience form builds the request and returns it.
+        let public = self.operation_request_method_access(operation, request_kind) == "public";
+        output.push_str(ASYNC_ENUMERABLE_GUARD);
+        if public {
+            let request_doc = (
+                "request".to_string(),
+                "The request of the first page.".to_string(),
+            );
+            render_poll_xml_doc(output, operation, vec![request_doc]);
+        }
+        output.push_str("    ");
+        output.push_str(GENERATED_CODE_ATTRIBUTE);
+        output.push_str("\n    ");
+        output.push_str(if public { "public" } else { "private" });
+        output.push_str(" static async ");
+        output.push_str(&return_type);
+        output.push(' ');
+        output.push_str(&poll_method_name(&csharp_operation_ident(operation)));
+        self.render_operation_model_type_parameters(output, operation);
+        output.push('(');
+        output.push_str(CLIENT_RECEIVER_PARAMETER);
+        output.push_str(", ");
+        output.push_str(&input_type);
+        output.push_str(" request, [System.Runtime.CompilerServices.EnumeratorCancellation] ");
+        output.push_str(CANCELLATION_PARAMETER);
+        output.push_str(")\n    {\n");
+        // The iteration uses one Nexus client for every page.
+        output.push_str("        var nexusClient = ");
+        output.push_str(&client_nexus_client_expr(service, "client"));
+        output.push_str(";\n");
+        render_poll_loop(
+            output,
+            &self.client_operation_call(service, operation, "nexusClient", "cancellationToken"),
+            helper,
+        );
+        output.push_str("    }\n");
+        output.push_str(ASYNC_ENUMERABLE_GUARD_END);
+        output.push('\n');
+        if let Some(model) = self.flattened_input_model(operation) {
+            self.render_operation_flattened_extension(
+                output,
+                operation,
+                model,
+                FlattenedReceiver::Client,
+                &FlattenedCall::Poll {
+                    return_type: &return_type,
+                },
+            );
+        }
+    }
+
+    fn poll_return_type(&self, operation: &PlannedOperation) -> String {
+        format!(
+            "IAsyncEnumerable<{}>",
+            self.operation_return_type(operation)
+        )
     }
 
     fn render_endpoint_service_operation(
@@ -902,22 +1161,13 @@ impl<'a> ApiPlanner<'a> {
             );
         }
 
-        if has_input
-            && let PlannedType::Record(input_record) = operation.input_model()
-            && let Some(model) = self.api_plan.record(&input_record.full_name)
-            && operation_has_flattened_convenience(operation, model, self.api_plan)
-        {
+        if let Some(model) = self.flattened_input_model(operation) {
             self.render_operation_flattened_extension(
                 output,
                 operation,
-                &method_name,
                 model,
-                &raw_return,
-                &high_level_return,
-                false,
-                true,
-                None,
-                None,
+                FlattenedReceiver::Instance,
+                &FlattenedCall::Operation,
             );
         }
     }
@@ -934,7 +1184,7 @@ impl<'a> ApiPlanner<'a> {
         high_level_return: &str,
         request_kind: RequestArgumentKind,
     ) {
-        render_operation_xml_doc(output, "    ", operation, self.api_plan, false);
+        render_operation_xml_doc(output, "    ", operation, self.api_plan, None);
         output.push_str("    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
@@ -1031,6 +1281,7 @@ impl<'a> ApiPlanner<'a> {
                     "result",
                     self.api_plan,
                     Some("_client"),
+                    None,
                 ));
             } else {
                 output.push_str(&expression);
@@ -1129,7 +1380,13 @@ impl<'a> ApiPlanner<'a> {
         endpoint_constant_name: &str,
         endpoint_parameter: bool,
     ) {
-        render_operation_xml_doc(output, "    ", operation, self.api_plan, endpoint_parameter);
+        render_operation_xml_doc(
+            output,
+            "    ",
+            operation,
+            self.api_plan,
+            endpoint_parameter.then(endpoint_parameter_doc),
+        );
         output.push_str("    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
@@ -1253,6 +1510,7 @@ impl<'a> ApiPlanner<'a> {
                     "result",
                     self.api_plan,
                     Some("client"),
+                    None,
                 ));
             } else {
                 output.push_str(&expression);
@@ -1290,24 +1548,7 @@ impl<'a> ApiPlanner<'a> {
     ) {
         let raw_return = self.operation_raw_return_type(operation);
         let has_input = self.operation_has_input(operation);
-        if has_input {
-            let request_expr = resource_method_request_model_init_expr(
-                request_plan,
-                self.api_plan,
-                self.support_namespace,
-                None,
-                ResourceMethodRequestInitKind::AllFields,
-            )
-            .or_else(|| {
-                resource_method_operation_call_args(
-                    operation,
-                    request_plan,
-                    self.api_plan,
-                    self.support_namespace,
-                )
-                .and_then(|args| (args.len() == 1).then(|| args[0].clone()))
-            })
-            .expect("bound resource operation should have a renderable request plan");
+        if let Some(request_expr) = self.resource_method_request_expr(operation, request_plan) {
             output.push_str("        var request = ");
             output.push_str(&request_expr);
             output.push_str(";\n");
@@ -1344,6 +1585,7 @@ impl<'a> ApiPlanner<'a> {
                     "result",
                     self.api_plan,
                     Some("RequireNexgenClient()"),
+                    None,
                 ));
             } else {
                 output.push_str(&expression);
@@ -1788,7 +2030,7 @@ impl<'a> ApiPlanner<'a> {
                 nullable_type(&base)
             };
         }
-        if field.api_required(GenerationTarget::Workflow) {
+        if field.api_required(api_target()) {
             self.field_type(field)
         } else {
             nullable_type(&self.field_type(field))
@@ -1805,13 +2047,13 @@ impl<'a> ApiPlanner<'a> {
             .field_flattened_annotation(field_name)
             .and_then(|annotation| annotation.value())
         {
-            if field.api_required(GenerationTarget::Workflow) {
+            if field.api_required(api_target()) {
                 annotation.to_string()
             } else {
                 nullable_type(annotation)
             }
         } else {
-            if field.api_required(GenerationTarget::Workflow) {
+            if field.api_required(api_target()) {
                 self.field_type(field)
             } else {
                 nullable_type(&self.field_type(field))
@@ -1849,12 +2091,10 @@ impl<'a> ApiPlanner<'a> {
         self.render_operation_model_type_parameters(output, operation);
         output.push_str("\n{\n");
         let mut option_fields = Vec::<(&RecordFieldSpec<PlannedFamily>, String, bool)>::new();
-        for (field_name, field) in model.api_fields(GenerationTarget::Workflow) {
+        for (field_name, field) in model.api_fields(api_target()) {
             if let Some(nested_model) = flattened_nested_model(field, self.api_plan) {
                 let _ = field_name;
-                for (nested_field_name, nested_field) in
-                    nested_model.api_fields(GenerationTarget::Workflow)
-                {
+                for (nested_field_name, nested_field) in nested_model.api_fields(api_target()) {
                     if !field_is_options_field(nested_model, nested_field_name, nested_field) {
                         continue;
                     }
@@ -1866,8 +2106,7 @@ impl<'a> ApiPlanner<'a> {
                     option_fields.push((
                         nested_field,
                         field_type,
-                        field.api_required(GenerationTarget::Workflow)
-                            && nested_field.api_required(GenerationTarget::Workflow),
+                        field.api_required(api_target()) && nested_field.api_required(api_target()),
                     ));
                 }
                 continue;
@@ -1881,11 +2120,7 @@ impl<'a> ApiPlanner<'a> {
                 field,
                 FlattenedFunctionMode::String,
             );
-            option_fields.push((
-                field,
-                field_type,
-                field.api_required(GenerationTarget::Workflow),
-            ));
+            option_fields.push((field, field_type, field.api_required(api_target())));
         }
         let options_type_parameters = self
             .operation_model_parameters(operation)
@@ -1913,110 +2148,97 @@ impl<'a> ApiPlanner<'a> {
         &self,
         output: &mut String,
         operation: &PlannedOperation,
-        method_name: &str,
         model: &PlannedModel,
-        raw_return: &str,
-        high_level_return: &str,
-        endpoint_parameter: bool,
-        instance_method: bool,
-        operation_call_target: Option<&str>,
-        endpoint_expr: Option<&str>,
+        receiver: FlattenedReceiver,
+        call: &FlattenedCall<'_>,
     ) {
         for overload in flattened_overloads(model) {
-            self.render_operation_flattened_overload(
-                output,
-                operation,
-                method_name,
-                model,
-                raw_return,
-                high_level_return,
-                &overload,
-                endpoint_parameter,
-                instance_method,
-                operation_call_target,
-                endpoint_expr,
+            self.render_flattened_method_signature(
+                output, operation, model, &overload, receiver, call,
             );
+            render_flattened_method_body(
+                output,
+                model,
+                self.api_plan,
+                &overload,
+                self.support_namespace,
+            );
+            render_flattened_call(output, operation, receiver, call);
         }
-    }
-
-    fn render_operation_flattened_overload(
-        &self,
-        output: &mut String,
-        operation: &PlannedOperation,
-        method_name: &str,
-        model: &PlannedModel,
-        raw_return: &str,
-        high_level_return: &str,
-        overload: &FlattenedOverload,
-        endpoint_parameter: bool,
-        instance_method: bool,
-        operation_call_target: Option<&str>,
-        endpoint_expr: Option<&str>,
-    ) {
-        self.render_flattened_method_signature(
-            output,
-            operation,
-            method_name,
-            raw_return,
-            high_level_return,
-            model,
-            overload,
-            endpoint_parameter,
-            instance_method,
-        );
-        render_flattened_method_body(
-            output,
-            operation,
-            model,
-            self.api_plan,
-            overload,
-            self.support_namespace,
-            operation_call_target,
-            endpoint_expr,
-        );
     }
 
     fn render_flattened_method_signature(
         &self,
         output: &mut String,
         operation: &PlannedOperation,
-        method_name: &str,
-        raw_return: &str,
-        high_level_return: &str,
         model: &PlannedModel,
         overload: &FlattenedOverload,
-        endpoint_parameter: bool,
-        instance_method: bool,
+        receiver: FlattenedReceiver,
+        call: &FlattenedCall<'_>,
     ) {
-        render_operation_flattened_xml_doc(
-            output,
-            "    ",
-            operation,
-            model,
-            self.api_plan,
-            overload,
-        );
+        let mut docs = flattened_method_parameter_docs(model, self.api_plan, overload);
+        let operation_ident = csharp_operation_ident(operation);
+        match call {
+            FlattenedCall::Operation => {
+                if matches!(receiver, FlattenedReceiver::Client) {
+                    docs.insert(0, client_parameter_doc());
+                }
+                let return_doc = operation
+                    .output
+                    .as_ref()
+                    .and_then(|_| dotnet_doc(&operation.return_doc));
+                render_xml_doc(
+                    output,
+                    "    ",
+                    dotnet_doc(&operation.doc),
+                    docs,
+                    return_doc,
+                    operation.experimental,
+                );
+            }
+            FlattenedCall::Poll { .. } => {
+                output.push_str(ASYNC_ENUMERABLE_GUARD);
+                render_poll_xml_doc(output, operation, docs);
+            }
+        }
         output.push_str("    ");
         output.push_str(GENERATED_CODE_ATTRIBUTE);
         output.push('\n');
         output.push_str("    public ");
-        if !instance_method {
+        if !matches!(receiver, FlattenedReceiver::Instance) {
             output.push_str("static ");
         }
-        if raw_return == "void" {
-            output.push_str("Task ");
-        } else {
-            output.push_str("Task<");
-            output.push_str(high_level_return);
-            output.push_str("> ");
+        match call {
+            FlattenedCall::Operation => {
+                if self.operation_raw_return_type(operation) == "void" {
+                    output.push_str("Task ");
+                } else {
+                    output.push_str("Task<");
+                    output.push_str(&self.operation_return_type(operation));
+                    output.push_str("> ");
+                }
+                output.push_str(&operation_ident);
+                output.push_str("Async");
+            }
+            FlattenedCall::Poll { return_type } => {
+                output.push_str(return_type);
+                output.push(' ');
+                output.push_str(&poll_method_name(&operation_ident));
+            }
         }
-        output.push_str(method_name);
         render_flattened_generic_parameters(output, model, overload, self.api_plan);
         output.push('(');
         let mut has_parameters = false;
-        if endpoint_parameter {
-            output.push_str("string endpoint");
-            has_parameters = true;
+        match receiver {
+            FlattenedReceiver::Endpoint => {
+                output.push_str("string endpoint");
+                has_parameters = true;
+            }
+            FlattenedReceiver::Client => {
+                output.push_str(CLIENT_RECEIVER_PARAMETER);
+                has_parameters = true;
+            }
+            FlattenedReceiver::Static | FlattenedReceiver::Instance => {}
         }
         self.render_flattened_parameters(output, model, overload, &mut has_parameters);
         if model_has_options_fields(model, self.api_plan) {
@@ -2028,6 +2250,10 @@ impl<'a> ApiPlanner<'a> {
             } else {
                 output.push_str("? options = null");
             }
+        }
+        if matches!(call, FlattenedCall::Poll { .. }) {
+            render_parameter_separator(output, &mut has_parameters);
+            output.push_str(CANCELLATION_PARAMETER);
         }
         output.push_str(")\n    {\n");
     }
@@ -2048,8 +2274,8 @@ impl<'a> ApiPlanner<'a> {
                     if nested_field.function.is_none() {
                         continue;
                     }
-                    let nested_required = field.api_required(GenerationTarget::Workflow)
-                        && nested_field.api_required(GenerationTarget::Workflow);
+                    let nested_required =
+                        field.api_required(api_target()) && nested_field.api_required(api_target());
                     render_parameter_separator(output, has_parameters);
                     output.push_str(&self.flattened_nested_parameter_type(
                         nested_model,
@@ -2073,7 +2299,7 @@ impl<'a> ApiPlanner<'a> {
             ));
             output.push(' ');
             output.push_str(&csharp_parameter_name(&field.name));
-            if !field.api_required(GenerationTarget::Workflow) {
+            if !field.api_required(api_target()) {
                 output.push_str(" = null");
             }
             if matches!(
@@ -2114,7 +2340,7 @@ impl<'a> ApiPlanner<'a> {
 
 fn dotnet_input_default_expr(field: &RecordFieldSpec<PlannedFamily>, value: &str) -> String {
     if field.required
-        && let Some(default) = field.default_for(GenerationTarget::Workflow)
+        && let Some(default) = field.default_for(api_target())
     {
         format!("(({value}) ?? ({default}))")
     } else {
@@ -2361,6 +2587,7 @@ pub(crate) fn generate(
     let mut generated = match &tree.root {
         ApiSpecNode::Leaf(leaf) => generate_leaf(
             &leaf.spec,
+            &leaf.source_path,
             support_package,
             GeneratedFileOrigin::fixed("generated .NET package module"),
             &namespaces,
@@ -2393,6 +2620,7 @@ struct DotnetGenerationResult {
 
 fn generate_leaf(
     api_plan: &PlannedSpec,
+    source_path: &Path,
     support_package: Option<&str>,
     module_origin: GeneratedFileOrigin,
     namespaces: &Namespaces,
@@ -2416,6 +2644,15 @@ fn generate_leaf(
         dotnet_json::ModelBackend::new(json_tree.clone(), namespace.clone()),
     )?;
     validate_dotnet_support_references(api_plan, &generator.external_models, support_package)?;
+    if targets.client {
+        validate_dotnet_client_polls(api_plan, source_path)?;
+        validate_dotnet_client_target(api_plan)?;
+    }
+    generator.validate_resource_member_names()?;
+    let has_resources = api_plan
+        .services
+        .iter()
+        .any(|service| !service.resources.is_empty());
     let mut files = GeneratedFileMap::default();
     super::emit_package(
         &mut files,
@@ -2429,7 +2666,34 @@ fn generate_leaf(
             Ok(())
         },
         |files, target| {
-            debug_assert_eq!(target, GenerationTarget::Workflow);
+            if target == GenerationTarget::Client {
+                // The client target has its own namespace, in its package directory of the
+                // output.
+                let package = client_package_name();
+                let client_namespace = format!("{namespace}.{package}");
+                if api_plan
+                    .services
+                    .iter()
+                    .any(|service| !service.operations.is_empty() || !service.resources.is_empty())
+                {
+                    files.insert(
+                        format!("{package}/Operations.cs"),
+                        generator.render_client_operations_file(&client_namespace),
+                        module_origin.clone(),
+                    )?;
+                }
+                if has_resources {
+                    files.insert(
+                        format!("{package}/Resources.cs"),
+                        generator.render_resources_file(
+                            &client_namespace,
+                            Some(GenerationTarget::Client),
+                        ),
+                        module_origin.clone(),
+                    )?;
+                }
+                return Ok(());
+            }
             if api_plan
                 .services
                 .iter()
@@ -2459,14 +2723,14 @@ fn generate_leaf(
             module_origin.clone(),
         )?;
     }
-    if api_plan
-        .services
-        .iter()
-        .any(|service| !service.resources.is_empty())
-    {
+    if has_resources {
+        // With no Workflow target, a resource has its fields only.
         files.insert(
             "Resources.cs",
-            generator.render_resources_file(&namespace),
+            generator.render_resources_file(
+                &namespace,
+                targets.workflow.then_some(GenerationTarget::Workflow),
+            ),
             module_origin,
         )?;
     }
@@ -2644,6 +2908,7 @@ fn generate_tree_node(
         ApiSpecNode::Leaf(leaf) => {
             let generated = generate_leaf(
                 &leaf.spec,
+                &leaf.source_path,
                 support_package,
                 GeneratedFileOrigin::input_module(Language::Dotnet, &leaf.source_path),
                 namespaces,
@@ -2680,6 +2945,9 @@ fn validate_dotnet_support_references(
             if let Some(reference) = operation.serialization_context.value() {
                 validate_dotnet_support_reference(reference, support_namespace)?;
             }
+            if let Some(reference) = operation.poll_next.value() {
+                validate_dotnet_support_reference(reference, support_namespace)?;
+            }
         }
     }
     for model in api_plan.records().map(|(_, record)| record) {
@@ -2713,6 +2981,245 @@ fn validate_dotnet_support_references(
         }
     }
     Ok(())
+}
+
+/// Refuses a client poll that can't get an iterator, and an iterator with the name of another
+/// operation's method, since the two would be overloads of one name.
+fn validate_dotnet_client_polls(api_plan: &PlannedSpec, source_path: &Path) -> Result<()> {
+    for service in &api_plan.services {
+        for operation in &service.operations {
+            if operation.poll_next.value().is_none()
+                || !operation.poll_targets.contains(GenerationTarget::Client)
+            {
+                continue;
+            }
+            let has_input = operation_has_input(operation, api_plan);
+            let function_inputs = has_input
+                && matches!(
+                    operation.input_model(),
+                    PlannedType::Record(record) if api_plan.record(&record.full_name).is_some_and(
+                        |model| model.public_fields().any(|(_, field)| field.function.is_some())
+                    )
+                );
+            let reason = if !has_input {
+                Some("has no request")
+            } else if function_inputs {
+                Some("has function inputs")
+            } else if operation.output_transform.is_some() {
+                Some("has an output transform")
+            } else if operation.data.output_resource_return.is_some()
+                || matches!(operation.output, Some(PlannedType::Resource(_)))
+            {
+                Some("returns a resource")
+            } else if operation.output.is_none() {
+                Some("returns nothing")
+            } else {
+                None
+            };
+            if let Some(reason) = reason {
+                return Err(Error::UnsupportedPoll {
+                    path: source_path.to_path_buf(),
+                    operation: format!("{}.{}", csharp_service_ident(service), operation.name),
+                    reason: reason.to_string(),
+                });
+            }
+            let iterator_name = poll_method_name(&csharp_operation_ident(operation));
+            if let Some(conflicting) = service.operations.iter().find(|candidate| {
+                format!("{}Async", csharp_operation_ident(candidate)) == iterator_name
+            }) {
+                return Err(Error::DotnetGeneratedNameConflict {
+                    name: iterator_name,
+                    generated_by: format!(
+                        "the iterator of operation `{}.{}`",
+                        csharp_service_ident(service),
+                        operation.name
+                    ),
+                    conflicting_declaration: format!(
+                        "operation `{}.{}`",
+                        csharp_service_ident(service),
+                        conflicting.name
+                    ),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The client target takes only services with an endpoint, and no result record that holds a
+/// resource, since the shared record holds the Workflow class. Its namespace needs a name that no
+/// generated type has. C# picks an extension method at compile time, so two services of one
+/// package can't share a public method name.
+fn validate_dotnet_client_target(api_plan: &PlannedSpec) -> Result<()> {
+    if let Some(service) = api_plan
+        .services
+        .iter()
+        .find(|service| service.endpoint.is_none())
+    {
+        return Err(Error::UnsupportedClientTarget {
+            reason: format!(
+                "doesn't take service `{}` yet, which has no endpoint",
+                csharp_service_ident(service)
+            ),
+        });
+    }
+    if let Some(operation) = api_plan
+        .services
+        .iter()
+        .flat_map(|service| &service.operations)
+        .find(|operation| {
+            operation
+                .data
+                .output_resource_return
+                .as_ref()
+                .is_some_and(|resource| resource.holder.is_some())
+        })
+    {
+        return Err(Error::UnsupportedClientTarget {
+            reason: format!(
+                "doesn't take operation `{}` yet, whose result record holds a resource",
+                operation.name
+            ),
+        });
+    }
+    // C# refuses a type and a namespace of one name in the same namespace.
+    let package = client_package_name();
+    let generated_types = api_plan
+        .records()
+        .map(|(_, record)| {
+            (
+                csharp_type_name(&record.name),
+                format!("record `{}`", record.name),
+            )
+        })
+        .chain(api_plan.enums().map(|(_, enumeration)| {
+            (
+                csharp_type_name(&enumeration.name),
+                format!("enum `{}`", enumeration.name),
+            )
+        }))
+        .chain(api_plan.flags().map(|(_, flags)| {
+            (
+                csharp_type_name(&flags.name),
+                format!("flags `{}`", flags.name),
+            )
+        }))
+        .chain(api_plan.variants().map(|(_, variant)| {
+            (
+                csharp_type_name(&variant.name),
+                format!("variant `{}`", variant.name),
+            )
+        }))
+        .chain(api_plan.services.iter().flat_map(|service| {
+            service.resources.iter().map(|resource| {
+                (
+                    csharp_type_name(&resource.data.type_name),
+                    format!("resource `{}`", resource.data.type_name),
+                )
+            })
+        }))
+        .chain(api_plan.services.iter().map(|service| {
+            (
+                dotnet_operations_class_name(service),
+                format!(
+                    "the operations class of `{}`",
+                    csharp_service_ident(service)
+                ),
+            )
+        }));
+    for (name, declaration) in generated_types {
+        if name == package {
+            return Err(Error::DotnetGeneratedNameConflict {
+                name,
+                generated_by: "the namespace of the client target".to_string(),
+                conflicting_declaration: declaration,
+            });
+        }
+    }
+    let mut owners = BTreeMap::<String, String>::new();
+    for service in &api_plan.services {
+        let service_name = csharp_service_ident(service);
+        for operation in &service.operations {
+            let operation_ident = csharp_operation_ident(operation);
+            let polled = operation.poll_next.value().is_some()
+                && operation.poll_targets.contains(GenerationTarget::Client);
+            let names = [
+                Some(format!("{operation_ident}Async")),
+                polled.then(|| poll_method_name(&operation_ident)),
+            ];
+            for name in names.into_iter().flatten() {
+                if let Some(first_service) = owners.insert(name.clone(), service_name.clone()) {
+                    return Err(Error::ClientTargetNameConflict {
+                        name,
+                        first_service,
+                        second_service: service_name,
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+impl ApiPlanner<'_> {
+    /// Refuses a generated resource member whose name a field or method already has, since C#
+    /// refuses two members of one name.
+    fn validate_resource_member_names(&self) -> Result<()> {
+        for service in &self.api_plan.services {
+            for resource in &service.resources {
+                let resource = &resource.data;
+                let type_name = csharp_type_name(&resource.type_name);
+                let members = resource
+                    .fields
+                    .iter()
+                    .map(|field| {
+                        (
+                            resource_property_name(&type_name, &field.name),
+                            format!("field `{}.{}`", resource.type_name, field.name),
+                        )
+                    })
+                    .chain(resource.methods.iter().map(|method| {
+                        (
+                            format!("{}Async", csharp_type_name(&method.name)),
+                            format!("method `{}.{}`", resource.type_name, method.name),
+                        )
+                    }))
+                    .collect::<Vec<_>>();
+                let mut generated = Vec::new();
+                for method in &resource.methods {
+                    let PlannedResourceMethodBindingSpec::Operation { operation_name, .. } =
+                        &method.binding
+                    else {
+                        continue;
+                    };
+                    let polled = service
+                        .operation(operation_name)
+                        .is_some_and(|operation| self.poll_helper(operation).is_some());
+                    if polled {
+                        generated.push((
+                            poll_method_name(&csharp_type_name(&method.name)),
+                            format!(
+                                "the iterator of resource method `{}.{}`",
+                                resource.type_name, method.name
+                            ),
+                        ));
+                    }
+                }
+                for (name, generated_by) in generated {
+                    if let Some((_, conflicting_declaration)) =
+                        members.iter().find(|(member, _)| *member == name)
+                    {
+                        return Err(Error::DotnetGeneratedNameConflict {
+                            name,
+                            generated_by,
+                            conflicting_declaration: conflicting_declaration.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 fn validate_dotnet_field_kind_support_references(
@@ -2868,12 +3375,21 @@ fn dotnet_doc(spec: &crate::spec::SelectedTextSpec) -> Option<&str> {
     spec.value()
 }
 
+fn endpoint_parameter_doc() -> (String, String) {
+    (
+        "endpoint".to_string(),
+        "Endpoint for the service.".to_string(),
+    )
+}
+
+/// The documentation of a method that takes the request, after `leading_parameter` when one is
+/// given.
 fn render_operation_xml_doc(
     output: &mut String,
     indent: &str,
     operation: &PlannedOperation,
     api_plan: &PlannedSpec,
-    endpoint_parameter: bool,
+    leading_parameter: Option<(String, String)>,
 ) {
     let return_doc = operation
         .output
@@ -2888,15 +3404,16 @@ fn render_operation_xml_doc(
         })
         .flatten()
         .and_then(|model| dotnet_doc(model.doc()));
-    let mut params = Vec::new();
-    if endpoint_parameter {
-        params.push((
-            "endpoint".to_string(),
-            "Endpoint for the service.".to_string(),
-        ));
-    }
-    if let Some(request_doc) = request_doc {
-        params.push(("request".to_string(), request_doc.to_string()));
+    let has_leading_parameter = leading_parameter.is_some();
+    let mut params = Vec::from_iter(leading_parameter);
+    match request_doc {
+        Some(request_doc) => params.push(("request".to_string(), request_doc.to_string())),
+        // C# warns about an undocumented parameter when another parameter has a doc.
+        None if has_leading_parameter && operation_has_input(operation, api_plan) => params.push((
+            "request".to_string(),
+            "The request of the operation.".to_string(),
+        )),
+        None => {}
     }
     render_xml_doc(
         output,
@@ -3017,11 +3534,7 @@ fn operation_has_flattened_convenience(
     model: &PlannedModel,
     _api_plan: &PlannedSpec,
 ) -> bool {
-    model
-        .api_fields(GenerationTarget::Workflow)
-        .next()
-        .is_some()
-        && model_function_fields_flattenable(model)
+    model.api_fields(api_target()).next().is_some() && model_function_fields_flattenable(model)
 }
 
 fn model_function_fields_flattenable(model: &PlannedModel) -> bool {
@@ -3090,26 +3603,124 @@ fn flattened_overloads(model: &PlannedModel) -> Vec<FlattenedOverload> {
         .collect()
 }
 
-fn render_operation_flattened_xml_doc(
+/// The first parameter of a generated method, which calls of the generated code pass on.
+#[derive(Clone, Copy)]
+enum FlattenedReceiver {
+    /// A static method of the Workflow operations class.
+    Static,
+    /// A static method that takes the endpoint of a service with no `@nexus.endpoint`.
+    Endpoint,
+    /// An instance method of the Workflow client of a service with no `@nexus.endpoint`.
+    Instance,
+    /// An extension method of `ITemporalClient`.
+    Client,
+}
+
+/// What a flattened method does with the request that it builds.
+enum FlattenedCall<'a> {
+    /// Calls the operation and returns its result.
+    Operation,
+    /// Returns the client's iterator of the request it builds.
+    Poll { return_type: &'a str },
+}
+
+const CLIENT_RECEIVER_PARAMETER: &str = "this Temporalio.Client.ITemporalClient client";
+
+const CANCELLATION_PARAMETER: &str =
+    "System.Threading.CancellationToken cancellationToken = default";
+
+// The SDK has `IAsyncEnumerable` only on .NET Core 3.0 and later, as for `ListWorkflowsAsync`.
+const ASYNC_ENUMERABLE_GUARD: &str = "    #if NETCOREAPP3_0_OR_GREATER\n";
+const ASYNC_ENUMERABLE_GUARD_END: &str = "    #endif\n";
+
+fn client_parameter_doc() -> (String, String) {
+    (
+        "client".to_string(),
+        "The client that starts the operation.".to_string(),
+    )
+}
+
+// The SDK names a method that returns an `IAsyncEnumerable` as an async method, as in
+// `ListWorkflowsAsync`. `<Name>Async` already returns one page.
+fn poll_method_name(name: &str) -> String {
+    format!("{name}PagesAsync")
+}
+
+fn render_poll_xml_doc(
     output: &mut String,
-    indent: &str,
     operation: &PlannedOperation,
-    model: &PlannedModel,
-    api_plan: &PlannedSpec,
-    overload: &FlattenedOverload,
+    mut params: Vec<(String, String)>,
 ) {
-    let return_doc = operation
-        .output
-        .as_ref()
-        .and_then(|_| dotnet_doc(&operation.return_doc));
+    params.insert(0, client_parameter_doc());
+    params.push((
+        "cancellationToken".to_string(),
+        "Cancels the poll, and the read in flight.".to_string(),
+    ));
+    let mut summary = format!(
+        "Reads each page of {}Async, up to the last one.",
+        csharp_operation_ident(operation)
+    );
+    if let Some(doc) = dotnet_doc(&operation.doc) {
+        summary.push('\n');
+        summary.push_str(doc);
+    }
     render_xml_doc(
         output,
-        indent,
-        dotnet_doc(&operation.doc),
-        flattened_method_parameter_docs(model, api_plan, overload),
-        return_doc,
+        "    ",
+        Some(&summary),
+        params,
+        None,
         operation.experimental,
     );
+}
+
+/// The end of a generated method, after it builds `request`.
+fn render_flattened_call(
+    output: &mut String,
+    operation: &PlannedOperation,
+    receiver: FlattenedReceiver,
+    call: &FlattenedCall<'_>,
+) {
+    let mut operation_call = format!("{}Async(", csharp_operation_ident(operation));
+    match receiver {
+        FlattenedReceiver::Endpoint => operation_call.push_str("endpoint, "),
+        FlattenedReceiver::Client => operation_call.push_str("client, "),
+        FlattenedReceiver::Static | FlattenedReceiver::Instance => {}
+    }
+    operation_call.push_str("request)");
+    match call {
+        FlattenedCall::Operation => {
+            output.push_str("        return ");
+            output.push_str(&operation_call);
+            output.push_str(";\n");
+        }
+        FlattenedCall::Poll { .. } => {
+            output.push_str("        return ");
+            output.push_str(&poll_method_name(&csharp_operation_ident(operation)));
+            output.push_str("(client, request, cancellationToken);\n    }\n");
+            output.push_str(ASYNC_ENUMERABLE_GUARD_END);
+            output.push('\n');
+            return;
+        }
+    }
+    output.push_str("    }\n\n");
+}
+
+/// The loop of a client poll, after the first `request`. `operation_call` gets the response to
+/// `request`. The helper runs before the yield, so a change to the yielded page doesn't change
+/// the next request.
+fn render_poll_loop(output: &mut String, operation_call: &str, helper: &str) {
+    output.push_str("        while (true)\n        {\n");
+    output.push_str("            var response = await ");
+    output.push_str(operation_call);
+    output.push_str(".ConfigureAwait(false);\n");
+    output.push_str("            var nextRequest = ");
+    output.push_str(helper);
+    output.push_str("(request, response);\n");
+    output.push_str("            yield return response;\n");
+    output.push_str("            if (nextRequest == null)\n            {\n");
+    output.push_str("                yield break;\n            }\n");
+    output.push_str("            request = nextRequest;\n        }\n");
 }
 
 fn flattened_method_parameter_docs(
@@ -3154,19 +3765,30 @@ fn push_field_parameter_doc(
     params: &mut Vec<(String, String)>,
     field: &RecordFieldSpec<PlannedFamily>,
 ) {
-    params.push((
-        csharp_parameter_name(&field.name),
+    params.push(field_parameter_doc(field));
+}
+
+fn field_parameter_doc(field: &RecordFieldSpec<PlannedFamily>) -> (String, String) {
+    (
+        xml_doc_parameter_name(field),
         field
             .doc
             .as_ref()
             .and_then(dotnet_doc)
             .map(str::to_string)
             .unwrap_or_else(|| fallback_parameter_doc(field)),
-    ));
+    )
 }
 
 fn fallback_parameter_doc(field: &RecordFieldSpec<PlannedFamily>) -> String {
-    format!("The {} value.", csharp_parameter_name(&field.name))
+    format!("The {} value.", xml_doc_parameter_name(field))
+}
+
+// A `<param>` tag names a parameter such as `@namespace` without its `@`.
+fn xml_doc_parameter_name(field: &RecordFieldSpec<PlannedFamily>) -> String {
+    csharp_parameter_name(&field.name)
+        .trim_start_matches('@')
+        .to_string()
 }
 
 fn push_function_args_parameter_docs(
@@ -3228,18 +3850,17 @@ fn render_flattened_generic_parameters(
     output.push('>');
 }
 
+/// The statements that build `request`, with each sourced field of the API target from its
+/// source.
 fn render_flattened_method_body(
     output: &mut String,
-    operation: &PlannedOperation,
     model: &PlannedModel,
     api_plan: &PlannedSpec,
     overload: &FlattenedOverload,
     support_namespace: Option<&str>,
-    operation_call_target: Option<&str>,
-    endpoint_expr: Option<&str>,
 ) {
     let options_required = model_options_required(model, api_plan);
-    for (field_name, field) in model.api_fields(GenerationTarget::Workflow) {
+    for (field_name, field) in model.api_fields(api_target()) {
         if field.function.is_some()
             && matches!(
                 overload.function_mode(field_name),
@@ -3278,7 +3899,7 @@ fn render_flattened_method_body(
         output.push('>');
     }
     let field_exprs = model
-        .api_fields(GenerationTarget::Workflow)
+        .api_fields(api_target())
         .map(|(field_name, field)| {
             let value = flattened_request_field_expr(
                 field_name,
@@ -3301,7 +3922,7 @@ fn render_flattened_method_body(
         .map(|(_, _, expr)| expr.clone())
         .collect::<Vec<_>>();
     constructor_args.extend(model.sourced_fields().map(|(name, field, source_expr)| {
-        if field.source_for(GenerationTarget::Workflow).is_some() {
+        if field.source_for(api_target()).is_some() {
             dotnet_source_expr(source_expr, support_namespace)
         } else {
             field_exprs
@@ -3335,19 +3956,6 @@ fn render_flattened_method_body(
         }
         output.push_str("        };\n");
     }
-    output.push_str("        return ");
-    if let Some(operation_call_target) = operation_call_target {
-        output.push_str(operation_call_target);
-        output.push('.');
-    }
-    output.push_str(&csharp_operation_ident(operation));
-    output.push_str("Async(");
-    if let Some(endpoint_expr) = endpoint_expr {
-        output.push_str(endpoint_expr);
-        output.push_str(", ");
-    }
-    output.push_str("request);\n");
-    output.push_str("    }\n\n");
 }
 
 fn flattened_request_field_expr(
@@ -3476,42 +4084,33 @@ fn service_definition_field_name(service: &PlannedService) -> String {
 }
 
 fn model_has_options_fields(model: &PlannedModel, api_plan: &PlannedSpec) -> bool {
-    model
-        .api_fields(GenerationTarget::Workflow)
-        .any(|(field_name, field)| {
-            if let Some(nested_model) = flattened_nested_model(field, api_plan) {
-                nested_model.api_fields(GenerationTarget::Workflow).any(
-                    |(nested_field_name, nested_field)| {
-                        field_is_options_field(nested_model, nested_field_name, nested_field)
-                    },
-                )
-            } else {
-                field_is_options_field(model, field_name, field)
-            }
-        })
+    model.api_fields(api_target()).any(|(field_name, field)| {
+        if let Some(nested_model) = flattened_nested_model(field, api_plan) {
+            nested_model
+                .api_fields(api_target())
+                .any(|(nested_field_name, nested_field)| {
+                    field_is_options_field(nested_model, nested_field_name, nested_field)
+                })
+        } else {
+            field_is_options_field(model, field_name, field)
+        }
+    })
 }
 
 fn model_options_required(model: &PlannedModel, api_plan: &PlannedSpec) -> bool {
-    model
-        .api_fields(GenerationTarget::Workflow)
-        .any(|(field_name, field)| {
-            if let Some(nested_model) = flattened_nested_model(field, api_plan) {
-                field.api_required(GenerationTarget::Workflow)
-                    && nested_model.api_fields(GenerationTarget::Workflow).any(
-                        |(nested_field_name, nested_field)| {
-                            nested_field.api_required(GenerationTarget::Workflow)
-                                && field_is_options_field(
-                                    nested_model,
-                                    nested_field_name,
-                                    nested_field,
-                                )
-                        },
-                    )
-            } else {
-                field.api_required(GenerationTarget::Workflow)
-                    && field_is_options_field(model, field_name, field)
-            }
-        })
+    model.api_fields(api_target()).any(|(field_name, field)| {
+        if let Some(nested_model) = flattened_nested_model(field, api_plan) {
+            field.api_required(api_target())
+                && nested_model
+                    .api_fields(api_target())
+                    .any(|(nested_field_name, nested_field)| {
+                        nested_field.api_required(api_target())
+                            && field_is_options_field(nested_model, nested_field_name, nested_field)
+                    })
+        } else {
+            field.api_required(api_target()) && field_is_options_field(model, field_name, field)
+        }
+    })
 }
 
 fn field_is_options_field(
@@ -3528,7 +4127,7 @@ fn nested_model_init_expr(
     options_required: bool,
 ) -> String {
     let option_fields = model
-        .api_fields(GenerationTarget::Workflow)
+        .api_fields(api_target())
         .filter(|(nested_field_name, nested_field)| {
             field_is_options_field(model, nested_field_name, nested_field)
         })
@@ -3575,7 +4174,7 @@ fn model_init_expr(
 ) -> String {
     let required = |field: &&RecordFieldSpec<PlannedFamily>| {
         if options_surface {
-            field.api_required(GenerationTarget::Workflow)
+            field.api_required(api_target())
         } else {
             field.required
         }
@@ -3603,7 +4202,7 @@ fn model_init_expr(
 }
 
 fn option_field_expr(field: &RecordFieldSpec<PlannedFamily>, options_required: bool) -> String {
-    if options_required || field.api_required(GenerationTarget::Workflow) {
+    if options_required || field.api_required(api_target()) {
         format!("options.{}", field_property_name(field))
     } else {
         format!("options?.{}", field_property_name(field))
@@ -3616,8 +4215,7 @@ fn option_nested_field_expr(
     options_required: bool,
 ) -> String {
     if options_required
-        || (field.api_required(GenerationTarget::Workflow)
-            && nested_field.api_required(GenerationTarget::Workflow))
+        || (field.api_required(api_target()) && nested_field.api_required(api_target()))
     {
         format!("options.{}", field_property_name(nested_field))
     } else {
@@ -3729,7 +4327,7 @@ fn resource_method_operation_call_args(
     )?;
     // The options wrapper fills every sourced field from its source, but the resource's value
     // wins over the source.
-    if request_plan_fills_source(api_plan, request_plan, GenerationTarget::Workflow) {
+    if request_plan_fills_source(api_plan, request_plan, api_target()) {
         return resource_method_request_model_init_expr(
             request_plan,
             api_plan,
@@ -3854,7 +4452,7 @@ fn resource_method_request_model_init_expr(
                 candidate.name == field.field_name || field_name.as_str() == field.field_name
             })?;
         if matches!(init_kind, ResourceMethodRequestInitKind::OptionsFields)
-            && (model_field.source_for(GenerationTarget::Workflow).is_some()
+            && (model_field.source_for(api_target()).is_some()
                 || !field_is_options_field(model, model_field_name, model_field))
         {
             continue;
@@ -3871,7 +4469,7 @@ fn resource_method_request_model_init_expr(
                 && !field_exprs
                     .iter()
                     .any(|(provided, _)| provided.name == field.name)
-                && let Some(default) = field.default_for(GenerationTarget::Workflow)
+                && let Some(default) = field.default_for(api_target())
             {
                 field_exprs.push((field, format!("({default})")));
             }
@@ -3886,7 +4484,7 @@ fn resource_method_request_model_init_expr(
                     .find(|(candidate, _)| candidate.name == field.name)
                     .map(|(_, expression)| expression.clone())
                     .unwrap_or_else(|| {
-                        if field.source_for(GenerationTarget::Workflow).is_some() {
+                        if field.source_for(api_target()).is_some() {
                             dotnet_source_expr(source_expr, support_namespace)
                         } else {
                             "default".to_string()
@@ -3978,12 +4576,9 @@ fn operation_has_input(operation: &PlannedOperation, api_plan: &PlannedSpec) -> 
         return false;
     };
     match input {
-        PlannedType::Record(record) => api_plan.record(&record.full_name).is_none_or(|model| {
-            model
-                .api_fields(GenerationTarget::Workflow)
-                .next()
-                .is_some()
-        }),
+        PlannedType::Record(record) => api_plan
+            .record(&record.full_name)
+            .is_none_or(|model| model.api_fields(api_target()).next().is_some()),
         PlannedType::External(ExternalTypeSpec::Proto(PlannedProtoType::Message(_)))
         | PlannedType::External(ExternalTypeSpec::Json(_)) => true,
         _ => panic!("operation input should be a model"),
@@ -4004,20 +4599,28 @@ fn operation_transform_expression(
             .replace("result", result_expr);
     }
     if operation.data.output_resource_return.is_some() {
-        return resource_return_expression(operation, request_expr, result_expr, api_plan, None);
+        return resource_return_expression(
+            operation,
+            request_expr,
+            result_expr,
+            api_plan,
+            None,
+            None,
+        );
     }
     result_expr.to_string()
 }
 
 /// The resource that an operation returns, bound to `client` when one is given. A result
 /// record that holds the resource gets it in its resource field, and each other field from
-/// the field of the same name in the wire record.
+/// the field of the same name in the wire record. A client handle takes `nexus_client` first.
 fn resource_return_expression(
     operation: &PlannedOperation,
     request_expr: &str,
     result_expr: &str,
     api_plan: &PlannedSpec,
     client: Option<&str>,
+    nexus_client: Option<&str>,
 ) -> String {
     let resource = operation
         .data
@@ -4050,6 +4653,11 @@ fn resource_return_expression(
                 _ => expr,
             }
         })
+        .collect::<Vec<_>>();
+    let args = nexus_client
+        .map(str::to_string)
+        .into_iter()
+        .chain(args)
         .collect::<Vec<_>>();
     let mut value = format!("new {type_name}({})", args.join(", "));
     if let Some(client) = client {
@@ -4388,6 +4996,19 @@ fn dotnet_endpoint_service_class_name(service: &PlannedService) -> String {
     format!("{}Client", csharp_service_ident(service))
 }
 
+/// The namespace segment and the output directory of the client target.
+fn client_package_name() -> String {
+    csharp_type_name(
+        GenerationTarget::Client
+            .package_dir()
+            .expect("the client target has a package directory"),
+    )
+}
+
+fn client_extensions_class_name(service: &PlannedService) -> String {
+    format!("{}ClientExtensions", csharp_service_ident(service))
+}
+
 fn service_endpoint_constant_name(service: &PlannedService) -> String {
     csharp_type_name(&format!("{}-endpoint", service.name))
 }
@@ -4637,6 +5258,409 @@ const CSHARP_KEYWORDS: &[&str] = &[
     "volatile",
     "while",
 ];
+
+impl<'a> ApiPlanner<'a> {
+    /// Renders `Client/Operations.cs`, with the operations of each service as extension methods
+    /// of `ITemporalClient`.
+    fn render_client_operations_file(&self, namespace: &str) -> String {
+        let _target = api_target_scope(GenerationTarget::Client);
+        let mut imports = vec![
+            "System",
+            "System.CodeDom.Compiler",
+            "System.Collections.Generic",
+            "System.Linq",
+            "System.Linq.Expressions",
+            "System.Threading.Tasks",
+            "Google.Protobuf.WellKnownTypes",
+        ];
+        if let Some(support_namespace) = self.support_namespace {
+            imports.push(support_namespace);
+        }
+        let module_imports = self.namespaces.module_imports(self.api_plan);
+        imports.extend(module_imports.iter().map(String::as_str));
+        let mut output = generated_file_prelude(namespace, &imports);
+        if self.api_plan.services.iter().any(|service| {
+            service.deprecated
+                || service
+                    .operations
+                    .iter()
+                    .any(|operation| operation.deprecated)
+        }) {
+            output.push_str(OBSOLETE_WARNING_PRAGMA);
+        }
+        for service in &self.api_plan.services {
+            for operation in &service.operations {
+                self.render_operation_options_type(&mut output, operation);
+            }
+            self.render_client_extensions_class(&mut output, service);
+        }
+        close_namespace(&mut output);
+        output
+    }
+
+    fn render_client_extensions_class(&self, output: &mut String, service: &PlannedService) {
+        output.push_str("/// <summary>\n/// Starts the operations of <c>");
+        output.push_str(&csharp_service_ident(service));
+        output.push_str("</c> from code outside a Workflow.\n/// </summary>\n");
+        if service.experimental {
+            output.push_str("/// <remarks>");
+            output.push_str(EXPERIMENTAL_WARNING);
+            output.push_str("</remarks>\n");
+        }
+        output.push_str(GENERATED_CODE_ATTRIBUTE);
+        output.push('\n');
+        if service.deprecated {
+            output.push_str(&obsolete_attribute("service"));
+            output.push('\n');
+        }
+        output.push_str("public static class ");
+        output.push_str(&client_extensions_class_name(service));
+        output.push_str("\n{\n");
+        output.push_str(
+            "    // Each call starts a new standalone Nexus operation, with a new random id.\n    ",
+        );
+        output.push_str(GENERATED_CODE_ATTRIBUTE);
+        output.push_str(
+            "\n    internal static Temporalio.Client.NexusOperationOptions NewOperationOptions(\n",
+        );
+        output.push_str(
+            "        System.Threading.CancellationToken cancellationToken = default) =>\n",
+        );
+        output.push_str(
+            "        new(Guid.NewGuid().ToString()) { Rpc = new() { CancellationToken = cancellationToken } };\n\n",
+        );
+        for resource in &service.resources {
+            self.render_client_resource_factory(output, service, &resource.data);
+        }
+        for operation in &service.operations {
+            self.render_client_operation(output, service, operation);
+        }
+        output.push_str("}\n\n");
+    }
+
+    /// A method that builds a client handle from the identity fields of a resource, for example
+    /// from fields that a caller stored. The handle gets a Nexus client for the resource's own
+    /// service.
+    fn render_client_resource_factory(
+        &self,
+        output: &mut String,
+        service: &PlannedService,
+        resource: &PlannedResource,
+    ) {
+        let type_name = csharp_type_name(&resource.type_name);
+        output.push_str("    /// <summary>\n    /// Returns the <c>");
+        output.push_str(&type_name);
+        output.push_str("</c> handle that has these identity fields.\n    /// </summary>\n    ");
+        output.push_str(GENERATED_CODE_ATTRIBUTE);
+        output.push_str("\n    public static ");
+        output.push_str(&type_name);
+        output.push(' ');
+        output.push_str(&client_resource_factory_name(resource));
+        output.push('(');
+        output.push_str(CLIENT_RECEIVER_PARAMETER);
+        for field in &resource.fields {
+            output.push_str(", ");
+            output.push_str(&self.resource_field_type(&field.kind, field.optional));
+            output.push(' ');
+            output.push_str(&resource_parameter_name(&type_name, &field.name));
+        }
+        output.push_str(") =>\n        new(");
+        output.push_str(&client_nexus_client_expr(service, "client"));
+        for field in &resource.fields {
+            output.push_str(", ");
+            output.push_str(&resource_parameter_name(&type_name, &field.name));
+        }
+        output.push_str(");\n\n");
+    }
+
+    fn render_client_operation(
+        &self,
+        output: &mut String,
+        service: &PlannedService,
+        operation: &PlannedOperation,
+    ) {
+        let (raw_input_type, input_type) = if self.operation_has_input(operation) {
+            (
+                self.operation_raw_input_type(operation.input_model()),
+                self.operation_input_type(operation.input_model()),
+            )
+        } else {
+            Default::default()
+        };
+        if input_type == raw_input_type {
+            self.render_client_request_method(
+                output,
+                service,
+                operation,
+                &raw_input_type,
+                RequestArgumentKind::Raw,
+            );
+        } else {
+            self.render_client_request_method(
+                output,
+                service,
+                operation,
+                &input_type,
+                RequestArgumentKind::HighLevel,
+            );
+        }
+        if let Some(model) = self.flattened_input_model(operation) {
+            self.render_operation_flattened_extension(
+                output,
+                operation,
+                model,
+                FlattenedReceiver::Client,
+                &FlattenedCall::Operation,
+            );
+        }
+        if let Some(helper) = self.poll_helper(operation) {
+            self.render_poll_methods(output, service, operation, &helper);
+        }
+    }
+
+    /// The extension method that starts the operation with the request and returns its result.
+    fn render_client_request_method(
+        &self,
+        output: &mut String,
+        service: &PlannedService,
+        operation: &PlannedOperation,
+        input_type: &str,
+        request_kind: RequestArgumentKind,
+    ) {
+        let has_input = self.operation_has_input(operation);
+        render_operation_xml_doc(
+            output,
+            "    ",
+            operation,
+            self.api_plan,
+            Some(client_parameter_doc()),
+        );
+        output.push_str("    ");
+        output.push_str(GENERATED_CODE_ATTRIBUTE);
+        output.push('\n');
+        if operation.deprecated {
+            output.push_str("    ");
+            output.push_str(&obsolete_attribute("operation"));
+            output.push('\n');
+        }
+        output.push_str("    ");
+        output.push_str(self.operation_request_method_access(operation, request_kind));
+        output.push_str(" static async ");
+        if self.operation_raw_return_type(operation) == "void" {
+            output.push_str("Task ");
+        } else {
+            output.push_str("Task<");
+            output.push_str(&self.operation_return_type(operation));
+            output.push_str("> ");
+        }
+        output.push_str(&csharp_operation_ident(operation));
+        output.push_str("Async");
+        self.render_operation_model_type_parameters(output, operation);
+        output.push('(');
+        output.push_str(CLIENT_RECEIVER_PARAMETER);
+        if has_input {
+            output.push_str(", ");
+            output.push_str(input_type);
+            output.push_str(" request");
+        }
+        output.push_str(")\n    {\n");
+        output.push_str("        var nexusClient = ");
+        output.push_str(&client_nexus_client_expr(service, "client"));
+        output.push_str(";\n");
+        self.render_client_operation_body(
+            output,
+            service,
+            operation,
+            "nexusClient",
+            Some("client"),
+            Some("result"),
+        );
+        output.push_str("    }\n\n");
+    }
+
+    /// The call that starts an operation with `request` on `nexus_client`, and awaits its raw
+    /// result.
+    fn client_operation_call(
+        &self,
+        service: &PlannedService,
+        operation: &PlannedOperation,
+        nexus_client: &str,
+        cancellation_token: &str,
+    ) -> String {
+        let mut raw_return = self.operation_raw_return_type(operation);
+        // The client namespace has its own class of each resource, which takes a Nexus client, so
+        // the answer decodes into the class of the parent namespace.
+        if self.resource_of_type(&raw_return).is_some() {
+            raw_return = format!(
+                "global::{}.{raw_return}",
+                self.namespaces.namespace(self.api_plan)
+            );
+        }
+        format!(
+            "{nexus_client}.ExecuteNexusOperationAsync{}({}, {}, {}.NewOperationOptions({cancellation_token}))",
+            if raw_return == "void" {
+                String::new()
+            } else {
+                format!("<{raw_return}>")
+            },
+            csharp_string_literal(&operation.wire_name),
+            if self.operation_has_input(operation) {
+                "request"
+            } else {
+                "null"
+            },
+            client_extensions_class_name(service),
+        )
+    }
+
+    /// The statements that start an operation with `request` on `nexus_client` and return its
+    /// result in `result`, or drop it with `discard`. `client` is the `ITemporalClient` that
+    /// creates the Nexus client of a resource of another service, when the caller has one.
+    fn render_client_operation_body(
+        &self,
+        output: &mut String,
+        service: &PlannedService,
+        operation: &PlannedOperation,
+        nexus_client: &str,
+        client: Option<&str>,
+        result: Option<&str>,
+    ) {
+        let call = self.client_operation_call(service, operation, nexus_client, "");
+        let Some(result) = result.filter(|_| self.operation_raw_return_type(operation) != "void")
+        else {
+            output.push_str("        await ");
+            output.push_str(&call);
+            output.push_str(".ConfigureAwait(false);\n");
+            return;
+        };
+        output.push_str("        var ");
+        output.push_str(result);
+        output.push_str(" = await ");
+        output.push_str(&call);
+        output.push_str(".ConfigureAwait(false);\n");
+        output.push_str("        return ");
+        output.push_str(&self.client_result_expression(
+            service,
+            operation,
+            nexus_client,
+            client,
+            result,
+        ));
+        output.push_str(";\n");
+    }
+
+    /// The result of a client call. A returned handle gets a Nexus client for its resource's own
+    /// service.
+    fn client_result_expression(
+        &self,
+        service: &PlannedService,
+        operation: &PlannedOperation,
+        nexus_client: &str,
+        client: Option<&str>,
+        result: &str,
+    ) -> String {
+        let result_nexus_client =
+            |resource_type_name: &str| match (self.resource_of_type(resource_type_name), client) {
+                (Some((owner, _)), Some(client)) if owner.wire_name != service.wire_name => {
+                    client_nexus_client_expr(owner, client)
+                }
+                _ => nexus_client.to_string(),
+            };
+        if let Some(resource) = &operation.data.output_resource_return {
+            return resource_return_expression(
+                operation,
+                "request",
+                result,
+                self.api_plan,
+                None,
+                Some(&result_nexus_client(&resource.resource_type_name)),
+            );
+        }
+        if operation
+            .output_transform
+            .as_ref()
+            .is_some_and(|transform| transform.transform.value().is_some())
+        {
+            return operation_transform_expression(operation, "request", result, self.api_plan);
+        }
+        let return_type = self.operation_return_type(operation);
+        if let Some((_, resource)) = self.resource_of_type(&return_type) {
+            let type_name = csharp_type_name(&resource.type_name);
+            let args = std::iter::once(result_nexus_client(&resource.type_name))
+                .chain(resource.fields.iter().map(|field| {
+                    format!(
+                        "{result}.{}",
+                        resource_property_name(&type_name, &field.name)
+                    )
+                }))
+                .collect::<Vec<_>>();
+            return format!("new {type_name}({})", args.join(", "));
+        }
+        result.to_string()
+    }
+
+    fn resource_of_type(
+        &self,
+        type_name: &str,
+    ) -> Option<(&'a PlannedService, &'a PlannedResource)> {
+        let type_name = csharp_type_name(type_name);
+        self.api_plan
+            .services
+            .iter()
+            .flat_map(|service| {
+                service
+                    .resources
+                    .iter()
+                    .map(move |resource| (service, &resource.data))
+            })
+            .find(|(_, resource)| csharp_type_name(&resource.type_name) == type_name)
+    }
+}
+
+/// The Nexus client of `service`, from the `ITemporalClient` expression `client`.
+fn client_nexus_client_expr(service: &PlannedService, client: &str) -> String {
+    format!(
+        "{client}.CreateNexusClient({}, {})",
+        csharp_string_literal(
+            service
+                .endpoint
+                .as_deref()
+                .expect("the client target refuses a service with no endpoint")
+        ),
+        csharp_string_literal(&service.wire_name)
+    )
+}
+
+fn client_resource_factory_name(resource: &PlannedResource) -> String {
+    format!("Get{}", csharp_type_name(&resource.type_name))
+}
+
+/// The local of a client resource method's operation result, which no parameter has.
+fn client_result_local(method: &PlannedResourceMethod) -> String {
+    let mut name = "result".to_string();
+    while method
+        .params
+        .iter()
+        .any(|param| csharp_parameter_name(&param.name) == name)
+    {
+        name.push('_');
+    }
+    name
+}
+
+/// The name of the client resource constructor's Nexus client parameter, which no field
+/// parameter has.
+fn client_resource_nexus_client_name(resource: &PlannedResource, type_name: &str) -> String {
+    let mut name = "nexusClient".to_string();
+    while resource
+        .fields
+        .iter()
+        .any(|field| resource_parameter_name(type_name, &field.name) == name)
+    {
+        name.push('_');
+    }
+    name
+}
 
 #[cfg(test)]
 mod tests {

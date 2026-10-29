@@ -1,0 +1,8 @@
+languages = ["dotnet"]
+targets = ["workflow", "client"]
+
+[error]
+kind = "dotnet-generated-name-conflict"
+contains = [
+  ".NET generated name `Client` for the namespace of the client target conflicts with record `Client`",
+]

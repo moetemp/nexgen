@@ -1,0 +1,13 @@
+package temporal:dotnet-client-type@1.0.0;
+
+world system { export account-service; }
+
+// The .NET client target writes the namespace `<namespace>.Client`, the name of the record
+// `client`.
+/// @nexus.endpoint "accounts"
+interface account-service {
+  record client { id: string }
+  record get-client-request { id: string }
+
+  get-client: func(request: get-client-request) -> client;
+}

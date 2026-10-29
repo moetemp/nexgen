@@ -1,0 +1,2 @@
+`--targets workflow,client` also writes a .NET client namespace, `<namespace>.Client`, under `Client/`, with its own resources and options types and an `ITemporalClient` extension method per operation. A client resource takes the `NexusClient` of its service, each call uses a new random operation ID, and each extension class has a `Get<Resource>` factory.
+`@nexus.poll` with a `dotnet` helper generates a .NET `<Name>PagesAsync` in the client target, an `IAsyncEnumerable` of the pages.

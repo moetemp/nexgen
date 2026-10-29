@@ -1514,9 +1514,10 @@ separate the targets with commas.
   model fields. A handler that implements the service needs only these.
 - `workflow` selects the API for Workflow code.
 - `client` writes the same API for code outside a Workflow, in a `client`
-  package inside the output directory. So far Python and TypeScript support it.
-  It can be selected independently or alongside `workflow`. nexgen refuses it
-  for a service with no `@nexus.endpoint`.
+  package inside the output directory. In .NET, that is the namespace
+  `<namespace>.Client`, in files under `Client/`. So far Python, TypeScript and
+  .NET support it. It can be selected independently or alongside `workflow`.
+  nexgen refuses it for a service with no `@nexus.endpoint`.
 
 The `client` package has its own resource classes and a
 `<Service>ClientExtension` for each service, with the names of the Workflow
@@ -1635,6 +1636,31 @@ A TypeScript client resource keeps its Nexus client in a private field, so the
 handle still converts as data. nexgen refuses an operation whose client method
 would be `createNexusClient`, and a type named `NexusServiceClient`, since both
 would clash in the client package.
+
+In .NET, `Client/Operations.cs` has a static `<Service>ClientExtensions` class
+for each service, and the options types of the client calls. Its methods are
+extension methods of `ITemporalClient`, with the names and parameters of the
+Workflow operations. Each call creates a Nexus client with
+`ITemporalClient.CreateNexusClient`, starts the operation with a new random
+operation ID, and returns the result. The factory of a resource is
+`Get<Resource>`. A client resource takes the `NexusClient` of its service as its
+first constructor argument and keeps it in a private field, so the handle still
+converts as data. C# picks an extension method at compile time, so nexgen
+refuses two services of one package with public methods of the same name. It
+also refuses a type named `Client`, and an operation whose result record holds a
+resource.
+
+```csharp
+using Temporalio.Workflows.Client;
+
+var stream = await client.CreateStreamAsync(new CreateStreamOptions("s1"));
+await stream.PublishAsync(records);
+```
+
+For a System Nexus service, `@temporalio/client` 1.24 and Temporalio 1.20.0
+don't encode a client call with the System Nexus payload converter yet. They use
+the user's converter and codec, so a `Payload`, a failure or a 64-bit value
+doesn't reach the service in the form it expects.
 
 Sources work in the client target as well. Restrict workflow-only helpers with
 `targets="workflow"`. If a required resource-method request field has neither an
@@ -2190,18 +2216,25 @@ type or transform expression refers to an otherwise-unavailable module.
 ### @nexus.poll
 
 **Placement:** Operation (function) **Syntax:**
-`@nexus.poll python="<support-helper>" typescript="<support-helper>" targets="client"`
+`@nexus.poll <language>="<support-helper>" targets="client"`, where `<language>`
+is `python`, `typescript` or `dotnet`.
 
 Generates an async iterator on the client extension, and on each client resource
-method that binds the operation. Python names it `iter_<name>`, and TypeScript
-names it `iter<Name>`. The iterator sends the request, yields the response, and
-calls `<support-helper>(request, response)` for the next request. The helper is
-a sync function in the `--support-package`. It returns `None` (`undefined` in
-TypeScript) to stop.
+method that binds the operation. Python names it `iter_<name>`, TypeScript names
+it `iter<Name>`, and .NET names it `<Name>PagesAsync`. The iterator sends the
+request, yields the response, and calls `<support-helper>(request, response)`
+for the next request. The helper is a sync function in the `--support-package`.
+It returns `None` (`undefined` in TypeScript, `null` in .NET) to stop.
+
+In .NET, `<Name>PagesAsync` has the parameters of `<Name>Async` and a
+`CancellationToken`, and it returns an `IAsyncEnumerable` of the responses, as
+the SDK's `ListWorkflowsAsync` does. The token also cancels the read in flight.
+As in the SDK, the method is under `#if NETCOREAPP3_0_OR_GREATER`.
 
 ```wit
 /// @nexus.operation name="ReadRecords"
-/// @nexus.poll python="next_read_request" typescript="nextReadRequest" targets="client"
+/// @nexus.poll python="next_read_request" typescript="nextReadRequest"
+///   dotnet="StreamPoll.NextReadRequest" targets="client"
 read-records: func(request: read-records-request) -> read-records-response;
 ```
 
@@ -2216,8 +2249,9 @@ def next_read_request(request, response):
 ```
 
 The stream sample's full helpers are in
-[`temporal_support/poll.py`](advanced/samples/python/temporal_support/poll.py)
-and [`support/poll.ts`](advanced/samples/typescript/support/poll.ts).
+[`temporal_support/poll.py`](advanced/samples/python/temporal_support/poll.py),
+[`support/poll.ts`](advanced/samples/typescript/support/poll.ts) and
+[`StreamPoll.cs`](advanced/samples/dotnet/TemporalSupport/StreamService/StreamPoll.cs).
 
 - The iterator yields pages, not the items in them.
 - All pages use one Nexus client. Each page is a new operation with a new random

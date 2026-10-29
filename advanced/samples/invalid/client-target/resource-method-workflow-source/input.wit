@@ -14,6 +14,7 @@ interface job-service {
   record restart-request {
     job-id: string,
     /// @nexus.source targets="workflow" python="workflow_namespace()" typescript="workflowNamespace()"
+    ///   dotnet="TemporalWorkflowContext.WorkflowNamespace()"
     namespace: string,
   }
 

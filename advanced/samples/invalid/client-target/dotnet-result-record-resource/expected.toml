@@ -1,0 +1,9 @@
+languages = ["dotnet"]
+targets = ["workflow", "client"]
+descriptors = "temporal"
+
+[error]
+kind = "unsupported-client-target"
+contains = [
+  "the client target doesn't take operation `StartRun` yet, whose result record holds a resource",
+]

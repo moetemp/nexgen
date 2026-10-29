@@ -1,4 +1,4 @@
-languages = ["go", "dotnet"]
+languages = ["go"]
 system_nexus = true
 targets = ["client"]
 

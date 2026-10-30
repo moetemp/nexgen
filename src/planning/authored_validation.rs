@@ -43,6 +43,7 @@ impl<'a> AuthoredValidationPass<'a> {
     }
 
     pub(crate) fn validate_spec(&self, spec: &ApiSpec) -> Result<()> {
+        super::record_backing::validate(spec, self.descriptors)?;
         python::validate_service_configuration(spec)?;
         validate_external_type_bindings(spec, self.descriptors, self.language)
     }

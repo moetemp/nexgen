@@ -2,13 +2,13 @@
 
 import * as workflow from "@temporalio/workflow";
 import { integerBindings } from "../services";
-import type { GetClockRequest } from "../models";
+import type { Timestamp } from "../models";
 import { Clock } from "../resources";
 
 /**
  * @param request - Request for the operation.
  */
-export async function getClock(request: GetClockRequest): Promise<Clock> {
+export async function getClock(request: Timestamp): Promise<Clock> {
   const client = workflow.createNexusServiceClient({
     service: integerBindings,
     endpoint: "integer-bindings",
@@ -18,5 +18,5 @@ export async function getClock(request: GetClockRequest): Promise<Clock> {
     request,
   );
   const result = await handle.result();
-  return new Clock(result.seconds ?? undefined, result.nanos ?? undefined);
+  return new Clock(request.seconds, request.nanos);
 }

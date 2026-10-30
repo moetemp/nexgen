@@ -6,7 +6,7 @@ use super::integer_annotation;
 use crate::error::{Error, Result};
 use crate::generator::typescript::{
     RenderedResource, RenderedService, render_resource_with_annotations,
-    typescript_resource_field_annotation, typescript_resource_requirements,
+    typescript_resource_field_type,
 };
 use crate::planning::{
     PlannedFamily, PlannedResource, PlannedResourceMethodBindingSpec, PlannedSpec, PlannedType,
@@ -22,15 +22,13 @@ pub(super) fn render_resource(
     rendered_service: &RenderedService<'_>,
 ) -> Result<RenderedResource> {
     let bindings = ResourceBindings::resolve(api, service, resource)?;
-    let mut requirements = typescript_resource_requirements(resource);
-    requirements.long |= bindings.requires_long(resource);
     let mut source = String::new();
-    render_resource_with_annotations(
+    let requirements = render_resource_with_annotations(
         &mut source,
         resource,
         rendered_service,
         |field| {
-            typescript_resource_field_annotation(
+            typescript_resource_field_type(
                 &field.kind,
                 field.optional,
                 field.function.as_ref(),
@@ -38,7 +36,7 @@ pub(super) fn render_resource(
             )
         },
         |method, param| {
-            typescript_resource_field_annotation(
+            typescript_resource_field_type(
                 &param.kind,
                 false,
                 param.function.as_ref(),
@@ -70,20 +68,6 @@ impl ResourceBindings {
             .contains(&(method.to_string(), name.to_string()))
     }
 
-    fn requires_long(&self, resource: &PlannedResource) -> bool {
-        resource.fields.iter().any(|field| {
-            self.field_is_proto(&field.name)
-                && field.function.is_none()
-                && has_inline_64_bit_int(&field.kind)
-        }) || resource.methods.iter().any(|method| {
-            method.params.iter().any(|param| {
-                self.param_is_proto(&method.name, &param.name)
-                    && param.function.is_none()
-                    && has_inline_64_bit_int(&param.kind)
-            })
-        })
-    }
-
     fn resolve(
         api: &PlannedSpec,
         service: &ServiceSpec<PlannedFamily>,
@@ -92,7 +76,7 @@ impl ResourceBindings {
         // Remember both the representation and its origin so a shared constructor field
         // cannot silently acquire incompatible types from different operations.
         let mut fields = BTreeMap::<String, (bool, String)>::new();
-        let mut params = BTreeMap::new();
+        let mut params = BTreeSet::new();
         let mut constrain = |name: &str, proto: bool, origin: String| -> Result<()> {
             let Some(field) = resource.fields.iter().find(|field| field.name == name) else {
                 return Ok(());
@@ -109,7 +93,8 @@ impl ResourceBindings {
                     resource: resource.type_name.clone(),
                     reason: format!(
                         "64-bit field `{name}` has incompatible bindings: {previous_origin} \
-                         requires `{}`, but {origin} requires `{}`",
+                         requires `{}`, but {origin} requires `{}`. \
+                         Use consistent protobuf or JSON bindings, or separate resource values",
                         if *previous {
                             integer_annotation(IntSpec::I64)
                         } else {
@@ -130,30 +115,21 @@ impl ResourceBindings {
             if let PlannedResourceMethodBindingSpec::Operation { request_plan, .. } =
                 &method.binding
             {
-                visit_request_sources(api, request_plan, false, &mut |source, proto| {
+                visit_request_sources(api, request_plan, false, "", &mut |source, proto, path| {
                     match source {
                         RequestPlanSource::ResourceField(name) => {
-                            constrain(name, proto, format!("method `{}`", method.name))?;
+                            constrain(
+                                name,
+                                proto,
+                                format!("method `{}` request field `{path}`", method.name),
+                            )?;
                         }
                         RequestPlanSource::MethodParam(name) => {
-                            let key = (method.name.clone(), name.clone());
-                            if let Some(previous) = params.insert(key, proto)
-                                && previous != proto
-                                && method.params.iter().any(|param| {
-                                    param.name == *name
-                                        && param.function.is_none()
-                                        && has_inline_64_bit_int(&param.kind)
-                                })
-                            {
-                                return Err(Error::InvalidResourceMethod {
-                                    service: service.name.clone(),
-                                    resource: resource.type_name.clone(),
-                                    method: method.name.clone(),
-                                    reason: format!(
-                                        "64-bit parameter `{name}` binds to both protobuf (`Long`) \
-                                         and JSON (`number`) fields"
-                                    ),
-                                });
+                            // The shared containment check makes each request tree
+                            // homogeneous. Only constructor fields can be shared
+                            // between methods with different backing.
+                            if proto {
+                                params.insert((method.name.clone(), name.clone()));
                             }
                         }
                     }
@@ -198,10 +174,7 @@ impl ResourceBindings {
                 .into_iter()
                 .filter_map(|(name, (proto, _))| proto.then_some(name))
                 .collect(),
-            proto_params: params
-                .into_iter()
-                .filter_map(|(key, proto)| proto.then_some(key))
-                .collect(),
+            proto_params: params,
         })
     }
 }
@@ -239,10 +212,11 @@ fn visit_request_sources(
     api: &PlannedSpec,
     plan: &RequestPlan,
     proto: bool,
-    visit: &mut impl FnMut(&RequestPlanSource, bool) -> Result<()>,
+    path: &str,
+    visit: &mut impl FnMut(&RequestPlanSource, bool, &str) -> Result<()>,
 ) -> Result<()> {
     match plan {
-        RequestPlan::Source(source) => visit(source, proto),
+        RequestPlan::Source(source) => visit(source, proto, path),
         RequestPlan::Construct {
             message_name,
             fields,
@@ -252,8 +226,15 @@ fn visit_request_sources(
             let proto = api.record(message_name).map_or(true, |record| {
                 matches!(record.source, Some(ExternalTypeSourceSpec::Proto(_)))
             });
+            let prefix = if path.is_empty() { message_name } else { path };
             for field in fields {
-                visit_request_sources(api, &field.value, proto, visit)?;
+                visit_request_sources(
+                    api,
+                    &field.value,
+                    proto,
+                    &format!("{prefix}.{}", field.field_name),
+                    visit,
+                )?;
             }
             Ok(())
         }

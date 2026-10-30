@@ -1,7 +1,8 @@
+import "./setup-protos.ts";
 import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
 import Long from "long";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   type ReadRecordsResponse,
@@ -17,6 +18,10 @@ vi.mock("@temporalio/workflow", () => ({
 }));
 
 describe("stream-service generated output", () => {
+  beforeEach(() => {
+    startOperation.mockReset();
+  });
+
   // No SDK has these protos yet, so proto/streams.d.ts declares them. The converters fail to
   // compile when those declarations drift from what they read and write.
   test("maps each read item kind through the proto oneof", () => {

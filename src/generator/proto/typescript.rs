@@ -574,6 +574,16 @@ impl ModelBackend {
                         .unwrap_or_else(|| {
                             panic!("planned model should exist for {}", model.full_name)
                         });
+                if let Some(proto) = &planned_record.data.proto {
+                    rendered.model_requirements.value_namespace_imports.insert(
+                        proto
+                            .full_name
+                            .split('.')
+                            .next()
+                            .expect("proto namespace")
+                            .to_string(),
+                    );
+                }
                 self.render_model_wire_functions(
                     body,
                     model,
@@ -680,6 +690,7 @@ fn render_model_transfer_type_converter(
         .expect("wire functions require a protobuf-backed record");
     let converter_name = transfer_converter_name(model);
     let proto_type = message_typescript_interface_ref(proto);
+    let message_type = &proto.full_name;
     output.push_str("export const ");
     output.push_str(&converter_name);
     output.push_str(" = {\n");
@@ -702,9 +713,9 @@ fn render_model_transfer_type_converter(
     ));
     output.push_str("): ");
     output.push_str(&proto_type);
-    output.push_str(" {\n    return ");
+    output.push_str(&format!(" {{\n    return {message_type}.create("));
     output.push_str(&names.to_wire);
-    output.push_str("(value);\n  },\n};");
+    output.push_str("(value));\n  },\n};");
     if let Some(factory_name) = transfer_converter_factory_name(model) {
         output.push_str("\n\n");
         render_named_generic_function_start(
@@ -715,7 +726,7 @@ fn render_model_transfer_type_converter(
         );
         render_type_info_parameter(output, model);
         output.push_str(&format!(
-            "): common.TransferTypeConverter<{}, {proto_type}> {{\n  return {{\n    fromTransferType(value) {{\n      return {}{}(value, typeInfo);\n    }},\n    toTransferType(value) {{\n      return {}(value, typeInfo);\n    }},\n  }};\n}}",
+            "): common.TransferTypeConverter<{}, {proto_type}> {{\n  return {{\n    fromTransferType(value) {{\n      return {}{}(value, typeInfo);\n    }},\n    toTransferType(value) {{\n      return {message_type}.create({}(value, typeInfo));\n    }},\n  }};\n}}",
             generic_model_annotation(&model.name, &model.type_parameters),
             names.from_wire,
             type_arguments(model),

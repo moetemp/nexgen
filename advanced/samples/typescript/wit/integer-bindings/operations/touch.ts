@@ -2,13 +2,13 @@
 
 import * as workflow from "@temporalio/workflow";
 import { integerBindings } from "../services";
-import type { ClockResult } from "../models";
+import type { Timestamp } from "../models";
 
 /**
  * @param request - Request for the operation.
  */
 export async function touch(
-  request: ClockResult,
+  request: Timestamp,
 ): Promise<workflow.NexusOperationHandle<void>> {
   const client = workflow.createNexusServiceClient({
     service: integerBindings,

@@ -1,0 +1,8 @@
+descriptors = "temporal"
+
+[error]
+kind = "mixed-record-backing"
+contains = [
+  """protobuf-backed record `models.bad-binary` field `create-time` contains JSON-backed record \
+     `models.timestamp`; nested records must use the same backing""",
+]

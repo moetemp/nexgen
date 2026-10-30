@@ -4,15 +4,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use heck::{ToKebabCase, ToUpperCamelCase};
 use prost_types::FieldDescriptorProto;
-use prost_types::field_descriptor_proto::Type;
+use prost_types::field_descriptor_proto::{Label, Type};
 
 use crate::descriptors::DescriptorIndex;
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ApiSpecTransform, ExternalTypeSpec, JsonModelSpec, OperationSpec, RecordFieldSpec,
-    RecordFieldVisibility, RecordSpec, ResourceFieldSpec, ResourceMethodSpec, ResourceResultSpec,
-    ResourceSpec, SelectedFamily, SelectedResourceType, SelectedTextSpec, ServiceSpec, Symbol,
-    TypeFamily, TypeSpec,
+    ApiSpec, ApiSpecTransform, ExternalTypeSpec, IntSpec, JsonModelSpec, OperationSpec,
+    RecordFieldSpec, RecordFieldVisibility, RecordSpec, ResourceFieldSpec, ResourceMethodSpec,
+    ResourceResultSpec, ResourceSpec, SelectedFamily, SelectedResourceType, SelectedTextSpec,
+    ServiceSpec, Symbol, TypeFamily, TypeSpec,
 };
 use crate::spec::{ApiSpecLeaf, CompilerPass};
 /// Selected IR after resource-method and resource-return bindings are resolved.
@@ -181,6 +181,7 @@ struct MessageFieldInfo {
     required: bool,
     hidden: bool,
     message_name: Option<String>,
+    integer_widths: Vec<(String, u8)>,
 }
 
 pub(crate) fn resolve_service_resources(
@@ -379,6 +380,14 @@ fn resolve_resource_method(
                 ),
             });
         }
+        validate_request_integer_widths(
+            spec,
+            descriptors,
+            service,
+            resource,
+            method,
+            &request_plan,
+        )?;
         return Ok(ResolvedResourceMethodSpec {
             name: method.name.clone(),
             doc: method.doc.clone(),
@@ -407,6 +416,14 @@ fn resolve_resource_method(
             continue;
         }
 
+        validate_request_integer_widths(
+            spec,
+            descriptors,
+            service,
+            resource,
+            method,
+            &request_plan,
+        )?;
         matching_operations.push((operation.name.clone(), request_plan));
     }
 
@@ -461,6 +478,158 @@ fn resource_method_result_matches_operation(
         }
         _ => false,
     }
+}
+
+fn validate_request_integer_widths(
+    spec: &ApiSpec<SelectedFamily>,
+    descriptors: &DescriptorIndex,
+    service: &ServiceSpec<SelectedFamily>,
+    resource: &ResourceSpec<SelectedFamily>,
+    method: &ResourceMethodSpec<SelectedFamily>,
+    plan: &RequestPlan,
+) -> Result<()> {
+    let RequestPlan::Construct {
+        message_name,
+        fields,
+    } = plan
+    else {
+        return Ok(());
+    };
+    let destinations = if spec.record(message_name).is_some() {
+        all_record_fields(spec, message_name)?
+    } else {
+        all_message_fields(spec, descriptors, message_name)?
+    };
+    for field in fields {
+        if let RequestPlan::Source(source) = &field.value {
+            let (what, source) = match source {
+                RequestPlanSource::ResourceField(name) => (
+                    "constructor field",
+                    resource.fields.iter().find(|field| field.name == *name),
+                ),
+                RequestPlanSource::MethodParam(name) => (
+                    "parameter",
+                    method.params.iter().find(|field| field.name == *name),
+                ),
+            };
+            if let Some(source) = source
+                && source.function.is_none()
+                && let Some(destination) = destinations
+                    .iter()
+                    .find(|dest| dest.api_name == field.field_name)
+            {
+                let mut widths = Vec::new();
+                collect_integer_widths(&source.field_type, "", &mut widths);
+                for (path, width) in widths {
+                    if let Some((_, target_width)) = destination
+                        .integer_widths
+                        .iter()
+                        .find(|(target_path, _)| target_path == &path)
+                        && width != *target_width
+                    {
+                        return Err(Error::InvalidResourceMethod {
+                            service: service.name.clone(),
+                            resource: resource.name.to_upper_camel_case(),
+                            method: method.name.clone(),
+                            reason: format!(
+                                "{what} `{}` uses a {width}-bit integer, but request field \
+                                 `{message_name}.{}{path}` requires a {target_width}-bit integer; use matching integer widths",
+                                source.name, field.field_name,
+                            ),
+                        });
+                    }
+                }
+            }
+        } else {
+            validate_request_integer_widths(
+                spec,
+                descriptors,
+                service,
+                resource,
+                method,
+                &field.value,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_integer_widths(
+    kind: &TypeSpec<SelectedFamily>,
+    path: &str,
+    widths: &mut Vec<(String, u8)>,
+) {
+    match kind {
+        TypeSpec::Int(int) => widths.push((
+            path.to_string(),
+            match int {
+                IntSpec::I32 | IntSpec::U32 => 32,
+                IntSpec::I64 | IntSpec::U64 => 64,
+            },
+        )),
+        TypeSpec::Option(inner) => collect_integer_widths(inner, path, widths),
+        TypeSpec::List(inner) => collect_integer_widths(inner, &format!("{path}[]"), widths),
+        TypeSpec::Map(key, value) => {
+            collect_integer_widths(key, &format!("{path}.key"), widths);
+            collect_integer_widths(value, &format!("{path}.value"), widths);
+        }
+        TypeSpec::Tuple(items) => {
+            for (index, item) in items.iter().enumerate() {
+                collect_integer_widths(item, &format!("{path}.{index}"), widths);
+            }
+        }
+        TypeSpec::Result { ok, err } => {
+            if let Some(ok) = ok {
+                collect_integer_widths(ok, &format!("{path}.ok"), widths);
+            }
+            if let Some(err) = err {
+                collect_integer_widths(err, &format!("{path}.err"), widths);
+            }
+        }
+        TypeSpec::External(ExternalTypeSpec::Alias(alias)) => {
+            collect_integer_widths(&alias.target, path, widths);
+        }
+        _ => {}
+    }
+}
+
+fn descriptor_integer_widths(
+    field: &FieldDescriptorProto,
+    descriptors: &DescriptorIndex,
+    path: &str,
+    widths: &mut Vec<(String, u8)>,
+) {
+    if let Some(entry) = field
+        .type_name
+        .as_deref()
+        .and_then(|name| descriptors.message(name.trim_start_matches('.')))
+        && entry
+            .descriptor
+            .options
+            .as_ref()
+            .is_some_and(|options| options.map_entry())
+    {
+        for member in &entry.descriptor.field {
+            descriptor_integer_widths(
+                member,
+                descriptors,
+                &format!("{path}.{}", member.name()),
+                widths,
+            );
+        }
+        return;
+    }
+    let path = if field.label() == Label::Repeated {
+        format!("{path}[]")
+    } else {
+        path.to_string()
+    };
+    let width = match field.r#type() {
+        Type::Int32 | Type::Uint32 | Type::Sint32 | Type::Fixed32 | Type::Sfixed32 => 32,
+        Type::Int64 | Type::Uint64 | Type::Sint64 | Type::Fixed64 | Type::Sfixed64 => 64,
+        _ => return,
+    };
+    widths.push((path, width));
 }
 
 fn synthesize_operation_request_plan(
@@ -692,12 +861,15 @@ fn build_record_field_info(
     let required = field.required;
     let hidden = matches!(field.visibility, RecordFieldVisibility::Sourced { .. });
     let message_name = api_field_message_name(&field.field_type, spec);
+    let mut integer_widths = Vec::new();
+    collect_integer_widths(&field.field_type, "", &mut integer_widths);
     Ok(MessageFieldInfo {
         proto_name: field_name.to_string(),
         api_name,
         required,
         hidden,
         message_name,
+        integer_widths,
     })
 }
 
@@ -734,12 +906,15 @@ fn build_message_field_info(
         record.field_omitted(proto_name) || record.field_source(proto_name).is_some()
     });
     let message_name = field_message_name(field, descriptors);
+    let mut integer_widths = Vec::new();
+    descriptor_integer_widths(field, descriptors, "", &mut integer_widths);
     Ok(MessageFieldInfo {
         proto_name: proto_name.to_string(),
         api_name,
         required,
         hidden,
         message_name,
+        integer_widths,
     })
 }
 

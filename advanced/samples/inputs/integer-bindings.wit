@@ -32,12 +32,9 @@ interface integer-bindings {
   set-time: func(request: nested-request);
 
   /// @nexus.proto "google.protobuf.Empty" typescript-import="@temporalio/proto"
-  record get-clock-request {}
-
-  /// @nexus.proto "google.protobuf.Timestamp" typescript-import="@temporalio/proto"
   type clock-result = own<clock>;
 
-  get-clock: func(request: get-clock-request) -> clock-result;
+  get-clock: func(request: timestamp) -> clock-result;
 
   resource counter {
     constructor(total: s64);
@@ -50,4 +47,17 @@ interface integer-bindings {
   }
 
   add: func(request: add-request);
+
+  /// @nexus.proto "google.protobuf.Int64Value" typescript-import="@temporalio/proto"
+  record signed-value {
+    value: option<s64>,
+  }
+
+  /// @nexus.proto "google.protobuf.UInt64Value" typescript-import="@temporalio/proto"
+  record unsigned-value {
+    value: option<u64>,
+  }
+
+  roundtrip-signed: func(request: signed-value) -> signed-value;
+  roundtrip-unsigned: func(request: unsigned-value) -> unsigned-value;
 }

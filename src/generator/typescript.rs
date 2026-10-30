@@ -3142,7 +3142,7 @@ struct RenderedWithArgumentsField {
 #[derive(Debug, Clone, Default)]
 pub(in crate::generator) struct TypeScriptRequirements {
     pub(in crate::generator) long: bool,
-    value_namespace_imports: BTreeSet<String>,
+    pub(in crate::generator) value_namespace_imports: BTreeSet<String>,
 }
 
 impl TypeScriptRequirements {
@@ -3218,32 +3218,6 @@ pub(in crate::generator) fn collect_typescript_model_requirements(
         }
         for function in &model.with_arguments {
             requirements.merge(&function.requirements);
-        }
-    }
-    requirements
-}
-
-pub(in crate::generator) fn typescript_resource_requirements(
-    resource: &PlannedResource,
-) -> TypeScriptRequirements {
-    let mut requirements = TypeScriptRequirements::default();
-    for field in &resource.fields {
-        requirements.merge(&typescript_resource_field_requirements(
-            &field.kind,
-            field.function.as_ref(),
-        ));
-    }
-    for method in &resource.methods {
-        for param in &method.params {
-            requirements.merge(&typescript_resource_field_requirements(
-                &param.kind,
-                param.function.as_ref(),
-            ));
-        }
-        if let Some(result) = &method.result
-            && let PlannedResourceMethodResultKind::Value(kind) = &result.kind
-        {
-            requirements.merge(&typescript_resource_field_requirements(kind, None));
         }
     }
     requirements
@@ -3426,7 +3400,7 @@ fn render_typescript_namespace_imports(
     generated_imports: &[(&str, &str, bool)],
 ) {
     let mut namespace_imports = BTreeMap::<(String, String), bool>::new();
-    let mut named_type_imports = BTreeMap::<String, BTreeSet<String>>::new();
+    let mut named_imports = BTreeMap::<String, BTreeMap<String, bool>>::new();
     for (namespace, package, type_only) in generated_imports {
         if contains_qualified_identifier(source, namespace) {
             namespace_imports.insert(
@@ -3465,15 +3439,17 @@ fn render_typescript_namespace_imports(
                     .or_insert(needs_value_import);
             }
             LanguageImportStyle::Named => {
-                named_type_imports
+                named_imports
                     .entry(import.module.clone())
                     .or_default()
-                    .insert(
+                    .entry(
                         import
                             .name
                             .clone()
                             .unwrap_or_else(|| import.reference.clone()),
-                    );
+                    )
+                    .and_modify(|needs_value| *needs_value |= !import.type_only)
+                    .or_insert(!import.type_only);
             }
             LanguageImportStyle::Module => {}
         }
@@ -3494,14 +3470,27 @@ fn render_typescript_namespace_imports(
         import.push_str("';\n");
         rendered_imports.push((package, import));
     }
-    for (package, imports) in named_type_imports {
+    for (package, imports) in named_imports {
         let package = typescript_relative_import(source_dir, &package);
-        let mut import = String::from("import type { ");
-        import.push_str(&imports.into_iter().collect::<Vec<_>>().join(", "));
-        import.push_str(" } from '");
-        import.push_str(&package);
-        import.push_str("';\n");
-        rendered_imports.push((package, import));
+        for needs_value in [true, false] {
+            let names = imports
+                .iter()
+                .filter(|(_, value)| **value == needs_value)
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>();
+            if !names.is_empty() {
+                let mut import = String::from(if needs_value {
+                    "import { "
+                } else {
+                    "import type { "
+                });
+                import.push_str(&names.join(", "));
+                import.push_str(" } from '");
+                import.push_str(&package);
+                import.push_str("';\n");
+                rendered_imports.push((package.clone(), import));
+            }
+        }
     }
     rendered_imports.sort_by(|(left, _), (right, _)| {
         left.starts_with('.')
@@ -4162,6 +4151,12 @@ fn render_models_module(
         .iter()
         .flat_map(|model| model.fields.iter())
         .flat_map(|field| field.requirements.value_namespace_imports.iter())
+        .chain(
+            rendered_types
+                .model_requirements
+                .value_namespace_imports
+                .iter(),
+        )
         .collect::<BTreeSet<_>>();
     for import in &mut model_language_imports {
         if import.type_only
@@ -4397,7 +4392,7 @@ fn render_service_module(
         .filter(|resource| {
             contains_identifier(&body, &resource_client_bind_function_name(resource))
         })
-        .map(|resource| resource_client_bind_function_name(resource))
+        .map(resource_client_bind_function_name)
         .collect::<Vec<_>>();
     render_value_imports(&mut imports, "./resources", &resource_client_binders);
     render_generated_module(imports, body)
@@ -4553,7 +4548,7 @@ fn render_operation_module(
         .filter(|resource| {
             contains_identifier(&body, &resource_client_bind_function_name(resource))
         })
-        .map(|resource| resource_client_bind_function_name(resource))
+        .map(resource_client_bind_function_name)
         .collect::<Vec<_>>();
     if !type_resources.is_empty() {
         imports.push_str("import '../resources';\n");
@@ -5525,9 +5520,10 @@ pub(in crate::generator) fn render_resource_with_annotations(
     output: &mut String,
     resource: &PlannedResource,
     service: &RenderedService<'_>,
-    field_annotation: impl Fn(&PlannedResourceField) -> String,
-    param_annotation: impl Fn(&PlannedResourceMethod, &PlannedResourceField) -> String,
-) {
+    field_annotation: impl Fn(&PlannedResourceField) -> ResolvedFieldType,
+    param_annotation: impl Fn(&PlannedResourceMethod, &PlannedResourceField) -> ResolvedFieldType,
+) -> TypeScriptRequirements {
+    let mut requirements = TypeScriptRequirements::default();
     let client_symbol_name = resource_client_symbol_name(resource);
     if service.endpoint.is_none() {
         output.push_str("const ");
@@ -5555,18 +5551,22 @@ pub(in crate::generator) fn render_resource_with_annotations(
         output.push_str("    public readonly ");
         output.push_str(&typescript_generated_field_name(&field.name));
         output.push_str(": ");
-        output.push_str(&field_annotation(field));
+        let rendered = field_annotation(field);
+        requirements.merge(&rendered.requirements);
+        output.push_str(&rendered.annotation);
         output.push_str(",\n");
     }
     output.push_str("  ) {}\n");
 
     if resource.methods.is_empty() {
         output.push_str("}\n");
-        return;
+        return requirements;
     }
 
     for method in &resource.methods {
-        let result_annotation = typescript_resource_method_result_annotation(method);
+        let result = typescript_resource_method_result_type(method);
+        requirements.merge(&result.requirements);
+        let result_annotation = result.annotation;
         output.push('\n');
         output.push_str("  public async ");
         output.push_str(&typescript_generated_field_name(&method.name));
@@ -5582,7 +5582,9 @@ pub(in crate::generator) fn render_resource_with_annotations(
                 output.push('?');
             }
             output.push_str(": ");
-            output.push_str(&param_annotation(method, param));
+            let rendered = param_annotation(method, param);
+            requirements.merge(&rendered.requirements);
+            output.push_str(&rendered.annotation);
             if param.optional && before_required {
                 output.push_str(" | undefined");
             }
@@ -5695,32 +5697,41 @@ pub(in crate::generator) fn render_resource_with_annotations(
         output.push_str("  return client;\n");
         output.push_str("}\n");
     }
+    requirements
 }
 
-fn typescript_resource_method_result_annotation(method: &PlannedResourceMethod) -> String {
-    let Some(result) = &method.result else {
-        return "void".to_string();
-    };
-    let annotation = match &result.kind {
-        PlannedResourceMethodResultKind::Resource { type_name } => type_name.clone(),
-        PlannedResourceMethodResultKind::Value(kind) => {
-            typescript_resource_field_annotation(kind, result.optional, None, false)
+fn typescript_resource_method_result_type(method: &PlannedResourceMethod) -> ResolvedFieldType {
+    let mut rendered = match method.result.as_ref().map(|result| &result.kind) {
+        Some(PlannedResourceMethodResultKind::Value(kind)) => {
+            typescript_resource_field_type(kind, false, None, false)
         }
+        kind => ResolvedFieldType {
+            annotation: match kind {
+                Some(PlannedResourceMethodResultKind::Resource { type_name }) => type_name.clone(),
+                _ => "void".to_string(),
+            },
+            kind: ResolvedFieldKind::Scalar,
+            requirements: TypeScriptRequirements::default(),
+            wire_conversion: None,
+        },
     };
-    if result.optional && !annotation.contains(" | undefined") {
-        format!("{annotation} | undefined")
-    } else {
-        annotation
+    if method.result.as_ref().is_some_and(|result| result.optional)
+        && !rendered.annotation.contains(" | undefined")
+    {
+        rendered.annotation.push_str(" | undefined");
     }
+    rendered
 }
 
-pub(in crate::generator) fn typescript_resource_field_annotation(
+pub(in crate::generator) fn typescript_resource_field_type(
     kind: &PlannedType,
     optional: bool,
     function: Option<&FunctionFieldSpec<PlannedFamily>>,
     proto: bool,
-) -> String {
+) -> ResolvedFieldType {
+    let mut requirements = TypeScriptRequirements::default();
     let base = if let Some(function) = function {
+        requirements.merge(&typescript_function_requirements(function));
         typescript_function_value_annotation(
             function
                 .alternate_type
@@ -5730,32 +5741,31 @@ pub(in crate::generator) fn typescript_resource_field_annotation(
             &function_constraint(function),
         )
     } else {
-        match kind {
-            PlannedType::List(value) => {
-                typescript_array_annotation(&typescript_resource_value_annotation(value, proto))
-            }
-            PlannedType::Map(key, value) => format!(
-                "Record<{}, {}>",
-                if proto {
-                    "string".to_string()
-                } else {
-                    typescript_resource_value_annotation(key, false)
-                },
-                typescript_resource_value_annotation(value, proto)
-            ),
-            value => typescript_resource_value_annotation(value, proto),
-        }
+        typescript_resource_value_annotation(kind, proto, &mut requirements)
     };
-    if optional {
-        format!("{base} | undefined")
-    } else {
-        base
+    ResolvedFieldType {
+        annotation: if optional {
+            format!("{base} | undefined")
+        } else {
+            base
+        },
+        kind: ResolvedFieldKind::Scalar,
+        requirements,
+        wire_conversion: None,
     }
 }
 
-fn typescript_resource_value_annotation(value: &PlannedType, proto: bool) -> String {
+fn typescript_resource_value_annotation(
+    value: &PlannedType,
+    proto: bool,
+    requirements: &mut TypeScriptRequirements,
+) -> String {
     match value {
-        PlannedType::Int(int) if proto => typescript_proto::integer_annotation(*int).to_string(),
+        PlannedType::Int(int) if proto => {
+            let annotation = typescript_proto::integer_annotation(*int);
+            requirements.long |= annotation == "Long";
+            annotation.to_string()
+        }
         PlannedType::Int(_) | PlannedType::Float => "number".to_string(),
         PlannedType::Bool => "boolean".to_string(),
         PlannedType::String => "string".to_string(),
@@ -5782,56 +5792,48 @@ fn typescript_resource_value_annotation(value: &PlannedType, proto: bool) -> Str
         PlannedType::Option(inner) => {
             format!(
                 "{} | undefined",
-                typescript_resource_value_annotation(inner, proto)
+                typescript_resource_value_annotation(inner, proto, requirements)
             )
         }
-        PlannedType::List(inner) => {
-            typescript_array_annotation(&typescript_resource_value_annotation(inner, proto))
-        }
+        PlannedType::List(inner) => typescript_array_annotation(
+            &typescript_resource_value_annotation(inner, proto, requirements),
+        ),
         PlannedType::Map(key, value) => format!(
             "Record<{}, {}>",
             if proto {
                 "string".to_string()
             } else {
-                typescript_resource_value_annotation(key, false)
+                typescript_resource_value_annotation(key, false, requirements)
             },
-            typescript_resource_value_annotation(value, proto)
+            typescript_resource_value_annotation(value, proto, requirements)
         ),
         PlannedType::Tuple(items) => format!(
             "[{}]",
             items
                 .iter()
-                .map(|item| typescript_resource_value_annotation(item, proto))
+                .map(|item| typescript_resource_value_annotation(item, proto, requirements))
                 .collect::<Vec<_>>()
                 .join(", ")
         ),
         PlannedType::Result { ok, err } => typescript_result_annotation(
             ok.as_ref()
-                .map(|ok| typescript_resource_value_annotation(ok, proto).to_string()),
+                .map(|ok| typescript_resource_value_annotation(ok, proto, requirements)),
             err.as_ref()
-                .map(|err| typescript_resource_value_annotation(err, proto).to_string()),
+                .map(|err| typescript_resource_value_annotation(err, proto, requirements)),
         ),
         PlannedType::External(ExternalTypeSpec::Alias(AliasTypeSpec {
             type_name,
             target: fallback,
             ..
-        })) => type_name
-            .value()
-            .map(str::to_string)
-            .unwrap_or_else(|| typescript_resource_value_annotation(fallback, proto)),
+        })) => {
+            if let Some(annotation) = type_name.value() {
+                requirements.long |= annotation == "Long";
+                annotation.to_string()
+            } else {
+                typescript_resource_value_annotation(fallback, proto, requirements)
+            }
+        }
     }
-}
-
-fn typescript_resource_field_requirements(
-    kind: &PlannedType,
-    function: Option<&FunctionFieldSpec<PlannedFamily>>,
-) -> TypeScriptRequirements {
-    if let Some(function) = function {
-        return typescript_function_requirements(function);
-    }
-    let mut requirements = TypeScriptRequirements::default();
-    collect_typescript_value_requirements(kind, &mut requirements);
-    requirements
 }
 
 fn collect_typescript_value_requirements(
@@ -5892,12 +5894,13 @@ fn branchable_request_method_params(
         .iter()
         .filter(|param| {
             used_params.contains(&param.name)
-                && typescript_resource_field_annotation(
+                && typescript_resource_field_type(
                     &param.kind,
                     param.optional,
                     param.function.as_ref(),
                     false,
                 )
+                .annotation
                 .trim_start()
                 .starts_with("string | ")
         })
@@ -6565,14 +6568,14 @@ fn render_resource_constructor(
 fn render_resource_structural_type(
     output: &mut String,
     resource: &PlannedResource,
-    field_annotation: &impl Fn(&PlannedResourceField) -> String,
+    field_annotation: &impl Fn(&PlannedResourceField) -> ResolvedFieldType,
 ) {
     output.push_str("{ ");
     for field in &resource.fields {
         output.push_str("readonly ");
         output.push_str(&typescript_generated_field_name(&field.name));
         output.push_str(": ");
-        output.push_str(&field_annotation(field));
+        output.push_str(&field_annotation(field).annotation);
         output.push_str("; ");
     }
     output.push('}');

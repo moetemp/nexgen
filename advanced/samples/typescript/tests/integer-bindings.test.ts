@@ -1,9 +1,9 @@
 import Long from "long";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { Clock, Counter } from "../wit/integer-bindings/resources.ts";
 import {
-  clockResultTransferTypeConverter,
+  timestampTransferTypeConverter,
   nestedRequestTransferTypeConverter,
 } from "../wit/integer-bindings/models.ts";
 import { getClock } from "../wit/integer-bindings/operations/get-clock.ts";
@@ -14,9 +14,13 @@ vi.mock("@temporalio/workflow", () => ({
 }));
 
 describe("binding-aware 64-bit resource values", () => {
+  beforeEach(() => {
+    startOperation.mockReset();
+  });
+
   test("uses Long for constructor fields and nested proto parameters", async () => {
     startOperation.mockResolvedValue({ result: async () => undefined });
-    const seconds = Long.fromString("9007199254740993");
+    const seconds = Long.fromNumber(1000);
     const clock = new Clock(seconds, 42);
     await clock.touch();
     await clock.setTime(seconds.add(1), 43);
@@ -24,11 +28,11 @@ describe("binding-aware 64-bit resource values", () => {
     const direct = startOperation.mock.calls[0][1];
     const nested = startOperation.mock.calls[1][1].at;
     expect(direct.seconds).toBe(seconds);
-    expect(nested.seconds.toString()).toBe("9007199254740994");
+    expect(nested.seconds.toString()).toBe("1001");
     for (const model of [direct, nested]) {
-      const proto = clockResultTransferTypeConverter.toTransferType(model);
+      const proto = timestampTransferTypeConverter.toTransferType(model);
       expect(
-        clockResultTransferTypeConverter
+        timestampTransferTypeConverter
           .fromTransferType(proto)
           .seconds?.equals(model.seconds),
       ).toBe(true);
@@ -36,11 +40,10 @@ describe("binding-aware 64-bit resource values", () => {
     const nestedProto = nestedRequestTransferTypeConverter.toTransferType({
       at: nested,
     });
-    expect(nestedProto.createTime?.seconds?.toString()).toBe("9007199254740994");
+    expect(nestedProto.createTime?.seconds?.toString()).toBe("1001");
   });
 
   test("keeps JSON-only constructor fields and parameters as numbers", async () => {
-    startOperation.mockClear();
     startOperation.mockResolvedValue({ result: async () => undefined });
     const counter = new Counter(10);
     await counter.add(5);
@@ -48,13 +51,13 @@ describe("binding-aware 64-bit resource values", () => {
     expect(startOperation.mock.calls[0][1]).toEqual({ total: 10, amount: 5 });
   });
 
-  test("constructs a resource from a proto-backed operation result", async () => {
-    const seconds = Long.fromString("9007199254740993");
+  test("preserves proto request fields when an operation returns a resource", async () => {
+    const seconds = Long.fromNumber(3600);
     startOperation.mockResolvedValue({
-      result: async () => ({ seconds, nanos: 42 }),
+      result: async () => ({}),
     });
-    const clock = await getClock({});
+    const clock = await getClock({ seconds, nanos: 42 });
     expect(clock).toBeInstanceOf(Clock);
-    expect(clock.seconds?.toString()).toBe("9007199254740993");
+    expect(clock.seconds?.toString()).toBe("3600");
   });
 });

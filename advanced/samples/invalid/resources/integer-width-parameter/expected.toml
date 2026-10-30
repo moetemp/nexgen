@@ -1,0 +1,8 @@
+descriptors = "temporal"
+
+[error]
+kind = "invalid-resource-method"
+contains = [
+  """parameter `nanos` uses a 64-bit integer, but request field \
+     `google.protobuf.Timestamp.nanos` requires a 32-bit integer; use matching integer widths""",
+]

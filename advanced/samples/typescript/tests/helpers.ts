@@ -55,6 +55,12 @@ export async function executeWorkflowWithNexus<T>(
     nexusServices: options.nexusServices,
     taskQueue,
     workflowsPath: options.workflowsPath,
+    dataConverter: {
+      payloadConverterPath: new URL(
+        "../support/protobuf-payload-converter.ts",
+        import.meta.url,
+      ).pathname,
+    },
   });
   const endpoint = await env.createNexusEndpoint(options.endpoint, taskQueue);
   try {

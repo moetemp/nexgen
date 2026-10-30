@@ -2,25 +2,44 @@
 
 import * as nexus from "nexus-rpc";
 import {
-  clockResultTransferTypeConverter,
+  timestampTransferTypeConverter,
   nestedRequestTransferTypeConverter,
-  getClockRequestTransferTypeConverter,
+  clockResultTransferTypeConverter,
+  signedValueTransferTypeConverter,
+  unsignedValueTransferTypeConverter,
 } from "./models";
-import type { ClockResult, NestedRequest, GetClockRequest, AddRequest } from "./models";
+import type {
+  Timestamp,
+  NestedRequest,
+  ClockResult,
+  AddRequest,
+  SignedValue,
+  UnsignedValue,
+} from "./models";
 
 export const integerBindings = nexus.service("IntegerBindings", {
-  touch: nexus.operation<ClockResult, void>({
+  touch: nexus.operation<Timestamp, void>({
     name: "Touch",
-    inputType: { transferTypeConverter: clockResultTransferTypeConverter },
+    inputType: { transferTypeConverter: timestampTransferTypeConverter },
   }),
   setTime: nexus.operation<NestedRequest, void>({
     name: "SetTime",
     inputType: { transferTypeConverter: nestedRequestTransferTypeConverter },
   }),
-  getClock: nexus.operation<GetClockRequest, ClockResult>({
+  getClock: nexus.operation<Timestamp, ClockResult>({
     name: "GetClock",
-    inputType: { transferTypeConverter: getClockRequestTransferTypeConverter },
+    inputType: { transferTypeConverter: timestampTransferTypeConverter },
     outputType: { transferTypeConverter: clockResultTransferTypeConverter },
   }),
   add: nexus.operation<AddRequest, void>({ name: "Add" }),
+  roundtripSigned: nexus.operation<SignedValue, SignedValue>({
+    name: "RoundtripSigned",
+    inputType: { transferTypeConverter: signedValueTransferTypeConverter },
+    outputType: { transferTypeConverter: signedValueTransferTypeConverter },
+  }),
+  roundtripUnsigned: nexus.operation<UnsignedValue, UnsignedValue>({
+    name: "RoundtripUnsigned",
+    inputType: { transferTypeConverter: unsignedValueTransferTypeConverter },
+    outputType: { transferTypeConverter: unsignedValueTransferTypeConverter },
+  }),
 });

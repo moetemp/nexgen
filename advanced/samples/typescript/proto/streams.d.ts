@@ -1,6 +1,11 @@
 // The protobufjs interfaces and enums of the protos in descriptors/streams/, which no release of
-// `@temporalio/proto` has yet. The generated code only uses them as types.
+// `@temporalio/proto` has yet. tests/setup-protos.ts loads their real runtime
+// constructors from the same checked-in descriptors.
 import type Long from "long";
+
+interface ProtoConstructor<T> {
+  create(properties?: T): T;
+}
 
 declare module "@temporalio/proto" {
   // temporal/api/enums/v1/stream.proto
@@ -53,6 +58,17 @@ declare module "@temporalio/proto" {
 
   // temporal/api/stream/v1/message.proto
   namespace temporal.api.stream.v1 {
+    const StreamRef: ProtoConstructor<IStreamRef>;
+    const ProducerEpoch: ProtoConstructor<IProducerEpoch>;
+    const Producer: ProtoConstructor<IProducer>;
+    const WorkflowTaskEpoch: ProtoConstructor<IWorkflowTaskEpoch>;
+    const AppendRecord: ProtoConstructor<IAppendRecord>;
+    const Supersession: ProtoConstructor<ISupersession>;
+    const StreamData: ProtoConstructor<IStreamData>;
+    const StreamClose: ProtoConstructor<IStreamClose>;
+    const StreamRecord: ProtoConstructor<IStreamRecord>;
+    const StreamErrorDetails: ProtoConstructor<IStreamErrorDetails>;
+
     interface IStreamRef {
       id?: string | null;
       owner?: temporal.api.common.v1.IExecution | null;
@@ -112,6 +128,17 @@ declare module "@temporalio/proto" {
 
   // temporal/api/streamservice/v1/request_response.proto
   namespace temporal.api.streamservice.v1 {
+    const CreateStreamRequest: ProtoConstructor<ICreateStreamRequest>;
+    const CreateStreamResponse: ProtoConstructor<ICreateStreamResponse>;
+    const AppendRecordsRequest: ProtoConstructor<IAppendRecordsRequest>;
+    const AppendRecordsResponse: ProtoConstructor<IAppendRecordsResponse>;
+    const CloseStreamRequest: ProtoConstructor<ICloseStreamRequest>;
+    const CloseStreamResponse: ProtoConstructor<ICloseStreamResponse>;
+    const ReadRecordsRequest: ProtoConstructor<IReadRecordsRequest>;
+    const ReadRecordsResponse: ProtoConstructor<IReadRecordsResponse>;
+    const DescribeStreamRequest: ProtoConstructor<IDescribeStreamRequest>;
+    const DescribeStreamResponse: ProtoConstructor<IDescribeStreamResponse>;
+
     interface ICreateStreamRequest {
       namespace?: string | null;
       streamId?: string | null;

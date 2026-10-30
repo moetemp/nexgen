@@ -4,4 +4,12 @@ export { touch } from "./operations/touch";
 export { setTime } from "./operations/set-time";
 export { getClock } from "./operations/get-clock";
 export { add } from "./operations/add";
-export type { AddRequest, ClockResult, GetClockRequest, NestedRequest } from "./models";
+export { roundtripSigned } from "./operations/roundtrip-signed";
+export { roundtripUnsigned } from "./operations/roundtrip-unsigned";
+export type {
+  AddRequest,
+  NestedRequest,
+  SignedValue,
+  Timestamp,
+  UnsignedValue,
+} from "./models";

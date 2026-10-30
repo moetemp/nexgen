@@ -146,6 +146,15 @@ impl ExampleOptions {
         }
     }
 
+    /// The targets that the example generates in one language. Only Python has the client
+    /// target, and an example that also asks for it still builds the Workflow API in every
+    /// language.
+    fn targets_for(&self, language: Language) -> GenerationTargets {
+        let mut targets = self.targets();
+        targets.client &= language.has_client_target();
+        targets
+    }
+
     fn supports(&self, language: Language) -> bool {
         self.languages
             .as_ref()
@@ -701,7 +710,7 @@ fn build_example_configuration(
     let generate_request = GenerateRequest {
         config: NexgenConfig {
             system_nexus,
-            targets: options.targets(),
+            targets: options.targets_for(language),
         },
         language,
         input_paths,
@@ -1125,6 +1134,25 @@ descriptors = ["streams.bin"]
         );
         assert!(replaced.supports(Language::Go));
         assert!(!replaced.supports(Language::Python));
+    }
+
+    #[test]
+    fn the_client_target_applies_only_to_languages_that_have_it() {
+        let config = parse_examples_config(
+            r#"
+[sample]
+targets = ["workflow", "client"]
+"#,
+        )
+        .unwrap();
+        let options = &config.examples["sample"].configurations("sample")[0].1;
+        assert_eq!(
+            options.targets_for(Language::Python),
+            GenerationTargets::ALL
+        );
+        for language in [Language::TypeScript, Language::Go, Language::Dotnet] {
+            assert_eq!(options.targets_for(language), GenerationTargets::WORKFLOW);
+        }
     }
 
     #[test]

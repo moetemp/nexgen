@@ -6,7 +6,7 @@ world system { export source-service; }
 interface source-service {
   record submit-request {
     id: string,
-    /// @nexus.source python="shared_source()"
+    /// @nexus.source targets="workflow,client" python="shared_source()"
     shared: string,
     /// @nexus.source targets="workflow" python="workflow_source()"
     workflow: string,
@@ -38,7 +38,7 @@ interface source-service {
 
   record restart-request {
     job-id: string,
-    /// @nexus.source python="shared_source()"
+    /// @nexus.source targets="workflow,client" python="shared_source()"
     shared: string,
   }
 

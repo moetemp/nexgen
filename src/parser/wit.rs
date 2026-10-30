@@ -1780,7 +1780,7 @@ fn build_field_origins(
     let default_targets = default_directive
         .map(|directive| build_origin_targets(directive, path, context, "default"))
         .transpose()?
-        .unwrap_or(crate::nexgen_config::GenerationTargets::ALL);
+        .unwrap_or(crate::nexgen_config::GenerationTargets::WORKFLOW);
     for language in all_languages() {
         let source = build_source_call(directives, path, context, language)?;
         let expression = default.and_then(|default| default.for_language(language));
@@ -1832,8 +1832,10 @@ fn build_origin_targets(
     context: &str,
     kind: &str,
 ) -> Result<crate::nexgen_config::GenerationTargets> {
+    // An unscoped helper, such as `workflow_namespace()`, often needs a Workflow context, so
+    // a client applies it only when the directive names the client target.
     let Some(value) = directive.value("targets") else {
-        return Ok(crate::nexgen_config::GenerationTargets::ALL);
+        return Ok(crate::nexgen_config::GenerationTargets::WORKFLOW);
     };
     let mut targets = crate::nexgen_config::GenerationTargets::NONE;
     for name in value.split(',').map(str::trim) {
@@ -4098,6 +4100,46 @@ interface workflow-service {
                 Some(expression)
             );
         }
+    }
+
+    #[test]
+    fn unscoped_sources_and_defaults_apply_to_the_workflow_target_only() {
+        use crate::nexgen_config::GenerationTargets;
+
+        let wit = r#"
+package temporal:nexus@1.0.0;
+
+world system { export service; }
+interface service {
+  record request {
+    /// @nexus.source python="namespace()"
+    unscoped-source: string,
+    /// @nexus.source targets="workflow,client" python="namespace()"
+    scoped-source: string,
+    /// @nexus.default python="3"
+    unscoped-default: u32,
+    /// @nexus.default targets="client" python="3"
+    scoped-default: u32,
+  }
+}
+"#;
+        let spec = parse(Language::Python, wit);
+        let record = spec
+            .records()
+            .find(|(_, record)| record.name == "Request")
+            .unwrap()
+            .1;
+        let targets = |field: &str| match record.fields[field].origin.for_language(Language::Python)
+        {
+            Some(FieldOrigin::Source { targets, .. } | FieldOrigin::Default { targets, .. }) => {
+                *targets
+            }
+            origin => panic!("`{field}` has no source or default: {origin:?}"),
+        };
+        assert_eq!(targets("unscoped_source"), GenerationTargets::WORKFLOW);
+        assert_eq!(targets("scoped_source"), GenerationTargets::ALL);
+        assert_eq!(targets("unscoped_default"), GenerationTargets::WORKFLOW);
+        assert_eq!(targets("scoped_default"), GenerationTargets::CLIENT);
     }
 
     #[test]

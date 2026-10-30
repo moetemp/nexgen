@@ -947,14 +947,14 @@ own nullable contracts.
 ### Sourced Fields
 
 Fields annotated with `@nexus.source` are supplied by a helper in each
-applicable API target, rather than exposed as convenience arguments. Sources
-apply to all targets unless restricted by `targets="workflow"`,
-`targets="client"`, or a comma-separated list. Other targets expose the field as
-an ordinary argument. Generation with no API targets rejects sourced fields,
-since the source would have no effect. Each value is a helper call relative to
-the project's support package, supplied with `--support-package`. Include the
-call and its arguments in WIT. Nexgen adds the package prefix and imports
-support for the generated field.
+applicable API target, rather than exposed as convenience arguments. A source
+applies to the `workflow` target only, unless `targets="client"` or a
+comma-separated list such as `targets="workflow,client"` names its targets.
+Other targets expose the field as an ordinary argument. Generation with no API
+targets rejects sourced fields, since the source would have no effect. Each
+value is a helper call relative to the project's support package, supplied with
+`--support-package`. Include the call and its arguments in WIT. Nexgen adds the
+package prefix and imports support for the generated field.
 
 ```wit
 record start-workflow-request {
@@ -1514,10 +1514,11 @@ The client is runtime state, not a resource identity field. Serialization
 carries only identity data. When an operation returns resource data, the
 generated API decodes it before constructing the client-backed handle.
 
-Sources work in the client target as well. Restrict workflow-only helpers with
-`targets="workflow"`. If a required resource-method request field has neither an
-applicable source nor a resource field or method parameter supplying it,
-generation rejects that API target.
+A source or a default applies to the client target only when its `targets=`
+names `client`, because an unscoped helper can need a Workflow context. If a
+required resource-method request field has neither an applicable source nor a
+resource field or method parameter supplying it, generation rejects that API
+target.
 
 ---
 
@@ -1821,10 +1822,10 @@ namespace: string,
 ```
 
 The sample's workflow API calls `_support.workflow_namespace()` in Python or
-`support.WorkflowNamespace(ctx)` in Go while constructing a request. Restrict
-this helper to the workflow target with `targets="workflow"`. Without a target
-list, a source applies to all targets. Models and wire conversion never evaluate
-the source.
+`support.WorkflowNamespace(ctx)` in Go while constructing a request. Without a
+target list, a source applies to the workflow target only. Add
+`targets="client"` or `targets="workflow,client"` to apply it in the client
+target. Models and wire conversion never evaluate the source.
 
 Cannot be combined with `@nexus.default`.
 
@@ -1833,12 +1834,13 @@ Cannot be combined with `@nexus.default`.
 ### @nexus.default
 
 **Placement:** Record field **Syntax:**
-`@nexus.default python="<expression>" typescript="<expression>" go="<expression>" dotnet="<expression>"`
+`@nexus.default [targets="workflow,client"] python="<expression>" typescript="<expression>" go="<expression>" dotnet="<expression>"`
 
 Makes an operation argument omittable and calculates its value when the
 generated operation prepares its outbound request. The field must have a
 non-option type: `@nexus.default` is rejected on `option<T>`, including aliases
-to option types.
+to option types. Without a target list, a default applies to the workflow target
+only, as a source does.
 
 ```wit
 /// @nexus.default

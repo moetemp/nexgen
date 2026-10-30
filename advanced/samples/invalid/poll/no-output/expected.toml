@@ -1,0 +1,6 @@
+languages = ["python"]
+targets = ["workflow", "client"]
+
+[error]
+kind = "unsupported-poll"
+contains = ["`Read`", "it returns nothing"]

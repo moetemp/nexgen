@@ -6,8 +6,8 @@ Advanced generation examples. Two flavors live here:
   [`inputs/`](inputs/). Generated output is checked in for .NET, Go, Python, and
   TypeScript, with focused tests for the examples that exercise runtime or
   typechecking behavior.
-- **JSON Schema native-api mode** — the service/client (`json_schema/api/`)
-  outputs generated from the schemas in
+- **JSON Schema Workflow API** — the service/client (`json_schema/api/`) outputs
+  generated from the schemas in
   [`../../samples/schemas/`](../../samples/schemas/). These are snapshot-only
   (regenerated and diffed by `cargo test`); the runtime round-trip tests for
   JSON Schema live under [`../../samples/`](../../samples/) against the

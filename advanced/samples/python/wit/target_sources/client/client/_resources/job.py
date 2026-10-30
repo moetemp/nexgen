@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import dataclasses
 
-from .._nexus_client import _NexusClient
+from .._nexus_client import (
+    _NexusClient,
+    _operation_id,
+)
 from ... import _resources as _resource_data
 from ...models import (
     CreateJobRequest,
@@ -29,6 +32,8 @@ class Job:
 
     async def restart(
         self,
+        *,
+        operation_id: str | None = None,
     ) -> None:
         request = RestartRequest(
             job_id=self.job_id,
@@ -37,12 +42,15 @@ class Job:
         nexus_client = self._nexus_client
         handle = await nexus_client.start_operation(
             operation="Restart",
-            input=request,
+            arg=request,
+            id=_operation_id(operation_id),
         )
-        await handle
+        await handle.result()
 
     async def refresh(
         self,
+        *,
+        operation_id: str | None = None,
     ) -> Job:
         request = CreateJobRequest(
             job_id=self.job_id,
@@ -50,10 +58,11 @@ class Job:
         nexus_client = self._nexus_client
         handle = await nexus_client.start_operation(
             operation="Refresh",
-            input=request,
-            output_type=_resource_data.Job,
+            arg=request,
+            id=_operation_id(operation_id),
+            result_type=_resource_data.Job,
         )
-        result = await handle
+        result = await handle.result()
         return Job(
             nexus_client,
             job_id=result.job_id,

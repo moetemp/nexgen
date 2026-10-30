@@ -1,0 +1,6 @@
+languages = ["python"]
+targets = ["client"]
+
+[error]
+kind = "python-generated-name-conflict"
+contains = ["`operation_id`", "a parameter of resource method `Job.restart`"]

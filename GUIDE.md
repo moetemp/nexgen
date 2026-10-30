@@ -1480,19 +1480,35 @@ stream_service/
 ```
 
 A client class inherits one or more extensions and implements
-`_create_nexus_client`. That method returns an object with the `start_operation`
-of the Workflow Nexus client. A call returns the result of the operation.
+`_create_nexus_client`. That method returns a Nexus client for one service, with
+the `start_operation` of `temporalio.client.NexusClient`. A subclass of
+`temporalio.client.Client` returns
+`self.create_nexus_client(service, endpoint)`. A call starts the operation and
+returns its result.
 
 ```python
+import typing
+
+import temporalio.client
 from stream_service.client import StreamServiceClientExtension
 
-class Client(StreamServiceClientExtension):
-    def _create_nexus_client(self, *, service, endpoint):
-        ...  # for example, start a standalone Nexus operation
 
-stream = await Client().create_stream(id="s1")
+class Client(temporalio.client.Client, StreamServiceClientExtension):
+    def _create_nexus_client(
+        self, *, service: str, endpoint: str
+    ) -> temporalio.client.NexusClient[typing.Any]:
+        return self.create_nexus_client(service, endpoint)
+
+
+client = await Client.connect("localhost:7233")
+stream = await client.create_stream(id="s1")
 await stream.publish(records=records)
 ```
+
+Each method that starts an operation takes a keyword-only `operation_id`. With
+no ID, the method uses a new random one. Give the same ID when you retry a call,
+so that the server doesn't start a second operation. nexgen refuses a request
+field or a resource method parameter named `operation_id`.
 
 Each operation also has a private method that takes the request, such as
 `_stream_service_create_stream`. Its name has the service name. Two services of

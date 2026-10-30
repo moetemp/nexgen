@@ -1,0 +1,13 @@
+package temporal:client-operation-id-clash@1.0.0;
+
+world system { export job-service; }
+
+// Each client method takes `operation_id`, so a request field of that name has no parameter.
+/// @nexus.endpoint "jobs"
+interface job-service {
+  record start-request {
+    operation-id: string,
+  }
+
+  start: func(request: start-request);
+}

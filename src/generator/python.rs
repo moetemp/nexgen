@@ -907,7 +907,7 @@ impl<'a> ApiPlanner<'a> {
         files.insert(format!("{dir}/_extensions.py"), extensions, origin())?;
         let mut nexus_client = String::new();
         render_generated_file_header(&mut nexus_client);
-        nexus_client.push_str("\nimport collections.abc\nimport typing\n\n\n");
+        nexus_client.push_str("\nimport typing\nimport uuid\n\n\n");
         nexus_client.push_str(PYTHON_CLIENT_NEXUS_PROTOCOL);
         files.insert(format!("{dir}/_nexus_client.py"), nexus_client, origin())?;
         if !resources.is_empty() {
@@ -1035,7 +1035,7 @@ impl<'a> ApiPlanner<'a> {
         ) {
             output.push('\n');
         }
-        render_named_python_import(&mut output, "._nexus_client", &["_NexusClient".to_string()]);
+        render_named_python_import(&mut output, "._nexus_client", &client_nexus_imports(&body));
         let used_model_names = used_python_symbol_imports(&body, model_names);
         if !used_model_names.is_empty() {
             render_model_name_imports(
@@ -1192,7 +1192,7 @@ impl<'a> ApiPlanner<'a> {
             render_named_python_import(
                 &mut output,
                 ".._nexus_client",
-                &["_NexusClient".to_string()],
+                &client_nexus_imports(&body),
             );
             render_client_resource_data_import(&mut output, &body, "...");
         }
@@ -1349,12 +1349,12 @@ impl<'a> ApiPlanner<'a> {
         let has_default = |param: &PlannedResourceField| {
             param.optional || resource_method_list_param(param).is_some()
         };
-        if method
+        let keyword_only = method
             .params
             .iter()
             .skip_while(|param| !has_default(param))
-            .any(|param| !has_default(param))
-        {
+            .any(|param| !has_default(param));
+        if keyword_only {
             output.push_str("        *,\n");
         }
         for param in &method.params {
@@ -1377,6 +1377,13 @@ impl<'a> ApiPlanner<'a> {
                 }
             }
             output.push_str(",\n");
+        }
+        let bound = matches!(
+            method.binding,
+            PlannedResourceMethodBindingSpec::Operation { .. }
+        );
+        if client && bound {
+            render_client_operation_id_parameter(output, keyword_only, "None");
         }
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
@@ -3919,6 +3926,15 @@ fn client_resource_data_type(type_name: &str) -> String {
 
 const CLIENT_RESOURCE_DATA_MODULE: &str = "_resource_data";
 
+/// The names that a client module imports from the module of the Nexus client protocol.
+fn client_nexus_imports(body: &str) -> Vec<String> {
+    let mut names = vec!["_NexusClient".to_string()];
+    if body_uses_python_symbol(body, "_operation_id") {
+        names.push("_operation_id".to_string());
+    }
+    names
+}
+
 /// Imports the resources of the parent package. `parent` is the relative name of the parent
 /// package in the client module, such as `..`.
 fn render_client_resource_data_import(output: &mut String, body: &str, parent: &str) {
@@ -5719,36 +5735,93 @@ fn validate_client_names(services: &[RenderedService<'_>]) -> Result<()> {
                     });
                 }
             }
+            if operation
+                .target_unpacked_input(GenerationTarget::Client)
+                .is_some_and(|input| {
+                    input
+                        .parameters
+                        .iter()
+                        .any(|parameter| parameter.attr_name == CLIENT_OPERATION_ID_PARAMETER)
+                })
+            {
+                return Err(client_operation_id_conflict(format!(
+                    "a request field of operation `{}.{}`",
+                    service.name, operation.name
+                )));
+            }
+        }
+        for resource in &service.resources {
+            for method in &resource.methods {
+                if matches!(
+                    method.binding,
+                    PlannedResourceMethodBindingSpec::Operation { .. }
+                ) && method
+                    .params
+                    .iter()
+                    .any(|param| python_field_name(&param.name) == CLIENT_OPERATION_ID_PARAMETER)
+                {
+                    return Err(client_operation_id_conflict(format!(
+                        "a parameter of resource method `{}.{}`",
+                        resource.type_name, method.name
+                    )));
+                }
+            }
         }
     }
     Ok(())
 }
 
-/// The Nexus client that a client extension starts operations with. It has the
-/// `start_operation` of the Workflow Nexus client.
+fn client_operation_id_conflict(conflicting_declaration: String) -> Error {
+    Error::PythonGeneratedNameConflict {
+        name: CLIENT_OPERATION_ID_PARAMETER.to_string(),
+        generated_by: "the operation ID parameter of each client method".to_string(),
+        conflicting_declaration,
+    }
+}
+
+/// The Nexus client that a client extension starts operations with. It has the `start_operation`
+/// of `temporalio.client.NexusClient`, so `Client.create_nexus_client` can supply it.
 const PYTHON_CLIENT_NEXUS_PROTOCOL: &str = r#"_OutputT = typing.TypeVar("_OutputT")
+_OutputT_co = typing.TypeVar("_OutputT_co", covariant=True)
 
 
-# The client modules import this class, so it isn't unused.
+class _NexusOperationHandle(typing.Protocol[_OutputT_co]):
+    """A started Nexus operation."""
+
+    async def result(self) -> _OutputT_co: ...
+
+
+# The client modules import the names below, so they aren't unused.
 class _NexusClient(typing.Protocol):  # pyright: ignore[reportUnusedClass]
-    """Starts the Nexus operations of one service."""
+    """Starts the operations of one Nexus service, like ``temporalio.client.NexusClient``."""
 
     @typing.overload
     async def start_operation(
         self,
         operation: str,
-        input: typing.Any,
+        arg: typing.Any,
         *,
-        output_type: type[_OutputT],
-    ) -> collections.abc.Awaitable[_OutputT]: ...
+        id: str,
+        result_type: type[_OutputT],
+    ) -> _NexusOperationHandle[_OutputT]: ...
 
     @typing.overload
     async def start_operation(
         self,
         operation: str,
-        input: typing.Any,
-    ) -> collections.abc.Awaitable[None]: ...
+        arg: typing.Any,
+        *,
+        id: str,
+    ) -> _NexusOperationHandle[typing.Any]: ...
+
+
+def _operation_id(operation_id: str | None) -> str:  # pyright: ignore[reportUnusedFunction]
+    """Return the operation ID that the caller gave, or a new random one."""
+    return str(uuid.uuid4()) if operation_id is None else operation_id
 "#;
+
+/// The keyword-only parameter of each client method that starts an operation.
+const CLIENT_OPERATION_ID_PARAMETER: &str = "operation_id";
 
 const CLIENT_NEXUS_CLIENT_HOOK: &str = "_create_nexus_client";
 
@@ -7118,6 +7191,16 @@ fn render_function_unpacked_overload(
         }
         output.push_str(",\n");
     }
+    if target == GenerationTarget::Client {
+        let keyword_only = primary_case.is_none_or(|function_case| {
+            function_case.positional_args.is_empty()
+                || function_case
+                    .positional_args
+                    .iter()
+                    .any(|positional_arg| positional_arg.variadic)
+        });
+        render_client_operation_id_parameter(output, keyword_only, "...");
+    }
 
     start_line(output, target, ") -> ");
     output.push_str(&function_unpacked_overload_return_annotation(
@@ -7530,10 +7613,25 @@ fn render_client_operation_method(
         output.push_str(&input.annotation);
         output.push_str(",\n");
     }
+    render_client_operation_id_parameter(output, false, "None");
     start_line(output, target, ") -> ");
     output.push_str(&operation_result_annotation(operation));
     output.push_str(":\n");
     render_client_operation_body(output, service, operation, None, false);
+}
+
+/// The keyword-only parameter of a client method that sets the ID of the Nexus operation. A
+/// caller that retries with the same ID finds the operation that it started before.
+fn render_client_operation_id_parameter(output: &mut String, keyword_only: bool, default: &str) {
+    let target = GenerationTarget::Client;
+    if !keyword_only {
+        start_line(output, target, "    *,\n");
+    }
+    start_line(output, target, "    ");
+    output.push_str(CLIENT_OPERATION_ID_PARAMETER);
+    output.push_str(": str | None = ");
+    output.push_str(default);
+    output.push_str(",\n");
 }
 
 fn render_client_operation_body(
@@ -7551,55 +7649,47 @@ fn render_client_operation_body(
     } else {
         render_inline_nexus_client(output, target, service);
     }
-    // `output_type` names the generic model with no type arguments, so the cast adds them.
-    let cast_handle = operation.generic_model_types && !operation_returns_direct(operation);
-    if cast_handle {
-        start_line(output, target, "    handle = typing.cast(\n");
-        start_line(output, target, "        collections.abc.Awaitable[");
-        output.push_str(&operation.output_annotation);
-        output.push_str("],\n");
-        start_line(
-            output,
-            target,
-            "        await nexus_client.start_operation(\n",
-        );
-    } else {
-        start_line(
-            output,
-            target,
-            "    handle = await nexus_client.start_operation(\n",
-        );
-    }
+    start_line(
+        output,
+        target,
+        "    handle = await nexus_client.start_operation(\n",
+    );
     start_line(output, target, "        operation=");
     output.push_str(&python_string_literal(operation.wire_name));
     output.push_str(",\n");
-    start_line(output, target, "        input=");
+    start_line(output, target, "        arg=");
     output.push_str(operation_input_wire_expr(operation));
     output.push_str(",\n");
+    start_line(output, target, "        id=_operation_id(");
+    output.push_str(CLIENT_OPERATION_ID_PARAMETER);
+    output.push_str("),\n");
     if !operation.output_none {
-        start_line(output, target, "        output_type=");
-        if operation.output_direct_result {
+        start_line(output, target, "        result_type=");
+        if operation.client_resource.is_some() {
             output.push_str(&client_resource_data_type(&operation.output_ref));
         } else {
             output.push_str(&operation.output_type_expr);
         }
         output.push_str(",\n");
     }
-    if cast_handle {
-        start_line(output, target, "        ),\n");
-    }
     start_line(output, target, "    )\n");
+    // A statement that drops a result other than `None` needs `_ =` for basedpyright.
+    let await_result = if operation.output_none {
+        "    await handle.result()\n"
+    } else {
+        "    _ = await handle.result()\n"
+    };
     if discard_result {
-        start_line(output, target, "    await handle\n");
+        start_line(output, target, await_result);
         return;
     }
     if let Some(transform_expr) = &operation.output_transform_expr {
-        start_line(output, target, "    result = await handle\n");
+        start_line(output, target, "    result = await handle.result()\n");
         start_line(output, target, "    return ");
         output.push_str(transform_expr);
         output.push('\n');
     } else if let Some(resource_return) = &operation.output_resource_return {
-        start_line(output, target, "    result = await handle\n");
+        start_line(output, target, "    result = await handle.result()\n");
         render_resource_return_guards(
             output,
             target_body_indent(target),
@@ -7624,15 +7714,11 @@ fn render_client_operation_body(
         start_line(output, target, "    )\n");
         start_line(output, target, "    return resource\n");
     } else if let Some(resource) = &operation.client_resource {
-        start_line(
-            output,
-            target,
-            if resource.fields.is_empty() {
-                "    await handle\n"
-            } else {
-                "    result = await handle\n"
-            },
-        );
+        if resource.fields.is_empty() {
+            start_line(output, target, await_result);
+        } else {
+            start_line(output, target, "    result = await handle.result()\n");
+        }
         start_line(output, target, "    return ");
         output.push_str(&operation.output_ref);
         output.push_str("(\n");
@@ -7661,9 +7747,17 @@ fn render_client_operation_body(
         }
         start_line(output, target, "    )\n");
     } else if operation.output_none {
-        start_line(output, target, "    await handle\n");
+        start_line(output, target, await_result);
+    } else if operation.generic_model_types {
+        // `result_type` names the generic model with no type arguments, so the cast adds them.
+        start_line(output, target, "    return typing.cast(\n");
+        start_line(output, target, "        ");
+        output.push_str(&operation.output_annotation);
+        output.push_str(",\n");
+        start_line(output, target, "        await handle.result(),\n");
+        start_line(output, target, "    )\n");
     } else {
-        start_line(output, target, "    return await handle\n");
+        start_line(output, target, "    return await handle.result()\n");
     }
 }
 
@@ -7687,17 +7781,24 @@ fn render_client_request_method(
         output.push_str(operation_input_annotation(operation));
         output.push_str(",\n");
     }
+    render_client_operation_id_parameter(output, false, "None");
     start_line(output, target, ") -> ");
     output.push_str(&operation_result_annotation(operation));
     output.push_str(":\n");
     render_operation_docstring(output, target_body_indent(target), operation, &[], None);
     start_line(output, target, "    return await self.");
     output.push_str(&client_operation_name(service, operation));
+    output.push('(');
     if operation.input.is_some() {
-        output.push_str("(request)\n");
-    } else {
-        output.push_str("()\n");
+        output.push_str("request, ");
     }
+    output.push_str(&client_operation_id_argument());
+    output.push_str(")\n");
+}
+
+/// Passes the caller's operation ID on to the private method that starts the operation.
+fn client_operation_id_argument() -> String {
+    format!("{CLIENT_OPERATION_ID_PARAMETER}={CLIENT_OPERATION_ID_PARAMETER}")
 }
 
 fn function_unpacked_needs_overloads(functions: &[RenderedFunctionField]) -> bool {
@@ -8316,6 +8417,9 @@ fn render_unpacked_operation_function(
         }
         output.push_str(",\n");
     }
+    if target == GenerationTarget::Client {
+        render_client_operation_id_parameter(output, !unpacked_input.parameters.is_empty(), "None");
+    }
     render_unpacked_return_annotation(output, target, service, operation);
     render_unpacked_operation_docstring(output, body_indent, operation, unpacked_input, None);
     for flattened_message in &unpacked_input.flattened_messages {
@@ -8334,7 +8438,7 @@ fn render_unpacked_operation_function(
     start_line(output, target, "    )\n");
     start_line(output, target, "    return await ");
     output.push_str(&operation_call_target(target, service, operation));
-    output.push_str("(request)\n");
+    output.push_str(&operation_call_arguments(target));
 }
 
 /// The return annotation of an unpacked operation. A Workflow function returns the operation
@@ -8370,6 +8474,14 @@ fn render_unpacked_return_annotation(
         ));
         output.push_str(",\n");
         start_line(output, target, "]:\n");
+    }
+}
+
+/// The arguments that an unpacked operation passes to the function or method of its request.
+fn operation_call_arguments(target: GenerationTarget) -> String {
+    match target {
+        GenerationTarget::Workflow => "(request)\n".to_string(),
+        GenerationTarget::Client => format!("(request, {})\n", client_operation_id_argument()),
     }
 }
 
@@ -8506,6 +8618,13 @@ fn render_function_unpacked_implementation(
         }
         output.push_str(",\n");
     }
+    if target == GenerationTarget::Client {
+        // With fixed positional arguments and no keyword-only field, the signature has no `*`.
+        let keyword_only = primary_function.is_none_or(|function| {
+            python_function_fixed_positional_args(function).is_none() || has_keyword_only_parameters
+        });
+        render_client_operation_id_parameter(output, keyword_only, "None");
+    }
 
     render_unpacked_return_annotation(output, target, service, operation);
     render_unpacked_operation_docstring(
@@ -8603,7 +8722,7 @@ fn render_function_unpacked_implementation(
     start_line(output, target, "    )\n");
     start_line(output, target, "    return await ");
     output.push_str(&operation_call_target(target, service, operation));
-    output.push_str("(request)\n");
+    output.push_str(&operation_call_arguments(target));
 }
 
 fn rendered_function_implementation_renders_field(

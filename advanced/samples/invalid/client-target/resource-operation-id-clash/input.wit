@@ -1,0 +1,25 @@
+package temporal:client-resource-operation-id-clash@1.0.0;
+
+world system { export job-service; }
+
+// Each client resource method takes `operation_id`, so a parameter of that name clashes. The
+// field that the parameter fills is nested, so the request itself has no such field.
+/// @nexus.endpoint "jobs"
+interface job-service {
+  resource job {
+    constructor(job-id: string);
+
+    restart: func(operation-id: string);
+  }
+
+  record restart-target {
+    job-id: string,
+    operation-id: string,
+  }
+
+  record restart-request {
+    target: restart-target,
+  }
+
+  restart: func(request: restart-request);
+}

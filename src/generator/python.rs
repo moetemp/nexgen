@@ -7712,7 +7712,7 @@ fn render_client_operation_method(
 }
 
 /// The keyword-only parameter of a client method that sets the ID of the Nexus operation. A
-/// caller that retries with the same ID finds the operation that it started before.
+/// retry with the same ID doesn't start a second operation.
 fn render_client_operation_id_parameter(output: &mut String, keyword_only: bool, default: &str) {
     let target = GenerationTarget::Client;
     if !keyword_only {

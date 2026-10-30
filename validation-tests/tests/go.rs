@@ -379,6 +379,55 @@ interface namespace-service {
     fs::remove_dir_all(temp_dir).unwrap();
 }
 
+/// The imports of the Workflow API must not stay in output that has no Workflow API.
+#[test]
+fn go_definitions_only_output_compiles() {
+    let root = project_root();
+    let temp_dir = unique_output_path("go-definitions-only");
+    let module_root = temp_dir.join("module");
+    fs::create_dir_all(&module_root).unwrap();
+    for file in ["go.mod", "go.sum"] {
+        fs::copy(
+            root.join("advanced/samples/go").join(file),
+            module_root.join(file),
+        )
+        .unwrap();
+    }
+    for (example_id, system_nexus) in [
+        ("function-execution", false),
+        ("multi-operation-service", true),
+    ] {
+        generate_to_file(&GenerateRequest {
+            config: nexgen::nexgen_config::NexgenConfig {
+                system_nexus,
+                targets: GenerationTargets::NONE,
+            },
+            language: nexgen::language::Language::Go,
+            input_paths: vec![common::wit_input_path(&root, example_id)],
+            support_package: Some("go.temporal.io/sdk/advanced/samples/go/support".into()),
+            descriptor_paths: Vec::new(),
+            output_path: module_root.join(go_package_name(example_id)),
+            format: false,
+            java_package_name: None,
+            ts_date_time_types: Default::default(),
+            dotnet_namespace: None,
+        })
+        .unwrap();
+    }
+    let build = Command::new("go")
+        .args(["build", "./..."])
+        .current_dir(&module_root)
+        .output()
+        .unwrap();
+    assert!(
+        build.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&build.stdout),
+        String::from_utf8_lossy(&build.stderr)
+    );
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
 #[test]
 fn go_json_examples_render_expected_language_features() {
     let root = project_root();

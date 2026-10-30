@@ -548,6 +548,7 @@ fn generate_go_tree(
     )
 }
 
+/// Generates the Workflow API. Use `generate_source_with_targets` to select other targets.
 pub fn generate_source(
     language: Language,
     spec: ApiSpec,
@@ -559,7 +560,7 @@ pub fn generate_source(
         spec,
         descriptors,
         support_package,
-        GenerationTargets::NONE,
+        GenerationTargets::WORKFLOW,
     )
 }
 

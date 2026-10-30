@@ -69,6 +69,28 @@ struct GenerateArgs {
     #[cfg(feature = "advanced")]
     #[arg(long = "targets", value_enum, value_delimiter = ',')]
     targets: Vec<CliGenerationTarget>,
+    // Hidden, so an old invocation gets a pointer to `--targets` and not a generic clap error.
+    #[cfg(feature = "advanced")]
+    #[arg(long = "native-api", hide = true)]
+    native_api: bool,
+}
+
+#[cfg(feature = "advanced")]
+fn reject_removed_flags(command: &Commands) -> Result<(), clap::Error> {
+    let generate_args = match command {
+        Commands::Dotnet(args) => &args.common.common,
+        Commands::Go(args) | Commands::Python(args) => &args.common,
+        Commands::Java(args) => &args.common,
+        Commands::Typescript(args) => &args.common,
+        Commands::AddRpc(_) | Commands::AddMessage(_) | Commands::DebugWitDir(_) => return Ok(()),
+    };
+    if generate_args.native_api {
+        return Err(<Cli as clap::CommandFactory>::command().error(
+            clap::error::ErrorKind::UnknownArgument,
+            "`--native-api` was removed, use `--targets workflow`",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(feature = "advanced")]
@@ -186,6 +208,10 @@ struct DebugWitDirArgs {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    #[cfg(feature = "advanced")]
+    if let Err(error) = reject_removed_flags(&cli.command) {
+        error.exit();
+    }
 
     let result = match cli.command {
         Commands::Dotnet(args) => {
@@ -335,7 +361,76 @@ fn generate_request(
 #[cfg(test)]
 mod tests {
     use super::{Cli, Commands};
+    #[cfg(feature = "advanced")]
+    use super::{generation_targets, reject_removed_flags};
     use clap::Parser;
+    #[cfg(feature = "advanced")]
+    use nexgen::nexgen_config::GenerationTargets;
+
+    #[cfg(feature = "advanced")]
+    fn parse_python(extra: &[&str]) -> Result<Commands, clap::Error> {
+        let mut args = vec!["nexgen", "python", "input.wit", "--output", "out"];
+        args.extend(extra);
+        Ok(Cli::try_parse_from(args)?.command)
+    }
+
+    #[cfg(feature = "advanced")]
+    fn python_targets(extra: &[&str]) -> Result<GenerationTargets, clap::Error> {
+        match parse_python(extra)? {
+            Commands::Python(args) => Ok(generation_targets(&args.common.targets)),
+            _ => unreachable!("the command is python"),
+        }
+    }
+
+    #[cfg(feature = "advanced")]
+    #[test]
+    fn targets_accept_a_list_or_a_repeated_flag() {
+        let both = GenerationTargets {
+            workflow: true,
+            client: true,
+        };
+        assert_eq!(python_targets(&[]).unwrap(), GenerationTargets::NONE);
+        assert_eq!(
+            python_targets(&["--targets", "workflow"]).unwrap(),
+            GenerationTargets::WORKFLOW
+        );
+        assert_eq!(
+            python_targets(&["--targets", "client"]).unwrap(),
+            GenerationTargets {
+                workflow: false,
+                client: true,
+            }
+        );
+        assert_eq!(
+            python_targets(&["--targets", "workflow,client"]).unwrap(),
+            both
+        );
+        assert_eq!(
+            python_targets(&["--targets", "client", "--targets", "workflow"]).unwrap(),
+            both
+        );
+    }
+
+    #[cfg(feature = "advanced")]
+    #[test]
+    fn targets_reject_an_unknown_value() {
+        let error = python_targets(&["--targets", "server"]).unwrap_err();
+        assert_eq!(error.kind(), clap::error::ErrorKind::InvalidValue);
+        assert!(error.to_string().contains("server"), "{error}");
+    }
+
+    #[cfg(feature = "advanced")]
+    #[test]
+    fn the_removed_native_api_flag_points_at_the_targets_flag() {
+        let command = parse_python(&["--native-api"]).unwrap();
+        let error = reject_removed_flags(&command).unwrap_err();
+        assert!(
+            error.to_string().contains("use `--targets workflow`"),
+            "{error}"
+        );
+        let command = parse_python(&["--targets", "workflow"]).unwrap();
+        assert!(reject_removed_flags(&command).is_ok());
+    }
 
     #[test]
     fn support_package_option_is_available_but_not_a_json_schema_requirement() {

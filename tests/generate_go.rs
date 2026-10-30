@@ -390,6 +390,45 @@ fn cli_overwrites_previously_generated_files_in_place() {
 }
 
 #[test]
+fn cli_generates_go_definitions_without_workflow_operations() {
+    let root = project_root();
+    let inputs = example_input_paths(&root, "function-execution");
+    let with_workflow_api =
+        generate_to_string_with_inputs(nexgen::language::Language::Go, &inputs, &[]).unwrap();
+    assert!(with_workflow_api.contains("workflow.NewNexusClient"));
+
+    let temp_dir = unique_output_path("go-definitions-only");
+    fs::create_dir_all(&temp_dir).unwrap();
+    let output_path = temp_dir.join("output");
+    let output = Command::new(env!("CARGO_BIN_EXE_nexgen"))
+        .arg("go")
+        .args(&inputs)
+        .args([
+            "--support-package",
+            "example.com/nexgen/support",
+            "--output",
+            output_path.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let files = read_go_output_files(&output_path);
+    assert!(!files.is_empty());
+    for (path, contents) in files {
+        assert!(
+            !contents.contains("workflow.NewNexusClient"),
+            "{} has Workflow operation code",
+            path.display()
+        );
+    }
+    fs::remove_dir_all(temp_dir).unwrap();
+}
+
+#[test]
 fn go_proto_enum_field_infers_descriptor_go_package() {
     let root = project_root();
     let temp_dir = unique_output_path("go-unconvertible-input");

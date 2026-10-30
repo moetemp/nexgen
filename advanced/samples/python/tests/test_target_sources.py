@@ -16,6 +16,7 @@ from wit.target_sources.both import models as both_models
 from wit.target_sources.both._resources import Job as WorkflowJob
 from wit.target_sources.both import client as both_client
 from wit.target_sources.client import client as client_api
+from wit.target_sources.client._resources import Job as DataOnlyJob
 from wit.target_sources.workflow import models as workflow_models
 
 
@@ -164,3 +165,10 @@ def test_shared_models_never_evaluate_sources(source_calls: list[str]) -> None:
     with pytest.raises(TypeError):
         _ = both_models.SubmitRequest(id="missing")  # pyright: ignore[reportCallIssue]
     assert source_calls == []
+
+
+def test_without_the_workflow_target_resources_carry_only_their_fields() -> None:
+    job = DataOnlyJob(job_id="job")
+    assert dataclasses.asdict(job) == {"job_id": "job"}
+    assert not hasattr(job, "restart")
+    assert not hasattr(job, "refresh")

@@ -1,0 +1,21 @@
+package temporal:client-factory-name-clash@1.0.0;
+
+world system {
+  export job-service;
+  export scheduler;
+}
+
+// The client factory of resource `job` is `job`, the public method of operation `Scheduler.job`.
+/// @nexus.endpoint "jobs"
+interface job-service {
+  resource job {
+    constructor(job-id: string);
+  }
+}
+
+/// @nexus.endpoint "scheduler"
+interface scheduler {
+  record job-request { id: string }
+
+  job: func(request: job-request);
+}

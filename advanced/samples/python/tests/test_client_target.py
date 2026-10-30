@@ -118,6 +118,22 @@ async def test_a_resource_from_another_service_calls_its_own_service() -> None:
     ]
 
 
+async def test_a_factory_rebuilds_a_handle_from_stored_identity_fields() -> None:
+    client = FakeOrdersClient({"Restart": [None]})
+
+    job = client.job(job_id="stored")
+    await job.restart()
+
+    assert client.calls == [
+        Call(
+            SOURCE_SERVICE,
+            "sources",
+            "Restart",
+            RestartRequest(job_id="stored", shared="shared"),
+        )
+    ]
+
+
 async def test_a_created_resource_calls_its_operations_through_the_client() -> None:
     client = FakeClient(
         {

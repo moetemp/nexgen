@@ -205,14 +205,18 @@ model. nexgen ignores the directives that it doesn't know yet, such as
 `@nexus.varargs` and `@nexus.close`.
 
 Some of the output doesn't type-check. Python imports the Stream protos from
-`temporalio`, which doesn't have them, so basedpyright skips the service.
-TypeScript passes a `number` where a resource method's proto request wants a
-`Long`. So `tsc` skips the service, but the test still checks its models.
+`temporalio`, which doesn't have them, so basedpyright skips the service's
+`models.py`. The Python tests map the bindings in `streamprotos/` to those
+names. Python also generates the client target, on the `__temporal_system`
+endpoint. TypeScript passes a `number` where a resource method's proto request
+wants a `Long`. So `tsc` skips the service, but the test still checks its
+models.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),
   [`dotnet/tests/StreamServiceChecks.cs`](dotnet/tests/StreamServiceChecks.cs)
-- Python: [`python/wit/stream_service/`](python/wit/stream_service/)
+- Python: [`python/wit/stream_service/`](python/wit/stream_service/),
+  [`python/tests/test_stream_client.py`](python/tests/test_stream_client.py)
 - TypeScript:
   [`typescript/wit/stream-service/`](typescript/wit/stream-service/),
   [`typescript/tests/stream-service.test.ts`](typescript/tests/stream-service.test.ts)
@@ -227,6 +231,17 @@ returned by a client.
 - Python tests:
   [`python/tests/test_client_target.py`](python/tests/test_client_target.py),
   [`python/tests/test_target_sources.py`](python/tests/test_target_sources.py)
+
+### `cross-service-resource`
+
+One interface returns a resource of another interface. A Python client handle of
+that resource starts its operations on the endpoint of its own service.
+
+- WIT: [`inputs/cross-service-resource.wit`](inputs/cross-service-resource.wit)
+- Python:
+  [`python/wit/cross_service_resource/`](python/wit/cross_service_resource/),
+  [`python/tests/test_cross_service_resource.py`](python/tests/test_cross_service_resource.py),
+  [`python/tests/test_sdk_client.py`](python/tests/test_sdk_client.py)
 
 ## Supporting files
 

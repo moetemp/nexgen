@@ -4580,6 +4580,11 @@ fn render_resource_methods(
                 request_plan,
                 ..
             } => {
+                let request_plan = &crate::generator::request_plan_for_target(
+                    api_plan,
+                    request_plan,
+                    GenerationTarget::Workflow,
+                );
                 let operation = service
                     .operations
                     .iter()

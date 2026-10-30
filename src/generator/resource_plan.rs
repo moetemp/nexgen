@@ -1,6 +1,7 @@
 //! Shared rendering of resolved resource-method request plans.
 
 use crate::error::{Error, Result};
+use crate::nexgen_config::GenerationTarget;
 use crate::planning::{
     PlannedFamily, PlannedProtoType, PlannedResourceMethodBindingSpec, PlannedSpec, RequestPlan,
     RequestPlanField, RequestPlanSource,
@@ -71,6 +72,43 @@ pub(crate) fn record_for_request_name<'a>(
     })
 }
 
+/// The plan of one target. A field whose source applies to the target takes the source, so the
+/// plan doesn't fill it from a resource field or a method parameter. Each language renders this
+/// plan, so they all follow one rule.
+pub(crate) fn request_plan_for_target(
+    api_plan: &PlannedSpec,
+    plan: &RequestPlan,
+    target: GenerationTarget,
+) -> RequestPlan {
+    let RequestPlan::Construct {
+        message_name,
+        fields,
+    } = plan
+    else {
+        return plan.clone();
+    };
+    let record = record_for_request_name(api_plan, message_name);
+    let sourced = |name: &str| {
+        record.is_some_and(|record| {
+            record
+                .fields
+                .values()
+                .any(|field| field.name == name && field.source_for(target).is_some())
+        })
+    };
+    RequestPlan::Construct {
+        message_name: message_name.clone(),
+        fields: fields
+            .iter()
+            .filter(|field| !sourced(&field.field_name))
+            .map(|field| RequestPlanField {
+                field_name: field.field_name.clone(),
+                value: request_plan_for_target(api_plan, &field.value, target),
+            })
+            .collect(),
+    }
+}
+
 /// Check each API independently, preserving the shared request and source policy.
 pub(crate) fn validate_resource_origins(
     api_plan: &PlannedSpec,
@@ -139,4 +177,98 @@ fn missing_origin_field(
     fields
         .iter()
         .find_map(|field| missing_origin_field(api_plan, &field.value, target))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::descriptors::DescriptorIndex;
+    use crate::language::Language;
+    use crate::nexgen_config::{GenerationTarget, GenerationTargets, NexgenConfig, scope};
+    use crate::planning::{PlannedResourceMethodBindingSpec, PlannedSpec, RequestPlan};
+    use crate::spec::{ApiSpecNode, ApiSpecTree, CompilerPass};
+
+    fn planned(wit: &str) -> PlannedSpec {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let _scope = scope(NexgenConfig {
+            targets: GenerationTargets::ALL,
+            ..NexgenConfig::default()
+        });
+        let descriptors =
+            DescriptorIndex::load(&root.join("advanced/samples/descriptors/temporal_api.bin"))
+                .unwrap();
+        let spec = crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
+            Language::Python,
+            wit,
+            PathBuf::from("inline.wit"),
+            &[root.join("advanced/samples/inputs/deps")],
+        )
+        .unwrap();
+        let tree = crate::planning::LanguageSelectionPass::new(Language::Python)
+            .apply(ApiSpecTree::single(spec))
+            .unwrap();
+        let tree =
+            crate::planning::ResourceResolutionPass::new(&descriptors, GenerationTargets::ALL)
+                .apply(tree)
+                .unwrap();
+        let tree = crate::planning::OperationBindingPass::new()
+            .apply(tree)
+            .unwrap();
+        let tree = crate::planning::OperationLoweringPass::new()
+            .apply(tree)
+            .unwrap();
+        let type_planning = crate::planning::TypePlanningPass::new(&tree, &descriptors);
+        let ApiSpecNode::Leaf(leaf) = type_planning.apply(tree).unwrap().root else {
+            panic!("one WIT file plans one leaf");
+        };
+        leaf.spec
+    }
+
+    fn planned_fields(plan: &RequestPlan) -> Vec<&str> {
+        let RequestPlan::Construct { fields, .. } = plan else {
+            panic!("the request plan constructs a record");
+        };
+        fields
+            .iter()
+            .map(|field| field.field_name.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn a_source_that_applies_to_the_target_wins_over_a_resource_field() {
+        let spec = planned(
+            r#"
+package temporal:sources@1.0.0;
+
+world system { export jobs; }
+
+/// @nexus.endpoint "jobs"
+interface jobs {
+  resource job {
+    constructor(job-id: string, namespace: string);
+    restart: func();
+  }
+
+  record restart-request {
+    job-id: string,
+    /// @nexus.source targets="workflow" python="workflow_namespace()"
+    namespace: string,
+  }
+
+  restart: func(request: restart-request);
+}
+"#,
+        );
+        let method = &spec.services[0].resources[0].data.methods[0];
+        let PlannedResourceMethodBindingSpec::Operation { request_plan, .. } = &method.binding
+        else {
+            panic!("`restart` binds the `restart` operation");
+        };
+        let workflow =
+            super::request_plan_for_target(&spec, request_plan, GenerationTarget::Workflow);
+        let client = super::request_plan_for_target(&spec, request_plan, GenerationTarget::Client);
+        assert_eq!(planned_fields(&workflow), ["job-id"]);
+        assert_eq!(planned_fields(&client), ["job-id", "namespace"]);
+    }
 }

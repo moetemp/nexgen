@@ -608,7 +608,14 @@ impl<'a> ApiPlanner<'a> {
             } => {
                 let operation =
                     operation.expect("bound resource operation should exist on the service");
-                let request_plan = &with_resource_property_names(request_plan, type_name);
+                let request_plan = &with_resource_property_names(
+                    &crate::generator::request_plan_for_target(
+                        self.api_plan,
+                        request_plan,
+                        GenerationTarget::Workflow,
+                    ),
+                    type_name,
+                );
                 output.push_str("\n    {\n");
                 if service.endpoint.is_none() {
                     self.render_resource_method_inline_operation_body(

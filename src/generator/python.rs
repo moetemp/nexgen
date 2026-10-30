@@ -6310,6 +6310,7 @@ fn render_resource_method_request_expr(
     api_plan: &PlannedSpec,
     target: GenerationTarget,
 ) -> String {
+    let plan = &crate::generator::request_plan_for_target(api_plan, plan, target);
     let RequestPlan::Construct {
         message_name,
         fields,

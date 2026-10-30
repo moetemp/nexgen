@@ -1,0 +1,21 @@
+package temporal:client-optional-workflow-source@1.0.0;
+
+world system { export job-service; }
+
+// The optional task queue comes from a Workflow source, so a client resource method can't set it.
+/// @nexus.endpoint "jobs"
+interface job-service {
+  resource job {
+    constructor(job-id: string);
+
+    restart: func();
+  }
+
+  record restart-request {
+    job-id: string,
+    /// @nexus.source targets="workflow" python="workflow_task_queue()"
+    task-queue: option<string>,
+  }
+
+  restart: func(request: restart-request);
+}

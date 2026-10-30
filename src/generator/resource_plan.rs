@@ -163,8 +163,9 @@ fn missing_origin_field(
                 Some(FieldOrigin::Default { .. }) => "defaulted",
                 _ => continue,
             };
-            if field.required
-                && field.source_for(target).is_none()
+            // An optional field counts too. The method has no parameter for it, so it would
+            // always be empty.
+            if field.source_for(target).is_none()
                 && field.default_for(target).is_none()
                 && fields
                     .iter()

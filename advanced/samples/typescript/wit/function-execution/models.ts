@@ -43,6 +43,23 @@ export interface ExecuteFunctionRequest<
   enabled: boolean;
 }
 
+export interface ExecuteCallbackRequest<
+  FunctionFn extends (name: string, enabled: boolean) => string = (
+    name: string,
+    enabled: boolean,
+  ) => string,
+> {
+  function_: FunctionFn;
+  /**
+   * The name argument for the function.
+   */
+  name: string;
+  /**
+   * The enabled argument for the function.
+   */
+  enabled: boolean;
+}
+
 export interface ExecuteCountedFunctionResult {
   value: string;
 }

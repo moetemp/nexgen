@@ -4,6 +4,7 @@ import * as nexus from "nexus-rpc";
 import type {
   ExecuteFunctionResult,
   ExecuteFunctionRequest,
+  ExecuteCallbackRequest,
   ExecuteCountedFunctionResult,
   ExecuteCountedFunctionRequest,
   ExecuteNamedFunctionResult,
@@ -18,6 +19,9 @@ import type {
 export const functionExecution = nexus.service("FunctionExecution", {
   executeFunction: nexus.operation<ExecuteFunctionRequest, ExecuteFunctionResult>({
     name: "ExecuteFunction",
+  }),
+  executeCallback: nexus.operation<ExecuteCallbackRequest, ExecuteFunctionResult>({
+    name: "ExecuteCallback",
   }),
   executeCountedFunction: nexus.operation<
     ExecuteCountedFunctionRequest,

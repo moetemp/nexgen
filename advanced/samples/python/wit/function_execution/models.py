@@ -20,6 +20,13 @@ class ExecuteFunctionResult:
 
 
 @dataclasses.dataclass(slots=True)
+class ExecuteCallbackRequest:
+    function: collections.abc.Callable[[str, bool], str]
+    name: str
+    enabled: bool
+
+
+@dataclasses.dataclass(slots=True)
 class ExecuteCountedFunctionRequest:
     function: collections.abc.Callable[[str, int], str]
     name: str

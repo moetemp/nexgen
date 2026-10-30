@@ -10,6 +10,30 @@ namespace Nexgen.FunctionExecution
 {
 
     [GeneratedCode("nexgen", null)]
+    public record ExecuteCallbackRequest
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ExecuteCallbackRequest"/> class.
+        /// </summary>
+        public ExecuteCallbackRequest(string function, string name, bool enabled)
+        {
+            Function = function;
+            Name = name;
+            Enabled = enabled;
+        }
+
+        public string Function { get; init; }
+        /// <summary>
+        /// The name argument for the function.
+        /// </summary>
+        public string Name { get; init; }
+        /// <summary>
+        /// The enabled argument for the function.
+        /// </summary>
+        public bool Enabled { get; init; }
+    }
+
+    [GeneratedCode("nexgen", null)]
     public record ExecuteCountedFunctionRequest
     {
         /// <summary>

@@ -33,6 +33,24 @@ func (m executeFunctionRequest) GetEnabled() bool {
 	return m.Enabled
 }
 
+type executeCallbackRequest struct {
+	Function string
+	Name     string
+	Enabled  bool
+}
+
+func (m executeCallbackRequest) GetFunction() string {
+	return m.Function
+}
+
+func (m executeCallbackRequest) GetName() string {
+	return m.Name
+}
+
+func (m executeCallbackRequest) GetEnabled() bool {
+	return m.Enabled
+}
+
 type executeCountedFunctionRequest struct {
 	Function string
 	Name     string
@@ -146,6 +164,12 @@ func executeFunction(ctx workflow.Context, request executeFunctionRequest) workf
 	return fut
 }
 
+func executeCallback(ctx workflow.Context, request executeCallbackRequest) workflow.Future {
+	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
+	fut := c.ExecuteOperation(ctx, "ExecuteCallback", request, workflow.NexusOperationOptions{})
+	return fut
+}
+
 func executeCountedFunction(ctx workflow.Context, request executeCountedFunctionRequest) workflow.Future {
 	c := workflow.NewNexusClient("function-execution", "FunctionExecution")
 	fut := c.ExecuteOperation(ctx, "ExecuteCountedFunction", request, workflow.NexusOperationOptions{})
@@ -244,6 +268,33 @@ func ExecuteFunction(
 		functionName = strings.TrimSuffix(shortName, "-fm")
 	}
 	return executeFunction(ctx, executeFunctionRequest{
+		Function: functionName,
+		Name:     name,
+		Enabled:  enabled,
+	})
+}
+
+type ExecuteCallbackOptions struct {
+}
+
+// Input name: The name argument for the function.
+// Input enabled: The enabled argument for the function.
+func ExecuteCallback(
+	ctx workflow.Context,
+	opts ExecuteCallbackOptions,
+	function func(string, bool) string,
+	name string,
+	enabled bool,
+) workflow.Future {
+	functionName := ""
+	{
+		rv := reflect.ValueOf(function)
+		fullName := runtime.FuncForPC(rv.Pointer()).Name()
+		elements := strings.Split(fullName, ".")
+		shortName := elements[len(elements)-1]
+		functionName = strings.TrimSuffix(shortName, "-fm")
+	}
+	return executeCallback(ctx, executeCallbackRequest{
 		Function: functionName,
 		Name:     name,
 		Enabled:  enabled,

@@ -165,8 +165,8 @@ model. nexgen ignores the directives that it doesn't know yet, such as
 
 Some of the output doesn't type-check. Python imports the Stream protos from
 `temporalio`, which doesn't have them, so basedpyright skips the service.
-TypeScript passes a `number` where a resource method's proto request wants a
-`Long`. So `tsc` skips the service, but the test still checks its models.
+TypeScript resource methods use `Long` for protobuf-backed 64-bit parameters,
+preserving Stream offsets, and the full service is included in type-checking.
 
 - WIT: [`inputs/stream-service.wit`](inputs/stream-service.wit)
 - .NET: [`dotnet/wit/stream-service/`](dotnet/wit/stream-service/),

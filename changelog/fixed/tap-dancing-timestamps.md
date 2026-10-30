@@ -1,0 +1,1 @@
+TypeScript resource constructor fields and method parameters now use `Long` when bound to protobuf-backed 64-bit fields, while JSON-only values remain `number`. Conflicting protobuf/JSON bindings are rejected rather than silently losing precision.

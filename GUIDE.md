@@ -823,6 +823,16 @@ enum's name and members, even when its name differs from the protobuf enum's.
 Converters bridge the model and protobuf enum by number, and `@nexus.default`
 continues to name a WIT case.
 
+In TypeScript, `s64` and `u64` fields in protobuf-backed models use `Long`
+instead of `number`, preserving values above JavaScript's safe integer range.
+Plain JSON-backed fields continue to use `number`. Resource constructor fields
+and method parameters follow the fields they bind to, including fields in nested
+protobuf messages. A resource's constructor field must have one consistent
+representation across its methods and the operations that return it. Generation
+fails if a 64-bit constructor field or method parameter binds to both protobuf
+(`Long`) and JSON (`number`) fields; no lossy numeric conversion is inserted.
+Unbound resource values retain their ordinary JSON types.
+
 ### Transfer-Type Conversion
 
 ```wit

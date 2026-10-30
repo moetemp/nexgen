@@ -1,0 +1,10 @@
+languages = ["typescript"]
+descriptors = "temporal"
+
+[error]
+kind = "invalid-resource-method"
+contains = [
+  "64-bit parameter `seconds` binds to both",
+  "protobuf (`Long`)",
+  "JSON (`number`)",
+]

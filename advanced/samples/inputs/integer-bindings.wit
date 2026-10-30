@@ -1,0 +1,53 @@
+package test:integer-bindings@1.0.0;
+
+world system { export integer-bindings; }
+
+/// @nexus.endpoint "integer-bindings"
+interface integer-bindings {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.proto "google.protobuf.Timestamp" typescript-import="@temporalio/proto"
+  record timestamp {
+    seconds: option<s64>,
+    nanos: option<s32>,
+  }
+
+  resource clock {
+    constructor(seconds: option<s64>, nanos: option<s32>);
+    touch: func();
+    set-time: func(seconds: option<s64>, nanos: option<s32>);
+  }
+
+  /// @nexus.proto "temporal.api.namespace.v1.BadBinaryInfo" typescript-import="@temporalio/proto"
+  record nested-request {
+    /// @nexus.proto-field "create_time"
+    at: timestamp,
+    /// @nexus.omit
+    reason: placeholder,
+    /// @nexus.omit
+    operator: placeholder,
+  }
+
+  touch: func(request: timestamp);
+  set-time: func(request: nested-request);
+
+  /// @nexus.proto "google.protobuf.Empty" typescript-import="@temporalio/proto"
+  record get-clock-request {}
+
+  /// @nexus.proto "google.protobuf.Timestamp" typescript-import="@temporalio/proto"
+  type clock-result = own<clock>;
+
+  get-clock: func(request: get-clock-request) -> clock-result;
+
+  resource counter {
+    constructor(total: s64);
+    add: func(amount: s64);
+  }
+
+  record add-request {
+    total: s64,
+    amount: s64,
+  }
+
+  add: func(request: add-request);
+}

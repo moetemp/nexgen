@@ -131,6 +131,7 @@ fn cli_uses_dotnet_support_package_without_copying_files() {
         .args([
             "dotnet",
             wit_input_path(&root, "user-service").to_str().unwrap(),
+            "--targets=workflow",
             "--support-package",
             "Custom",
             "--output",

@@ -39,7 +39,7 @@ descriptors = "temporal"
 [stream-service]
 languages = ["python", "typescript", "dotnet"]
 system_nexus = true
-targets = ["workflow"]
+targets = ["workflow", "client"]
 descriptors = ["temporal_api.bin", "streams.bin"]
 
 # A System Nexus operation that returns a resource.

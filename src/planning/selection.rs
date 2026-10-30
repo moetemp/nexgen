@@ -28,6 +28,12 @@ struct Selector {
 }
 
 impl ApiSpecTransform<AuthoredFamily, SelectedFamily> for Selector {
+    fn map_origin(
+        &mut self,
+        origin: crate::spec::LanguageFieldOrigins,
+    ) -> Option<crate::spec::FieldOrigin> {
+        origin.for_language(self.language).cloned()
+    }
     fn map_spec_data(&mut self, _data: ()) {}
     fn map_record(&mut self, name: Symbol) -> Symbol {
         name
@@ -115,8 +121,8 @@ mod tests {
     use crate::spec::{
         AliasTypeSpec, ApiSpec, ApiSpecTransform, AuthoredResourceType, ExternalTypeSpec,
         FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, FunctionTypeDescriptorSpec,
-        LanguageStringSpec, RecordFieldSpec, RecordFieldVisibility, RecordSpec, ServiceSpec,
-        Symbol, TypeDeclSpec, TypeSpec,
+        LanguageStringSpec, RecordFieldSpec, RecordSpec, ServiceSpec, Symbol, TypeDeclSpec,
+        TypeSpec,
     };
     use crate::spec::{ApiSpecNode, ApiSpecTree, CompilerPass};
 
@@ -125,6 +131,12 @@ mod tests {
     struct Identity;
 
     impl ApiSpecTransform<crate::spec::AuthoredFamily, crate::spec::AuthoredFamily> for Identity {
+        fn map_origin(
+            &mut self,
+            origin: crate::spec::LanguageFieldOrigins,
+        ) -> crate::spec::LanguageFieldOrigins {
+            origin
+        }
         fn map_spec_data(&mut self, _data: ()) {}
         fn map_record(&mut self, name: Symbol) -> Symbol {
             name
@@ -300,9 +312,8 @@ mod tests {
                             annotation: None,
                             flattened_annotation: None,
                             field_type: TypeSpec::String,
-                            default_value: None,
                             required: true,
-                            visibility: RecordFieldVisibility::Public,
+                            origin: Default::default(),
                             function: Some(FunctionFieldSpec {
                                 primary: false,
                                 result: FunctionResultSpec::Authored(TypeSpec::String),

@@ -9,9 +9,11 @@ import nexusrpc
 import temporalio.converter
 from . import services as _services
 from ._resources.job import restart
+from ._resources.job import job
 from .operations.place import place
 
 __all__ = [
+    "job",
     "place",
     "restart",
 ]

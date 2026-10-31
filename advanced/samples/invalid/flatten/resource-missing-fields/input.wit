@@ -1,0 +1,17 @@
+package test:resource-missing-fields@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  // The flatten names no field to promote.
+  /// @nexus.flatten-in-api param="execution"
+  resource run {
+    constructor(execution: workflow-execution);
+  }
+}

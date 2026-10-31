@@ -77,12 +77,21 @@ class StreamServiceClientExtension(abc.ABC):
 
     def get_stream(
         self,
+        definition: type[temporal_support.StreamDefinition[BodyT]],
         *,
-        stream: StreamRef,
-        created: bool | None,
-        body_type: type[BodyT] | None = None,
+        id: str | None = None,
+        stream: StreamRef | None = None,
+        backend: str | None = None,
+        created: bool | None = None,
     ) -> Stream[BodyT]:
-        """Return the ``Stream`` handle that has these identity fields."""
+        """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``stream``."""
+        (body_type,) = _support.definition_type_arguments(definition)
+        if stream is None:
+            if id is None:
+                raise TypeError("pass id or stream")
+            stream = StreamRef(id=id, backend=backend)
+        elif id is not None or backend is not None:
+            raise TypeError("pass stream or its fields, not both")
         return Stream(
             self._create_nexus_client(
                 service="temporal.api.streamservice.v1.StreamService",

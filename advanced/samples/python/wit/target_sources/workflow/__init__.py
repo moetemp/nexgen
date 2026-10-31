@@ -16,6 +16,8 @@ from ._resources.job import restart
 from .operations.create_run import create_run
 from .operations.create_run_with_status import create_run_with_status
 from ._resources.run import cancel_run
+from ._resources.job import job
+from ._resources.run import run
 
 __all__ = [
     "cancel_run",
@@ -23,8 +25,10 @@ __all__ = [
     "create_marker",
     "create_run",
     "create_run_with_status",
+    "job",
     "refresh",
     "restart",
+    "run",
     "submit",
 ]
 

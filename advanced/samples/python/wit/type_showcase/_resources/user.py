@@ -57,6 +57,24 @@ class User:
         await handle
 
 
+def user(
+    *,
+    user_id: str,
+    email: str,
+    display_name: str,
+    status: UserStatus,
+    profile: UserProfile,
+) -> User:
+    """A handle on an existing ``User``, with no call."""
+    return User(
+        user_id=user_id,
+        email=email,
+        display_name=display_name,
+        status=status,
+        profile=profile,
+    )
+
+
 async def _update_email(
     request: UpdateEmailRequest,
 ) -> User:

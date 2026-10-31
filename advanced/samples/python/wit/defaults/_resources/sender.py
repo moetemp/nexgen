@@ -37,6 +37,16 @@ class Sender:
         await handle
 
 
+def sender(
+    *,
+    token: str,
+) -> Sender:
+    """A handle on an existing ``Sender``, with no call."""
+    return Sender(
+        token=token,
+    )
+
+
 async def _submit_from_sender(
     request: Request,
 ) -> temporalio.workflow.NexusOperationHandle[Request,]:

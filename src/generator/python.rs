@@ -710,6 +710,10 @@ impl<'a> ApiPlanner<'a> {
         );
         let mut package_model_names = package_model_names.into_iter().collect::<Vec<_>>();
         sort_python_model_names(&mut package_model_names, &self.variants, model_fragments);
+        if targets.workflow {
+            validate_workflow_factory_names(services)?;
+        }
+        self.validate_factory_parameter_names(services)?;
         let render_init = |root_package_imports: &RootPackageImports| {
             if targets.workflow {
                 render_package_init(
@@ -1109,7 +1113,7 @@ impl<'a> ApiPlanner<'a> {
         render_definition_type_checking_imports(
             &mut output,
             &body,
-            services.iter().flat_map(|service| &service.operations),
+            services.iter().flat_map(service_definitions),
         );
         output.push_str("\n\n");
         output.push_str(&body);
@@ -1126,44 +1130,7 @@ impl<'a> ApiPlanner<'a> {
         resource: &PlannedResource,
     ) {
         let receiver = resource_client_identifier(resource, "self");
-        output.push_str("    def ");
-        output.push_str(&client_resource_factory_name(resource));
-        output.push_str("(\n        ");
-        output.push_str(&receiver);
-        output.push_str(",\n");
-        let type_variables = resource_type_variable_names(resource);
-        if !resource.fields.is_empty() || !type_variables.is_empty() {
-            output.push_str("        *,\n");
-        }
-        for field in &resource.fields {
-            output.push_str(&format!(
-                "        {}: {},\n",
-                python_field_name(&field.name),
-                self.python_resource_field_annotation(
-                    &field.kind,
-                    field.optional,
-                    field.function.as_ref()
-                )
-            ));
-        }
-        render_runtime_type_keyword_parameters(output, &type_variables);
-        output.push_str("    ) -> ");
-        output.push_str(&python_type_annotation_with_arguments(
-            &resource.type_name,
-            &type_variables,
-        ));
-        output.push_str(":\n");
-        render_python_docstring(
-            output,
-            "        ",
-            Some(&format!(
-                "Return the ``{}`` handle that has these identity fields.",
-                resource.type_name
-            )),
-            &[],
-            None,
-            false,
-        );
+        self.render_resource_factory_head(output, "    ", resource, Some(&receiver));
         output.push_str("        return ");
         output.push_str(&resource.type_name);
         output.push_str("(\n");
@@ -1178,19 +1145,371 @@ impl<'a> ApiPlanner<'a> {
                 .expect("the client target refuses a service with no endpoint"),
         ));
         output.push_str(",\n            ),\n");
-        for name in resource
+        render_resource_factory_arguments(output, "            ", resource);
+        output.push_str("        )\n");
+    }
+
+    /// Renders the signature and the setup of a resource factory, which builds a handle with no
+    /// call. The factory takes the resource's definition, or else its runtime types, and the
+    /// promoted fields of a flattened constructor parameter.
+    fn render_resource_factory_head(
+        &self,
+        output: &mut String,
+        indent: &str,
+        resource: &PlannedResource,
+        receiver: Option<&str>,
+    ) {
+        let type_variables = resource_type_variable_names(resource);
+        let definition = resource.definition.value();
+        let name = match receiver {
+            Some(_) => client_resource_factory_name(resource),
+            None => workflow_resource_factory_name(resource),
+        };
+        output.push_str(&format!("{indent}def {name}(\n"));
+        if let Some(receiver) = receiver {
+            output.push_str(&format!("{indent}    {receiver},\n"));
+        }
+        if let Some(definition) = definition {
+            output.push_str(&format!(
+                "{indent}    definition: type[{definition}[{}]],\n",
+                type_variables.join(", ")
+            ));
+        }
+        let runtime_types = if definition.is_none() {
+            type_variables.as_slice()
+        } else {
+            &[]
+        };
+        if !resource.fields.is_empty() || !runtime_types.is_empty() {
+            output.push_str(&format!("{indent}    *,\n"));
+        }
+        let flatten = self.resource_factory_flatten(resource);
+        for field in &resource.fields {
+            let name = python_field_name(&field.name);
+            let annotation = self.python_resource_field_annotation(
+                &field.kind,
+                field.optional,
+                field.function.as_ref(),
+            );
+            let Some(flatten) = flatten
+                .as_ref()
+                .filter(|flatten| flatten.param == field.name)
+            else {
+                let default = if field.optional { " = None" } else { "" };
+                output.push_str(&format!("{indent}    {name}: {annotation}{default},\n"));
+                continue;
+            };
+            // With `keep`, the call takes either the whole value or the promoted fields.
+            for field in flatten.fields.iter().filter(|field| field.required()) {
+                output.push_str(&format!("{indent}    {}", field.attr_name));
+                output.push_str(&field.parameter(flatten.keep));
+            }
+            if flatten.keep {
+                let annotation = annotation.strip_suffix(" | None").unwrap_or(&annotation);
+                output.push_str(&format!(
+                    "{indent}    {name}: {annotation} | None = None,\n"
+                ));
+            }
+            for field in flatten.fields.iter().filter(|field| !field.required()) {
+                output.push_str(&format!("{indent}    {}", field.attr_name));
+                output.push_str(&field.parameter(flatten.keep));
+            }
+        }
+        for name in runtime_types {
+            output.push_str(&format!(
+                "{indent}    {}: type[{name}] | None = None,\n",
+                python_runtime_type_argument_name(name)
+            ));
+        }
+        output.push_str(&format!(
+            "{indent}) -> {}:\n",
+            python_type_annotation_with_arguments(&resource.type_name, &type_variables)
+        ));
+        let body_indent = format!("{indent}    ");
+        let mut summary = format!(
+            "A handle on an existing ``{}``, with no call.",
+            resource.type_name
+        );
+        if let Some(flatten) = flatten.as_ref().filter(|flatten| flatten.keep)
+            && flatten.fields.iter().any(FactoryPromotedField::required)
+        {
+            summary.push_str(&format!(
+                " Pass {} ``{}``.",
+                flatten.required_names("``"),
+                python_field_name(&flatten.param)
+            ));
+        }
+        render_python_docstring(output, &body_indent, Some(&summary), &[], None, false);
+        if definition.is_some() {
+            output.push_str(&body_indent);
+            output.push('(');
+            for name in &type_variables {
+                output.push_str(&python_runtime_type_argument_name(name));
+                output.push(',');
+            }
+            output.push_str(") = _support.definition_type_arguments(definition)\n");
+        }
+        let Some(flatten) = &flatten else {
+            return;
+        };
+        let param = python_field_name(&flatten.param);
+        let value = format!(
+            "{}({})",
+            flatten.model_name,
+            flatten
+                .fields
+                .iter()
+                .map(|field| format!("{}={}", field.attr_name, field.value()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        if !flatten.keep {
+            output.push_str(&format!("{body_indent}{param} = {value}\n"));
+            return;
+        }
+        let missing = flatten
             .fields
             .iter()
-            .map(|field| python_field_name(&field.name))
-            .chain(
-                type_variables
-                    .iter()
-                    .map(|name| python_runtime_type_argument_name(name)),
-            )
-        {
-            output.push_str(&format!("            {name}={name},\n"));
+            .filter(|field| field.required())
+            .map(|field| format!("{} is None", field.attr_name))
+            .collect::<Vec<_>>();
+        let given = flatten
+            .fields
+            .iter()
+            .map(|field| format!("{} is not None", field.attr_name))
+            .collect::<Vec<_>>();
+        output.push_str(&format!("{body_indent}if {param} is None:\n"));
+        if !missing.is_empty() {
+            output.push_str(&format!("{body_indent}    if {}:\n", missing.join(" or ")));
+            output.push_str(&format!(
+                "{body_indent}        raise TypeError(\"pass {} {param}\")\n",
+                flatten.required_names("")
+            ));
         }
-        output.push_str("        )\n");
+        output.push_str(&format!("{body_indent}    {param} = {value}\n"));
+        output.push_str(&format!("{body_indent}elif {}:\n", given.join(" or ")));
+        output.push_str(&format!(
+            "{body_indent}    raise TypeError(\"pass {param} or its fields, not both\")\n"
+        ));
+    }
+
+    /// A factory takes the definition or the runtime types next to the constructor parameters and
+    /// the promoted fields, so none of them can share a name.
+    fn validate_factory_parameter_names(&self, services: &[RenderedService<'_>]) -> Result<()> {
+        for resource in services.iter().flat_map(|service| &service.resources) {
+            let factory = client_resource_factory_name(resource);
+            if resource.definition.value().is_some()
+                && let Some(field) = resource
+                    .fields
+                    .iter()
+                    .find(|field| python_field_name(&field.name) == "definition")
+            {
+                return Err(Error::PythonGeneratedNameConflict {
+                    name: "definition".to_string(),
+                    generated_by: format!("the definition of the `{factory}` factory"),
+                    conflicting_declaration: format!(
+                        "field `{}` of resource `{}`",
+                        field.name, resource.name
+                    ),
+                });
+            }
+            let promoted = self
+                .resource_factory_flatten(resource)
+                .map(|flatten| flatten.fields)
+                .unwrap_or_default();
+            for parameter in resource_type_variable_names(resource) {
+                let name = python_runtime_type_argument_name(&parameter);
+                if let Some(field) = promoted.iter().find(|field| field.attr_name == name) {
+                    return Err(Error::RuntimeTypeArgumentNameConflict {
+                        language: Language::Python,
+                        conflicting: format!(
+                            "the promoted field `{}` of the `{factory}` factory",
+                            field.attr_name
+                        ),
+                        name,
+                        parameter,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The fields that a resource's factory takes in place of its flattened constructor parameter.
+    fn resource_factory_flatten(
+        &self,
+        resource: &PlannedResource,
+    ) -> Option<ResourceFactoryFlatten> {
+        let flatten = resource.flatten.as_ref()?;
+        let param = resource
+            .fields
+            .iter()
+            .find(|field| field.name == flatten.param)?;
+        let kind = match &param.kind {
+            PlannedType::Option(inner) => inner.as_ref(),
+            kind => kind,
+        };
+        let PlannedType::Record(record) = kind else {
+            return None;
+        };
+        let planned = self.api_plan.record(&record.full_name)?;
+        let rendered = self.models.get(&record.full_name)?;
+        let fields = planned
+            .fields
+            .iter()
+            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldOrigin::is_omitted))
+            .zip(&rendered.fields)
+            .collect::<Vec<_>>();
+        Some(ResourceFactoryFlatten {
+            param: flatten.param.clone(),
+            keep: flatten.keep,
+            model_name: rendered.name.clone(),
+            fields: flatten
+                .fields
+                .iter()
+                .filter_map(|key| {
+                    let ((_, planned), rendered) =
+                        fields.iter().find(|((name, _), _)| *name == key)?;
+                    let annotation = rendered
+                        .annotation
+                        .strip_suffix(" | None")
+                        .unwrap_or(&rendered.annotation);
+                    Some(FactoryPromotedField {
+                        attr_name: rendered.attr_name.clone(),
+                        annotation: annotation.to_string(),
+                        default_kind: rendered.default_kind.clone(),
+                        default_expr: rendered
+                            .default_expr
+                            .clone()
+                            .filter(|_| planned.has_default()),
+                    })
+                })
+                .collect(),
+        })
+    }
+
+    /// The constructor field that a resource passes as data, with the field's model and proto
+    /// reference. A resource with one required field of a non-generic proto-backed record, and no
+    /// other required field, is data.
+    fn resource_data_field<'r>(
+        &self,
+        resource: &'r PlannedResource,
+    ) -> Option<(
+        &'r PlannedResourceField,
+        String,
+        python_proto::PythonReference,
+    )> {
+        let mut records = resource.fields.iter().filter_map(|field| {
+            let PlannedType::Record(record) = &field.kind else {
+                return None;
+            };
+            let planned = self.api_plan.record(&record.full_name)?;
+            let proto = planned.data.proto.as_ref()?;
+            self.api_plan
+                .record_type_parameters(&record.full_name)
+                .is_empty()
+                .then(|| python_proto::message_python_ref(proto))
+                .flatten()
+                .map(|proto| (field, self.models[&record.full_name].name.clone(), proto))
+        });
+        let data = records.next().filter(|_| records.next().is_none())?;
+        let others_optional = resource
+            .fields
+            .iter()
+            .all(|field| field.optional || field.name == data.0.name);
+        (!data.0.optional && others_optional).then_some(data)
+    }
+
+    /// Renders the transfer converter of a resource that is data. Its wire form is the record of
+    /// its data field, so a handle can be an argument or a result.
+    fn render_resource_transfer_converter(
+        &self,
+        output: &mut String,
+        client: bool,
+        resource: &PlannedResource,
+        field: &PlannedResourceField,
+        model_name: &str,
+        proto: &str,
+    ) {
+        let type_variables = resource_type_variable_names(resource);
+        let annotation =
+            python_type_annotation_with_arguments(&resource.type_name, &type_variables);
+        let converter = format!("_{}TransferTypeConverter", resource.type_name);
+        let field_name = python_field_name(&field.name);
+        let field_converter = format!("_{model_name}TransferTypeConverter()");
+        output.push_str(&format!("\n\nclass {converter}(\n"));
+        output.push_str(&format!(
+            "    temporalio.converter.TransferTypeConverter[{annotation}, {proto}]\n"
+        ));
+        output.push_str("):\n");
+        let decoded = if client {
+            format!(
+                "A client can't decode a handle, since the handle needs a client. Decode the \
+                 ``{field_name}`` and pass it to ``{}``.",
+                client_resource_factory_name(resource)
+            )
+        } else {
+            "A decoded handle calls the Workflow operations.".to_string()
+        };
+        let summary = format!(
+            "Passes a ``{}`` as its ``{field_name}``. {decoded}",
+            resource.type_name
+        );
+        render_python_docstring(output, "    ", Some(&summary), &[], None, false);
+        output.push_str(&format!(
+            "\n    transfer_type: type[{proto}] | None = {proto}\n"
+        ));
+        output.push_str("\n    @typing_extensions.override\n    def from_transfer_type(\n");
+        output.push_str("        self,\n");
+        output.push_str(&format!("        value: {proto},\n"));
+        output.push_str(&format!("        type_hint: type[{annotation}],\n"));
+        output.push_str(&format!("    ) -> {annotation}:\n"));
+        if client {
+            output.push_str(&format!(
+                "        raise TypeError(\"a client {} needs a client. Pass its {field_name} to {}\")\n",
+                resource.type_name,
+                client_resource_factory_name(resource)
+            ));
+        } else {
+            if !type_variables.is_empty() {
+                let arguments = type_variables
+                    .iter()
+                    .map(|name| format!("{},", python_runtime_type_argument_name(name)))
+                    .collect::<String>();
+                let defaults = type_variables
+                    .iter()
+                    .map(|_| "typing.Any,")
+                    .collect::<String>();
+                output.push_str(&format!(
+                    "        ({arguments}) = typing.get_args(type_hint) or ({defaults})\n"
+                ));
+            }
+            output.push_str(&format!("        return {}(\n", resource.type_name));
+            output.push_str(&format!(
+                "            {field_name}={field_converter}.from_transfer_type(\n"
+            ));
+            output.push_str(&format!("                value, {model_name}\n"));
+            output.push_str("            ),\n");
+            for name in &type_variables {
+                let argument = python_runtime_type_argument_name(name);
+                output.push_str(&format!(
+                    "            {argument}=typing.cast(type[{name}], {argument}),\n"
+                ));
+            }
+            output.push_str("        )\n");
+        }
+        output.push_str("\n    @typing_extensions.override\n");
+        output.push_str(&format!(
+            "    def to_transfer_type(self, value: {annotation}) -> {proto}:\n"
+        ));
+        output.push_str(&format!(
+            "        return {field_converter}.to_transfer_type(value.{field_name})\n"
+        ));
+        output.push_str(&format!(
+            "\n\ntemporalio.converter.transfer_type_convertible({converter})({})",
+            resource.type_name
+        ));
+        output.push_str("  # pyright: ignore[reportUnusedCallResult]\n");
     }
 
     fn render_resource_module_file(
@@ -1246,7 +1565,30 @@ impl<'a> ApiPlanner<'a> {
             body.push_str("\n\n");
         }
         let client = target == Some(GenerationTarget::Client);
+        let data_field = target.and_then(|_| self.resource_data_field(resource));
         self.render_resource(&mut body, service, resource, bound_operations, target);
+        let workflow = target == Some(GenerationTarget::Workflow);
+        if workflow && service.endpoint.is_some() && !resource.methods.is_empty() {
+            body.push_str("\n\n");
+            self.render_resource_factory_head(&mut body, "", resource, None);
+            body.push_str("    return ");
+            body.push_str(&resource.type_name);
+            body.push_str("(\n");
+            render_resource_factory_arguments(&mut body, "        ", resource);
+            body.push_str("    )\n");
+        }
+        if let Some((field, model_name, proto)) = &data_field {
+            self.render_resource_transfer_converter(
+                &mut body,
+                client,
+                resource,
+                field,
+                model_name,
+                &proto.type_ref,
+            );
+            module_imports.insert(proto.module_path.clone());
+            module_imports.insert("temporalio.converter".to_string());
+        }
         for (full_name, (_, resource_type)) in resource_holders(self.api_plan) {
             if resource_type != resource.type_name {
                 continue;
@@ -1258,7 +1600,6 @@ impl<'a> ApiPlanner<'a> {
                 module_imports.extend(field.imports.module_imports.iter().cloned());
             }
         }
-        let workflow = target == Some(GenerationTarget::Workflow);
         if workflow && !bound_operations.is_empty() && service.endpoint.is_some() {
             body.push_str("\n\n");
             for (index, bound_operation) in bound_operations.iter().enumerate() {
@@ -1350,14 +1691,26 @@ impl<'a> ApiPlanner<'a> {
                     self.api_plan.module_path.child(dir).child("_resources"),
                 ),
             };
-            render_model_name_imports(
-                &mut output,
+            let mut groups = model_name_import_groups(
                 models,
                 &module_path,
                 self.api_plan,
                 &used_model_names,
                 self.model_hoists,
             );
+            // The converter of a resource that is data uses the converter of its field's model.
+            if let Some((_, model_name, _)) = &data_field
+                && let Some(names) = groups.values_mut().find(|names| names.contains(model_name))
+            {
+                names.insert(format!("_{model_name}TransferTypeConverter"));
+            }
+            for (module, names) in groups {
+                render_named_python_import(
+                    &mut output,
+                    &module,
+                    &names.into_iter().collect::<Vec<_>>(),
+                );
+            }
         }
         let own_names = resource_holders(self.api_plan)
             .into_values()
@@ -1373,6 +1726,7 @@ impl<'a> ApiPlanner<'a> {
             render_named_python_import(&mut output, ".", &used_resource_names);
         }
         render_support_import(&mut output, &body, self.support_package, false);
+        render_definition_type_checking_imports(&mut output, &body, resource.definition.value());
         if !body.is_empty() {
             output.push('\n');
             output.push('\n');
@@ -1391,11 +1745,16 @@ impl<'a> ApiPlanner<'a> {
     ) {
         let client = target == Some(GenerationTarget::Client);
         let type_variables = resource_type_variable_names(resource);
-        output.push_str(if client || !type_variables.is_empty() {
-            "@dataclasses.dataclass(init=False)\n"
-        } else {
-            "@dataclasses.dataclass\n"
-        });
+        // The SDK converter applies the transfer type of a value inside another value only when
+        // the value isn't a dataclass, so a resource that is data is a plain class.
+        let data = target.is_some() && self.resource_data_field(resource).is_some();
+        if !data {
+            output.push_str(if client || !type_variables.is_empty() {
+                "@dataclasses.dataclass(init=False)\n"
+            } else {
+                "@dataclasses.dataclass\n"
+            });
+        }
         output.push_str("class ");
         output.push_str(&resource.type_name);
         if !type_variables.is_empty() {
@@ -1427,9 +1786,17 @@ impl<'a> ApiPlanner<'a> {
             output.push('\n');
         }
         if client {
-            self.render_resource_constructor(output, resource);
-        } else if !type_variables.is_empty() {
-            render_generic_resource_init(output, &fields, &type_variables);
+            self.render_resource_constructor(output, resource, data);
+        } else if data || !type_variables.is_empty() {
+            let optional = resource
+                .fields
+                .iter()
+                .map(|field| data && field.optional)
+                .collect::<Vec<_>>();
+            render_generic_resource_init(output, &fields, &optional, &type_variables);
+        }
+        if data {
+            render_resource_equality(output, &resource.type_name, &fields);
         }
         let Some(target) = target else {
             // With no API target, the class carries the fields only, so that no caller gets a
@@ -1462,7 +1829,14 @@ impl<'a> ApiPlanner<'a> {
         }
     }
 
-    fn render_resource_constructor(&self, output: &mut String, resource: &PlannedResource) {
+    /// The constructor of a client handle. A handle that is data can leave out its optional
+    /// fields.
+    fn render_resource_constructor(
+        &self,
+        output: &mut String,
+        resource: &PlannedResource,
+        data: bool,
+    ) {
         let receiver = resource_client_identifier(resource, "self");
         let parameter = resource_client_identifier(resource, "nexus_client");
         let attribute = resource_client_identifier(resource, "_nexus_client");
@@ -1477,13 +1851,18 @@ impl<'a> ApiPlanner<'a> {
         }
         for field in &resource.fields {
             output.push_str(&format!(
-                "        {}: {},\n",
+                "        {}: {}{},\n",
                 python_field_name(&field.name),
                 self.python_resource_field_annotation(
                     &field.kind,
                     field.optional,
                     field.function.as_ref()
-                )
+                ),
+                if data && field.optional {
+                    " = None"
+                } else {
+                    ""
+                }
             ));
         }
         render_runtime_type_keyword_parameters(output, &type_variables);
@@ -3696,6 +4075,67 @@ pub(in crate::generator) enum PythonFieldDefaultKind {
     EmptyDict,
 }
 
+/// The promoted fields of a resource's flattened constructor parameter.
+struct ResourceFactoryFlatten {
+    param: String,
+    keep: bool,
+    model_name: String,
+    fields: Vec<FactoryPromotedField>,
+}
+
+/// A promoted field of a factory, with its annotation with no `None` and its model default.
+struct FactoryPromotedField {
+    attr_name: String,
+    annotation: String,
+    default_kind: PythonFieldDefaultKind,
+    default_expr: Option<String>,
+}
+
+impl FactoryPromotedField {
+    fn required(&self) -> bool {
+        self.default_kind == PythonFieldDefaultKind::Required && self.default_expr.is_none()
+    }
+
+    /// The rest of the parameter after its name. With `keep`, each promoted field is optional.
+    fn parameter(&self, keep: bool) -> String {
+        let annotation = &self.annotation;
+        if self.required() && !keep {
+            format!(": {annotation},\n")
+        } else {
+            format!(": {annotation} | None = None,\n")
+        }
+    }
+
+    /// The value that the factory passes to the model, so the model keeps its default.
+    fn value(&self) -> String {
+        let name = &self.attr_name;
+        match (&self.default_expr, &self.default_kind) {
+            (Some(expr), _) => format!("{expr} if {name} is None else {name}"),
+            (None, PythonFieldDefaultKind::EmptyList) => format!("{name} or []"),
+            (None, PythonFieldDefaultKind::EmptyDict) => format!("{name} or {{}}"),
+            _ => name.clone(),
+        }
+    }
+}
+
+impl ResourceFactoryFlatten {
+    /// The names of the required promoted fields with the word before the whole value, as in
+    /// "id or" and "id and key, or".
+    fn required_names(&self, quote: &str) -> String {
+        let names = self
+            .fields
+            .iter()
+            .filter(|field| field.required())
+            .map(|field| format!("{quote}{}{quote}", field.attr_name))
+            .collect::<Vec<_>>();
+        if names.len() > 1 {
+            format!("{}, or", names.join(" and "))
+        } else {
+            format!("{} or", names.join(""))
+        }
+    }
+}
+
 #[derive(Debug)]
 struct RenderedUnpackedInput {
     model_name: String,
@@ -5417,7 +5857,7 @@ fn render_service_module(
         &endpoint_client_body,
         endpoint_services
             .iter()
-            .flat_map(|service| &service.operations),
+            .flat_map(|service| service_definitions(service)),
     );
     if needs_temporalio_workflow_type_checking {
         output.push_str("if typing.TYPE_CHECKING:\n");
@@ -5564,11 +6004,29 @@ fn render_operation_module(
         render_named_python_import(&mut output, ".._resources", &used_resource_names);
     }
     render_support_import(&mut output, &body, support_package, false);
-    render_definition_type_checking_imports(&mut output, &body, [operation]);
+    render_definition_type_checking_imports(
+        &mut output,
+        &body,
+        operation.runtime_type_definition.as_deref(),
+    );
     output.push('\n');
     output.push('\n');
     output.push_str(&body);
     output
+}
+
+/// The definition types of a service's operations and resources.
+fn service_definitions<'a>(service: &'a RenderedService<'a>) -> impl Iterator<Item = &'a str> {
+    service
+        .operations
+        .iter()
+        .filter_map(|operation| operation.runtime_type_definition.as_deref())
+        .chain(
+            service
+                .resources
+                .iter()
+                .filter_map(|resource| resource.definition.value()),
+        )
 }
 
 /// Imports the module of each definition type that the body names, for type checking only. The
@@ -5576,11 +6034,10 @@ fn render_operation_module(
 fn render_definition_type_checking_imports<'a>(
     output: &mut String,
     body: &str,
-    operations: impl IntoIterator<Item = &'a RenderedOperation<'a>>,
+    definitions: impl IntoIterator<Item = &'a str>,
 ) {
-    let modules = operations
+    let modules = definitions
         .into_iter()
-        .filter_map(|operation| operation.runtime_type_definition.as_deref())
         .filter(|definition| body.contains(&format!("{definition}[")))
         .filter_map(|definition| definition.rsplit_once('.').map(|(module, _)| module))
         .collect::<BTreeSet<_>>();
@@ -5973,6 +6430,7 @@ fn render_package_init(
                 .operations
                 .iter()
                 .map(|operation| operation.attr_name.clone())
+                .chain(workflow_factory_resources(service).map(workflow_resource_factory_name))
         })
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -6026,6 +6484,13 @@ fn render_package_init(
                         std::slice::from_ref(&operation.attr_name),
                     );
                 }
+            }
+            for resource in workflow_factory_resources(service) {
+                render_named_python_import(
+                    &mut output,
+                    &format!("._resources.{}", resource_module_name(resource)),
+                    &[workflow_resource_factory_name(resource)],
+                );
             }
         }
     }
@@ -6760,6 +7225,82 @@ fn client_resource_factory_name(resource: &PlannedResource) -> String {
     format!("get_{}", resource.name.to_snake_case())
 }
 
+/// The Workflow package's factory of a resource, a function of the package.
+fn workflow_resource_factory_name(resource: &PlannedResource) -> String {
+    python_field_name(&resource.name.to_snake_case())
+}
+
+/// The resources whose handle the Workflow package's factory builds. A handle with no method does
+/// nothing that its constructor doesn't.
+fn workflow_factory_resources<'a>(
+    service: &'a RenderedService<'a>,
+) -> impl Iterator<Item = &'a PlannedResource> {
+    service
+        .resources
+        .iter()
+        .filter(|resource| service.endpoint.is_some() && !resource.methods.is_empty())
+}
+
+/// The package exports the Workflow factory of each resource next to the operation functions and
+/// the modules of the package.
+fn validate_workflow_factory_names(services: &[RenderedService<'_>]) -> Result<()> {
+    let mut names = ["client", "models", "operations", "services"]
+        .map(|module| {
+            (
+                module.to_string(),
+                format!("the module `{module}` of the package"),
+            )
+        })
+        .into_iter()
+        .collect::<BTreeMap<_, _>>();
+    for service in services.iter().filter(|service| service.endpoint.is_some()) {
+        for operation in &service.operations {
+            names.insert(
+                operation.attr_name.clone(),
+                format!(
+                    "the function of operation `{}.{}`",
+                    service.name, operation.name
+                ),
+            );
+        }
+    }
+    for service in services {
+        for resource in workflow_factory_resources(service) {
+            let name = workflow_resource_factory_name(resource);
+            let generated_by = format!("the factory of resource `{}`", resource.type_name);
+            if let Some(conflicting_declaration) = names.insert(name.clone(), generated_by.clone())
+            {
+                return Err(Error::PythonGeneratedNameConflict {
+                    name,
+                    generated_by,
+                    conflicting_declaration,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The keyword arguments with which a factory builds its handle.
+fn render_resource_factory_arguments(
+    output: &mut String,
+    indent: &str,
+    resource: &PlannedResource,
+) {
+    for name in resource
+        .fields
+        .iter()
+        .map(|field| python_field_name(&field.name))
+        .chain(
+            resource_type_variable_names(resource)
+                .iter()
+                .map(|name| python_runtime_type_argument_name(name)),
+        )
+    {
+        output.push_str(&format!("{indent}{name}={name},\n"));
+    }
+}
+
 fn endpoint_service_object_name(service: &RenderedService<'_>) -> String {
     format!("{}Client", service.name)
 }
@@ -7027,20 +7568,36 @@ fn render_resource_client_binder(output: &mut String, resource: &PlannedResource
 }
 
 /// The `__init__` of a generic resource, which takes its runtime types as keywords.
+/// The `__init__` of a resource that isn't a plain dataclass. It takes its runtime types as
+/// keywords. Each `optional` field defaults to `None`.
 fn render_generic_resource_init(
     output: &mut String,
     fields: &[(String, String)],
+    optional: &[bool],
     type_variables: &[String],
 ) {
+    // A parameter with no default can't follow one with a default.
+    let kw_only = optional
+        .iter()
+        .skip_while(|optional| !**optional)
+        .any(|optional| !optional);
     output.push_str("\n    def __init__(\n        self,\n");
-    for (name, annotation) in fields {
+    if kw_only {
+        output.push_str("        *,\n");
+    }
+    for ((name, annotation), optional) in fields.iter().zip(optional) {
         output.push_str("        ");
         output.push_str(name);
         output.push_str(": ");
         output.push_str(annotation);
+        if *optional {
+            output.push_str(" = None");
+        }
         output.push_str(",\n");
     }
-    output.push_str("        *,\n");
+    if !kw_only && !type_variables.is_empty() {
+        output.push_str("        *,\n");
+    }
     render_runtime_type_keyword_parameters(output, type_variables);
     output.push_str("    ) -> None:\n");
     for (name, _) in fields {
@@ -7051,6 +7608,46 @@ fn render_generic_resource_init(
         output.push('\n');
     }
     render_runtime_type_attributes(output, "self", type_variables);
+}
+
+/// The equality and the repr of a plain resource class, as a dataclass gives them.
+fn render_resource_equality(output: &mut String, type_name: &str, fields: &[(String, String)]) {
+    let values = |owner: &str| {
+        let values = fields
+            .iter()
+            .map(|(name, _)| format!("{owner}.{name}"))
+            .collect::<Vec<_>>();
+        if values.len() == 1 {
+            format!("({},)", values[0])
+        } else {
+            format!("({})", values.join(", "))
+        }
+    };
+    output.push_str("\n    @typing_extensions.override\n");
+    output.push_str("    def __eq__(self, other: object) -> bool:\n");
+    output.push_str("        if not isinstance(other, ");
+    output.push_str(type_name);
+    output.push_str("):\n            return NotImplemented\n");
+    output.push_str("        return ");
+    output.push_str(&values("self"));
+    output.push_str(" == ");
+    output.push_str(&values("other"));
+    output.push('\n');
+    output.push_str("\n    __hash__: typing.ClassVar[None] = None");
+    output.push_str("  # pyright: ignore[reportIncompatibleMethodOverride]\n");
+    output.push_str("\n    @typing_extensions.override\n");
+    output.push_str("    def __repr__(self) -> str:\n");
+    output.push_str("        return f\"");
+    output.push_str(type_name);
+    output.push('(');
+    output.push_str(
+        &fields
+            .iter()
+            .map(|(name, _)| format!("{name}={{self.{name}!r}}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    output.push_str(")\"\n");
 }
 
 /// The keyword parameter of each runtime type of a generic resource.

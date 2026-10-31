@@ -55,7 +55,7 @@ class JobsClientExtension(abc.ABC):
         *,
         job_id: str,
     ) -> Job:
-        """Return the ``Job`` handle that has these identity fields."""
+        """A handle on an existing ``Job``, with no call."""
         return Job(
             self._create_nexus_client(
                 service="Jobs",

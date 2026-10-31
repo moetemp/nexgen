@@ -13,6 +13,7 @@ from ..models import (
 )
 from .._resources import Stream
 import temporal_support as _support
+from .._resource_call import resource_call
 
 if typing.TYPE_CHECKING:
     import temporal_support
@@ -44,6 +45,7 @@ async def _create_stream(
     )
 
 
+@resource_call
 async def create_stream(
     definition: type[temporal_support.StreamDefinition[BodyT]],
     *,

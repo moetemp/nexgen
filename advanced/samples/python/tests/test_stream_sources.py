@@ -121,6 +121,28 @@ def test_a_workflow_read_takes_no_last() -> None:
     assert "last" not in inspect.signature(stream_module.read_records).parameters
 
 
+async def test_a_workflow_block_leaves_the_close_of_its_stream_to_the_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nexus_client = FakeNexusClient()
+    monkeypatch.setattr(temporalio.workflow, "in_workflow", lambda: True)
+    monkeypatch.setattr(
+        temporalio.workflow, "info", lambda: FakeWorkflowInfo("chat-1", "r1", "r3")
+    )
+
+    def create_nexus_client(**_: object) -> FakeNexusClient:
+        return nexus_client
+
+    monkeypatch.setattr(temporalio.workflow, "create_nexus_client", create_nexus_client)
+
+    async with create_stream(Turns) as stream:
+        _ = assert_type(stream, Stream[str])
+
+    # The block sends only the create, and the sample's policy records the Stream for the run.
+    assert len(nexus_client.inputs) == 1
+    assert temporal_support.deferred_closes("r3") == [stream]
+
+
 def test_a_workflow_factory_builds_a_handle_on_the_run_operations() -> None:
     handle = stream_service.stream(Turns, id="chat-1:r1:turns", backend="redis")
 

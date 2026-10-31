@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import collections.abc
 import dataclasses
 import datetime
@@ -11,6 +12,7 @@ import typing
 import pytest
 import temporalio.activity
 import temporalio.converter
+import temporalio.exceptions
 import temporalio.nexus.system
 from temporalio.api.common.v1 import Payload
 from typing_extensions import assert_type, override
@@ -24,6 +26,8 @@ from wit.stream_service.both.models import (
     AppendRecord,
     AppendRecordsRequest,
     AppendRecordsResponse,
+    CloseStreamRequest,
+    CloseStreamResponse,
     CreateStreamRequest,
     CreateStreamResult,
     DescribeStreamRequest,
@@ -74,6 +78,8 @@ class Handle:
         self._answer: object = answer
 
     async def result(self) -> typing.Any:
+        if isinstance(self._answer, BaseException):
+            raise self._answer
         return self._answer
 
 
@@ -308,6 +314,77 @@ async def test_a_handle_passes_as_its_ref_inside_a_dataclass_and_a_list() -> Non
     assert decoded == value
     assert decoded.stream.body_type is Turn
     assert decoded.streams[1].body_type is Turn
+
+
+def closing_client(*close_answers: object) -> Client:
+    return Client(
+        {
+            "CreateStream": [CreateStreamResult(stream=StreamRef(id="s1"))],
+            "CloseStream": list(close_answers) or [CloseStreamResponse()],
+        }
+    )
+
+
+def close_failures(client: Client) -> list[BaseException | None]:
+    return [
+        typing.cast(CloseStreamRequest, request).failure
+        for _, _, operation, request in client.calls
+        if operation == "CloseStream"
+    ]
+
+
+async def test_a_block_closes_its_stream_with_its_error() -> None:
+    client = closing_client()
+    error = ValueError("boom")
+
+    with pytest.raises(ValueError, match="boom"):
+        async with client.create_stream(Texts, id="s1") as stream:
+            _ = assert_type(stream, Stream[str])
+            raise error
+
+    assert close_failures(client) == [error]
+
+
+async def test_a_clean_block_closes_its_stream_with_no_failure() -> None:
+    client = closing_client()
+
+    async with client.create_stream(Texts, id="s1"):
+        pass
+
+    assert close_failures(client) == [None]
+
+
+async def test_a_canceled_block_closes_its_stream_as_canceled() -> None:
+    client = closing_client()
+
+    with pytest.raises(asyncio.CancelledError):
+        async with client.create_stream(Texts, id="s1"):
+            raise asyncio.CancelledError("stop")
+
+    (failure,) = close_failures(client)
+    # The Store records a canceled close, so the failure is Temporal's CancelledError.
+    assert isinstance(failure, temporalio.exceptions.CancelledError)
+
+
+async def test_an_interrupted_block_leaves_its_stream_open() -> None:
+    client = closing_client()
+
+    with pytest.raises(KeyboardInterrupt):
+        async with client.create_stream(Texts, id="s1"):
+            raise KeyboardInterrupt
+
+    assert close_failures(client) == []
+
+
+async def test_a_failed_close_raises_with_the_block_error_as_its_context() -> None:
+    close_error = RuntimeError("close failed")
+    client = closing_client(close_error)
+
+    with pytest.raises(RuntimeError, match="close failed") as raised:
+        async with client.create_stream(Texts, id="s1"):
+            raise ValueError("boom")
+
+    assert isinstance(raised.value.__context__, ValueError)
 
 
 async def test_a_stored_stream_ref_rebuilds_the_handle() -> None:

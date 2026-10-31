@@ -22,3 +22,17 @@ export { createAppendRecordTransferTypeConverter } from "./models";
 export { createReadRecordsResponseTransferTypeConverter } from "./models";
 export { createStreamRecordTransferTypeConverter } from "./models";
 export { createStreamDataTransferTypeConverter } from "./models";
+export {
+  StreamError,
+  StreamNotFoundError,
+  StreamExpiredError,
+  StreamClosedError,
+  StreamFencedError,
+  StreamSeqDivergentError,
+  StreamNotOwnerError,
+  StreamOffsetError,
+  StreamTooLargeError,
+  StreamStorageError,
+  StreamUnsupportedError,
+  streamError,
+} from "./errors";

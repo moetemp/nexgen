@@ -1,0 +1,5 @@
+languages = ["python", "typescript"]
+
+[error]
+kind = "error-class-name-conflict"
+contains = ["`job-service.job-error-reason`", "`JobMissingError`"]

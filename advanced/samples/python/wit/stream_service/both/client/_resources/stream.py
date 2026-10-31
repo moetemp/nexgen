@@ -24,6 +24,7 @@ from ...models import (
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
+    StreamErrorDetails,
     StreamReadStart,
     StreamRecord,
     StreamRef,
@@ -31,6 +32,7 @@ from ...models import (
 )
 import temporal_support as _support
 from ..._poll import PollIterator
+from ...errors import StreamError, stream_error
 
 
 BodyT = typing.TypeVar("BodyT")
@@ -99,17 +101,26 @@ class Stream(typing.Generic[BodyT]):
             producer=_support.client_producer(),
             previous_completed_task=_support.local_activity_previous_completed_task(),
         )
-        nexus_client = self._nexus_client
-        handle = await nexus_client.start_operation(
-            operation="AppendRecords",
-            arg=request,
-            id=_operation_id(),
-            result_type=AppendRecordsResponse,
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        response = await handle.result()
-        return response.last_offset or 0
+        try:
+            nexus_client = self._nexus_client
+            handle = await nexus_client.start_operation(
+                operation="AppendRecords",
+                arg=request,
+                id=_operation_id(),
+                result_type=AppendRecordsResponse,
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            response = await handle.result()
+            return response.last_offset or 0
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def close(
         self,
@@ -126,16 +137,25 @@ class Stream(typing.Generic[BodyT]):
             failure=failure,
             producer=_support.client_producer(),
         )
-        nexus_client = self._nexus_client
-        handle = await nexus_client.start_operation(
-            operation="CloseStream",
-            arg=request,
-            id=_operation_id(),
-            result_type=CloseStreamResponse,
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        _ = await handle.result()
+        try:
+            nexus_client = self._nexus_client
+            handle = await nexus_client.start_operation(
+                operation="CloseStream",
+                arg=request,
+                id=_operation_id(),
+                result_type=CloseStreamResponse,
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            _ = await handle.result()
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     async def read(
         self,
@@ -159,16 +179,25 @@ class Stream(typing.Generic[BodyT]):
             create_wait=create_wait,
             max_bytes=max_bytes,
         )
-        nexus_client = self._nexus_client
-        handle = await nexus_client.start_operation(
-            operation="ReadRecords",
-            arg=request,
-            id=_operation_id(),
-            result_type=ReadRecordsResponse[self.body_type],
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        return await handle.result()
+        try:
+            nexus_client = self._nexus_client
+            handle = await nexus_client.start_operation(
+                operation="ReadRecords",
+                arg=request,
+                id=_operation_id(),
+                result_type=ReadRecordsResponse[self.body_type],
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            return await handle.result()
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
     def iter_read(
         self,
@@ -217,15 +246,24 @@ class Stream(typing.Generic[BodyT]):
         ) -> tuple[
             ReadRecordsRequest | None, collections.abc.Sequence[StreamRecord[BodyT]]
         ]:
-            handle = await nexus_client.start_operation(
-                operation="ReadRecords",
-                arg=request,
-                id=_operation_id(),
-                result_type=ReadRecordsResponse[self.body_type],
-                rpc_metadata=rpc_metadata or {},
-                rpc_timeout=rpc_timeout,
-            )
-            response = await handle.result()
+            try:
+                handle = await nexus_client.start_operation(
+                    operation="ReadRecords",
+                    arg=request,
+                    id=_operation_id(),
+                    result_type=ReadRecordsResponse[self.body_type],
+                    rpc_metadata=rpc_metadata or {},
+                    rpc_timeout=rpc_timeout,
+                )
+                response = await handle.result()
+            except StreamError:
+                raise
+            except Exception as err:
+                found = _support.error_details(err, StreamErrorDetails)
+                if found is None:
+                    raise
+                details, message = found
+                raise stream_error(details, message) from err
             return _support.next_read_request(request, response), response.records or []
 
         return PollIterator(request, read, _support.resume_read_request)
@@ -240,16 +278,25 @@ class Stream(typing.Generic[BodyT]):
         request = DescribeStreamRequest(
             stream=self.stream,
         )
-        nexus_client = self._nexus_client
-        handle = await nexus_client.start_operation(
-            operation="DescribeStream",
-            arg=request,
-            id=_operation_id(),
-            result_type=DescribeStreamResponse,
-            rpc_metadata=rpc_metadata or {},
-            rpc_timeout=rpc_timeout,
-        )
-        return await handle.result()
+        try:
+            nexus_client = self._nexus_client
+            handle = await nexus_client.start_operation(
+                operation="DescribeStream",
+                arg=request,
+                id=_operation_id(),
+                result_type=DescribeStreamResponse,
+                rpc_metadata=rpc_metadata or {},
+                rpc_timeout=rpc_timeout,
+            )
+            return await handle.result()
+        except StreamError:
+            raise
+        except Exception as err:
+            found = _support.error_details(err, StreamErrorDetails)
+            if found is None:
+                raise
+            details, message = found
+            raise stream_error(details, message) from err
 
 
 class _StreamTransferTypeConverter(

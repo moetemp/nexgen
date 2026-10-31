@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.error", "on an enum, names `details`, `field` and `name`"]

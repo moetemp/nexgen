@@ -69,6 +69,13 @@ pub enum Error {
     #[error("the client target {reason}")]
     UnsupportedClientTarget { reason: String },
 
+    #[error("two error classes of `{enumeration}` have the name `{name}` in {language}")]
+    ErrorClassNameConflict {
+        enumeration: String,
+        name: String,
+        language: Language,
+    },
+
     #[error("the generic resource `{resource}` isn't supported in {language}")]
     UnsupportedGenericResource {
         language: Language,

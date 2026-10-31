@@ -730,9 +730,18 @@ fn build_wit_enum_spec(
     let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
     let context = format!("type `{}`", wit_type_full_name(resolve, type_id));
     let fallback = enum_fallback_case(enumeration, type_def, path, &context)?;
+    let error = build_enum_error(
+        resolve,
+        type_id,
+        type_def,
+        enumeration,
+        path,
+        interface_name,
+    )?;
     Ok(Some(EnumSpec {
         name: type_name.to_upper_camel_case(),
         full_name: wit_type_full_name(resolve, type_id),
+        error,
         values: enumeration
             .cases
             .iter()
@@ -844,6 +853,159 @@ fn fallback_error(path: &Path, context: &str, reason: &str) -> Error {
         directive: "@nexus.fallback".to_string(),
         reason: reason.to_string(),
     }
+}
+
+/// An enum's `@nexus.error`, with the cases that have one. The details record is a record of the
+/// same interface, whose field holds this enum.
+fn build_enum_error(
+    resolve: &Resolve,
+    type_id: TypeId,
+    type_def: &TypeDef,
+    enumeration: &wit_parser_crate::Enum,
+    path: &Path,
+    interface_name: &str,
+) -> Result<Option<EnumErrorSpec>> {
+    let type_name = type_def.name.as_deref().unwrap_or("unnamed-type");
+    let context = format!("type `{interface_name}.{type_name}`");
+    let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
+    let invalid = |context: &str, reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.error".to_string(),
+        reason,
+    };
+    let mut cases = Vec::<(String, bool, LanguageStringSpec)>::new();
+    for case in &enumeration.cases {
+        let case_context = format!("{context} case `{}`", case.name);
+        let case_directives = parse_directives(case.docs.contents.as_deref(), path, &case_context)?;
+        let Some(case_error) = directive(&case_directives, "error", path, &case_context)? else {
+            continue;
+        };
+        let retryable = match case_error.value("retryable") {
+            None | Some("false") => false,
+            Some("true") => true,
+            Some(other) => {
+                return Err(invalid(
+                    &case_context,
+                    format!("`retryable={other}` isn't `true` or `false`"),
+                ));
+            }
+        };
+        cases.push((
+            case.name.clone(),
+            retryable,
+            directive_language_string_for_key(case_error, "name"),
+        ));
+    }
+    let Some(error) = directive(&directives, "error", path, &context)? else {
+        if let Some((value, _, _)) = cases.first() {
+            return Err(invalid(
+                &context,
+                format!("case `{value}` needs `@nexus.error` on the enum too"),
+            ));
+        }
+        return Ok(None);
+    };
+    let (Some(details), Some(field), Some(name)) = (
+        error.value("details"),
+        error.value("field"),
+        error.value("name"),
+    ) else {
+        return Err(invalid(
+            &context,
+            "on an enum, names `details`, `field` and `name`".to_string(),
+        ));
+    };
+    let TypeOwner::Interface(interface_id) = type_def.owner else {
+        return Err(invalid(
+            &context,
+            "needs an enum of an interface".to_string(),
+        ));
+    };
+    let details_id = resolve.interfaces[interface_id]
+        .types
+        .get(details)
+        .copied()
+        .ok_or_else(|| {
+            invalid(
+                &context,
+                format!("`{details}` isn't a type of the interface"),
+            )
+        })?;
+    let TypeDefKind::Record(record) = &resolve.types[details_id].kind else {
+        return Err(invalid(&context, format!("`{details}` isn't a record")));
+    };
+    let details_field = record
+        .fields
+        .iter()
+        .find(|candidate| candidate.name == field)
+        .ok_or_else(|| invalid(&context, format!("`{field}` isn't a field of `{details}`")))?;
+    let mut ty = details_field.ty;
+    let holds_enum = loop {
+        let Type::Id(id) = ty else {
+            break false;
+        };
+        if id == type_id {
+            break true;
+        }
+        match &resolve.types[id].kind {
+            TypeDefKind::Option(inner) | TypeDefKind::Type(inner) => ty = *inner,
+            _ => break false,
+        }
+    };
+    if !holds_enum {
+        return Err(invalid(
+            &context,
+            format!("`{details}.{field}` doesn't hold `{type_name}`"),
+        ));
+    }
+    let mut extends = LanguageStringSpec::default();
+    for language in all_languages() {
+        let key = language_key(language);
+        if let Some(value) = error.value(&format!("{key}-extends")) {
+            extends.by_language.insert(language, value.to_string());
+        }
+        if let Some(value) = error.value(&format!("{key}-extends-import")) {
+            // Python and .NET name the class by its dotted path, which gives the import.
+            if matches!(language, Language::Python | Language::Dotnet) {
+                return Err(invalid(
+                    &context,
+                    format!(
+                        "`{key}-extends-import` has no effect, since `{key}-extends` is a \
+                         dotted path"
+                    ),
+                ));
+            }
+            extends.imports.insert(language, value.to_string());
+        }
+    }
+    let stem = name
+        .strip_suffix("-error")
+        .unwrap_or(name)
+        .to_upper_camel_case();
+    let prefix = format!("{type_name}-");
+    let cases = cases
+        .into_iter()
+        .map(|(value, retryable, case_name)| {
+            let failure_type = case_name.default.clone().unwrap_or_else(|| {
+                let part = value.strip_prefix(&prefix).unwrap_or(&value);
+                format!("{stem}{}Error", part.to_upper_camel_case())
+            });
+            EnumErrorCaseSpec {
+                value,
+                retryable,
+                name: case_name,
+                failure_type,
+            }
+        })
+        .collect();
+    Ok(Some(EnumErrorSpec {
+        details: wit_type_full_name(resolve, details_id),
+        field: record_field_key(details_field, path, &context)?,
+        name: name.to_string(),
+        extends,
+        cases,
+    }))
 }
 
 fn build_wit_flags_spec(

@@ -11,7 +11,8 @@ use crate::generator::resource_plan::{
     record_for_request_name, request_plan_fills_source, resource_method_fills_source,
 };
 use crate::generator::{
-    ExternalModelBackend, GeneratedFileMap, GeneratedFileOrigin, GeneratedFiles,
+    ErrorClasses, ExternalModelBackend, GeneratedFileMap, GeneratedFileOrigin, GeneratedFiles,
+    error_classes,
 };
 use crate::language::Language;
 use crate::nexgen_config::GenerationTarget;
@@ -2920,6 +2921,13 @@ fn generate_leaf(
                 generator.render_models_file(&namespace),
                 module_origin.clone(),
             )?;
+            if let Some(errors) = render_errors_file(api_plan, &namespace)? {
+                files.insert(
+                    "Errors.cs",
+                    errors,
+                    GeneratedFileOrigin::fixed("generated .NET error classes"),
+                )?;
+            }
             Ok(())
         },
         |files, target| {
@@ -3586,6 +3594,142 @@ fn qualify_csharp_type_names(type_expr: &str, names: &BTreeSet<String>, namespac
     }
     output.push_str(rest);
     output
+}
+
+/// Renders `Errors.cs`, with a class per case of each error enum under one base, and the static
+/// class that gives the class of a failed call's details.
+fn render_errors_file(api_plan: &PlannedSpec, namespace: &str) -> Result<Option<String>> {
+    let error_classes = error_classes(api_plan, Language::Dotnet, "Exception")?;
+    if error_classes.is_empty() {
+        return Ok(None);
+    }
+    let mut output = generated_file_prelude(namespace, &["System.CodeDom.Compiler"]);
+    for classes in &error_classes {
+        render_error_classes(&mut output, classes);
+    }
+    close_namespace(&mut output);
+    Ok(Some(output))
+}
+
+/// Renders the classes of one error enum, and the static class that maps each case to its class.
+fn render_error_classes(output: &mut String, classes: &ErrorClasses<'_>) {
+    let enum_name = csharp_type_name(&classes.enumeration.name);
+    let member = |value: &crate::spec::EnumValueSpec| format!("{enum_name}.{}", value.name);
+    let base = &classes.base.name;
+    let details = csharp_type_name(&classes.details.name);
+    let property = field_property_name(classes.field);
+    let unspecified = member(classes.unspecified);
+    output.push_str(&format!(
+        concat!(
+            "/// <summary>\n",
+            "/// A failed call, with its <see cref=\"{enum_name}\"/>.",
+            " A reason with no class of its own\n",
+            "/// throws this class.\n",
+            "/// </summary>\n",
+            "{attribute}\n",
+            "public class {base} : {extends}\n",
+            "{{\n",
+            "    /// <summary>\n",
+            "    /// Initializes a new instance of the <see cref=\"{base}\"/> class.\n",
+            "    /// </summary>\n",
+            "    public {base}(string message, {enum_name} reason = {unspecified})\n",
+            "        : this(message, reason, \"{failure_type}\", true)\n",
+            "    {{\n",
+            "    }}\n",
+            "\n",
+            "    /// <summary>\n",
+            "    /// Initializes a new instance with the",
+            " failure type and the retryability of a class.\n",
+            "    /// </summary>\n",
+            "    protected {base}(string message, {enum_name}",
+            " reason, string errorType, bool nonRetryable)\n",
+            "        : base(message, errorType, nonRetryable, new",
+            " object[] {{ new {details} {{ {property} = reason }} }})\n",
+            "    {{\n",
+            "        Reason = reason;\n",
+            "    }}\n",
+            "\n",
+            "    /// <summary>\n",
+            "    /// Gets the reason of the failed call.\n",
+            "    /// </summary>\n",
+            "    public {enum_name} Reason {{ get; }}\n",
+            "}}\n",
+        ),
+        enum_name = enum_name,
+        attribute = GENERATED_CODE_ATTRIBUTE,
+        base = base,
+        extends = classes.extends,
+        unspecified = unspecified,
+        failure_type = classes.base.failure_type,
+        details = details,
+        property = property,
+    ));
+    let mut arms = Vec::new();
+    for case in &classes.cases {
+        let member = member(case.value);
+        output.push_str(&format!(
+            concat!(
+                "\n/// <summary>\n",
+                "/// The error of <see cref=\"{member}\"/>.\n",
+                "/// </summary>\n",
+                "{attribute}\n",
+                "public class {class} : {base}\n",
+                "{{\n",
+                "    /// <summary>\n",
+                "    /// Initializes a new instance of the <see cref=\"{class}\"/> class.\n",
+                "    /// </summary>\n",
+                "    public {class}(string message)\n",
+                "        : base(message, {member}, \"{failure_type}\", {non_retryable})\n",
+                "    {{\n",
+                "    }}\n",
+                "}}\n",
+            ),
+            member = member,
+            attribute = GENERATED_CODE_ATTRIBUTE,
+            class = case.name,
+            base = base,
+            failure_type = case.failure_type,
+            non_retryable = !case.retryable,
+        ));
+        arms.push(format!(
+            "            {member} => new {}(message),\n",
+            case.name
+        ));
+    }
+    let stem = base.strip_suffix("Exception").unwrap_or(base);
+    output.push_str(&format!(
+        concat!(
+            "\n/// <summary>\n",
+            "/// Gives the exception of the reason of a failed call.\n",
+            "/// </summary>\n",
+            "{attribute}\n",
+            "public static class {stem}Errors\n",
+            "{{\n",
+            "    /// <summary>\n",
+            "    /// The exception of the reason in the details",
+            " of a failed call. A reason with no class\n",
+            "    /// of its own, or one that this code doesn't",
+            " know, gives <see cref=\"{base}\"/>.\n",
+            "    /// </summary>\n",
+            "    public static {base} From({details} details, string message)\n",
+            "    {{\n",
+            "        var reason = details.{property} ?? {unspecified};\n",
+            "        return reason switch\n",
+            "        {{\n",
+            "{arms}",
+            "            _ => new {base}(message, reason),\n",
+            "        }};\n",
+            "    }}\n",
+            "}}\n",
+        ),
+        attribute = GENERATED_CODE_ATTRIBUTE,
+        stem = stem,
+        base = base,
+        details = details,
+        property = property,
+        unspecified = unspecified,
+        arms = arms.concat(),
+    ));
 }
 
 fn generated_file_prelude(namespace: &str, imports: &[&str]) -> String {

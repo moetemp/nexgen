@@ -665,6 +665,7 @@ impl<'a> TypePlanningContext<'a> {
                 runtime_type_parameters: operation_runtime_type_parameters(
                     &self.spec, service, operation,
                 ),
+                runtime_type_definition: operation_runtime_type_definition(service, operation),
             },
         })
     }
@@ -1318,6 +1319,44 @@ fn plan_operation_resource_return(
     })
 }
 
+/// The definition that an operation takes in place of the runtime types of the resource that it
+/// returns. A method that binds the operation passes the runtime types of its handle.
+fn operation_runtime_type_definition(
+    service: &ServiceSpec<OperationLoweredFamily>,
+    operation: &OperationSpec<OperationLoweredFamily>,
+) -> SelectedTextSpec {
+    if operation_bound_by_a_method(service, &operation.name, |_| true) {
+        return SelectedTextSpec::default();
+    }
+    operation
+        .data
+        .output_resource_return
+        .as_ref()
+        .and_then(|returned| service.resource(&returned.resource_name))
+        .map(|resource| resource.definition.clone())
+        .unwrap_or_default()
+}
+
+/// Whether a method of a resource that `resource_filter` accepts binds the operation.
+fn operation_bound_by_a_method(
+    service: &ServiceSpec<OperationLoweredFamily>,
+    operation_name: &str,
+    resource_filter: impl Fn(&crate::spec::ResourceSpec<OperationLoweredFamily>) -> bool,
+) -> bool {
+    service.resources.iter().any(|resource| {
+        resource_filter(resource)
+            && resource.data.resolved.as_ref().is_some_and(|resolved| {
+                resolved.methods.iter().any(|method| {
+                    matches!(
+                        &method.binding,
+                        ResolvedResourceMethodBinding::Operation { operation_name: bound, .. }
+                            if bound == operation_name
+                    )
+                })
+            })
+    })
+}
+
 /// An operation that returns a generic resource takes each of the resource's type parameters. One
 /// that a method of a generic resource binds takes each parameter that its output uses, since a
 /// request value doesn't give its type at runtime and the handle has them all.
@@ -1332,19 +1371,9 @@ fn operation_runtime_type_parameters(
             .map(|resource| resource.type_parameters.clone())
             .unwrap_or_default();
     }
-    let bound = service.resources.iter().any(|resource| {
+    if !operation_bound_by_a_method(service, &operation.name, |resource| {
         !resource.type_parameters.is_empty()
-            && resource.data.resolved.as_ref().is_some_and(|resolved| {
-                resolved.methods.iter().any(|method| {
-                    matches!(
-                        &method.binding,
-                        ResolvedResourceMethodBinding::Operation { operation_name, .. }
-                            if *operation_name == operation.name
-                    )
-                })
-            })
-    });
-    if !bound {
+    }) {
         return Vec::new();
     }
     operation
@@ -1753,6 +1782,17 @@ interface alerts {
         // An append or describe response has no generic value, so the call takes no runtime type.
         assert!(runtime_type_parameters("AppendRecords").is_empty());
         assert!(runtime_type_parameters("DescribeStream").is_empty());
+        // Only the create returns the Stream, so only it takes the Stream's definition.
+        let definition = |name: &str| {
+            plan.services[0]
+                .operation(name)
+                .and_then(|operation| operation.data.runtime_type_definition.value())
+        };
+        assert_eq!(
+            definition("CreateStream"),
+            Some("temporal_support.StreamDefinition")
+        );
+        assert_eq!(definition("ReadRecords"), None);
     }
 
     #[test]
@@ -1814,6 +1854,31 @@ interface alerts {
 
         assert_eq!(
             type_parameters
+                .iter()
+                .map(|parameter| parameter.full_name.as_str())
+                .collect::<Vec<_>>(),
+            ["stream-service.body-t"]
+        );
+    }
+
+    #[test]
+    fn an_operation_that_a_method_binds_keeps_its_runtime_types() {
+        // The method passes the runtime types of its handle, so the create takes no definition.
+        let spec = stream_service_spec_with(
+            r#"/// @nexus.operation "create-stream"
+    sibling: func(id: string) -> create-stream-result;"#,
+            "",
+        );
+        let plan = plan_single_leaf_for(spec, crate::nexgen_config::GenerationTargets::WORKFLOW);
+        let create = plan.services[0]
+            .operation("CreateStream")
+            .expect("the stream service has the operation");
+
+        assert_eq!(create.data.runtime_type_definition.value(), None);
+        assert_eq!(
+            create
+                .data
+                .runtime_type_parameters
                 .iter()
                 .map(|parameter| parameter.full_name.as_str())
                 .collect::<Vec<_>>(),

@@ -242,6 +242,9 @@ pub(crate) struct PlannedOperationData {
     /// The type parameters that a call passes as runtime types, since the request can't give
     /// them. Only an operation of a generic resource has them.
     pub(crate) runtime_type_parameters: Vec<crate::spec::TypeParameterSpec>,
+    /// The definition type of the returned resource. A call takes it in place of the runtime
+    /// types.
+    pub(crate) runtime_type_definition: SelectedTextSpec,
 }
 
 #[derive(Debug, Clone, PartialEq)]

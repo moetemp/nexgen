@@ -127,6 +127,15 @@ arguments. For example, write `workflow_namespace()` in Python,
 `Nexgen.Support.TemporalWorkflowContext.WorkflowNamespace()` for those examples.
 `@nexus.output-transform` remains a separate authored expression.
 
+For a resource with [`@nexus.definition`](#nexusdefinition), the support package
+has one helper that reads the type arguments of each of its definition types. In
+Python, the definition is a class, and `definition_type_arguments(definition)`
+returns a tuple with one runtime type for each type parameter of the resource,
+in order. In TypeScript, the definition is a value, and
+`definitionTypeArguments(definition)` returns an array with the `TypeInfo` of
+each parameter, in order. .NET reads the type arguments of the definition type,
+so it needs no helper.
+
 ### Go
 
 Create a **separate Go package in a separate directory** from the generated
@@ -1557,7 +1566,7 @@ class Client(temporalio.client.Client, StreamServiceClientExtension):
 
 
 client = await Client.connect("localhost:7233")
-stream = await client.create_stream(id="s1")
+stream = await client.create_stream(Turns, id="s1")
 await stream.publish(records=records)
 ```
 
@@ -1903,6 +1912,9 @@ The factory of a client resource takes the runtime types too, as
 `get_stream(stream=ref, created=None, body_type=Turn)`,
 `getStream(ref, undefined, turnType)` or `GetStream<Turn>(streamRef, null)`.
 
+An operation that returns the resource can take a definition in place of its
+runtime types. See [`@nexus.definition`](#nexusdefinition).
+
 Go and Java refuse a generic resource. nexgen refuses a resource that uses a
 parameter that it doesn't declare, also through a proto-backed record or a
 returned generic resource, and a declared parameter that the resource doesn't
@@ -1911,6 +1923,47 @@ resource. A generic resource can't be the result of an operation with no
 `@nexus.proto` message, or a field of a record. Python refuses a resource field
 or a request field with the name of a runtime type, such as `body-type` for
 `body-t`. TypeScript refuses such a resource field.
+
+---
+
+### @nexus.definition
+
+**Placement:** Resource with `@nexus.type-parameter` **Syntax:**
+`@nexus.definition python="<type>" typescript="<type>" typescript-import="<module>" dotnet="<type>"`
+
+Names an SDK type that gives the type arguments of a generic resource, such as a
+Stream definition. An operation that returns the resource takes the definition
+in place of its runtime types. The type must be generic in the parameters of the
+resource, in order. A language with no value keeps the runtime types.
+
+```wit
+/// @nexus.type-parameter "body-t"
+/// @nexus.definition python="temporalio.common.StreamDefinition"
+///   typescript="StreamDefinition" typescript-import="@temporalio/common"
+///   dotnet="Temporalio.Common.StreamDefinition"
+resource %stream { ... }
+```
+
+- Python. The create takes
+  `definition: type[temporalio.common.StreamDefinition[BodyT]]` as its first
+  positional parameter, also before a request. When `Turns` subclasses
+  `StreamDefinition[Turn]`, `create_stream(Turns, id="s1")` returns a
+  `Stream[Turn]`. The support helper `definition_type_arguments(definition)`
+  returns the runtime types. The module of the type is imported for type
+  checking only, since the SDK module that defines it can import the generated
+  package.
+- TypeScript. The create takes `definition: StreamDefinition<BodyT>` before its
+  request. The support helper `definitionTypeArguments(definition)` returns the
+  type info of each parameter. A relative `typescript-import` is relative to the
+  root of the generated package. The create of the client target still takes
+  `bodyType` after its request.
+- .NET. The create takes `StreamDefinition<TBody> definition`, which gives the
+  type argument.
+
+An operation that a resource method binds keeps its runtime types, since the
+method passes the runtime types of its handle. nexgen refuses a request field
+named `definition` in an operation that takes a definition. See
+[Integrating a Support Package](#integrating-a-support-package) for the helpers.
 
 ---
 

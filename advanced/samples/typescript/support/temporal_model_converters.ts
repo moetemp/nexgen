@@ -457,3 +457,16 @@ export function workflowIdConflictPolicyToProto(
 ): temporal.api.enums.v1.WorkflowIdConflictPolicy | undefined {
   return common.encodeWorkflowIdConflictPolicy(policy);
 }
+
+/** A Stream's name and the type info of its values. */
+export interface StreamDefinition<T> {
+  readonly name: string;
+  readonly type?: common.TypeInfo<T>;
+}
+
+/** The type info of each type argument that a definition gives. */
+export function definitionTypeArguments(
+  definition: StreamDefinition<unknown>,
+): (common.TypeInfo<any> | undefined)[] {
+  return [definition.type];
+}

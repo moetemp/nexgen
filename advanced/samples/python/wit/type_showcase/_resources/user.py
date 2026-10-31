@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import temporalio.workflow
 
@@ -12,6 +13,7 @@ from ..models import (
     UserProfile,
     UserStatus,
 )
+import temporal_support as _support
 
 
 @dataclasses.dataclass
@@ -102,6 +104,18 @@ async def update_email(
     return await _update_email(request)
 
 
+def start_update_email(
+    *,
+    user_id: str,
+    email: str,
+) -> asyncio.Task[User]:
+    """Start ``update_email`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``update_email`` returns.
+    """
+    return _support.start_now(update_email(user_id=user_id, email=email))
+
+
 async def _rename(
     request: RenameRequest,
 ) -> User:
@@ -129,6 +143,18 @@ async def rename(
     return await _rename(request)
 
 
+def start_rename(
+    *,
+    user_id: str,
+    display_name: str,
+) -> asyncio.Task[User]:
+    """Start ``rename`` at the call, as ``workflow.start_activity`` places an Activity, so
+    sync Workflow code keeps the operation's place in the command order. The task gives
+    what ``rename`` returns.
+    """
+    return _support.start_now(rename(user_id=user_id, display_name=display_name))
+
+
 async def _deactivate(
     request: DeactivateRequest,
 ) -> temporalio.workflow.NexusOperationHandle[None,]:
@@ -152,3 +178,15 @@ async def deactivate(
         reason=reason,
     )
     return await _deactivate(request)
+
+
+def start_deactivate(
+    *,
+    user_id: str,
+    reason: str | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[None]]:
+    """Start ``deactivate`` at the call, as ``workflow.start_activity`` places an Activity,
+    so sync Workflow code keeps the operation's place in the command order. The task
+    gives what ``deactivate`` returns.
+    """
+    return _support.start_now(deactivate(user_id=user_id, reason=reason))

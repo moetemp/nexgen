@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import typing
 import datetime
 import temporalio.workflow
@@ -83,3 +84,18 @@ async def create_stream(
         ref=ref,
     )
     return await _create_stream(request, body_type)
+
+
+def start_create_stream(
+    definition: type[temporal_support.StreamDefinition[BodyT]],
+    *,
+    retention: datetime.timedelta | None = None,
+    backend: str | None = None,
+) -> asyncio.Task[Stream[BodyT]]:
+    """Start ``create_stream`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``create_stream`` returns.
+    """
+    return _support.start_now(
+        create_stream(definition, retention=retention, backend=backend)
+    )

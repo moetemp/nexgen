@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
     NamespaceInfo,
     NamespaceState,
 )
+import temporal_support as _support
 
 
 async def _namespace_info_operation(
@@ -35,3 +37,18 @@ async def namespace_info_operation(
         state=((NamespaceState.NamespaceStateRegistered) if state is None else state),
     )
     return await _namespace_info_operation(request)
+
+
+def start_namespace_info_operation(
+    *,
+    name: str | None = None,
+    data: dict[str, str] | None = None,
+    state: NamespaceState | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[None]]:
+    """Start ``namespace_info_operation`` at the call, as ``workflow.start_activity``
+    places an Activity, so sync Workflow code keeps the operation's place in the command
+    order. The task gives what ``namespace_info_operation`` returns.
+    """
+    return _support.start_now(
+        namespace_info_operation(name=name, data=data, state=state)
+    )

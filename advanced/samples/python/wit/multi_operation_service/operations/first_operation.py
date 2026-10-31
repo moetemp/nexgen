@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
     Request,
     Response,
 )
+import temporal_support as _support
 
 
 async def _first_operation(
@@ -32,3 +34,14 @@ async def first_operation(
         id=id,
     )
     return await _first_operation(request)
+
+
+def start_first_operation(
+    *,
+    id: str,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[Response]]:
+    """Start ``first_operation`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``first_operation`` returns.
+    """
+    return _support.start_now(first_operation(id=id))

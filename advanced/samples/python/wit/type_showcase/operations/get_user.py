@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import GetUserRequest
 from .._resources import User
+import temporal_support as _support
 
 
 async def _get_user(
@@ -41,3 +43,17 @@ async def get_user(
         consistency_token=consistency_token,
     )
     return await _get_user(request)
+
+
+def start_get_user(
+    *,
+    user_id: str,
+    consistency_token: str | None = None,
+) -> asyncio.Task[User]:
+    """Start ``get_user`` at the call, as ``workflow.start_activity`` places an Activity,
+    so sync Workflow code keeps the operation's place in the command order. The task
+    gives what ``get_user`` returns.
+    """
+    return _support.start_now(
+        get_user(user_id=user_id, consistency_token=consistency_token)
+    )

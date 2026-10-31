@@ -8,9 +8,13 @@ import typing
 import nexusrpc
 import temporalio.converter
 from . import services as _services
-from .operations.start_workflow import start_workflow
+from .operations.start_workflow import (
+    start_workflow,
+    start_start_workflow,
+)
 
 __all__ = [
+    "start_start_workflow",
     "start_workflow",
 ]
 

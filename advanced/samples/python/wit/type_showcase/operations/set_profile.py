@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
@@ -10,6 +11,7 @@ from ..models import (
 )
 from .._resources import User
 from .._resources._resource_data import UserData
+import temporal_support as _support
 
 
 async def _set_profile(
@@ -45,3 +47,15 @@ async def set_profile(
         profile=profile,
     )
     return await _set_profile(request)
+
+
+def start_set_profile(
+    *,
+    user_id: str,
+    profile: UserProfile,
+) -> asyncio.Task[User]:
+    """Start ``set_profile`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``set_profile`` returns.
+    """
+    return _support.start_now(set_profile(user_id=user_id, profile=profile))

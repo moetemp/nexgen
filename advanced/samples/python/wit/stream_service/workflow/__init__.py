@@ -8,11 +8,26 @@ import typing
 import nexusrpc
 import temporalio.converter
 from . import services as _services
-from .operations.create_stream import create_stream
-from ._resources.stream import append_records
-from ._resources.stream import close_stream
-from ._resources.stream import read_records
-from ._resources.stream import describe_stream
+from .operations.create_stream import (
+    create_stream,
+    start_create_stream,
+)
+from ._resources.stream import (
+    append_records,
+    start_append_records,
+)
+from ._resources.stream import (
+    close_stream,
+    start_close_stream,
+)
+from ._resources.stream import (
+    read_records,
+    start_read_records,
+)
+from ._resources.stream import (
+    describe_stream,
+    start_describe_stream,
+)
 from ._resources.stream import stream
 
 __all__ = [
@@ -21,6 +36,11 @@ __all__ = [
     "create_stream",
     "describe_stream",
     "read_records",
+    "start_append_records",
+    "start_close_stream",
+    "start_create_stream",
+    "start_describe_stream",
+    "start_read_records",
     "stream",
 ]
 

@@ -5,6 +5,7 @@ from .closing import exit_close as exit_close
 from .errors import error_details as error_details
 from .poll import next_read_request as next_read_request
 from .poll import resume_read_request as resume_read_request
+from .starting import start_now as start_now
 from .streams import client_producer as client_producer
 from .streams import local_activity_failed_tasks as local_activity_failed_tasks
 from .streams import (

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import temporalio.common
 import temporalio.workflow
 
 from ..models import ActivityOptions
+import temporal_support as _support
 
 
 async def _activity_options_operation(
@@ -37,3 +39,24 @@ async def activity_options_operation(
         priority=priority,
     )
     return await _activity_options_operation(request)
+
+
+def start_activity_options_operation(
+    *,
+    task_queue: str | None = None,
+    retry_policy: temporalio.common.RetryPolicy,
+    schedule_to_close_timeout: datetime.timedelta | None = None,
+    priority: temporalio.common.Priority | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[ActivityOptions]]:
+    """Start ``activity_options_operation`` at the call, as ``workflow.start_activity``
+    places an Activity, so sync Workflow code keeps the operation's place in the command
+    order. The task gives what ``activity_options_operation`` returns.
+    """
+    return _support.start_now(
+        activity_options_operation(
+            task_queue=task_queue,
+            retry_policy=retry_policy,
+            schedule_to_close_timeout=schedule_to_close_timeout,
+            priority=priority,
+        )
+    )

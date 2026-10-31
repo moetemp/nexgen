@@ -49,6 +49,15 @@ export function workflowProducer(): Producer {
   return { id: `wf:${runId}`, runId };
 }
 
+/** The run that a retry run's Workflow retries. Undefined elsewhere. */
+export function withdrawRun(): string | undefined {
+  if (!workflow.inWorkflowContext()) {
+    return undefined;
+  }
+  const info = workflow.workflowInfo();
+  return info.attempt > 1 ? info.continuedFromExecutionRunId : undefined;
+}
+
 /** An Activity's attempt, or a client. */
 export function clientProducer(): Producer {
   const info = activityInfoProvider?.();

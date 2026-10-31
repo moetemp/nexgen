@@ -117,11 +117,11 @@ function streamErrorReasonFromNumber(value: number): StreamErrorReason {
  */
 export type StreamItem<BodyT> =
   | { tag: "data"; value: StreamData<BodyT> }
-  | { tag: "superseded"; value: Supersession }
+  | { tag: "superseded"; value: StreamSuperseded }
   | { tag: "close"; value: StreamClose };
 
 export interface CreateStreamResult {
-  stream?: StreamRef;
+  handle?: StreamHandle;
   created?: boolean;
 }
 
@@ -129,7 +129,7 @@ function createStreamResultFromProto(
   proto: temporal.api.streamservice.v1.ICreateStreamResponse,
 ): CreateStreamResult {
   return {
-    stream: proto.stream == null ? undefined : streamRefFromProto(proto.stream),
+    handle: proto.handle == null ? undefined : streamHandleFromProto(proto.handle),
     created: proto.created ?? undefined,
   };
 }
@@ -138,7 +138,7 @@ function createStreamResultToProto(
   model: CreateStreamResult,
 ): temporal.api.streamservice.v1.ICreateStreamResponse {
   return {
-    stream: model.stream == null ? undefined : streamRefToProto(model.stream),
+    handle: model.handle == null ? undefined : streamHandleToProto(model.handle),
     created: model.created,
   };
 }
@@ -156,13 +156,13 @@ export const createStreamResultTransferTypeConverter = {
     return createStreamResultToProto(value);
   },
 };
-export interface StreamRef {
+export interface StreamHandle {
   /**
    * The Stream id, 1 to 4096 bytes.
    */
   id: string;
   /**
-   * The owning Workflow run chain or Standalone Activity. Empty on a client ref.
+   * The owning Workflow run chain or Standalone Activity. Empty for a client.
    */
   owner?: Execution;
   /**
@@ -171,29 +171,33 @@ export interface StreamRef {
   backend?: string;
 }
 
-function streamRefFromProto(proto: temporal.api.stream.v1.IStreamRef): StreamRef {
+function streamHandleFromProto(
+  proto: temporal.api.stream.v1.IStreamHandle,
+): StreamHandle {
   return {
-    id: requiredField(proto.id === "" ? undefined : proto.id, "StreamRef", "id"),
+    id: requiredField(proto.id === "" ? undefined : proto.id, "StreamHandle", "id"),
     owner: proto.owner == null ? undefined : executionFromProto(proto.owner),
     backend: proto.backend ?? undefined,
   };
 }
 
-function streamRefToProto(model: StreamRef): temporal.api.stream.v1.IStreamRef {
+function streamHandleToProto(
+  model: StreamHandle,
+): temporal.api.stream.v1.IStreamHandle {
   return {
-    id: requiredField(model.id, "StreamRef", "id"),
+    id: requiredField(model.id, "StreamHandle", "id"),
     owner: model.owner == null ? undefined : executionToProto(model.owner),
     backend: model.backend,
   };
 }
 
-export const streamRefTransferTypeConverter = {
-  fromTransferType(value: temporal.api.stream.v1.IStreamRef): StreamRef {
-    return streamRefFromProto(value);
+export const streamHandleTransferTypeConverter = {
+  fromTransferType(value: temporal.api.stream.v1.IStreamHandle): StreamHandle {
+    return streamHandleFromProto(value);
   },
 
-  toTransferType(value: StreamRef): temporal.api.stream.v1.IStreamRef {
-    return streamRefToProto(value);
+  toTransferType(value: StreamHandle): temporal.api.stream.v1.IStreamHandle {
+    return streamHandleToProto(value);
   },
 };
 export interface Execution {
@@ -243,17 +247,17 @@ export interface CreateStreamRequest {
    */
   retention?: common.Duration;
   /**
-   * Retry run only. The previous run, whose Records this withdraws.
+   * The handle, whose id is stream-id. With an owner, it needs the handle's owner.
    */
-  withdrawRun?: string;
-  /**
-   * The ref, whose id is stream-id. A create with an owner needs the ref's owner.
-   */
-  ref?: StreamRef;
+  streamHandle?: StreamHandle;
   /**
    * The Stream id. Required, and never empty.
    */
   id: string;
+  /**
+   * Retry run only. The previous run, whose Records this withdraws.
+   */
+  withdrawRun?: string;
   /**
    * The Workflow run that owns the Stream. The Workflow transport sets it.
    */
@@ -266,13 +270,16 @@ function createStreamRequestFromProto(
   return {
     retention:
       proto.retention == null ? undefined : support.durationFromProto(proto.retention),
-    withdrawRun: proto.withdrawRun ?? undefined,
-    ref: proto.ref == null ? undefined : streamRefFromProto(proto.ref),
+    streamHandle:
+      proto.streamHandle == null
+        ? undefined
+        : streamHandleFromProto(proto.streamHandle),
     id: requiredField(
       proto.streamId === "" ? undefined : proto.streamId,
       "sourced field",
       "id",
     ),
+    withdrawRun: proto.withdrawRun ?? undefined,
     owner: proto.owner == null ? undefined : producerFromProto(proto.owner),
   };
 }
@@ -283,9 +290,10 @@ function createStreamRequestToProto(
   return {
     retention:
       model.retention == null ? undefined : support.durationToProto(model.retention),
-    withdrawRun: model.withdrawRun,
-    ref: model.ref == null ? undefined : streamRefToProto(model.ref),
+    streamHandle:
+      model.streamHandle == null ? undefined : streamHandleToProto(model.streamHandle),
     streamId: model.id,
+    withdrawRun: model.withdrawRun,
     owner: model.owner == null ? undefined : producerToProto(model.owner),
   };
 }
@@ -492,16 +500,13 @@ export const appendRecordsResponseTransferTypeConverter = {
   },
 };
 export interface AppendRecordsRequest<BodyT> {
-  stream: StreamRef;
+  handle: StreamHandle;
   records?: AppendRecord<BodyT>[];
   /**
-   * The batch number in this epoch, 1 or more. It is part of the dedupe key.
+   * The batch number in this epoch. Empty takes the next one, and a retry writes it
+   * again.
    */
   sequence?: Long;
-  /**
-   * Retry run only. The previous run, whose Records this withdraws.
-   */
-  withdrawRun?: string;
   /**
    * Local Activity only. The run's failed or timed out Workflow Tasks.
    */
@@ -514,6 +519,10 @@ export interface AppendRecordsRequest<BodyT> {
    * Local Activity only. The run's last completed Workflow Task.
    */
   previousCompletedTask?: WorkflowTaskEpoch;
+  /**
+   * Retry run only. The previous run, whose Records this withdraws.
+   */
+  withdrawRun?: string;
 }
 
 function appendRecordsRequestFromProto<BodyT>(
@@ -523,15 +532,14 @@ function appendRecordsRequestFromProto<BodyT>(
   } = {},
 ): AppendRecordsRequest<BodyT> {
   return {
-    stream: streamRefFromProto(
-      requiredField(proto.stream, "AppendRecordsRequest", "stream"),
+    handle: streamHandleFromProto(
+      requiredField(proto.handle, "AppendRecordsRequest", "handle"),
     ),
     records: proto.records?.map((value: any) =>
       appendRecordFromProto(value, { bodyT: typeInfo.bodyT }),
     ),
     sequence:
       proto.sequence == null ? undefined : Long.fromValue(proto.sequence, false),
-    withdrawRun: proto.withdrawRun ?? undefined,
     failedTasks:
       proto.failedTasks?.map((value: any) => Long.fromValue(value, false)) ?? [],
     producer: proto.producer == null ? undefined : producerFromProto(proto.producer),
@@ -539,6 +547,7 @@ function appendRecordsRequestFromProto<BodyT>(
       proto.previousCompletedTask == null
         ? undefined
         : workflowTaskEpochFromProto(proto.previousCompletedTask),
+    withdrawRun: proto.withdrawRun ?? undefined,
   };
 }
 
@@ -549,21 +558,21 @@ function appendRecordsRequestToProto<BodyT>(
   } = {},
 ): temporal.api.streamservice.v1.IAppendRecordsRequest {
   return {
-    stream: streamRefToProto(
-      requiredField(model.stream, "AppendRecordsRequest", "stream"),
+    handle: streamHandleToProto(
+      requiredField(model.handle, "AppendRecordsRequest", "handle"),
     ),
     records: model.records?.map((value) =>
       appendRecordToProto(value, { bodyT: typeInfo.bodyT }),
     ),
     sequence:
       model.sequence == null ? undefined : Long.fromValue(model.sequence, false),
-    withdrawRun: model.withdrawRun,
     failedTasks: model.failedTasks?.map((value) => Long.fromValue(value, false)),
     producer: model.producer == null ? undefined : producerToProto(model.producer),
     previousCompletedTask:
       model.previousCompletedTask == null
         ? undefined
         : workflowTaskEpochToProto(model.previousCompletedTask),
+    withdrawRun: model.withdrawRun,
   };
 }
 
@@ -734,8 +743,11 @@ export const closeStreamResponseTransferTypeConverter = {
   },
 };
 export interface CloseStreamRequest {
-  stream: StreamRef;
+  handle: StreamHandle;
   result?: common.Payload;
+  /**
+   * Empty completes the Stream. A cancel failure cancels it. Any other fails it.
+   */
   failure?: Error;
   producer?: Producer;
 }
@@ -744,8 +756,8 @@ function closeStreamRequestFromProto(
   proto: temporal.api.streamservice.v1.ICloseStreamRequest,
 ): CloseStreamRequest {
   return {
-    stream: streamRefFromProto(
-      requiredField(proto.stream, "CloseStreamRequest", "stream"),
+    handle: streamHandleFromProto(
+      requiredField(proto.handle, "CloseStreamRequest", "handle"),
     ),
     result: proto.result == null ? undefined : support.payloadFromProto(proto.result),
     failure:
@@ -758,8 +770,8 @@ function closeStreamRequestToProto(
   model: CloseStreamRequest,
 ): temporal.api.streamservice.v1.ICloseStreamRequest {
   return {
-    stream: streamRefToProto(
-      requiredField(model.stream, "CloseStreamRequest", "stream"),
+    handle: streamHandleToProto(
+      requiredField(model.handle, "CloseStreamRequest", "handle"),
     ),
     result: model.result == null ? undefined : support.payloadToProto(model.result),
     failure: model.failure == null ? undefined : support.errorToFailure(model.failure),
@@ -882,7 +894,7 @@ function streamRecordFromProto<BodyT>(
     case "superseded":
       result = {
         tag: "superseded",
-        value: supersessionFromProto(
+        value: streamSupersededFromProto(
           requiredField(proto.superseded, "StreamRecord", "superseded"),
         ),
       };
@@ -924,7 +936,7 @@ function streamRecordToProto<BodyT>(
         break;
       case "superseded":
         proto.item = "superseded";
-        proto.superseded = supersessionToProto(result.value);
+        proto.superseded = streamSupersededToProto(result.value);
         break;
       case "close":
         proto.item = "close";
@@ -1031,7 +1043,7 @@ export function createStreamDataTransferTypeConverter<BodyT>(
     },
   };
 }
-export interface Supersession {
+export interface StreamSuperseded {
   producerId: string;
   /**
    * Workflow only. Started event ids of failed or timed out Workflow Tasks.
@@ -1053,13 +1065,13 @@ export interface Supersession {
   runId?: string;
 }
 
-function supersessionFromProto(
-  proto: temporal.api.stream.v1.ISupersession,
-): Supersession {
+function streamSupersededFromProto(
+  proto: temporal.api.stream.v1.IStreamSuperseded,
+): StreamSuperseded {
   return {
     producerId: requiredField(
       proto.producerId === "" ? undefined : proto.producerId,
-      "Supersession",
+      "StreamSuperseded",
       "producerId",
     ),
     failedTasks: proto.failedTasks?.map((value: any) => Long.fromValue(value, false)),
@@ -1077,11 +1089,11 @@ function supersessionFromProto(
   };
 }
 
-function supersessionToProto(
-  model: Supersession,
-): temporal.api.stream.v1.ISupersession {
+function streamSupersededToProto(
+  model: StreamSuperseded,
+): temporal.api.stream.v1.IStreamSuperseded {
   return {
-    producerId: requiredField(model.producerId, "Supersession", "producerId"),
+    producerId: requiredField(model.producerId, "StreamSuperseded", "producerId"),
     failedTasks: model.failedTasks?.map((value) => Long.fromValue(value, false)),
     producerKind:
       model.producerKind == null
@@ -1097,13 +1109,13 @@ function supersessionToProto(
   };
 }
 
-export const supersessionTransferTypeConverter = {
-  fromTransferType(value: temporal.api.stream.v1.ISupersession): Supersession {
-    return supersessionFromProto(value);
+export const streamSupersededTransferTypeConverter = {
+  fromTransferType(value: temporal.api.stream.v1.IStreamSuperseded): StreamSuperseded {
+    return streamSupersededFromProto(value);
   },
 
-  toTransferType(value: Supersession): temporal.api.stream.v1.ISupersession {
-    return supersessionToProto(value);
+  toTransferType(value: StreamSuperseded): temporal.api.stream.v1.IStreamSuperseded {
+    return streamSupersededToProto(value);
   },
 };
 export interface StreamClose {
@@ -1154,7 +1166,7 @@ export const streamCloseTransferTypeConverter = {
   },
 };
 export interface ReadRecordsRequest {
-  stream: StreamRef;
+  handle: StreamHandle;
   /**
    * Start offset. Empty uses start. OUT_OF_RANGE past the newest offset + 1.
    */
@@ -1189,8 +1201,8 @@ function readRecordsRequestFromProto(
   proto: temporal.api.streamservice.v1.IReadRecordsRequest,
 ): ReadRecordsRequest {
   return {
-    stream: streamRefFromProto(
-      requiredField(proto.stream, "ReadRecordsRequest", "stream"),
+    handle: streamHandleFromProto(
+      requiredField(proto.handle, "ReadRecordsRequest", "handle"),
     ),
     fromOffset:
       proto.fromOffset == null ? undefined : Long.fromValue(proto.fromOffset, false),
@@ -1211,8 +1223,8 @@ function readRecordsRequestToProto(
   model: ReadRecordsRequest,
 ): temporal.api.streamservice.v1.IReadRecordsRequest {
   return {
-    stream: streamRefToProto(
-      requiredField(model.stream, "ReadRecordsRequest", "stream"),
+    handle: streamHandleToProto(
+      requiredField(model.handle, "ReadRecordsRequest", "handle"),
     ),
     fromOffset:
       model.fromOffset == null ? undefined : Long.fromValue(model.fromOffset, false),
@@ -1294,15 +1306,15 @@ export const describeStreamResponseTransferTypeConverter = {
   },
 };
 export interface DescribeStreamRequest {
-  stream: StreamRef;
+  handle: StreamHandle;
 }
 
 function describeStreamRequestFromProto(
   proto: temporal.api.streamservice.v1.IDescribeStreamRequest,
 ): DescribeStreamRequest {
   return {
-    stream: streamRefFromProto(
-      requiredField(proto.stream, "DescribeStreamRequest", "stream"),
+    handle: streamHandleFromProto(
+      requiredField(proto.handle, "DescribeStreamRequest", "handle"),
     ),
   };
 }
@@ -1311,8 +1323,8 @@ function describeStreamRequestToProto(
   model: DescribeStreamRequest,
 ): temporal.api.streamservice.v1.IDescribeStreamRequest {
   return {
-    stream: streamRefToProto(
-      requiredField(model.stream, "DescribeStreamRequest", "stream"),
+    handle: streamHandleToProto(
+      requiredField(model.handle, "DescribeStreamRequest", "handle"),
     ),
   };
 }

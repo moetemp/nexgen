@@ -21,9 +21,9 @@ from ...models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamErrorDetails,
+    StreamHandle,
     StreamReadStart,
     StreamRecord,
-    StreamRef,
 )
 import temporal_support as _support
 from ..._poll import PollIterator
@@ -35,9 +35,9 @@ BodyT = typing.TypeVar("BodyT")
 
 @dataclasses.dataclass(init=False)
 class Stream(typing.Generic[BodyT]):
-    """A handle on one Stream. Build it from a stream-ref, or get it from a create."""
+    """One Stream. Build it from a stream-handle, or get it from a create."""
 
-    stream: StreamRef
+    handle: StreamHandle
     created: bool | None
 
     def __init__(
@@ -45,12 +45,12 @@ class Stream(typing.Generic[BodyT]):
         nexus_client: temporalio.client.NexusClient[typing.Any],
         /,
         *,
-        stream: StreamRef,
+        handle: StreamHandle,
         created: bool | None,
         body_type: type[BodyT] | None = None,
     ) -> None:
         self._nexus_client: temporalio.client.NexusClient[typing.Any] = nexus_client
-        self.stream = stream
+        self.handle = handle
         self.created = created
         # Not a dataclass field, so the converter doesn't encode it. A
         # decoded handle decodes its generic values as `typing.Any`.
@@ -79,11 +79,12 @@ class Stream(typing.Generic[BodyT]):
     ) -> int:
         """Publish values, and return the offset of the last one."""
         request = AppendRecordsRequest(
-            stream=self.stream,
+            handle=self.handle,
             records=[AppendRecord(body=value) for value in values],
             failed_tasks=_support.local_activity_failed_tasks(),
             producer=_support.client_producer(),
             previous_completed_task=_support.local_activity_previous_completed_task(),
+            withdraw_run=_support.withdraw_run(),
         )
         try:
             handle = await self._nexus_client.start_operation(
@@ -114,7 +115,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> None:
         """Close the Stream. Readers drain what is left, then end."""
         request = CloseStreamRequest(
-            stream=self.stream,
+            handle=self.handle,
             result=result,
             failure=failure,
             producer=_support.client_producer(),
@@ -151,7 +152,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> ReadRecordsResponse[BodyT]:
         """Read one page of Records. The poll iterator reads them all."""
         request = ReadRecordsRequest(
-            stream=self.stream,
+            handle=self.handle,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -210,7 +211,7 @@ class Stream(typing.Generic[BodyT]):
                 returned alone.
         """
         request = ReadRecordsRequest(
-            stream=self.stream,
+            handle=self.handle,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -255,7 +256,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> DescribeStreamResponse:
         """Describe the Stream's status, newest offset and Retention."""
         request = DescribeStreamRequest(
-            stream=self.stream,
+            handle=self.handle,
         )
         try:
             handle = await self._nexus_client.start_operation(

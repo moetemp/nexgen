@@ -65,7 +65,7 @@ def test_read_items_round_trip_as_their_records(models: types.ModuleType) -> Non
             ),
             models.StreamRecord(
                 item=models.StreamItemSuperseded(
-                    models.Supersession(producer_id="workflow-1", failed_tasks=[7])
+                    models.StreamSuperseded(producer_id="workflow-1", failed_tasks=[7])
                 ),
                 offset=2,
             ),
@@ -109,13 +109,13 @@ def test_a_record_of_an_unknown_item_kind_has_no_item(models: types.ModuleType) 
 def test_a_request_without_its_stream_is_refused(models: types.ModuleType) -> None:
     converter = models._AppendRecordsRequestTransferTypeConverter[object]()
     wire = converter.to_transfer_type(
-        models.AppendRecordsRequest(stream=models.StreamRef(id="s-1"))
+        models.AppendRecordsRequest(handle=models.StreamHandle(id="s-1"))
     )
-    assert wire.stream.id == "s-1"
+    assert wire.handle.id == "s-1"
 
-    wire.ClearField("stream")
+    wire.ClearField("handle")
     with pytest.raises(
-        ValueError, match="missing required field AppendRecordsRequest.stream"
+        ValueError, match="missing required field AppendRecordsRequest.handle"
     ):
         _ = converter.from_transfer_type(wire, models.AppendRecordsRequest)
 
@@ -139,7 +139,7 @@ def test_an_unknown_number_of_an_enum_with_no_fallback_fails_the_message(
 ) -> None:
     converter = models._ReadRecordsRequestTransferTypeConverter()
     wire = request_response_pb2.ReadRecordsRequest(
-        stream=message_pb2.StreamRef(id="s-1"),
+        handle=message_pb2.StreamHandle(id="s-1"),
         start=stream_pb2.StreamReadStart.ValueType(9),
     )
 
@@ -157,9 +157,9 @@ async def test_workflow_apis_call_the_stream_service(
     api: types.ModuleType,
     model_types: types.ModuleType,
 ) -> None:
-    ref = model_types.StreamRef(id="workflow-stream")
+    ref = model_types.StreamHandle(id="workflow-stream")
     replies = {
-        "CreateStream": model_types.CreateStreamResult(stream=ref, created=True),
+        "CreateStream": model_types.CreateStreamResult(handle=ref, created=True),
         "AppendRecords": model_types.AppendRecordsResponse(last_offset=3),
     }
     calls: list[tuple[str, typing.Any]] = []
@@ -205,12 +205,12 @@ async def test_workflow_apis_call_the_stream_service(
             model_types.CreateStreamRequest(
                 id="wf-1:r1:texts",
                 owner=run,
-                ref=model_types.StreamRef(id="wf-1:r1:texts", owner=owner),
+                stream_handle=model_types.StreamHandle(id="wf-1:r1:texts", owner=owner),
             ),
         ),
         (
             "AppendRecords",
-            model_types.AppendRecordsRequest(stream=ref, records=[], producer=run),
+            model_types.AppendRecordsRequest(handle=ref, records=[], producer=run),
         ),
     ]
     # The sources build the models of one package, so the calls compare as data.

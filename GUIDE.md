@@ -1241,18 +1241,18 @@ record create-stream-request {
   /// @nexus.name python="id" typescript="id" dotnet="Id"
   stream-id: string,
   /// @nexus.flatten-in-api fields="backend" fill="id=stream-id"
-  %ref: option<stream-ref>,
+  stream-handle: option<stream-handle>,
 }
 ```
 
-The call takes `backend`, and the ref copies the id. The call sets the field
+The call takes `backend`, and the handle copies the id. The call sets the field
 when it sets a promoted field or a fill applies, so this create always sets
-`ref`.
+`stream_handle`.
 
 ```python
 async def create_stream(..., id: str, backend: str | None = None, ...) -> ...:
-    ref = StreamRef(backend=backend, id=id)
-    request = CreateStreamRequest(id=id, ref=ref)
+    stream_handle = StreamHandle(backend=backend, id=id)
+    request = CreateStreamRequest(id=id, stream_handle=stream_handle)
 ```
 
 The field's type must be a record that a proto backs, or an `option` of one. The
@@ -1269,13 +1269,13 @@ Go refuses a field-level flatten, and Java doesn't generate proto-backed models.
 
 An `@nexus.source` with `field` on the same field fills a field of the record
 from a source, in the targets that it names. The Store refuses a Workflow create
-whose ref doesn't name the run chain, so the Workflow target sets the owner:
+whose handle doesn't name the run chain, so the Workflow target sets the owner:
 
 ```wit
   /// @nexus.flatten-in-api fields="backend" fill="id=stream-id"
   /// @nexus.source field="owner" targets="workflow" python="workflow_handle_owner()"
   ///   typescript="workflowHandleOwner()" dotnet="StreamWorkflowContext.HandleOwner()"
-  %ref: option<stream-ref>,
+  stream-handle: option<stream-handle>,
 ```
 
 The source sets its field when the call builds the record, but it doesn't make
@@ -1888,15 +1888,15 @@ record, and its parameters can't share a name in any case. TypeScript and .NET
 factories take the whole parameter.
 
 ```wit
-/// @nexus.flatten-in-api param="stream" fields="id backend" keep=true
+/// @nexus.flatten-in-api param="handle" fields="id backend" keep=true
 resource %stream {
-  constructor(%stream: stream-ref, created: option<bool>);
+  constructor(handle: stream-handle, created: option<bool>);
 }
 ```
 
 ```python
 stream = client.get_stream(Turns, id="chat-1:turns", backend="redis")
-same = client.get_stream(Turns, stream=StreamRef(id="chat-1:turns"))
+same = client.get_stream(Turns, handle=StreamHandle(id="chat-1:turns"))
 ```
 
 In TypeScript, the `client/` package has `index.ts`, `extension.ts`,
@@ -2197,9 +2197,9 @@ values of the response with these types.
   as `CreateStreamAsync<Turn>(options)`.
 
 The factory of a client resource takes the runtime types too, as
-`getStream(ref, undefined, turnType)` or `GetStream<Turn>(streamRef, null)`. The
+`getStream(handle, undefined, turnType)` or `GetStream<Turn>(handle, null)`. The
 Python factory of a resource with `@nexus.definition` takes the definition, as
-`get_stream(Turns, stream=ref)`.
+`get_stream(Turns, handle=handle)`.
 
 An operation that returns the resource can take a definition in place of its
 runtime types. See [`@nexus.definition`](#nexusdefinition).

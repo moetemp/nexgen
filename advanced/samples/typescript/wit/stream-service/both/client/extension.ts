@@ -2,10 +2,11 @@
 
 import type * as common from "@temporalio/common";
 import type * as nexus from "nexus-rpc";
-import type { StreamRef, CreateStreamRequest } from "../models";
+import type { StreamHandle, CreateStreamRequest } from "../models";
 import { streamService } from "../services";
 import { Stream } from "./resources";
 import { type NexusServiceClient, operationId } from "./nexus-client";
+import * as support from "../../../../support/temporal_model_converters";
 
 function requiredField<T>(
   value: T | null | undefined,
@@ -20,9 +21,9 @@ function requiredField<T>(
 
 type CreateStreamInput = CreateStreamRequest extends infer Input
   ? Input extends unknown
-    ? Omit<Input, "owner" | "ref" | "withdrawRun"> & {
+    ? Omit<Input, "owner" | "streamHandle" | "withdrawRun"> & {
         owner?: never;
-        ref?: never;
+        streamHandle?: never;
         withdrawRun?: never;
       } & { backend?: string }
     : never
@@ -74,7 +75,7 @@ export function StreamServiceClientExtension<
      * Returns the `Stream` handle that has these identity fields.
      */
     public getStream<BodyT = unknown>(
-      stream: StreamRef,
+      handle: StreamHandle,
       created: boolean | undefined,
       bodyType?: common.TypeInfo<BodyT>,
     ): Stream<BodyT> {
@@ -83,7 +84,7 @@ export function StreamServiceClientExtension<
           service: streamService,
           endpoint: "__temporal_system",
         }),
-        stream,
+        handle,
         created,
         bodyType,
       );
@@ -99,7 +100,8 @@ export function StreamServiceClientExtension<
       const { backend, ...requestFields } = requestInput;
       const request = {
         ...requestFields,
-        ref: { backend, id: requestFields.id },
+        withdrawRun: support.withdrawRun(),
+        streamHandle: { backend, id: requestFields.id },
       } as CreateStreamRequest;
       const nexusClient = this.createNexusClient({
         service: streamService,
@@ -113,7 +115,7 @@ export function StreamServiceClientExtension<
       const result = await handle.result();
       return new Stream(
         nexusClient,
-        requiredField(result.stream, "resource", "stream"),
+        requiredField(result.handle, "resource", "handle"),
         result.created ?? undefined,
         bodyType,
       );

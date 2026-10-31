@@ -2,9 +2,6 @@ syntax = "proto3";
 
 package temporal.api.enums.v1;
 
-// nexgen reads descriptors/streams.bin, not this file. After a change, rebuild the bin and
-// the bindings with the steps in advanced/samples/README.md.
-
 option go_package = "go.temporal.io/api/enums/v1;enums";
 option java_package = "io.temporal.api.enums.v1";
 option java_multiple_files = true;

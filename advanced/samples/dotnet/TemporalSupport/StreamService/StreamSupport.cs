@@ -24,6 +24,10 @@ namespace Nexgen.Support
 
         internal static Temporalio.Workflows.Producer Producer() =>
             new($"wf:{Workflow.Info.RunId}") { RunId = Workflow.Info.RunId };
+
+        // The run that a retry run's Workflow retries. Null elsewhere.
+        internal static string? WithdrawRun() =>
+            Workflow.InWorkflow && Workflow.Info.Attempt > 1 ? Workflow.Info.ContinuedRunId : null;
     }
 
     // The client sources. An Activity's attempt produces in an Activity, or else the client.

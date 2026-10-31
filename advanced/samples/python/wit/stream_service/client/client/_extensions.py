@@ -13,7 +13,7 @@ from ..services import StreamService
 from ..models import (
     CreateStreamRequest,
     StreamErrorDetails,
-    StreamRef,
+    StreamHandle,
 )
 from ._resources.stream import Stream
 import temporal_support as _support
@@ -52,24 +52,24 @@ class StreamServiceClientExtension(abc.ABC):
         definition: type[temporal_support.StreamDefinition[BodyT]],
         *,
         id: str | None = None,
-        stream: StreamRef | None = None,
+        handle: StreamHandle | None = None,
         backend: str | None = None,
         created: bool | None = None,
     ) -> Stream[BodyT]:
-        """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``stream``."""
+        """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``handle``."""
         (body_type,) = _support.definition_type_arguments(definition)
-        if stream is None:
+        if handle is None:
             if id is None:
-                raise TypeError("pass id or stream")
-            stream = StreamRef(id=id, backend=backend)
+                raise TypeError("pass id or handle")
+            handle = StreamHandle(id=id, backend=backend)
         elif id is not None or backend is not None:
-            raise TypeError("pass stream or its fields, not both")
+            raise TypeError("pass handle or its fields, not both")
         return Stream(
             self.create_nexus_client(
                 service=StreamService,
                 endpoint="__temporal_system",
             ),
-            stream=stream,
+            handle=handle,
             created=created,
             body_type=body_type,
         )
@@ -95,12 +95,12 @@ class StreamServiceClientExtension(abc.ABC):
                 rpc_timeout=rpc_timeout,
             )
             result = await handle.result()
-            if result.stream is None:
-                raise RuntimeError("CreateStream answered without `stream`")
+            if result.handle is None:
+                raise RuntimeError("CreateStream answered without `handle`")
             resource = Stream(
                 nexus_client,
                 body_type=body_type,
-                stream=result.stream,
+                handle=result.handle,
                 created=result.created or None,
             )
             return resource
@@ -133,14 +133,15 @@ class StreamServiceClientExtension(abc.ABC):
                 reads it.
         """
         (body_type,) = _support.definition_type_arguments(definition)
-        ref = StreamRef(
+        stream_handle = StreamHandle(
             backend=backend,
             id=id,
         )
         request = CreateStreamRequest(
             id=id,
             retention=retention,
-            ref=ref,
+            withdraw_run=_support.withdraw_run(),
+            stream_handle=stream_handle,
         )
         return await self._stream_service_create_stream(
             request, body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout

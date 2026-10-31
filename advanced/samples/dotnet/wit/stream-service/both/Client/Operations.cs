@@ -56,8 +56,8 @@ namespace Temporalio.Workflows.Client
         /// Returns the <c>Stream</c> handle that has these identity fields.
         /// </summary>
         [GeneratedCode("nexgen", null)]
-        public static Stream<TBody> GetStream<TBody>(this Temporalio.Client.ITemporalClient client, StreamRef streamValue, bool? created) =>
-            new(client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService"), streamValue, created);
+        public static Stream<TBody> GetStream<TBody>(this Temporalio.Client.ITemporalClient client, StreamHandle handle, bool? created) =>
+            new(client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService"), handle, created);
 
         /// <param name="client">The client that starts the operation.</param>
         /// <param name="request">Create a Stream, or get the open one. A closed, expired or another owner's Stream fails.</param>
@@ -66,7 +66,7 @@ namespace Temporalio.Workflows.Client
         {
             var nexusClient = client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService");
             var result = await nexusClient.ExecuteNexusOperationAsync<CreateStreamResult>("CreateStream", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
-            return new Stream<TBody>(nexusClient, (result.Stream ?? throw new System.InvalidOperationException("CreateStream answered without `stream`")), result.Created);
+            return new Stream<TBody>(nexusClient, (result.Handle ?? throw new System.InvalidOperationException("CreateStream answered without `handle`")), result.Created);
         }
 
         /// <param name="client">The client that starts the operation.</param>
@@ -74,10 +74,10 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public static Task<Stream<TBody>> CreateStreamAsync<TBody>(this Temporalio.Client.ITemporalClient client, CreateStreamOptions options)
         {
-            var request = new CreateStreamRequest(options.Id, default)
+            var request = new CreateStreamRequest(options.Id, Nexgen.Support.StreamWorkflowContext.WithdrawRun(), default)
             {
                 Retention = options.Retention,
-                Ref = new StreamRef(options.Id) { Backend = options.Backend },
+                StreamHandle = new StreamHandle(options.Id) { Backend = options.Backend },
             };
             return CreateStreamAsync<TBody>(client, request);
         }

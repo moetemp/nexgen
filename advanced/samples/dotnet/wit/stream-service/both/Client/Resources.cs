@@ -15,14 +15,14 @@ namespace Temporalio.Workflows.Client
     [GeneratedCode("nexgen", null)]
     public class Stream<TBody>
     {
-        public Stream(Temporalio.Client.NexusClient nexusClient, StreamRef streamValue, bool? created)
+        public Stream(Temporalio.Client.NexusClient nexusClient, StreamHandle handle, bool? created)
         {
             this.nexusClient = nexusClient;
-            StreamValue = streamValue;
+            Handle = handle;
             Created = created;
         }
 
-        public StreamRef StreamValue { get; }
+        public StreamHandle Handle { get; }
         public bool? Created { get; }
 
         private readonly Temporalio.Client.NexusClient nexusClient;
@@ -31,7 +31,7 @@ namespace Temporalio.Workflows.Client
         public async Task<long> PublishAsync(params TBody[] values)
         {
             var recordsValue = values.Select(value => new AppendRecord<TBody>(value)).ToList();
-            var request = new AppendRecordsRequest<TBody>(StreamValue, recordsValue, Nexgen.Support.StreamActivityContext.LocalActivityFailedTasks(), Nexgen.Support.StreamActivityContext.Producer(), Nexgen.Support.StreamActivityContext.LocalActivityPreviousCompletedTask());
+            var request = new AppendRecordsRequest<TBody>(Handle, recordsValue, Nexgen.Support.StreamActivityContext.LocalActivityFailedTasks(), Nexgen.Support.StreamActivityContext.Producer(), Nexgen.Support.StreamActivityContext.LocalActivityPreviousCompletedTask(), Nexgen.Support.StreamWorkflowContext.WithdrawRun());
             var result = await nexusClient.ExecuteNexusOperationAsync<AppendRecordsResponse>("AppendRecords", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
             return result.LastOffset ?? 0L;
         }
@@ -39,14 +39,14 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public async Task CloseAsync(object? result, System.Exception? failure)
         {
-            var request = new CloseStreamRequest(StreamValue, Nexgen.Support.StreamActivityContext.Producer()) { Result = result, Failure = failure };
+            var request = new CloseStreamRequest(Handle, Nexgen.Support.StreamActivityContext.Producer()) { Result = result, Failure = failure };
             await nexusClient.ExecuteNexusOperationAsync<CloseStreamResponse>("CloseStream", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
         }
 
         [GeneratedCode("nexgen", null)]
         public async Task<ReadRecordsResponse<TBody>> ReadAsync(long? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait, long? maxBytes)
         {
-            var request = new ReadRecordsRequest(StreamValue) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, MaxBytes = maxBytes };
+            var request = new ReadRecordsRequest(Handle) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, MaxBytes = maxBytes };
             var result = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse<TBody>>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
             return result;
         }
@@ -55,7 +55,7 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public async IAsyncEnumerable<ReadRecordsResponse<TBody>> ReadPagesAsync(long? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait, long? maxBytes, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken = default)
         {
-            var request = new ReadRecordsRequest(StreamValue) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, MaxBytes = maxBytes };
+            var request = new ReadRecordsRequest(Handle) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, MaxBytes = maxBytes };
             while (true)
             {
                 var response = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse<TBody>>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions(cancellationToken)).ConfigureAwait(false);
@@ -73,7 +73,7 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public async Task<DescribeStreamResponse> DescribeAsync()
         {
-            var request = new DescribeStreamRequest(StreamValue);
+            var request = new DescribeStreamRequest(Handle);
             var result = await nexusClient.ExecuteNexusOperationAsync<DescribeStreamResponse>("DescribeStream", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
             return result;
         }

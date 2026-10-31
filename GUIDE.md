@@ -1253,18 +1253,18 @@ record create-stream-request {
   /// @nexus.name python="id" typescript="id" dotnet="Id"
   stream-id: string,
   /// @nexus.flatten-in-api fields="backend" fill="id=stream-id"
-  %ref: option<stream-ref>,
+  stream-handle: option<stream-handle>,
 }
 ```
 
-The call takes `backend`, and the ref copies the id. The call sets the field
+The call takes `backend`, and the handle copies the id. The call sets the field
 when it sets a promoted field or a fill applies, so this create always sets
-`ref`.
+`stream_handle`.
 
 ```python
 async def create_stream(..., id: str, backend: str | None = None, ...) -> ...:
-    ref = StreamRef(backend=backend, id=id)
-    request = CreateStreamRequest(id=id, ref=ref)
+    stream_handle = StreamHandle(backend=backend, id=id)
+    request = CreateStreamRequest(id=id, stream_handle=stream_handle)
 ```
 
 The field's type must be a record that a proto backs, or an `option` of one. The
@@ -1897,22 +1897,22 @@ record, and its parameters can't share a name in any case. TypeScript and .NET
 factories take the whole parameter.
 
 ```wit
-/// @nexus.flatten-in-api param="stream" fields="id backend" keep=true
+/// @nexus.flatten-in-api param="handle" fields="id backend" keep=true
 resource %stream {
-  constructor(%stream: stream-ref, created: option<bool>);
+  constructor(handle: stream-handle, created: option<bool>);
 }
 ```
 
 ```python
 stream = client.get_stream(Turns, id="chat-1:turns", backend="redis")
-same = client.get_stream(Turns, stream=StreamRef(id="chat-1:turns"))
+same = client.get_stream(Turns, handle=StreamHandle(id="chat-1:turns"))
 ```
 
 A Python resource with one required field of a non-generic proto-backed record,
 and no other required field, passes as that record. Each package's class has a
 transfer converter, so a client `Stream` passes to Workflow code as its
-`StreamRef`, in the `json/protobuf` encoding of the default converter. The type
-hint gives the type arguments of a decoded handle, as in `Stream[Turn]`. A
+`StreamHandle`, in the `json/protobuf` encoding of the default converter. The
+type hint gives the type arguments of a decoded handle, as in `Stream[Turn]`. A
 client can't decode such a handle, since a client handle needs a client, so
 decode the ref and pass it to the factory. Such a resource is a plain class, not
 a dataclass, since the SDK converter applies a transfer type inside another
@@ -2214,9 +2214,9 @@ values of the response with these types.
   as `CreateStreamAsync<Turn>(options)`.
 
 The factory of a client resource takes the runtime types too, as
-`getStream(ref, undefined, turnType)` or `GetStream<Turn>(streamRef, null)`. The
+`getStream(handle, undefined, turnType)` or `GetStream<Turn>(handle, null)`. The
 Python factory of a resource with `@nexus.definition` takes the definition, as
-`get_stream(Turns, stream=ref)`.
+`get_stream(Turns, handle=handle)`.
 
 An operation that returns the resource can take a definition in place of its
 runtime types. See [`@nexus.definition`](#nexusdefinition).

@@ -90,7 +90,7 @@ namespace Temporalio.Workflows
         public sealed record Data(StreamData<TBody> Value) : StreamItem<TBody>;
 
         [GeneratedCode("nexgen", null)]
-        public sealed record Superseded(Supersession Value) : StreamItem<TBody>;
+        public sealed record Superseded(StreamSuperseded Value) : StreamItem<TBody>;
 
         [GeneratedCode("nexgen", null)]
         public sealed record Close(StreamClose Value) : StreamItem<TBody>;
@@ -160,25 +160,22 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Initializes a new instance of the <see cref="AppendRecordsRequest{TBody}"/> class.
         /// </summary>
-        public AppendRecordsRequest(StreamRef stream, IReadOnlyList<AppendRecord<TBody>> records, IReadOnlyList<long>? failedTasks, Producer? producer, WorkflowTaskEpoch? previousCompletedTask)
+        public AppendRecordsRequest(StreamHandle handle, IReadOnlyList<AppendRecord<TBody>> records, IReadOnlyList<long>? failedTasks, Producer? producer, WorkflowTaskEpoch? previousCompletedTask, string? withdrawRun)
         {
-            Stream = stream;
+            Handle = handle;
             Records = records;
             FailedTasks = failedTasks ?? System.Array.Empty<long>();
             Producer = producer;
             PreviousCompletedTask = previousCompletedTask;
+            WithdrawRun = withdrawRun;
         }
 
-        public StreamRef Stream { get; init; }
+        public StreamHandle Handle { get; init; }
         public IReadOnlyList<AppendRecord<TBody>> Records { get; init; }
         /// <summary>
-        /// The batch number in this epoch, 1 or more. It is part of the dedupe key.
+        /// The batch number in this epoch. Empty takes the next one, and a retry writes it again.
         /// </summary>
         public long? Sequence { get; init; }
-        /// <summary>
-        /// Retry run only. The previous run, whose Records this withdraws.
-        /// </summary>
-        public string? WithdrawRun { get; init; }
         /// <summary>
         /// Local Activity only. The run's failed or timed out Workflow Tasks.
         /// </summary>
@@ -191,13 +188,16 @@ namespace Temporalio.Workflows
         /// Local Activity only. The run's last completed Workflow Task.
         /// </summary>
         public WorkflowTaskEpoch? PreviousCompletedTask { get; init; }
+        /// <summary>
+        /// Retry run only. The previous run, whose Records this withdraws.
+        /// </summary>
+        public string? WithdrawRun { get; init; }
 
         internal static AppendRecordsRequest<TBody> FromTransferType(Temporalio.Api.StreamService.V1.AppendRecordsRequest wire)
         {
-            return new AppendRecordsRequest<TBody>(StreamRef.FromTransferType(wire.Stream), System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(wire.Records, item => AppendRecord<TBody>.FromTransferType(item))), System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(wire.FailedTasks, item => item)), wire.Producer == null ? null : Producer.FromTransferType(wire.Producer), wire.PreviousCompletedTask == null ? null : WorkflowTaskEpoch.FromTransferType(wire.PreviousCompletedTask))
+            return new AppendRecordsRequest<TBody>(StreamHandle.FromTransferType(wire.Handle), System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(wire.Records, item => AppendRecord<TBody>.FromTransferType(item))), System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(wire.FailedTasks, item => item)), wire.Producer == null ? null : Producer.FromTransferType(wire.Producer), wire.PreviousCompletedTask == null ? null : WorkflowTaskEpoch.FromTransferType(wire.PreviousCompletedTask), string.IsNullOrEmpty(wire.WithdrawRun) ? null : wire.WithdrawRun)
             {
                 Sequence = wire.Sequence == 0 ? null : wire.Sequence,
-                WithdrawRun = string.IsNullOrEmpty(wire.WithdrawRun) ? null : wire.WithdrawRun,
             };
         }
 
@@ -213,15 +213,15 @@ namespace Temporalio.Workflows
             {
                 proto.PreviousCompletedTask = (Temporalio.Api.Stream.V1.WorkflowTaskEpoch)previousCompletedTask.ToTransferType();
             }
-            proto.Stream = (Temporalio.Api.Stream.V1.StreamRef)Stream.ToTransferType();
+            if (WithdrawRun is { } withdrawRun)
+            {
+                proto.WithdrawRun = withdrawRun;
+            }
+            proto.Handle = (Temporalio.Api.Stream.V1.StreamHandle)Handle.ToTransferType();
             proto.Records.Add(System.Linq.Enumerable.Select(Records, item => (Temporalio.Api.Stream.V1.AppendRecord)item.ToTransferType()));
             if (Sequence is { } sequence)
             {
                 proto.Sequence = sequence;
-            }
-            if (WithdrawRun is { } withdrawRun)
-            {
-                proto.WithdrawRun = withdrawRun;
             }
             return proto;
         }
@@ -300,20 +300,23 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Initializes a new instance of the <see cref="CloseStreamRequest"/> class.
         /// </summary>
-        public CloseStreamRequest(StreamRef stream, Producer? producer)
+        public CloseStreamRequest(StreamHandle handle, Producer? producer)
         {
-            Stream = stream;
+            Handle = handle;
             Producer = producer;
         }
 
-        public StreamRef Stream { get; init; }
+        public StreamHandle Handle { get; init; }
         public object? Result { get; init; }
+        /// <summary>
+        /// Empty completes the Stream. A cancel failure cancels it. Any other fails it.
+        /// </summary>
         public System.Exception? Failure { get; init; }
         public Producer? Producer { get; init; }
 
         internal static CloseStreamRequest FromTransferType(Temporalio.Api.StreamService.V1.CloseStreamRequest wire)
         {
-            return new CloseStreamRequest(StreamRef.FromTransferType(wire.Stream), wire.Producer == null ? null : Producer.FromTransferType(wire.Producer))
+            return new CloseStreamRequest(StreamHandle.FromTransferType(wire.Handle), wire.Producer == null ? null : Producer.FromTransferType(wire.Producer))
             {
                 Result = wire.Result == null ? null : Nexgen.Support.ProtoExtensions.FromPayload(wire.Result),
                 Failure = wire.Failure == null ? null : Nexgen.Support.ProtoExtensions.FromFailureProto(wire.Failure),
@@ -327,7 +330,7 @@ namespace Temporalio.Workflows
             {
                 proto.Producer = (Temporalio.Api.Stream.V1.Producer)producer.ToTransferType();
             }
-            proto.Stream = (Temporalio.Api.Stream.V1.StreamRef)Stream.ToTransferType();
+            proto.Handle = (Temporalio.Api.Stream.V1.StreamHandle)Handle.ToTransferType();
             if (Result is { } result)
             {
                 proto.Result = Nexgen.Support.ProtoExtensions.ToPayload(result);
@@ -398,9 +401,10 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Initializes a new instance of the <see cref="CreateStreamRequest"/> class.
         /// </summary>
-        public CreateStreamRequest(string id, Producer? owner)
+        public CreateStreamRequest(string id, string? withdrawRun, Producer? owner)
         {
             Id = id;
+            WithdrawRun = withdrawRun;
             Owner = owner;
         }
 
@@ -409,17 +413,17 @@ namespace Temporalio.Workflows
         /// </summary>
         public System.TimeSpan? Retention { get; init; }
         /// <summary>
-        /// Retry run only. The previous run, whose Records this withdraws.
+        /// The handle, whose id is stream-id. With an owner, it needs the handle's owner.
         /// </summary>
-        public string? WithdrawRun { get; init; }
-        /// <summary>
-        /// The ref, whose id is stream-id. A create with an owner needs the ref's owner.
-        /// </summary>
-        public StreamRef? Ref { get; init; }
+        public StreamHandle? StreamHandle { get; init; }
         /// <summary>
         /// The Stream id. Required, and never empty.
         /// </summary>
         public string Id { get; init; }
+        /// <summary>
+        /// Retry run only. The previous run, whose Records this withdraws.
+        /// </summary>
+        public string? WithdrawRun { get; init; }
         /// <summary>
         /// The Workflow run that owns the Stream. The Workflow transport sets it.
         /// </summary>
@@ -427,11 +431,10 @@ namespace Temporalio.Workflows
 
         internal static CreateStreamRequest FromTransferType(Temporalio.Api.StreamService.V1.CreateStreamRequest wire)
         {
-            return new CreateStreamRequest(wire.StreamId, wire.Owner == null ? null : Producer.FromTransferType(wire.Owner))
+            return new CreateStreamRequest(wire.StreamId, string.IsNullOrEmpty(wire.WithdrawRun) ? null : wire.WithdrawRun, wire.Owner == null ? null : Producer.FromTransferType(wire.Owner))
             {
                 Retention = wire.Retention == null ? null : Nexgen.Support.ProtoExtensions.FromDurationProto(wire.Retention),
-                WithdrawRun = string.IsNullOrEmpty(wire.WithdrawRun) ? null : wire.WithdrawRun,
-                Ref = wire.Ref == null ? null : StreamRef.FromTransferType(wire.Ref),
+                StreamHandle = wire.StreamHandle == null ? null : StreamHandle.FromTransferType(wire.StreamHandle),
             };
         }
 
@@ -439,6 +442,10 @@ namespace Temporalio.Workflows
         {
             var proto = new Temporalio.Api.StreamService.V1.CreateStreamRequest();
             proto.StreamId = Id;
+            if (WithdrawRun is { } withdrawRun)
+            {
+                proto.WithdrawRun = withdrawRun;
+            }
             if (Owner is { } owner)
             {
                 proto.Owner = (Temporalio.Api.Stream.V1.Producer)owner.ToTransferType();
@@ -447,13 +454,9 @@ namespace Temporalio.Workflows
             {
                 proto.Retention = retention.ToProto();
             }
-            if (WithdrawRun is { } withdrawRun)
+            if (StreamHandle is { } streamHandle)
             {
-                proto.WithdrawRun = withdrawRun;
-            }
-            if (Ref is { } @ref)
-            {
-                proto.Ref = (Temporalio.Api.Stream.V1.StreamRef)@ref.ToTransferType();
+                proto.StreamHandle = (Temporalio.Api.Stream.V1.StreamHandle)streamHandle.ToTransferType();
             }
             return proto;
         }
@@ -479,14 +482,14 @@ namespace Temporalio.Workflows
     [GeneratedCode("nexgen", null)]
     public record CreateStreamResult
     {
-        public StreamRef? Stream { get; init; }
+        public StreamHandle? Handle { get; init; }
         public bool? Created { get; init; }
 
         internal static CreateStreamResult FromTransferType(Temporalio.Api.StreamService.V1.CreateStreamResponse wire)
         {
             return new CreateStreamResult()
             {
-                Stream = wire.Stream == null ? null : StreamRef.FromTransferType(wire.Stream),
+                Handle = wire.Handle == null ? null : StreamHandle.FromTransferType(wire.Handle),
                 Created = wire.Created == false ? null : wire.Created,
             };
         }
@@ -494,9 +497,9 @@ namespace Temporalio.Workflows
         internal Temporalio.Api.StreamService.V1.CreateStreamResponse ToTransferType()
         {
             var proto = new Temporalio.Api.StreamService.V1.CreateStreamResponse();
-            if (Stream is { } stream)
+            if (Handle is { } handle)
             {
-                proto.Stream = (Temporalio.Api.Stream.V1.StreamRef)stream.ToTransferType();
+                proto.Handle = (Temporalio.Api.Stream.V1.StreamHandle)handle.ToTransferType();
             }
             if (Created is { } created)
             {
@@ -529,22 +532,22 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Initializes a new instance of the <see cref="DescribeStreamRequest"/> class.
         /// </summary>
-        public DescribeStreamRequest(StreamRef stream)
+        public DescribeStreamRequest(StreamHandle handle)
         {
-            Stream = stream;
+            Handle = handle;
         }
 
-        public StreamRef Stream { get; init; }
+        public StreamHandle Handle { get; init; }
 
         internal static DescribeStreamRequest FromTransferType(Temporalio.Api.StreamService.V1.DescribeStreamRequest wire)
         {
-            return new DescribeStreamRequest(StreamRef.FromTransferType(wire.Stream));
+            return new DescribeStreamRequest(StreamHandle.FromTransferType(wire.Handle));
         }
 
         internal Temporalio.Api.StreamService.V1.DescribeStreamRequest ToTransferType()
         {
             var proto = new Temporalio.Api.StreamService.V1.DescribeStreamRequest();
-            proto.Stream = (Temporalio.Api.Stream.V1.StreamRef)Stream.ToTransferType();
+            proto.Handle = (Temporalio.Api.Stream.V1.StreamHandle)Handle.ToTransferType();
             return proto;
         }
 
@@ -848,12 +851,12 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Initializes a new instance of the <see cref="ReadRecordsRequest"/> class.
         /// </summary>
-        public ReadRecordsRequest(StreamRef stream)
+        public ReadRecordsRequest(StreamHandle handle)
         {
-            Stream = stream;
+            Handle = handle;
         }
 
-        public StreamRef Stream { get; init; }
+        public StreamHandle Handle { get; init; }
         /// <summary>
         /// Start offset. Empty uses start. OUT_OF_RANGE past the newest offset + 1.
         /// </summary>
@@ -885,7 +888,7 @@ namespace Temporalio.Workflows
 
         internal static ReadRecordsRequest FromTransferType(Temporalio.Api.StreamService.V1.ReadRecordsRequest wire)
         {
-            return new ReadRecordsRequest(StreamRef.FromTransferType(wire.Stream))
+            return new ReadRecordsRequest(StreamHandle.FromTransferType(wire.Handle))
             {
                 FromOffset = wire.FromOffset == 0 ? null : wire.FromOffset,
                 Start = (int)wire.Start == 0 ? null : (StreamReadStart)wire.Start,
@@ -900,7 +903,7 @@ namespace Temporalio.Workflows
         internal Temporalio.Api.StreamService.V1.ReadRecordsRequest ToTransferType()
         {
             var proto = new Temporalio.Api.StreamService.V1.ReadRecordsRequest();
-            proto.Stream = (Temporalio.Api.Stream.V1.StreamRef)Stream.ToTransferType();
+            proto.Handle = (Temporalio.Api.Stream.V1.StreamHandle)Handle.ToTransferType();
             if (FromOffset is { } fromOffset)
             {
                 proto.FromOffset = fromOffset;
@@ -1187,6 +1190,75 @@ namespace Temporalio.Workflows
     }
 
     /// <summary>
+    /// Identifies one Stream. The id is opaque to callers.
+    /// </summary>
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(StreamHandle.TransferTypeConverter))]
+    [GeneratedCode("nexgen", null)]
+    public record StreamHandle
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="StreamHandle"/> class.
+        /// </summary>
+        public StreamHandle(string id)
+        {
+            Id = id;
+        }
+
+        /// <summary>
+        /// The Stream id, 1 to 4096 bytes.
+        /// </summary>
+        public string Id { get; init; }
+        /// <summary>
+        /// The owning Workflow run chain or Standalone Activity. Empty for a client.
+        /// </summary>
+        public Execution? Owner { get; init; }
+        /// <summary>
+        /// Registered backend name, empty for the default. The Store never reads it.
+        /// </summary>
+        public string? Backend { get; init; }
+
+        internal static StreamHandle FromTransferType(Temporalio.Api.Stream.V1.StreamHandle wire)
+        {
+            return new StreamHandle(wire.Id)
+            {
+                Owner = wire.Owner == null ? null : Execution.FromTransferType(wire.Owner),
+                Backend = string.IsNullOrEmpty(wire.Backend) ? null : wire.Backend,
+            };
+        }
+
+        internal Temporalio.Api.Stream.V1.StreamHandle ToTransferType()
+        {
+            var proto = new Temporalio.Api.Stream.V1.StreamHandle();
+            proto.Id = Id;
+            if (Owner is { } owner)
+            {
+                proto.Owner = (Temporalio.Api.Common.V1.Execution)owner.ToTransferType();
+            }
+            if (Backend is { } backend)
+            {
+                proto.Backend = backend;
+            }
+            return proto;
+        }
+
+        /// <summary>
+        /// Converts this model to and from its generated transfer type.
+        /// </summary>
+        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
+        {
+            /// <summary>Gets the generated transfer type.</summary>
+            public System.Type TransferType => typeof(Temporalio.Api.Stream.V1.StreamHandle);
+
+            /// <summary>Converts a model value to its transfer type.</summary>
+            public object? ToTransferType(object? value) => value is null ? null : ((StreamHandle)value).ToTransferType();
+
+            /// <summary>Converts a transfer-type value to this model.</summary>
+            public object? FromTransferType(object? transferType) => transferType is null ? null : StreamHandle.FromTransferType((Temporalio.Api.Stream.V1.StreamHandle)transferType);
+        }
+
+    }
+
+    /// <summary>
     /// One item that a read gives.
     /// </summary>
     [Temporalio.Converters.TemporalTransferTypeConverter(typeof(StreamRecord<>.TransferTypeConverter))]
@@ -1208,7 +1280,7 @@ namespace Temporalio.Workflows
                     itemOneof = new StreamItem<TBody>.Data(StreamData<TBody>.FromTransferType(wire.Data));
                     break;
                 case Temporalio.Api.Stream.V1.StreamRecord.ItemOneofCase.Superseded:
-                    itemOneof = new StreamItem<TBody>.Superseded(Supersession.FromTransferType(wire.Superseded));
+                    itemOneof = new StreamItem<TBody>.Superseded(StreamSuperseded.FromTransferType(wire.Superseded));
                     break;
                 case Temporalio.Api.Stream.V1.StreamRecord.ItemOneofCase.Close:
                     itemOneof = new StreamItem<TBody>.Close(StreamClose.FromTransferType(wire.Close));
@@ -1234,7 +1306,7 @@ namespace Temporalio.Workflows
                     proto.Data = (Temporalio.Api.Stream.V1.StreamData)dataCase.Value.ToTransferType();
                     break;
                 case StreamItem<TBody>.Superseded supersededCase:
-                    proto.Superseded = (Temporalio.Api.Stream.V1.Supersession)supersededCase.Value.ToTransferType();
+                    proto.Superseded = (Temporalio.Api.Stream.V1.StreamSuperseded)supersededCase.Value.ToTransferType();
                     break;
                 case StreamItem<TBody>.Close closeCase:
                     proto.Close = (Temporalio.Api.Stream.V1.StreamClose)closeCase.Value.ToTransferType();
@@ -1265,85 +1337,16 @@ namespace Temporalio.Workflows
     }
 
     /// <summary>
-    /// Identifies one Stream. The id is opaque to callers.
-    /// </summary>
-    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(StreamRef.TransferTypeConverter))]
-    [GeneratedCode("nexgen", null)]
-    public record StreamRef
-    {
-        /// <summary>
-        /// Initializes a new instance of the <see cref="StreamRef"/> class.
-        /// </summary>
-        public StreamRef(string id)
-        {
-            Id = id;
-        }
-
-        /// <summary>
-        /// The Stream id, 1 to 4096 bytes.
-        /// </summary>
-        public string Id { get; init; }
-        /// <summary>
-        /// The owning Workflow run chain or Standalone Activity. Empty on a client ref.
-        /// </summary>
-        public Execution? Owner { get; init; }
-        /// <summary>
-        /// Registered backend name, empty for the default. The Store never reads it.
-        /// </summary>
-        public string? Backend { get; init; }
-
-        internal static StreamRef FromTransferType(Temporalio.Api.Stream.V1.StreamRef wire)
-        {
-            return new StreamRef(wire.Id)
-            {
-                Owner = wire.Owner == null ? null : Execution.FromTransferType(wire.Owner),
-                Backend = string.IsNullOrEmpty(wire.Backend) ? null : wire.Backend,
-            };
-        }
-
-        internal Temporalio.Api.Stream.V1.StreamRef ToTransferType()
-        {
-            var proto = new Temporalio.Api.Stream.V1.StreamRef();
-            proto.Id = Id;
-            if (Owner is { } owner)
-            {
-                proto.Owner = (Temporalio.Api.Common.V1.Execution)owner.ToTransferType();
-            }
-            if (Backend is { } backend)
-            {
-                proto.Backend = backend;
-            }
-            return proto;
-        }
-
-        /// <summary>
-        /// Converts this model to and from its generated transfer type.
-        /// </summary>
-        public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
-        {
-            /// <summary>Gets the generated transfer type.</summary>
-            public System.Type TransferType => typeof(Temporalio.Api.Stream.V1.StreamRef);
-
-            /// <summary>Converts a model value to its transfer type.</summary>
-            public object? ToTransferType(object? value) => value is null ? null : ((StreamRef)value).ToTransferType();
-
-            /// <summary>Converts a transfer-type value to this model.</summary>
-            public object? FromTransferType(object? transferType) => transferType is null ? null : StreamRef.FromTransferType((Temporalio.Api.Stream.V1.StreamRef)transferType);
-        }
-
-    }
-
-    /// <summary>
     /// Which earlier Records a Superseded item withdraws.
     /// </summary>
-    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(Supersession.TransferTypeConverter))]
+    [Temporalio.Converters.TemporalTransferTypeConverter(typeof(StreamSuperseded.TransferTypeConverter))]
     [GeneratedCode("nexgen", null)]
-    public record Supersession
+    public record StreamSuperseded
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="Supersession"/> class.
+        /// Initializes a new instance of the <see cref="StreamSuperseded"/> class.
         /// </summary>
-        public Supersession(string producerId, IReadOnlyList<long> failedTasks)
+        public StreamSuperseded(string producerId, IReadOnlyList<long> failedTasks)
         {
             ProducerId = producerId;
             FailedTasks = failedTasks;
@@ -1369,9 +1372,9 @@ namespace Temporalio.Workflows
         /// </summary>
         public string? RunId { get; init; }
 
-        internal static Supersession FromTransferType(Temporalio.Api.Stream.V1.Supersession wire)
+        internal static StreamSuperseded FromTransferType(Temporalio.Api.Stream.V1.StreamSuperseded wire)
         {
-            return new Supersession(wire.ProducerId, System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(wire.FailedTasks, item => item)))
+            return new StreamSuperseded(wire.ProducerId, System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(wire.FailedTasks, item => item)))
             {
                 ProducerKind = (int)wire.ProducerKind == 0 ? null : (System.Enum.IsDefined(typeof(StreamProducerKind), (int)wire.ProducerKind) ? (StreamProducerKind)wire.ProducerKind : StreamProducerKind.StreamProducerKindUnspecified),
                 Epoch = wire.Epoch == null ? null : ProducerEpoch.FromTransferType(wire.Epoch),
@@ -1381,9 +1384,9 @@ namespace Temporalio.Workflows
             };
         }
 
-        internal Temporalio.Api.Stream.V1.Supersession ToTransferType()
+        internal Temporalio.Api.Stream.V1.StreamSuperseded ToTransferType()
         {
-            var proto = new Temporalio.Api.Stream.V1.Supersession();
+            var proto = new Temporalio.Api.Stream.V1.StreamSuperseded();
             proto.ProducerId = ProducerId;
             proto.FailedTasks.Add(System.Linq.Enumerable.Select(FailedTasks, item => item));
             if (ProducerKind is { } producerKind)
@@ -1415,13 +1418,13 @@ namespace Temporalio.Workflows
         public sealed class TransferTypeConverter : Temporalio.Converters.ITemporalTransferTypeConverter
         {
             /// <summary>Gets the generated transfer type.</summary>
-            public System.Type TransferType => typeof(Temporalio.Api.Stream.V1.Supersession);
+            public System.Type TransferType => typeof(Temporalio.Api.Stream.V1.StreamSuperseded);
 
             /// <summary>Converts a model value to its transfer type.</summary>
-            public object? ToTransferType(object? value) => value is null ? null : ((Supersession)value).ToTransferType();
+            public object? ToTransferType(object? value) => value is null ? null : ((StreamSuperseded)value).ToTransferType();
 
             /// <summary>Converts a transfer-type value to this model.</summary>
-            public object? FromTransferType(object? transferType) => transferType is null ? null : Supersession.FromTransferType((Temporalio.Api.Stream.V1.Supersession)transferType);
+            public object? FromTransferType(object? transferType) => transferType is null ? null : StreamSuperseded.FromTransferType((Temporalio.Api.Stream.V1.StreamSuperseded)transferType);
         }
 
     }

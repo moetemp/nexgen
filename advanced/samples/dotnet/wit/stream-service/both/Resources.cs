@@ -16,20 +16,20 @@ namespace Temporalio.Workflows
     [GeneratedCode("nexgen", null)]
     public class Stream<TBody>
     {
-        public Stream(StreamRef streamValue, bool? created)
+        public Stream(StreamHandle handle, bool? created)
         {
-            StreamValue = streamValue;
+            Handle = handle;
             Created = created;
         }
 
-        public StreamRef StreamValue { get; }
+        public StreamHandle Handle { get; }
         public bool? Created { get; }
 
         [GeneratedCode("nexgen", null)]
         public async Task<long> PublishAsync(params TBody[] values)
         {
             var recordsValue = values.Select(value => new AppendRecord<TBody>(value)).ToList();
-            var request = new AppendRecordsOptions<TBody>(StreamValue, recordsValue);
+            var request = new AppendRecordsOptions<TBody>(Handle, recordsValue);
             var result = await Operations.AppendRecordsAsync(request).ConfigureAwait(true);
             return result.LastOffset ?? 0L;
         }
@@ -37,21 +37,21 @@ namespace Temporalio.Workflows
         [GeneratedCode("nexgen", null)]
         public Task CloseAsync(object? result, System.Exception? failure)
         {
-            var request = new CloseStreamOptions(StreamValue) { Result = result, Failure = failure };
+            var request = new CloseStreamOptions(Handle) { Result = result, Failure = failure };
             return Operations.CloseStreamAsync(request);
         }
 
         [GeneratedCode("nexgen", null)]
         public Task<ReadRecordsResponse<TBody>> ReadAsync(long? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait, long? maxBytes)
         {
-            var request = new ReadRecordsOptions(StreamValue) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, MaxBytes = maxBytes };
+            var request = new ReadRecordsOptions(Handle) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, MaxBytes = maxBytes };
             return Operations.ReadRecordsAsync<TBody>(request);
         }
 
         [GeneratedCode("nexgen", null)]
         public Task<DescribeStreamResponse> DescribeAsync()
         {
-            var request = new DescribeStreamOptions(StreamValue);
+            var request = new DescribeStreamOptions(Handle);
             return Operations.DescribeStreamAsync(request);
         }
 

@@ -25,15 +25,15 @@ namespace Nexgen.DotNetExamples.Tests
         [Fact]
         public async Task ACreatedStreamPublishesOnTheSystemEndpoint()
         {
-            var streamRef = new Models.StreamRef("s1");
+            var streamRef = new Models.StreamHandle("s1");
             var client = FakeTemporalClient.Create(
-                ("CreateStream", new Models.CreateStreamResult { Stream = streamRef, Created = true }),
+                ("CreateStream", new Models.CreateStreamResult { Handle = streamRef, Created = true }),
                 ("AppendRecords", new Models.AppendRecordsResponse { LastOffset = 2 }));
 
             var stream = await client.CreateStreamAsync<Turn>(new StreamClient.CreateStreamOptions("s1"));
             var lastOffset = await stream.PublishAsync(new Turn("user"));
 
-            Assert.Equal((streamRef, (bool?)true), (stream.StreamValue, stream.Created));
+            Assert.Equal((streamRef, (bool?)true), (stream.Handle, stream.Created));
             Assert.Equal(2, lastOffset);
             var calls = FakeTemporalClient.Calls(client);
             Assert.Equal(
@@ -43,14 +43,14 @@ namespace Nexgen.DotNetExamples.Tests
                     (SystemEndpoint, StreamService, "AppendRecords"),
                 },
                 calls.Select(call => (call.Endpoint, call.Service, call.Operation)));
-            // The client API omits the owner, and fills the producer from its source. The ref copies
-            // the id.
+            // The client API omits the owner, and fills the producer from its source. The handle
+            // copies the id.
             Assert.Equal(
-                new Models.CreateStreamRequest("s1", null) { Ref = streamRef },
+                new Models.CreateStreamRequest("s1", null, null) { StreamHandle = streamRef },
                 calls[0].Input);
             // The publish wraps each value in a record.
             var append = Assert.IsType<Models.AppendRecordsRequest<Turn>>(calls[1].Input);
-            Assert.Equal(streamRef, append.Stream);
+            Assert.Equal(streamRef, append.Handle);
             Assert.Equal(new[] { new Models.AppendRecord<Turn>(new Turn("user")) }, append.Records);
             Assert.Empty(append.FailedTasks);
             Assert.Equal(new Models.Producer("client:sample"), append.Producer);
@@ -59,7 +59,7 @@ namespace Nexgen.DotNetExamples.Tests
         [Fact]
         public async Task AStoredStreamRefRebuildsTheHandle()
         {
-            var streamRef = new Models.StreamRef("s2");
+            var streamRef = new Models.StreamHandle("s2");
             var client = FakeTemporalClient.Create(
                 ("DescribeStream", new Models.DescribeStreamResponse { LastOffset = 7 }));
 
@@ -74,7 +74,7 @@ namespace Nexgen.DotNetExamples.Tests
         [Fact]
         public async Task AReadThatDoesNotWaitStopsAtAnEmptyPageThatDidNotMove()
         {
-            var streamRef = new Models.StreamRef("s1");
+            var streamRef = new Models.StreamHandle("s1");
             var pages = new[]
             {
                 Page(nextOffset: 3, offsets: new long[] { 1, 2 }),
@@ -103,7 +103,7 @@ namespace Nexgen.DotNetExamples.Tests
         [Fact]
         public async Task AWaitingReadGoesOnAfterAnEmptyPageAtTheSameOffset()
         {
-            var streamRef = new Models.StreamRef("s1");
+            var streamRef = new Models.StreamHandle("s1");
             var wait = TimeSpan.FromSeconds(30);
             var pages = new[]
             {
@@ -131,7 +131,7 @@ namespace Nexgen.DotNetExamples.Tests
         [Fact]
         public async Task AStreamReadFromTheEndStaysAtTheFirstNextOffset()
         {
-            var streamRef = new Models.StreamRef("s1");
+            var streamRef = new Models.StreamHandle("s1");
             var wait = TimeSpan.FromSeconds(30);
             var pages = new[]
             {
@@ -140,7 +140,7 @@ namespace Nexgen.DotNetExamples.Tests
                 Page(done: true),
             };
             var client = FakeTemporalClient.Create(
-                new[] { ("CreateStream", (object?)new Models.CreateStreamResult { Stream = streamRef }) }
+                new[] { ("CreateStream", (object?)new Models.CreateStreamResult { Handle = streamRef }) }
                     .Concat(pages.Select(page => ("ReadRecords", (object?)page)))
                     .ToArray());
             var stream = await client.CreateStreamAsync<Turn>(new StreamClient.CreateStreamOptions("s1"));
@@ -168,7 +168,7 @@ namespace Nexgen.DotNetExamples.Tests
         [Fact]
         public async Task ADoneFirstPageEndsTheRead()
         {
-            var streamRef = new Models.StreamRef("s1");
+            var streamRef = new Models.StreamHandle("s1");
             var pages = new[] { Page(nextOffset: 1, done: true, offsets: new long[] { 0 }) };
             var client = FakeTemporalClient.Create(("ReadRecords", pages[0]));
 
@@ -185,7 +185,7 @@ namespace Nexgen.DotNetExamples.Tests
         public async Task APollPassesItsCancellationTokenToTheRead()
         {
             using var cancellation = new CancellationTokenSource();
-            var streamRef = new Models.StreamRef("s1");
+            var streamRef = new Models.StreamHandle("s1");
             var client = FakeTemporalClient.Create(
                 ("ReadRecords", Page(done: true)),
                 ("ReadRecords", Page(done: true)));

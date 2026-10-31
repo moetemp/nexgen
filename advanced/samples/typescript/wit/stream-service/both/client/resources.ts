@@ -5,7 +5,7 @@ import Long from "long";
 import { createReadRecordsResponseTransferTypeConverter } from "../models";
 import type {
   StreamReadStart,
-  StreamRef,
+  StreamHandle,
   ReadRecordsResponse,
   ReadRecordsRequest,
   DescribeStreamResponse,
@@ -20,7 +20,7 @@ export class Stream<BodyT = unknown> {
 
   public constructor(
     nexusClient: NexusServiceClient<typeof streamService>,
-    public readonly stream: StreamRef,
+    public readonly handle: StreamHandle,
     public readonly created: boolean | undefined,
     bodyType?: common.TypeInfo<BodyT>,
   ) {
@@ -34,11 +34,12 @@ export class Stream<BodyT = unknown> {
 
   public async publish(...values: BodyT[]): Promise<Long> {
     const request = {
-      stream: this.stream,
+      handle: this.handle,
       records: values.map((value) => ({ body: value })),
       failedTasks: support.localActivityFailedTasks(),
       producer: support.clientProducer(),
       previousCompletedTask: support.localActivityPreviousCompletedTask(),
+      withdrawRun: support.withdrawRun(),
     };
     const handle = await this.#nexusClient.startOperation(
       streamService.operations.appendRecords,
@@ -51,7 +52,7 @@ export class Stream<BodyT = unknown> {
 
   public async close(result?: common.Payload, failure?: Error): Promise<void> {
     const request = {
-      stream: this.stream,
+      handle: this.handle,
       result: result,
       failure: failure,
       producer: support.clientProducer(),
@@ -73,7 +74,7 @@ export class Stream<BodyT = unknown> {
     maxBytes?: Long,
   ): Promise<ReadRecordsResponse<BodyT>> {
     const request = {
-      stream: this.stream,
+      handle: this.handle,
       fromOffset: fromOffset,
       start: start,
       maxRecords: maxRecords,
@@ -110,7 +111,7 @@ export class Stream<BodyT = unknown> {
     maxBytes?: Long,
   ): AsyncGenerator<ReadRecordsResponse<BodyT>, void> {
     let request: ReadRecordsRequest = {
-      stream: this.stream,
+      handle: this.handle,
       fromOffset: fromOffset,
       start: start,
       maxRecords: maxRecords,
@@ -143,7 +144,7 @@ export class Stream<BodyT = unknown> {
   }
 
   public async describe(): Promise<DescribeStreamResponse> {
-    const request = { stream: this.stream };
+    const request = { handle: this.handle };
     const handle = await this.#nexusClient.startOperation(
       streamService.operations.describeStream,
       request,

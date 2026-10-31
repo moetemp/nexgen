@@ -10,16 +10,11 @@ type AppendRecordsInput<BodyT> =
     ? Input extends unknown
       ? Omit<
           Input,
-          | "failedTasks"
-          | "previousCompletedTask"
-          | "producer"
-          | "sequence"
-          | "withdrawRun"
+          "failedTasks" | "previousCompletedTask" | "producer" | "withdrawRun"
         > & {
           failedTasks?: never;
           previousCompletedTask?: never;
           producer?: never;
-          sequence?: never;
           withdrawRun?: never;
         }
       : never
@@ -36,6 +31,7 @@ export async function appendRecords<BodyT>(
   const request = {
     ...requestInput,
     producer: support.workflowProducer(),
+    withdrawRun: support.withdrawRun(),
     failedTasks: [],
   } as AppendRecordsRequest<BodyT>;
   const client = nexus.createNexusServiceClient({

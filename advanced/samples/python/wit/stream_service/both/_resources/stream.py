@@ -22,9 +22,9 @@ from ..models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamErrorDetails,
+    StreamHandle,
     StreamReadStart,
-    StreamRef,
-    _StreamRefTransferTypeConverter,
+    _StreamHandleTransferTypeConverter,
 )
 import temporal_support as _support
 from ..errors import StreamError, stream_error
@@ -37,19 +37,19 @@ BodyT = typing.TypeVar("BodyT")
 
 
 class Stream(typing.Generic[BodyT]):
-    """A handle on one Stream. Build it from a stream-ref, or get it from a create."""
+    """One Stream. Build it from a stream-handle, or get it from a create."""
 
-    stream: StreamRef
+    handle: StreamHandle
     created: bool | None
 
     def __init__(
         self,
-        stream: StreamRef,
+        handle: StreamHandle,
         created: bool | None = None,
         *,
         body_type: type[BodyT] | None = None,
     ) -> None:
-        self.stream = stream
+        self.handle = handle
         self.created = created
         # Not a dataclass field, so the converter doesn't encode it. A
         # decoded handle decodes its generic values as `typing.Any`.
@@ -61,13 +61,13 @@ class Stream(typing.Generic[BodyT]):
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Stream):
             return NotImplemented
-        return (self.stream, self.created) == (other.stream, other.created)
+        return (self.handle, self.created) == (other.handle, other.created)
 
     __hash__: typing.ClassVar[None] = None  # pyright: ignore[reportIncompatibleMethodOverride]
 
     @typing_extensions.override
     def __repr__(self) -> str:
-        return f"Stream(stream={self.stream!r}, created={self.created!r})"
+        return f"Stream(handle={self.handle!r}, created={self.created!r})"
 
     async def __aenter__(self) -> typing_extensions.Self:
         return self
@@ -88,9 +88,10 @@ class Stream(typing.Generic[BodyT]):
     ) -> int:
         """Publish values, and return the offset of the last one."""
         request = AppendRecordsRequest(
-            stream=self.stream,
+            handle=self.handle,
             records=[AppendRecord(body=value) for value in values],
             producer=_support.workflow_producer(),
+            withdraw_run=_support.withdraw_run(),
         )
         try:
             handle = await _append_records(request)
@@ -112,7 +113,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> None:
         """Close the Stream. Readers drain what is left, then end."""
         request = CloseStreamRequest(
-            stream=self.stream,
+            handle=self.handle,
             result=result,
             failure=failure,
             producer=_support.workflow_producer(),
@@ -140,7 +141,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> ReadRecordsResponse[BodyT]:
         """Read one page of Records. The poll iterator reads them all."""
         request = ReadRecordsRequest(
-            stream=self.stream,
+            handle=self.handle,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -165,7 +166,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> DescribeStreamResponse:
         """Describe the Stream's status, newest offset and Retention."""
         request = DescribeStreamRequest(
-            stream=self.stream,
+            handle=self.handle,
         )
         try:
             handle = await _describe_stream(request)
@@ -184,20 +185,20 @@ def stream(
     definition: type[temporal_support.StreamDefinition[BodyT]],
     *,
     id: str | None = None,
-    stream: StreamRef | None = None,
+    handle: StreamHandle | None = None,
     backend: str | None = None,
     created: bool | None = None,
 ) -> Stream[BodyT]:
-    """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``stream``."""
+    """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``handle``."""
     (body_type,) = _support.definition_type_arguments(definition)
-    if stream is None:
+    if handle is None:
         if id is None:
-            raise TypeError("pass id or stream")
-        stream = StreamRef(id=id, backend=backend)
+            raise TypeError("pass id or handle")
+        handle = StreamHandle(id=id, backend=backend)
     elif id is not None or backend is not None:
-        raise TypeError("pass stream or its fields, not both")
+        raise TypeError("pass handle or its fields, not both")
     return Stream(
-        stream=stream,
+        handle=handle,
         created=created,
         body_type=body_type,
     )
@@ -205,27 +206,27 @@ def stream(
 
 class _StreamTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        Stream[BodyT], temporalio.api.stream.v1.message_pb2.StreamRef
+        Stream[BodyT], temporalio.api.stream.v1.message_pb2.StreamHandle
     ]
 ):
-    """Passes a ``Stream`` as its ``stream``. A decoded handle calls the Workflow
+    """Passes a ``Stream`` as its ``handle``. A decoded handle calls the Workflow
     operations.
     """
 
-    transfer_type: type[temporalio.api.stream.v1.message_pb2.StreamRef] | None = (
-        temporalio.api.stream.v1.message_pb2.StreamRef
+    transfer_type: type[temporalio.api.stream.v1.message_pb2.StreamHandle] | None = (
+        temporalio.api.stream.v1.message_pb2.StreamHandle
     )
 
     @typing_extensions.override
     def from_transfer_type(
         self,
-        value: temporalio.api.stream.v1.message_pb2.StreamRef,
+        value: temporalio.api.stream.v1.message_pb2.StreamHandle,
         type_hint: type[Stream[BodyT]],
     ) -> Stream[BodyT]:
         (body_type,) = typing.get_args(type_hint) or (typing.Any,)
         return Stream(
-            stream=_StreamRefTransferTypeConverter().from_transfer_type(
-                value, StreamRef
+            handle=_StreamHandleTransferTypeConverter().from_transfer_type(
+                value, StreamHandle
             ),
             body_type=typing.cast(type[BodyT], body_type),
         )
@@ -233,8 +234,8 @@ class _StreamTransferTypeConverter(
     @typing_extensions.override
     def to_transfer_type(
         self, value: Stream[BodyT]
-    ) -> temporalio.api.stream.v1.message_pb2.StreamRef:
-        return _StreamRefTransferTypeConverter().to_transfer_type(value.stream)
+    ) -> temporalio.api.stream.v1.message_pb2.StreamHandle:
+        return _StreamHandleTransferTypeConverter().to_transfer_type(value.handle)
 
 
 temporalio.converter.transfer_type_convertible(_StreamTransferTypeConverter)(Stream)  # pyright: ignore[reportUnusedCallResult]
@@ -265,28 +266,39 @@ async def _append_records(
 
 async def append_records(
     *,
-    stream: StreamRef,
+    handle: StreamHandle,
     records: list[AppendRecord[BodyT]] | None = None,
+    sequence: int | None = None,
 ) -> temporalio.workflow.NexusOperationHandle[AppendRecordsResponse,]:
-    """Append one batch. Workflow code makes the call from a Local Activity."""
+    """Append one batch. Workflow code makes the call from a Local Activity.
+
+    Args:
+        sequence: The batch number in this epoch. Empty takes the next one, and a retry
+            writes it again.
+    """
     request = AppendRecordsRequest(
-        stream=stream,
+        handle=handle,
         records=records or [],
         producer=_support.workflow_producer(),
+        sequence=sequence,
+        withdraw_run=_support.withdraw_run(),
     )
     return await _append_records(request)
 
 
 def start_append_records(
     *,
-    stream: StreamRef,
+    handle: StreamHandle,
     records: list[AppendRecord[BodyT]] | None = None,
+    sequence: int | None = None,
 ) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[AppendRecordsResponse]]:
     """Start ``append_records`` at the call, as ``workflow.start_activity`` places an
     Activity, so sync Workflow code keeps the operation's place in the command order.
     The task gives what ``append_records`` returns.
     """
-    return _support.start_now(append_records(stream=stream, records=records))
+    return _support.start_now(
+        append_records(handle=handle, records=records, sequence=sequence)
+    )
 
 
 async def _close_stream(
@@ -314,12 +326,17 @@ async def _close_stream(
 
 async def close_stream(
     *,
-    stream: StreamRef,
+    handle: StreamHandle,
     result: typing.Any | None = None,
     failure: BaseException | None = None,
 ) -> temporalio.workflow.NexusOperationHandle[CloseStreamResponse,]:
+    """
+    Args:
+        failure: Empty completes the Stream. A cancel failure cancels it. Any other
+            fails it.
+    """
     request = CloseStreamRequest(
-        stream=stream,
+        handle=handle,
         producer=_support.workflow_producer(),
         result=result,
         failure=failure,
@@ -329,7 +346,7 @@ async def close_stream(
 
 def start_close_stream(
     *,
-    stream: StreamRef,
+    handle: StreamHandle,
     result: typing.Any | None = None,
     failure: BaseException | None = None,
 ) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[CloseStreamResponse]]:
@@ -338,7 +355,7 @@ def start_close_stream(
     The task gives what ``close_stream`` returns.
     """
     return _support.start_now(
-        close_stream(stream=stream, result=result, failure=failure)
+        close_stream(handle=handle, result=result, failure=failure)
     )
 
 
@@ -369,7 +386,7 @@ async def _read_records(
 async def read_records(
     body_type: type[BodyT],
     *,
-    stream: StreamRef,
+    handle: StreamHandle,
     from_offset: int | None = None,
     start: StreamReadStart | None = None,
     max_records: int | None = None,
@@ -393,7 +410,7 @@ async def read_records(
             alone.
     """
     request = ReadRecordsRequest(
-        stream=stream,
+        handle=handle,
         from_offset=from_offset,
         start=start,
         max_records=max_records,
@@ -407,7 +424,7 @@ async def read_records(
 def start_read_records(
     body_type: type[BodyT],
     *,
-    stream: StreamRef,
+    handle: StreamHandle,
     from_offset: int | None = None,
     start: StreamReadStart | None = None,
     max_records: int | None = None,
@@ -422,7 +439,7 @@ def start_read_records(
     return _support.start_now(
         read_records(
             body_type,
-            stream=stream,
+            handle=handle,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -458,20 +475,20 @@ async def _describe_stream(
 
 async def describe_stream(
     *,
-    stream: StreamRef,
+    handle: StreamHandle,
 ) -> temporalio.workflow.NexusOperationHandle[DescribeStreamResponse,]:
     request = DescribeStreamRequest(
-        stream=stream,
+        handle=handle,
     )
     return await _describe_stream(request)
 
 
 def start_describe_stream(
     *,
-    stream: StreamRef,
+    handle: StreamHandle,
 ) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[DescribeStreamResponse]]:
     """Start ``describe_stream`` at the call, as ``workflow.start_activity`` places an
     Activity, so sync Workflow code keeps the operation's place in the command order.
     The task gives what ``describe_stream`` returns.
     """
-    return _support.start_now(describe_stream(stream=stream))
+    return _support.start_now(describe_stream(handle=handle))

@@ -53,6 +53,14 @@ def client_producer() -> typing.Any:
     return _producer("client:sample")
 
 
+def withdraw_run() -> str | None:
+    """The run that a retry run's Workflow retries. None elsewhere."""
+    if not temporalio.workflow.in_workflow():
+        return None
+    info = temporalio.workflow.info()
+    return info.continued_run_id if info.attempt > 1 else None
+
+
 def local_activity_failed_tasks() -> list[int]:
     return []
 

@@ -4,7 +4,7 @@ import type * as common from "@temporalio/common";
 import Long from "long";
 import type {
   StreamReadStart,
-  StreamRef,
+  StreamHandle,
   ReadRecordsResponse,
   DescribeStreamResponse,
 } from "./models";
@@ -18,7 +18,7 @@ export class Stream<BodyT = unknown> {
   readonly #bodyType: common.TypeInfo<BodyT> | undefined;
 
   public constructor(
-    public readonly stream: StreamRef,
+    public readonly handle: StreamHandle,
     public readonly created: boolean | undefined,
     bodyType?: common.TypeInfo<BodyT>,
   ) {
@@ -31,7 +31,7 @@ export class Stream<BodyT = unknown> {
 
   public async publish(...values: BodyT[]): Promise<Long> {
     const request = {
-      stream: this.stream,
+      handle: this.handle,
       records: values.map((value) => ({ body: value })),
     };
     const handle = await appendRecords(request);
@@ -40,7 +40,7 @@ export class Stream<BodyT = unknown> {
   }
 
   public async close(result?: common.Payload, failure?: Error): Promise<void> {
-    const request = { stream: this.stream, result: result, failure: failure };
+    const request = { handle: this.handle, result: result, failure: failure };
     const handle = await closeStream(request);
     await handle.result();
   }
@@ -54,7 +54,7 @@ export class Stream<BodyT = unknown> {
     maxBytes?: Long,
   ): Promise<ReadRecordsResponse<BodyT>> {
     const request = {
-      stream: this.stream,
+      handle: this.handle,
       fromOffset: fromOffset,
       start: start,
       maxRecords: maxRecords,
@@ -67,7 +67,7 @@ export class Stream<BodyT = unknown> {
   }
 
   public async describe(): Promise<DescribeStreamResponse> {
-    const request = { stream: this.stream };
+    const request = { handle: this.handle };
     const handle = await describeStream(request);
     return await handle.result();
   }

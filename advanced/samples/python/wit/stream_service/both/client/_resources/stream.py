@@ -25,10 +25,10 @@ from ...models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamErrorDetails,
+    StreamHandle,
     StreamReadStart,
     StreamRecord,
-    StreamRef,
-    _StreamRefTransferTypeConverter,
+    _StreamHandleTransferTypeConverter,
 )
 import temporal_support as _support
 from ..._poll import PollIterator
@@ -39,9 +39,9 @@ BodyT = typing.TypeVar("BodyT")
 
 
 class Stream(typing.Generic[BodyT]):
-    """A handle on one Stream. Build it from a stream-ref, or get it from a create."""
+    """One Stream. Build it from a stream-handle, or get it from a create."""
 
-    stream: StreamRef
+    handle: StreamHandle
     created: bool | None
 
     def __init__(
@@ -49,12 +49,12 @@ class Stream(typing.Generic[BodyT]):
         nexus_client: _NexusClient,
         /,
         *,
-        stream: StreamRef,
+        handle: StreamHandle,
         created: bool | None = None,
         body_type: type[BodyT] | None = None,
     ) -> None:
         self._nexus_client: _NexusClient = nexus_client
-        self.stream = stream
+        self.handle = handle
         self.created = created
         # Not a dataclass field, so the converter doesn't encode it. A
         # decoded handle decodes its generic values as `typing.Any`.
@@ -66,13 +66,13 @@ class Stream(typing.Generic[BodyT]):
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Stream):
             return NotImplemented
-        return (self.stream, self.created) == (other.stream, other.created)
+        return (self.handle, self.created) == (other.handle, other.created)
 
     __hash__: typing.ClassVar[None] = None  # pyright: ignore[reportIncompatibleMethodOverride]
 
     @typing_extensions.override
     def __repr__(self) -> str:
-        return f"Stream(stream={self.stream!r}, created={self.created!r})"
+        return f"Stream(handle={self.handle!r}, created={self.created!r})"
 
     async def __aenter__(self) -> typing_extensions.Self:
         return self
@@ -95,11 +95,12 @@ class Stream(typing.Generic[BodyT]):
     ) -> int:
         """Publish values, and return the offset of the last one."""
         request = AppendRecordsRequest(
-            stream=self.stream,
+            handle=self.handle,
             records=[AppendRecord(body=value) for value in values],
             failed_tasks=_support.local_activity_failed_tasks(),
             producer=_support.client_producer(),
             previous_completed_task=_support.local_activity_previous_completed_task(),
+            withdraw_run=_support.withdraw_run(),
         )
         try:
             nexus_client = self._nexus_client
@@ -132,7 +133,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> None:
         """Close the Stream. Readers drain what is left, then end."""
         request = CloseStreamRequest(
-            stream=self.stream,
+            handle=self.handle,
             result=result,
             failure=failure,
             producer=_support.client_producer(),
@@ -171,7 +172,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> ReadRecordsResponse[BodyT]:
         """Read one page of Records. The poll iterator reads them all."""
         request = ReadRecordsRequest(
-            stream=self.stream,
+            handle=self.handle,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -231,7 +232,7 @@ class Stream(typing.Generic[BodyT]):
                 returned alone.
         """
         request = ReadRecordsRequest(
-            stream=self.stream,
+            handle=self.handle,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -276,7 +277,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> DescribeStreamResponse:
         """Describe the Stream's status, newest offset and Retention."""
         request = DescribeStreamRequest(
-            stream=self.stream,
+            handle=self.handle,
         )
         try:
             nexus_client = self._nexus_client
@@ -301,30 +302,30 @@ class Stream(typing.Generic[BodyT]):
 
 class _StreamTransferTypeConverter(
     temporalio.converter.TransferTypeConverter[
-        Stream[BodyT], temporalio.api.stream.v1.message_pb2.StreamRef
+        Stream[BodyT], temporalio.api.stream.v1.message_pb2.StreamHandle
     ]
 ):
-    """Passes a ``Stream`` as its ``stream``. A client can't decode a handle, since the
-    handle needs a client. Decode the ``stream`` and pass it to ``get_stream``.
+    """Passes a ``Stream`` as its ``handle``. A client can't decode a handle, since the
+    handle needs a client. Decode the ``handle`` and pass it to ``get_stream``.
     """
 
-    transfer_type: type[temporalio.api.stream.v1.message_pb2.StreamRef] | None = (
-        temporalio.api.stream.v1.message_pb2.StreamRef
+    transfer_type: type[temporalio.api.stream.v1.message_pb2.StreamHandle] | None = (
+        temporalio.api.stream.v1.message_pb2.StreamHandle
     )
 
     @typing_extensions.override
     def from_transfer_type(
         self,
-        value: temporalio.api.stream.v1.message_pb2.StreamRef,
+        value: temporalio.api.stream.v1.message_pb2.StreamHandle,
         type_hint: type[Stream[BodyT]],
     ) -> Stream[BodyT]:
-        raise TypeError("a client Stream needs a client. Pass its stream to get_stream")
+        raise TypeError("a client Stream needs a client. Pass its handle to get_stream")
 
     @typing_extensions.override
     def to_transfer_type(
         self, value: Stream[BodyT]
-    ) -> temporalio.api.stream.v1.message_pb2.StreamRef:
-        return _StreamRefTransferTypeConverter().to_transfer_type(value.stream)
+    ) -> temporalio.api.stream.v1.message_pb2.StreamHandle:
+        return _StreamHandleTransferTypeConverter().to_transfer_type(value.handle)
 
 
 temporalio.converter.transfer_type_convertible(_StreamTransferTypeConverter)(Stream)  # pyright: ignore[reportUnusedCallResult]

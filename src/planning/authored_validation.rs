@@ -332,10 +332,12 @@ fn validate_oneof_model_config(
         if grouped_field.origin.is_omitted() {
             continue;
         }
-        if matches!(
-            grouped_field.origin.for_language(model_config.language),
-            Some(FieldOrigin::Source { .. })
-        ) {
+        if grouped_field
+            .origin
+            .for_language(model_config.language)
+            .and_then(FieldOrigin::source)
+            .is_some()
+        {
             return Err(Error::InvalidTypeOverrideField {
                 message: message_name.to_string(),
                 field: oneof.name.to_string(),

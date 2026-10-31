@@ -99,10 +99,9 @@ namespace Nexgen.DotNetExamples.Tests
             StreamServiceExample.Stream<Turn> stream) =>
             stream.ReadAsync(null, null, null, null, null, null);
 
-        // A definition gives the type argument of a create.
+        // A definition gives the type argument of a create, and its source gives the id.
         private static Task<StreamServiceExample.Stream<Turn>> CreateTurns() =>
             StreamServiceExample.Operations.CreateStreamAsync(
-                new Streams::Nexgen.Support.StreamDefinition<Turn>("turns"),
-                new StreamServiceExample.CreateStreamOptions("stream-1"));
+                new Streams::Nexgen.Support.StreamDefinition<Turn>("turns"));
     }
 }

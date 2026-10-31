@@ -35,7 +35,13 @@ export class Stream<BodyT = unknown> {
   }
 
   public async publish(records: AppendRecord<BodyT>[]): Promise<AppendRecordsResponse> {
-    const request = { stream: this.stream, records: records };
+    const request = {
+      stream: this.stream,
+      records: records,
+      failedTasks: support.localActivityFailedTasks(),
+      producer: support.clientProducer(),
+      previousCompletedTask: support.localActivityPreviousCompletedTask(),
+    };
     const handle = await this.#nexusClient.startOperation(
       streamService.operations.appendRecords,
       request,
@@ -45,7 +51,12 @@ export class Stream<BodyT = unknown> {
   }
 
   public async close(result?: common.Payload, failure?: Error): Promise<void> {
-    const request = { stream: this.stream, result: result, failure: failure };
+    const request = {
+      stream: this.stream,
+      result: result,
+      failure: failure,
+      producer: support.clientProducer(),
+    };
     const handle = await this.#nexusClient.startOperation(
       streamService.operations.closeStream,
       request,

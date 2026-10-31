@@ -870,6 +870,22 @@ pub enum FieldOrigin {
         expression: FieldExpression,
         targets: GenerationTargets,
     },
+    /// Set when the `@nexus.source` or `@nexus.api-omit` directives of a field give the targets
+    /// different origins.
+    ByTarget {
+        workflow: TargetOrigin,
+        client: TargetOrigin,
+    },
+}
+
+/// The origin of a field in one target's convenience API.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetOrigin {
+    /// The caller supplies the field.
+    Parameter,
+    Source(FieldExpression),
+    /// The call leaves the field unset, so the transport or the server can set it.
+    ApiOmitted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -903,6 +919,10 @@ impl FieldOrigin {
     pub fn source_targets(&self) -> GenerationTargets {
         match self {
             Self::Source { targets, .. } => *targets,
+            Self::ByTarget { .. } => GenerationTargets {
+                workflow: self.source_for(GenerationTarget::Workflow).is_some(),
+                client: self.source_for(GenerationTarget::Client).is_some(),
+            },
             _ => GenerationTargets::NONE,
         }
     }
@@ -913,12 +933,39 @@ impl FieldOrigin {
                 expression,
                 targets,
             } if targets.contains(target) => Some(&expression.value),
+            Self::ByTarget { .. } => match self.target_origin(target) {
+                Some(TargetOrigin::Source(expression)) => Some(&expression.value),
+                _ => None,
+            },
             _ => None,
         }
     }
+
+    /// The source of the field, or for a field with a source in each target, the Workflow one.
     pub fn source(&self) -> Option<&str> {
         match self {
             Self::Source { expression, .. } => Some(&expression.value),
+            Self::ByTarget { .. } => self
+                .source_for(GenerationTarget::Workflow)
+                .or_else(|| self.source_for(GenerationTarget::Client)),
+            _ => None,
+        }
+    }
+
+    pub fn api_omitted_for(&self, target: GenerationTarget) -> bool {
+        match self {
+            Self::ApiOmitted => true,
+            Self::ByTarget { .. } => {
+                matches!(self.target_origin(target), Some(TargetOrigin::ApiOmitted))
+            }
+            _ => false,
+        }
+    }
+
+    fn target_origin(&self, target: GenerationTarget) -> Option<&TargetOrigin> {
+        match (self, target) {
+            (Self::ByTarget { workflow, .. }, GenerationTarget::Workflow) => Some(workflow),
+            (Self::ByTarget { client, .. }, GenerationTarget::Client) => Some(client),
             _ => None,
         }
     }
@@ -941,7 +988,7 @@ impl FieldOrigin {
     }
 
     pub fn can_initialize(&self) -> bool {
-        matches!(self, Self::Default { .. } | Self::Source { .. })
+        matches!(self, Self::Default { .. }) || self.source().is_some()
     }
 }
 
@@ -1047,10 +1094,9 @@ impl<F: TypeFamily> RecordSpec<F> {
         self.fields
             .iter()
             .filter(move |(_, field)| {
-                !matches!(
-                    field.origin,
-                    Some(FieldOrigin::Omitted | FieldOrigin::ApiOmitted)
-                ) && field.source_for(target).is_none()
+                !matches!(field.origin, Some(FieldOrigin::Omitted))
+                    && !field.api_omitted_for(target)
+                    && field.source_for(target).is_none()
             })
             .map(|(name, field)| (name.as_str(), field))
     }
@@ -1062,8 +1108,11 @@ impl<F: TypeFamily> RecordSpec<F> {
     where
         F: TypeFamily<Origin = Option<FieldOrigin>>,
     {
-        self.sourced_fields()
-            .filter(move |(_, field, _)| field.source_for(target).is_some())
+        self.fields.iter().filter_map(move |(name, field)| {
+            field
+                .source_for(target)
+                .map(|source| (name.as_str(), field, source))
+        })
     }
 
     /// Fields represented by the generated model, including fields hidden from
@@ -1074,11 +1123,10 @@ impl<F: TypeFamily> RecordSpec<F> {
     {
         self.fields
             .iter()
-            .filter(|(_, field)| {
-                matches!(
-                    field.origin,
-                    None | Some(FieldOrigin::Default { .. } | FieldOrigin::ApiOmitted)
-                )
+            .filter(|(_, field)| match &field.origin {
+                None | Some(FieldOrigin::Default { .. } | FieldOrigin::ApiOmitted) => true,
+                Some(origin @ FieldOrigin::ByTarget { .. }) => origin.source().is_none(),
+                Some(FieldOrigin::Omitted | FieldOrigin::Source { .. }) => false,
             })
             .map(|(name, field)| (name.as_str(), field))
     }
@@ -1246,6 +1294,23 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
         self.origin
             .as_ref()
             .and_then(|origin| origin.source_for(target))
+    }
+
+    /// Whether a source fills the field in any target.
+    pub fn has_source(&self) -> bool
+    where
+        F: TypeFamily<Origin = Option<FieldOrigin>>,
+    {
+        self.origin.as_ref().and_then(FieldOrigin::source).is_some()
+    }
+
+    pub fn api_omitted_for(&self, target: GenerationTarget) -> bool
+    where
+        F: TypeFamily<Origin = Option<FieldOrigin>>,
+    {
+        self.origin
+            .as_ref()
+            .is_some_and(|origin| origin.api_omitted_for(target))
     }
 
     pub fn source_targets(&self) -> GenerationTargets

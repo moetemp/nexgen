@@ -197,12 +197,19 @@ interface stream-service {
   record create-stream-request {
     /// @nexus.doc "The Stream id. Required, and never empty."
     /// @nexus.name python="id" typescript="id" dotnet="Id"
+    /// @nexus.source targets="workflow" python="workflow_stream_id(definition)"
+    ///   typescript="workflowStreamId(definition)"
+    ///   dotnet="StreamWorkflowContext.StreamId(definition)"
     stream-id: string,
     /// @nexus.doc "The age after which a Record is dropped. Empty is the Store default."
     retention: option<duration>,
     /// @nexus.doc "Retry run only. The previous run, whose Records this withdraws."
+    /// @nexus.api-omit
     withdraw-run: option<string>,
     /// @nexus.doc "The Workflow run that owns the Stream. The Workflow transport sets it."
+    /// @nexus.source targets="workflow" python="workflow_owner()" typescript="workflowOwner()"
+    ///   dotnet="StreamWorkflowContext.Owner()"
+    /// @nexus.api-omit targets="client"
     owner: option<producer>,
     /// @nexus.doc "The ref, whose id is stream-id. A create with an owner needs the ref's owner."
     %ref: option<stream-ref>,
@@ -234,18 +241,28 @@ interface stream-service {
     %stream: stream-ref,
     records: list<append-record>,
     /// @nexus.doc "Local Activity only. The run's failed or timed out Workflow Tasks."
-    /// @nexus.omit
+    /// @nexus.api-omit targets="workflow"
+    /// @nexus.source targets="client" python="local_activity_failed_tasks()"
+    ///   typescript="localActivityFailedTasks()"
+    ///   dotnet="StreamActivityContext.LocalActivityFailedTasks()"
     failed-tasks: list<s64>,
     /// @nexus.doc "Required outside a Workflow. In a Workflow the transport sets it."
+    /// @nexus.source targets="workflow" python="workflow_producer()"
+    ///   typescript="workflowProducer()" dotnet="StreamWorkflowContext.Producer()"
+    /// @nexus.source targets="client" python="client_producer()" typescript="clientProducer()"
+    ///   dotnet="StreamActivityContext.Producer()"
     producer: option<producer>,
     /// @nexus.doc "The batch number in this epoch, 1 or more. It is part of the dedupe key."
-    /// @nexus.omit
+    /// @nexus.api-omit
     sequence: option<s64>,
     /// @nexus.doc "Local Activity only. The run's last completed Workflow Task."
-    /// @nexus.omit
+    /// @nexus.api-omit targets="workflow"
+    /// @nexus.source targets="client" python="local_activity_previous_completed_task()"
+    ///   typescript="localActivityPreviousCompletedTask()"
+    ///   dotnet="StreamActivityContext.LocalActivityPreviousCompletedTask()"
     previous-completed-task: option<workflow-task-epoch>,
     /// @nexus.doc "Retry run only. The previous run, whose Records this withdraws."
-    /// @nexus.omit
+    /// @nexus.api-omit
     withdraw-run: option<string>,
     /// @nexus.omit
     namespace: placeholder,
@@ -269,6 +286,10 @@ interface stream-service {
     /// @nexus.doc "Workflow only. The run's failed or timed out Workflow Tasks."
     /// @nexus.omit
     failed-tasks: list<s64>,
+    /// @nexus.source targets="workflow" python="workflow_producer()"
+    ///   typescript="workflowProducer()" dotnet="StreamWorkflowContext.Producer()"
+    /// @nexus.source targets="client" python="client_producer()" typescript="clientProducer()"
+    ///   dotnet="StreamActivityContext.Producer()"
     producer: option<producer>,
     %result: option<payload>,
     failure: option<failure>,
@@ -315,7 +336,9 @@ interface stream-service {
     wait: option<duration>,
     /// @nexus.doc "How long to wait for an uncreated Stream. Empty fails at once. At most 60 s."
     create-wait: option<duration>,
+    // Replay needs a fixed range, so the Workflow API omits `last`.
     /// @nexus.doc "Read the newest this many Records, oldest first. No from-offset. No wait."
+    /// @nexus.api-omit targets="workflow"
     last: option<s32>,
     /// @nexus.doc "The maximum Record bytes in a page. A larger Record is still returned alone."
     max-bytes: option<s64>,

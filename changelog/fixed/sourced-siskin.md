@@ -1,0 +1,1 @@
+The TypeScript model of a request with a sourced field names the field with its `@nexus.name`, keeps an optional sourced field optional, and gives a proto-backed 64-bit sourced field the `Long` type. The input type of a call omits each sourced and API-omitted field by its TypeScript name.

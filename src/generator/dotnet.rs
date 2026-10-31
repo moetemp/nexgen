@@ -1352,6 +1352,9 @@ impl<'a> ApiPlanner<'a> {
             }
             has_parameter = true;
             output.push_str(&self.field_type(field));
+            if api_omitted_list_item(field).is_some() {
+                output.push('?');
+            }
             output.push(' ');
             output.push_str(&csharp_parameter_name(&field.name));
         }
@@ -1368,6 +1371,12 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(&field_property_name(field));
             output.push_str(" = ");
             output.push_str(&csharp_parameter_name(&field.name));
+            // A target that api-omits the list passes no value, which is an empty list.
+            if let Some(item) = api_omitted_list_item(field) {
+                output.push_str(" ?? System.Array.Empty<");
+                output.push_str(&self.high_level_value_type(item));
+                output.push_str(">()");
+            }
             output.push_str(";\n");
         }
         output.push_str("    }\n\n");
@@ -2432,6 +2441,20 @@ impl<'a> ApiPlanner<'a> {
             output.push(' ');
             output.push_str(&csharp_parameter_name(&arg_field.name));
         }
+    }
+}
+
+/// The item type of a required list that a target api-omits.
+fn api_omitted_list_item(field: &RecordFieldSpec<PlannedFamily>) -> Option<&PlannedType> {
+    match &field.field_type {
+        PlannedType::List(item)
+            if field.required
+                && (field.api_omitted_for(GenerationTarget::Workflow)
+                    || field.api_omitted_for(GenerationTarget::Client)) =>
+        {
+            Some(item)
+        }
+        _ => None,
     }
 }
 
@@ -4087,14 +4110,14 @@ fn render_flattened_method_body(
         .collect::<Vec<_>>();
     let mut constructor_args = field_exprs
         .iter()
-        .filter(|(_, field, _)| {
-            field.required && !matches!(field.origin, Some(FieldOrigin::Source { .. }))
-        })
+        .filter(|(_, field, _)| field.required && !field.has_source())
         .map(|(_, _, expr)| expr.clone())
         .collect::<Vec<_>>();
-    constructor_args.extend(model.sourced_fields().map(|(name, field, source_expr)| {
-        if field.source_for(api_target()).is_some() {
+    constructor_args.extend(model.sourced_fields().map(|(name, field, _)| {
+        if let Some(source_expr) = field.source_for(api_target()) {
             dotnet_source_expr(source_expr, support_namespace)
+        } else if field.api_omitted_for(api_target()) {
+            "default".to_string()
         } else {
             field_exprs
                 .iter()
@@ -4109,9 +4132,7 @@ fn render_flattened_method_body(
     output.push(')');
     let optional_field_exprs = field_exprs
         .iter()
-        .filter(|(_, field, _)| {
-            !field.required && !matches!(field.origin, Some(FieldOrigin::Source { .. }))
-        })
+        .filter(|(_, field, _)| !field.required && !field.has_source())
         .map(|(_, field, expr)| (*field, expr.clone()))
         .collect::<Vec<_>>();
     if optional_field_exprs.is_empty() {
@@ -4668,23 +4689,20 @@ fn resource_method_request_model_init_expr(
     let sourced_field_exprs = type_name_override.is_none().then(|| {
         model
             .sourced_fields()
-            .map(|(_, field, source_expr)| {
+            .map(|(_, field, _)| {
                 field_exprs
                     .iter()
                     .find(|(candidate, _)| candidate.name == field.name)
                     .map(|(_, expression)| expression.clone())
-                    .unwrap_or_else(|| {
-                        if field.source_for(api_target()).is_some() {
-                            dotnet_source_expr(source_expr, support_namespace)
-                        } else {
-                            "default".to_string()
-                        }
+                    .unwrap_or_else(|| match field.source_for(api_target()) {
+                        Some(source_expr) => dotnet_source_expr(source_expr, support_namespace),
+                        None => "default".to_string(),
                     })
             })
             .collect()
     });
     if type_name_override.is_none() {
-        field_exprs.retain(|(field, _)| !matches!(field.origin, Some(FieldOrigin::Source { .. })));
+        field_exprs.retain(|(field, _)| !field.has_source());
     }
     let type_arguments = api_plan
         .record_type_parameters(&model.full_name)
@@ -4929,10 +4947,9 @@ fn resource_return_binding_expr(
             proto_field_name: _,
             origin,
         } => {
-            if matches!(
-                origin,
-                Some(FieldOrigin::Source { .. } | FieldOrigin::Omitted)
-            ) {
+            if matches!(origin, Some(FieldOrigin::Omitted))
+                || origin.as_ref().and_then(FieldOrigin::source).is_some()
+            {
                 let expr = format!("{request_expr}.{}", csharp_type_name(field_name));
                 optional_resource_binding_expr(resource, binding, expr, api_plan)
             } else {

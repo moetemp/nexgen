@@ -1,0 +1,12 @@
+package temporal:api-omit-required-field@1.0.0;
+
+world system { export example; }
+
+interface example {
+  record request {
+    /// @nexus.api-omit targets="workflow"
+    id: string,
+  }
+
+  submit: func(request: request);
+}

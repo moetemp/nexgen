@@ -21,7 +21,6 @@ from ..models import (
     CreateStreamResult,
     DescribeStreamRequest,
     DescribeStreamResponse,
-    Producer,
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamReadStart,
@@ -131,8 +130,6 @@ class StreamServiceClientExtension(abc.ABC):
         *,
         id: str,
         retention: datetime.timedelta | None = None,
-        withdraw_run: str | None = None,
-        owner: Producer | None = None,
         ref: StreamRef | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
@@ -142,10 +139,6 @@ class StreamServiceClientExtension(abc.ABC):
             id: The Stream id. Required, and never empty.
             retention: The age after which a Record is dropped. Empty is the Store
                 default.
-            withdraw_run: Retry run only. The previous run, whose Records this
-                withdraws.
-            owner: The Workflow run that owns the Stream. The Workflow transport sets
-                it.
             ref: The ref, whose id is stream-id. A create with an owner needs the ref's
                 owner.
         """
@@ -153,8 +146,6 @@ class StreamServiceClientExtension(abc.ABC):
         request = CreateStreamRequest(
             id=id,
             retention=retention,
-            withdraw_run=withdraw_run,
-            owner=owner,
             ref=ref,
         )
         return await self._stream_service_create_stream(
@@ -187,19 +178,16 @@ class StreamServiceClientExtension(abc.ABC):
         *,
         stream: StreamRef,
         records: list[AppendRecord[BodyT]] | None = None,
-        producer: Producer | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> AppendRecordsResponse:
-        """Append one batch. Workflow code makes the call from a Local Activity.
-
-        Args:
-            producer: Required outside a Workflow. In a Workflow the transport sets it.
-        """
+        """Append one batch. Workflow code makes the call from a Local Activity."""
         request = AppendRecordsRequest(
             stream=stream,
             records=records or [],
-            producer=producer,
+            failed_tasks=_support.local_activity_failed_tasks(),
+            producer=_support.client_producer(),
+            previous_completed_task=_support.local_activity_previous_completed_task(),
         )
         return await self._stream_service_append_records(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
@@ -230,7 +218,6 @@ class StreamServiceClientExtension(abc.ABC):
         self,
         *,
         stream: StreamRef,
-        producer: Producer | None = None,
         result: typing.Any | None = None,
         failure: BaseException | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
@@ -238,7 +225,7 @@ class StreamServiceClientExtension(abc.ABC):
     ) -> CloseStreamResponse:
         request = CloseStreamRequest(
             stream=stream,
-            producer=producer,
+            producer=_support.client_producer(),
             result=result,
             failure=failure,
         )

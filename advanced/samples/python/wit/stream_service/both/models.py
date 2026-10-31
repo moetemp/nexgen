@@ -121,8 +121,6 @@ class _CreateStreamRequestTransferTypeConverter(
         value: temporalio.api.streamservice.v1.request_response_pb2.CreateStreamRequest,
         type_hint: type[CreateStreamRequest],
     ) -> CreateStreamRequest:
-        if not value.stream_id:
-            raise ValueError("missing required field CreateStreamRequest.id")
         id = value.stream_id
         return CreateStreamRequest(
             id=id,
@@ -529,7 +527,11 @@ class AppendRecordsRequest(typing.Generic[BodyT]):
 
     stream: StreamRef
     records: list[AppendRecord[BodyT]] | None = dataclasses.field(default_factory=list)
+    failed_tasks: list[int] | None = dataclasses.field(default_factory=list)
     producer: Producer | None = None
+    sequence: int | None = None
+    previous_completed_task: WorkflowTaskEpoch | None = None
+    withdraw_run: str | None = None
 
 
 class _AppendRecordsRequestTransferTypeConverter(
@@ -566,11 +568,19 @@ class _AppendRecordsRequestTransferTypeConverter(
                 )
                 for item in value.records
             ],
+            failed_tasks=list(value.failed_tasks),
             producer=_ProducerTransferTypeConverter().from_transfer_type(
                 value.producer, Producer
             )
             if value.HasField("producer")
             else None,
+            sequence=value.sequence if value.sequence != 0 else None,
+            previous_completed_task=_WorkflowTaskEpochTransferTypeConverter().from_transfer_type(
+                value.previous_completed_task, WorkflowTaskEpoch
+            )
+            if value.HasField("previous_completed_task")
+            else None,
+            withdraw_run=value.withdraw_run if bool(value.withdraw_run) else None,
         )
 
     @typing_extensions.override
@@ -590,10 +600,22 @@ class _AppendRecordsRequestTransferTypeConverter(
                 item.CopyFrom(
                     _AppendRecordTransferTypeConverter().to_transfer_type(element)
                 )
+        if value.failed_tasks:
+            message.failed_tasks.extend(value.failed_tasks)
         if value.producer is not None:
             message.producer.CopyFrom(
                 _ProducerTransferTypeConverter().to_transfer_type(value.producer)
             )
+        if value.sequence is not None:
+            message.sequence = value.sequence
+        if value.previous_completed_task is not None:
+            message.previous_completed_task.CopyFrom(
+                _WorkflowTaskEpochTransferTypeConverter().to_transfer_type(
+                    value.previous_completed_task
+                )
+            )
+        if value.withdraw_run is not None:
+            message.withdraw_run = value.withdraw_run
         return message
 
 
@@ -645,6 +667,64 @@ class _AppendRecordTransferTypeConverter(
 temporalio.converter.transfer_type_convertible(
     _AppendRecordTransferTypeConverter[typing.Any]
 )(AppendRecord)  # pyright: ignore[reportUnusedCallResult]
+
+
+@dataclasses.dataclass(slots=True)
+class WorkflowTaskEpoch:
+    """A Workflow Task attempt of the run."""
+
+    started_event_id: int | None = None
+    attempt: int | None = None
+    started_time: Timestamp | None = None
+
+
+class _WorkflowTaskEpochTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        WorkflowTaskEpoch, temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch
+    ]
+):
+    transfer_type: (
+        type[temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch] | None
+    ) = temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch,
+        type_hint: type[WorkflowTaskEpoch],
+    ) -> WorkflowTaskEpoch:
+        return WorkflowTaskEpoch(
+            started_event_id=value.started_event_id
+            if value.started_event_id != 0
+            else None,
+            attempt=value.attempt if value.attempt != 0 else None,
+            started_time=_TimestampTransferTypeConverter().from_transfer_type(
+                value.started_time, Timestamp
+            )
+            if value.HasField("started_time")
+            else None,
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self,
+        value: WorkflowTaskEpoch,
+    ) -> temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch:
+        message = temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch()
+        if value.started_event_id is not None:
+            message.started_event_id = value.started_event_id
+        if value.attempt is not None:
+            message.attempt = value.attempt
+        if value.started_time is not None:
+            message.started_time.CopyFrom(
+                _TimestampTransferTypeConverter().to_transfer_type(value.started_time)
+            )
+        return message
+
+
+temporalio.converter.transfer_type_convertible(_WorkflowTaskEpochTransferTypeConverter)(
+    WorkflowTaskEpoch
+)  # pyright: ignore[reportUnusedCallResult]
 
 
 @dataclasses.dataclass(slots=True)
@@ -1194,64 +1274,6 @@ class _SupersessionTransferTypeConverter(
 
 temporalio.converter.transfer_type_convertible(_SupersessionTransferTypeConverter)(
     Supersession
-)  # pyright: ignore[reportUnusedCallResult]
-
-
-@dataclasses.dataclass(slots=True)
-class WorkflowTaskEpoch:
-    """A Workflow Task attempt of the run."""
-
-    started_event_id: int | None = None
-    attempt: int | None = None
-    started_time: Timestamp | None = None
-
-
-class _WorkflowTaskEpochTransferTypeConverter(
-    temporalio.converter.TransferTypeConverter[
-        WorkflowTaskEpoch, temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch
-    ]
-):
-    transfer_type: (
-        type[temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch] | None
-    ) = temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch
-
-    @typing_extensions.override
-    def from_transfer_type(
-        self,
-        value: temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch,
-        type_hint: type[WorkflowTaskEpoch],
-    ) -> WorkflowTaskEpoch:
-        return WorkflowTaskEpoch(
-            started_event_id=value.started_event_id
-            if value.started_event_id != 0
-            else None,
-            attempt=value.attempt if value.attempt != 0 else None,
-            started_time=_TimestampTransferTypeConverter().from_transfer_type(
-                value.started_time, Timestamp
-            )
-            if value.HasField("started_time")
-            else None,
-        )
-
-    @typing_extensions.override
-    def to_transfer_type(
-        self,
-        value: WorkflowTaskEpoch,
-    ) -> temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch:
-        message = temporalio.api.stream.v1.message_pb2.WorkflowTaskEpoch()
-        if value.started_event_id is not None:
-            message.started_event_id = value.started_event_id
-        if value.attempt is not None:
-            message.attempt = value.attempt
-        if value.started_time is not None:
-            message.started_time.CopyFrom(
-                _TimestampTransferTypeConverter().to_transfer_type(value.started_time)
-            )
-        return message
-
-
-temporalio.converter.transfer_type_convertible(_WorkflowTaskEpochTransferTypeConverter)(
-    WorkflowTaskEpoch
 )  # pyright: ignore[reportUnusedCallResult]
 
 

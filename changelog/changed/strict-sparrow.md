@@ -1,0 +1,1 @@
+nexgen refuses `@nexus.api-omit` on a required field that isn't a `list<T>`, also with no target, since the call would leave it unset. A TypeScript or .NET call of a target that omits a required list sends the list empty.

@@ -1332,8 +1332,8 @@ fn build_fields_from_record(
                 reason: "cannot be used on option<T> fields; use T and omit the operation argument instead".to_string(),
             });
         }
-        let source = build_source_call(&directives, path, &field_context, language)?;
-        if source.is_some()
+        let sources = build_source_calls(&directives, path, &field_context, language)?;
+        if !sources.is_empty()
             && field_default
                 .as_ref()
                 .and_then(|default| default.for_language(language))
@@ -1346,23 +1346,18 @@ fn build_fields_from_record(
                 reason: "cannot be combined with `@nexus.source` for the same language".to_string(),
             });
         }
-        if let Some(api_omit_directive) = api_omit_directive {
-            if !api_omit_directive.args.is_empty() {
-                return Err(Error::InvalidWitDirective {
-                    path: path.to_path_buf(),
-                    context: field_context,
-                    directive: "@nexus.api-omit".to_string(),
-                    reason: "field-level api-omit does not take arguments".to_string(),
-                });
-            }
-            if source.is_some() {
-                return Err(Error::InvalidWitDirective {
-                    path: path.to_path_buf(),
-                    context: field_context,
-                    directive: "@nexus.api-omit".to_string(),
-                    reason: "cannot be combined with `@nexus.source`".to_string(),
-                });
-            }
+        let api_omit_targets = api_omit_directive
+            .map(|directive| build_api_omit_targets(directive, path, &field_context))
+            .transpose()?;
+        if api_omit_targets.is_some() && required && !is_list_type(resolve, &field.ty) {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context: field_context,
+                directive: "@nexus.api-omit".to_string(),
+                reason: "needs an `option<T>` or `list<T>` field, since the call leaves the field \
+                         unset"
+                    .to_string(),
+            });
         }
         let annotation =
             directive(&directives, "type", path, &field_context)?.map(directive_language_string);
@@ -1371,7 +1366,7 @@ fn build_fields_from_record(
         let function =
             build_function_field(resolve, owner, &directives, path, &field_context, language)?;
 
-        if source.is_some() && function.is_some() {
+        if !sources.is_empty() && function.is_some() {
             return Err(Error::ConflictingTypeOverrideFieldProperties {
                 message: context.to_string(),
                 field: proto_field_name,
@@ -1392,7 +1387,7 @@ fn build_fields_from_record(
                 origin: build_field_origins(
                     &directives,
                     field_default.as_ref(),
-                    api_omit_directive.is_some(),
+                    api_omit_targets,
                     path,
                     &field_context,
                 )?,
@@ -1836,13 +1831,19 @@ pub(crate) fn find_proto_name_for_type_def(
 fn build_field_origins(
     directives: &[Directive],
     default: Option<&LanguageStringSpec>,
-    api_omitted: bool,
+    api_omit_targets: Option<crate::nexgen_config::GenerationTargets>,
     path: &Path,
     context: &str,
 ) -> Result<LanguageFieldOrigins> {
     let mut origins = LanguageFieldOrigins::default();
-    if api_omitted {
-        origins.default = Some(FieldOrigin::ApiOmitted);
+    if let Some(api_omit_targets) = api_omit_targets {
+        origins.default = Some(
+            if api_omit_targets == crate::nexgen_config::GenerationTargets::ALL {
+                FieldOrigin::ApiOmitted
+            } else {
+                target_field_origin(&[], api_omit_targets)
+            },
+        );
         if default.is_some() {
             return Err(Error::InvalidWitDirective {
                 path: path.to_path_buf(), context: context.to_string(),
@@ -1857,9 +1858,9 @@ fn build_field_origins(
         .transpose()?
         .unwrap_or(crate::nexgen_config::GenerationTargets::ALL);
     for language in all_languages() {
-        let source = build_source_call(directives, path, context, language)?;
+        let sources = build_source_calls(directives, path, context, language)?;
         let expression = default.and_then(|default| default.for_language(language));
-        if source.is_some() && expression.is_some() {
+        if !sources.is_empty() && expression.is_some() {
             return Err(Error::InvalidWitDirective {
                 path: path.to_path_buf(),
                 context: context.to_string(),
@@ -1867,24 +1868,22 @@ fn build_field_origins(
                 reason: "cannot be combined with `@nexus.source` for the same language".to_string(),
             });
         }
-        let origin = if let Some((value, targets)) = source {
-            if api_omitted {
-                return Err(Error::InvalidWitDirective {
-                    path: path.to_path_buf(),
-                    context: context.to_string(),
-                    directive: "@nexus.api-omit".to_string(),
-                    reason: "cannot be combined with `@nexus.source`".to_string(),
-                });
-            }
-            Some(FieldOrigin::Source {
-                expression: FieldExpression {
-                    value,
-                    import: None,
-                },
-                targets,
+        if let Some(api_omit_targets) = api_omit_targets
+            && sources.iter().any(|(_, targets)| {
+                targets
+                    .iter()
+                    .any(|target| api_omit_targets.contains(target))
             })
-        } else {
-            expression.map(|value| FieldOrigin::Default {
+        {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context: context.to_string(),
+                directive: "@nexus.api-omit".to_string(),
+                reason: "cannot be combined with `@nexus.source` for the same target".to_string(),
+            });
+        }
+        let origin = match (sources.as_slice(), api_omit_targets) {
+            ([], _) => expression.map(|value| FieldOrigin::Default {
                 expression: FieldExpression {
                     value: value.to_string(),
                     import: default
@@ -1892,13 +1891,64 @@ fn build_field_origins(
                         .map(str::to_string),
                 },
                 targets: default_targets,
-            })
+            }),
+            ([(value, targets)], None) => Some(FieldOrigin::Source {
+                expression: FieldExpression {
+                    value: value.clone(),
+                    import: None,
+                },
+                targets: *targets,
+            }),
+            (sources, api_omit_targets) => Some(target_field_origin(
+                sources,
+                api_omit_targets.unwrap_or(crate::nexgen_config::GenerationTargets::NONE),
+            )),
         };
         if let Some(origin) = origin {
             origins.by_language.insert(language, origin);
         }
     }
     Ok(origins)
+}
+
+/// The origin of a field whose sources or api-omit name targets. A source runs in its targets,
+/// an api-omit leaves the field unset in its targets, and another target takes a parameter.
+fn target_field_origin(
+    sources: &[(String, crate::nexgen_config::GenerationTargets)],
+    api_omit_targets: crate::nexgen_config::GenerationTargets,
+) -> FieldOrigin {
+    let origin = |target| {
+        if let Some((value, _)) = sources.iter().find(|(_, targets)| targets.contains(target)) {
+            TargetOrigin::Source(FieldExpression {
+                value: value.clone(),
+                import: None,
+            })
+        } else if api_omit_targets.contains(target) {
+            TargetOrigin::ApiOmitted
+        } else {
+            TargetOrigin::Parameter
+        }
+    };
+    FieldOrigin::ByTarget {
+        workflow: origin(crate::nexgen_config::GenerationTarget::Workflow),
+        client: origin(crate::nexgen_config::GenerationTarget::Client),
+    }
+}
+
+fn build_api_omit_targets(
+    directive: &Directive,
+    path: &Path,
+    context: &str,
+) -> Result<crate::nexgen_config::GenerationTargets> {
+    if let Some(key) = directive.args.keys().find(|key| *key != "targets") {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.api-omit".to_string(),
+            reason: format!("field-level api-omit takes only `targets`, not `{key}`"),
+        });
+    }
+    build_origin_targets(directive, path, context, "api-omit")
 }
 
 fn build_origin_targets(
@@ -1951,18 +2001,44 @@ fn build_field_default(
     Ok(Some(expression))
 }
 
-fn build_source_call(
+/// The `@nexus.source` calls of a field for a language. Each target has at most one source.
+fn build_source_calls(
     directives: &[Directive],
     path: &Path,
     context: &str,
     language: Language,
-) -> Result<Option<(String, crate::nexgen_config::GenerationTargets)>> {
-    let Some(directive) = directive(directives, "source", path, context)? else {
-        return Ok(None);
-    };
+) -> Result<Vec<(String, crate::nexgen_config::GenerationTargets)>> {
+    let mut covered = crate::nexgen_config::GenerationTargets::NONE;
+    let mut sources = Vec::new();
+    for directive in directives
+        .iter()
+        .filter(|directive| directive.name == "source")
+    {
+        let targets = build_origin_targets(directive, path, context, "source")?;
+        if targets.iter().any(|target| covered.contains(target)) {
+            return Err(Error::InvalidWitDirective {
+                path: path.to_path_buf(),
+                context: context.to_string(),
+                directive: "@nexus.source".to_string(),
+                reason: "names a target of another `@nexus.source`; give each target one source"
+                    .to_string(),
+            });
+        }
+        covered.workflow |= targets.workflow;
+        covered.client |= targets.client;
+        if let Some(source) = build_source_call(directive, path, context, language)? {
+            sources.push((source, targets));
+        }
+    }
+    Ok(sources)
+}
 
-    let targets = build_origin_targets(directive, path, context, "source")?;
-
+fn build_source_call(
+    directive: &Directive,
+    path: &Path,
+    context: &str,
+    language: Language,
+) -> Result<Option<String>> {
     for key in [
         "go-support-import",
         "python-support-import",
@@ -2019,7 +2095,7 @@ fn build_source_call(
         });
     }
 
-    Ok(Some((source_expr.to_string(), targets)))
+    Ok(Some(source_expr.to_string()))
 }
 
 fn is_support_helper_invocation(source_expr: &str) -> bool {
@@ -3476,6 +3552,20 @@ fn interface_export_name(key: &WorldKey, interface: &Interface) -> String {
             .name
             .clone()
             .unwrap_or_else(|| "unnamed-interface".to_string()),
+    }
+}
+
+fn is_list_type(resolve: &Resolve, ty: &Type) -> bool {
+    let mut current = ty;
+    loop {
+        match current {
+            Type::Id(id) => match &resolve.types[*id].kind {
+                TypeDefKind::List(_) => return true,
+                TypeDefKind::Type(next) => current = next,
+                _ => return false,
+            },
+            _ => return false,
+        }
     }
 }
 

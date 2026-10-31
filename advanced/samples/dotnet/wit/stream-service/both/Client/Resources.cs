@@ -12,7 +12,7 @@ namespace Temporalio.Workflows.Client
 {
 
     [GeneratedCode("nexgen", null)]
-    public class Stream
+    public class Stream<TBody>
     {
         public Stream(Temporalio.Client.NexusClient nexusClient, StreamRef streamValue, bool? created)
         {
@@ -27,9 +27,9 @@ namespace Temporalio.Workflows.Client
         private readonly Temporalio.Client.NexusClient nexusClient;
 
         [GeneratedCode("nexgen", null)]
-        public async Task<AppendRecordsResponse> PublishAsync(IReadOnlyList<AppendRecord> records)
+        public async Task<AppendRecordsResponse> PublishAsync(IReadOnlyList<AppendRecord<TBody>> records)
         {
-            var request = new AppendRecordsRequest(StreamValue, records);
+            var request = new AppendRecordsRequest<TBody>(StreamValue, records);
             var result = await nexusClient.ExecuteNexusOperationAsync<AppendRecordsResponse>("AppendRecords", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
             return result;
         }
@@ -42,21 +42,21 @@ namespace Temporalio.Workflows.Client
         }
 
         [GeneratedCode("nexgen", null)]
-        public async Task<ReadRecordsResponse> ReadAsync(long? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait, long? maxBytes)
+        public async Task<ReadRecordsResponse<TBody>> ReadAsync(long? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait, long? maxBytes)
         {
             var request = new ReadRecordsRequest(StreamValue) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, MaxBytes = maxBytes };
-            var result = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
+            var result = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse<TBody>>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
             return result;
         }
 
         #if NETCOREAPP3_0_OR_GREATER
         [GeneratedCode("nexgen", null)]
-        public async IAsyncEnumerable<ReadRecordsResponse> ReadPagesAsync(long? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait, long? maxBytes, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<ReadRecordsResponse<TBody>> ReadPagesAsync(long? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait, long? maxBytes, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken = default)
         {
             var request = new ReadRecordsRequest(StreamValue) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, MaxBytes = maxBytes };
             while (true)
             {
-                var response = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions(cancellationToken)).ConfigureAwait(false);
+                var response = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse<TBody>>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions(cancellationToken)).ConfigureAwait(false);
                 var nextRequest = Nexgen.Support.StreamPoll.NextReadRequest(request, response);
                 yield return response;
                 if (nextRequest == null)

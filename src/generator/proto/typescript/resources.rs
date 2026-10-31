@@ -44,17 +44,19 @@ pub(super) fn render_resource(
 
 /// The TypeScript type of each value of a resource, from the backing of the requests that it
 /// binds to. The client target's resource uses the same types as the Workflow resource.
-pub(in crate::generator) struct ResourceAnnotations {
+pub(in crate::generator) struct ResourceAnnotations<'a> {
+    api: &'a PlannedSpec,
     bindings: ResourceBindings,
 }
 
-impl ResourceAnnotations {
+impl<'a> ResourceAnnotations<'a> {
     pub(in crate::generator) fn resolve(
-        api: &PlannedSpec,
+        api: &'a PlannedSpec,
         service: &ServiceSpec<PlannedFamily>,
         resource: &PlannedResource,
     ) -> Result<Self> {
         Ok(Self {
+            api,
             bindings: ResourceBindings::resolve(api, service, resource)?,
         })
     }
@@ -65,6 +67,7 @@ impl ResourceAnnotations {
             field.optional,
             field.function.as_ref(),
             self.bindings.field_is_proto(&field.name),
+            self.api,
         )
     }
 
@@ -78,6 +81,7 @@ impl ResourceAnnotations {
             false,
             param.function.as_ref(),
             self.bindings.param_is_proto(&method.name, &param.name),
+            self.api,
         )
     }
 }

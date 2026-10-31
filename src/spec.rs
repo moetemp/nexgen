@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use indexmap::IndexMap;
@@ -873,6 +873,12 @@ pub enum FieldOrigin {
     Source {
         expressions: BTreeMap<GenerationTarget, FieldExpression>,
     },
+    /// Set when `@nexus.api-omit` has `targets`. Each target has a source, leaves the field unset,
+    /// or takes it as a parameter.
+    ByTarget {
+        sources: BTreeMap<GenerationTarget, FieldExpression>,
+        api_omitted: BTreeSet<GenerationTarget>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -904,16 +910,30 @@ impl FieldOrigin {
     }
 
     pub fn source_for(&self, target: GenerationTarget) -> Option<&str> {
+        self.source_expressions()
+            .and_then(|expressions| expressions.get(&target))
+            .map(|expr| expr.value.as_str())
+    }
+
+    /// The source of each target that has one.
+    pub fn source_expressions(&self) -> Option<&BTreeMap<GenerationTarget, FieldExpression>> {
         match self {
-            Self::Source { expressions } => {
-                expressions.get(&target).map(|expr| expr.value.as_str())
-            }
+            Self::Source { expressions } => Some(expressions),
+            Self::ByTarget { sources, .. } if !sources.is_empty() => Some(sources),
             _ => None,
         }
     }
 
     pub fn is_sourced(&self) -> bool {
-        matches!(self, Self::Source { .. })
+        self.source_expressions().is_some()
+    }
+
+    pub fn api_omitted_for(&self, target: GenerationTarget) -> bool {
+        match self {
+            Self::ApiOmitted => true,
+            Self::ByTarget { api_omitted, .. } => api_omitted.contains(&target),
+            _ => false,
+        }
     }
 
     pub fn default_for(&self, target: GenerationTarget) -> Option<&str> {
@@ -926,7 +946,7 @@ impl FieldOrigin {
     }
 
     pub fn can_initialize(&self) -> bool {
-        matches!(self, Self::Default { .. } | Self::Source { .. })
+        matches!(self, Self::Default { .. }) || self.is_sourced()
     }
 }
 
@@ -1032,10 +1052,9 @@ impl<F: TypeFamily> RecordSpec<F> {
         self.fields
             .iter()
             .filter(move |(_, field)| {
-                !matches!(
-                    field.origin,
-                    Some(FieldOrigin::Omitted | FieldOrigin::ApiOmitted)
-                ) && field.source_for(target).is_none()
+                !matches!(field.origin, Some(FieldOrigin::Omitted))
+                    && !field.api_omitted_for(target)
+                    && field.source_for(target).is_none()
             })
             .map(|(name, field)| (name.as_str(), field))
     }
@@ -1063,11 +1082,10 @@ impl<F: TypeFamily> RecordSpec<F> {
     {
         self.fields
             .iter()
-            .filter(|(_, field)| {
-                matches!(
-                    field.origin,
-                    None | Some(FieldOrigin::Default { .. } | FieldOrigin::ApiOmitted)
-                )
+            .filter(|(_, field)| match &field.origin {
+                None | Some(FieldOrigin::Default { .. } | FieldOrigin::ApiOmitted) => true,
+                Some(origin @ FieldOrigin::ByTarget { .. }) => !origin.is_sourced(),
+                Some(FieldOrigin::Omitted | FieldOrigin::Source { .. }) => false,
             })
             .map(|(name, field)| (name.as_str(), field))
     }
@@ -1084,14 +1102,13 @@ impl<F: TypeFamily> RecordSpec<F> {
     where
         F: TypeFamily<Origin = Option<FieldOrigin>>,
     {
-        self.fields
-            .iter()
-            .filter_map(|(name, field)| match &field.origin {
-                Some(FieldOrigin::Source { expressions }) => {
-                    Some((name.as_str(), field, expressions))
-                }
-                _ => None,
-            })
+        self.fields.iter().filter_map(|(name, field)| {
+            field
+                .origin
+                .as_ref()
+                .and_then(FieldOrigin::source_expressions)
+                .map(|expressions| (name.as_str(), field, expressions))
+        })
     }
 
     pub fn functions(&self) -> impl Iterator<Item = (&str, &FunctionFieldSpec<F>)> {
@@ -1235,6 +1252,23 @@ impl<F: TypeFamily> RecordFieldSpec<F> {
         self.origin
             .as_ref()
             .and_then(|origin| origin.source_for(target))
+    }
+
+    /// Whether a source fills the field in any target.
+    pub fn has_source(&self) -> bool
+    where
+        F: TypeFamily<Origin = Option<FieldOrigin>>,
+    {
+        self.origin.as_ref().is_some_and(FieldOrigin::is_sourced)
+    }
+
+    pub fn api_omitted_for(&self, target: GenerationTarget) -> bool
+    where
+        F: TypeFamily<Origin = Option<FieldOrigin>>,
+    {
+        self.origin
+            .as_ref()
+            .is_some_and(|origin| origin.api_omitted_for(target))
     }
 
     fn map_names_with<G, M>(

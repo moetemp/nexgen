@@ -208,11 +208,11 @@ export interface CreateStreamRequest {
   /**
    * Retry run only. The previous run, whose Records this withdraws.
    */
-  withdrawRun: string;
+  withdrawRun?: string;
   /**
    * Unique for each create call, and the same on its retries.
    */
-  requestId: string;
+  requestId?: string;
 }
 
 function createStreamRequestFromProto(
@@ -228,16 +228,8 @@ function createStreamRequestFromProto(
       proto.idConflictPolicy == null
         ? undefined
         : (proto.idConflictPolicy as number as StreamIdConflictPolicy),
-    withdrawRun: requiredField(
-      proto.withdrawRun === "" ? undefined : proto.withdrawRun,
-      "sourced field",
-      "withdrawRun",
-    ),
-    requestId: requiredField(
-      proto.requestId === "" ? undefined : proto.requestId,
-      "sourced field",
-      "requestId",
-    ),
+    withdrawRun: proto.withdrawRun ?? undefined,
+    requestId: proto.requestId ?? undefined,
   };
 }
 
@@ -323,7 +315,7 @@ export interface AppendRecordsRequest<BodyT> {
   /**
    * Required outside a Workflow. In a Workflow the transport sets it.
    */
-  writer: StreamWriter;
+  writer?: StreamWriter;
 }
 
 function appendRecordsRequestFromProto<BodyT>(
@@ -343,9 +335,7 @@ function appendRecordsRequestFromProto<BodyT>(
     ),
     sequence:
       proto.sequence == null ? undefined : Long.fromValue(proto.sequence, false),
-    writer: streamWriterFromProto(
-      requiredField(proto.writer, "sourced field", "writer"),
-    ),
+    writer: proto.writer == null ? undefined : streamWriterFromProto(proto.writer),
   };
 }
 
@@ -890,7 +880,7 @@ export const closeStreamResponseTransferTypeConverter = {
 };
 export interface CloseStreamRequest {
   ref: StreamRef;
-  writer: StreamWriter;
+  writer?: StreamWriter;
 }
 
 function closeStreamRequestFromProto(
@@ -898,9 +888,7 @@ function closeStreamRequestFromProto(
 ): CloseStreamRequest {
   return {
     ref: streamRefFromProto(requiredField(proto.ref, "CloseStreamRequest", "ref")),
-    writer: streamWriterFromProto(
-      requiredField(proto.writer, "sourced field", "writer"),
-    ),
+    writer: proto.writer == null ? undefined : streamWriterFromProto(proto.writer),
   };
 }
 

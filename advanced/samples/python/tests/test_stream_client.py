@@ -131,7 +131,7 @@ async def test_a_read_that_does_not_wait_stops_at_an_empty_page_that_did_not_mov
         ReadRecordsRequest(stream=ref, last=2),
         ReadRecordsRequest(stream=ref, from_offset=3),
     ]
-    # One Nexus client serves the iteration, and each page is a new operation.
+    # The iteration uses one Nexus client, and each page is a new operation.
     assert client.nexus_clients == 1
     assert len(set(client.operation_ids)) == len(pages)
 
@@ -187,7 +187,7 @@ async def test_a_stream_read_from_the_end_stays_at_the_first_next_offset() -> No
         ReadRecordsRequest(stream=ref, from_offset=5, wait=wait),
         ReadRecordsRequest(stream=ref, from_offset=6, wait=wait),
     ]
-    # The handle reads on the Nexus client of its create.
+    # The iterator uses the Nexus client that `create_stream` gave the handle.
     assert client.nexus_clients == 1
 
 

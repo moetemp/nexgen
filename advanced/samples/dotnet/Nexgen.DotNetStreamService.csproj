@@ -16,9 +16,10 @@
   <ItemGroup>
     <!-- The generated interceptor partial requires matching SDK changes. -->
     <Compile Include="wit/stream-service/**/*.cs"
-             Exclude="wit/stream-service/workflow/SystemNexusWorkflowOutboundInterceptor.cs" />
+             Exclude="wit/stream-service/both/SystemNexusWorkflowOutboundInterceptor.cs" />
     <Compile Include="proto/streams/**/*.cs" />
     <Compile Include="TemporalSupport/TemporalSupport.cs" />
+    <Compile Include="TemporalSupport/StreamService/*.cs" />
   </ItemGroup>
 
   <ItemGroup>

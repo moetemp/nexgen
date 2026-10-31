@@ -1,0 +1,14 @@
+package temporal:poll-dotnet-iterator-name-clash@1.0.0;
+
+world service { export reader; }
+
+// The .NET iterator of `read` would be `ReadPagesAsync`, the method of `read-pages`.
+/// @nexus.endpoint "reader"
+interface reader {
+  record read-request { offset: option<s64> }
+  record read-response { done: option<bool> }
+
+  /// @nexus.poll dotnet="ReaderPoll.NextRead" targets="client"
+  read: func(request: read-request) -> read-response;
+  read-pages: func(request: read-request) -> read-response;
+}

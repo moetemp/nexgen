@@ -12,6 +12,7 @@ interface reader {
 
   record open-request { offset: s64 }
 
-  /// @nexus.poll python="next_open_request" typescript="nextOpenRequest" targets="client"
+  /// @nexus.poll python="next_open_request" typescript="nextOpenRequest"
+  ///   dotnet="ReaderPoll.NextOpenRequest" targets="client"
   open: func(request: open-request) -> cursor-result;
 }

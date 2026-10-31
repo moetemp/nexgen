@@ -1,6 +1,6 @@
-languages = ["python", "typescript"]
+languages = ["python", "typescript", "dotnet"]
 targets = ["workflow", "client"]
 
 [error]
 kind = "client-target-name-conflict"
-contains = ["`describe`", "`OrderService`", "`UserService`"]
+contains = ["is a client method of both", "`OrderService`", "`UserService`"]

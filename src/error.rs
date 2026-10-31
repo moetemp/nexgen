@@ -109,6 +109,11 @@ pub enum Error {
     },
 
     #[error(
+        "TypeScript can't flatten some fields of a request field of operation `{operation}`: {reason}"
+    )]
+    UnsupportedTypeScriptFlatten { operation: String, reason: String },
+
+    #[error(
         ".NET generated name `{name}` for {generated_by} conflicts with {conflicting_declaration}"
     )]
     DotnetGeneratedNameConflict {

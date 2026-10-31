@@ -137,7 +137,13 @@ async def test_a_created_stream_publishes_on_the_system_endpoint() -> None:
     assert (stream.stream, stream.created) == (ref, True)
     assert response.last_offset == 0
     assert client.calls == [
-        (STREAM_SERVICE, SYSTEM_ENDPOINT, "CreateStream", CreateStreamRequest(id="s1")),
+        (
+            STREAM_SERVICE,
+            SYSTEM_ENDPOINT,
+            "CreateStream",
+            # The ref copies the id.
+            CreateStreamRequest(id="s1", ref=StreamRef(id="s1")),
+        ),
         (
             STREAM_SERVICE,
             SYSTEM_ENDPOINT,
@@ -178,6 +184,21 @@ async def test_an_activity_publish_takes_the_producer_of_its_attempt(
             ),
         )
     ]
+
+
+async def test_a_create_takes_the_ref_fields_as_parameters() -> None:
+    client = Client({"CreateStream": [CreateStreamResult(stream=StreamRef(id="s1"))]})
+
+    _ = await client.create_stream(Texts, id="s1", backend="redis")
+
+    request = client.calls[0][3]
+    # The ref copies the id, and takes the backend.
+    assert request == CreateStreamRequest(
+        id="s1", ref=StreamRef(id="s1", backend="redis")
+    )
+    # The proto keeps the ref.
+    payload = SYSTEM_CONVERTER.to_payload(request)
+    assert SYSTEM_CONVERTER.from_payload(payload, CreateStreamRequest) == request
 
 
 async def test_a_stored_stream_ref_rebuilds_the_handle() -> None:

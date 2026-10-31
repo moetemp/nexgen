@@ -44,8 +44,11 @@ namespace Nexgen.DotNetExamples.Tests
                     (SystemEndpoint, StreamService, "AppendRecords"),
                 },
                 calls.Select(call => (call.Endpoint, call.Service, call.Operation)));
-            // The client API omits the owner, and fills the producer from its source.
-            Assert.Equal(new Models.CreateStreamRequest("s1", null), calls[0].Input);
+            // The client API omits the owner, and fills the producer from its source. The ref copies
+            // the id.
+            Assert.Equal(
+                new Models.CreateStreamRequest("s1", null) { Ref = streamRef },
+                calls[0].Input);
             Assert.Equal(
                 new Models.AppendRecordsRequest<Turn>(
                     streamRef, records, Array.Empty<long>(), new Models.Producer("client:sample"), null),

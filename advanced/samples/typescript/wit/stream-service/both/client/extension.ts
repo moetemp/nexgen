@@ -33,7 +33,11 @@ function requiredField<T>(
 
 type CreateStreamInput = CreateStreamRequest extends infer Input
   ? Input extends unknown
-    ? Omit<Input, "owner" | "withdrawRun"> & { owner?: never; withdrawRun?: never }
+    ? Omit<Input, "owner" | "ref" | "withdrawRun"> & {
+        owner?: never;
+        ref?: never;
+        withdrawRun?: never;
+      } & { backend?: string }
     : never
   : never;
 
@@ -136,9 +140,14 @@ export function StreamServiceClientExtension<
      * @param request - Request for the operation.
      */
     public async createStream<BodyT>(
-      request: CreateStreamInput,
+      requestInput: CreateStreamInput,
       bodyType?: common.TypeInfo<BodyT>,
     ): Promise<Stream<BodyT>> {
+      const { backend, ...requestFields } = requestInput;
+      const request = {
+        ...requestFields,
+        ref: { backend, id: requestFields.id },
+      } as CreateStreamRequest;
       const nexusClient = this.createNexusClient({
         service: streamService,
         endpoint: "__temporal_system",

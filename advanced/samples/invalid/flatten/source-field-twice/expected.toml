@@ -1,0 +1,6 @@
+[error]
+kind = "invalid-wit-directive"
+contains = [
+  "@nexus.source",
+  "names a target of another `@nexus.source`; give each target one source",
+]

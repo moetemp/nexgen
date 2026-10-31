@@ -4,7 +4,12 @@ import type { Info as ActivityInfo } from "@temporalio/activity";
 import * as workflow from "@temporalio/workflow";
 import type Long from "long";
 
-import type { Producer, WorkflowTaskEpoch } from "../wit/stream-service/both/models";
+import {
+  type Execution,
+  ExecutionType,
+  type Producer,
+  type WorkflowTaskEpoch,
+} from "../wit/stream-service/both/models";
 import type { StreamDefinition } from "./temporal_model_converters";
 
 // Workflow code imports this module too, so it can't load `@temporalio/activity`. A client-only
@@ -22,6 +27,16 @@ export function setActivityInfoProvider(
 export function workflowStreamId(definition: StreamDefinition<unknown>): string {
   const info = workflow.workflowInfo();
   return `${info.workflowId}:${info.firstExecutionRunId}:${definition.name}`;
+}
+
+/** The Workflow's run chain, which owns its Streams: its id and its first run id. */
+export function workflowHandleOwner(): Execution {
+  const info = workflow.workflowInfo();
+  return {
+    type: ExecutionType.ExecutionTypeWorkflow,
+    businessId: info.workflowId,
+    runId: info.firstExecutionRunId,
+  };
 }
 
 export function workflowOwner(): Producer {

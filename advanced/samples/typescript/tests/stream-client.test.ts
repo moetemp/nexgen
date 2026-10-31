@@ -114,7 +114,8 @@ describe("stream-service client target", () => {
         service: STREAM_SERVICE,
         endpoint: SYSTEM_ENDPOINT,
         operation: "CreateStream",
-        input: { id: "s1" },
+        // The ref copies the id.
+        input: { id: "s1", ref: { id: "s1" } },
       },
       {
         service: STREAM_SERVICE,
@@ -152,6 +153,18 @@ describe("stream-service client target", () => {
         failedTasks: [],
         producer: { id: "act:r1:a1", runId: "r1" },
       },
+    ]);
+  });
+
+  test("a create takes the fields of the ref as parameters", async () => {
+    const created: CreateStreamResult = { stream: { id: "s1" } };
+    const client = new Client({ CreateStream: [created] });
+
+    await client.createStream({ id: "s1", backend: "redis" });
+
+    // The ref copies the id, and takes the backend.
+    expect(client.calls.map((call) => call.input)).toEqual([
+      { id: "s1", ref: { backend: "redis", id: "s1" } },
     ]);
   });
 

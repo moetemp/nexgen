@@ -244,6 +244,7 @@ fn resource_result_fields(
                     field_type: TypeSpec::String,
                     required: false,
                     origin: None,
+                    flatten: None,
                     function: None,
                     data: (),
                 },

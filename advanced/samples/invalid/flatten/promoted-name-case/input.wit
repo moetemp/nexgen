@@ -1,0 +1,33 @@
+package temporal:nexus@1.0.0;
+
+world system { export cancel-service; }
+
+/// @nexus.endpoint "cancel"
+interface cancel-service {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution"
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  /// @nexus.proto "temporal.api.workflowservice.v1.RequestCancelWorkflowExecutionRequest"
+  record cancel-request {
+    namespace: string,
+    /// @nexus.flatten-in-api fields="workflow-id"
+    workflow-execution: option<workflow-execution>,
+    /// @nexus.omit
+    identity: placeholder,
+    /// @nexus.omit
+    request-id: placeholder,
+    /// @nexus.omit
+    first-execution-run-id: placeholder,
+    /// @nexus.name typescript="workflowId"
+    reason: option<string>,
+    /// @nexus.omit
+    links: placeholder,
+  }
+
+  cancel: func(request: cancel-request);
+}

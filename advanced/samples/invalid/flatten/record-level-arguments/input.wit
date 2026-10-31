@@ -1,0 +1,21 @@
+package temporal:nexus@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  // A record-level flatten flattens each field, so it names no fields.
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution"
+  /// @nexus.flatten-in-api fields="workflow-id"
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  record get-history-request {
+    namespace: string,
+    execution: option<workflow-execution>,
+  }
+
+  get-history: func(request: get-history-request);
+}

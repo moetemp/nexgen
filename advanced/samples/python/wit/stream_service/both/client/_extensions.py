@@ -24,10 +24,12 @@ from ..models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamReadStart,
+    StreamRecord,
     StreamRef,
 )
 from ._resources import Stream
 import temporal_support as _support
+from .._poll import PollIterator
 
 if typing.TYPE_CHECKING:
     import temporal_support
@@ -316,7 +318,7 @@ class StreamServiceClientExtension(abc.ABC):
             request, body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
         )
 
-    async def iter_read_records(
+    def iter_read_records(
         self,
         body_type: type[BodyT],
         *,
@@ -330,8 +332,9 @@ class StreamServiceClientExtension(abc.ABC):
         max_bytes: int | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
-    ) -> collections.abc.AsyncGenerator[ReadRecordsResponse[BodyT], None]:
-        """Yield each response of ``read_records`` until the poll helper stops.
+    ) -> PollIterator[ReadRecordsRequest, StreamRecord[BodyT]]:
+        """Yield each item that ``read_records`` reads, page by page. The iterator's
+        ``next_request`` resumes after the last item that it yielded.
 
         A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads from a Local
         Activity.
@@ -366,7 +369,12 @@ class StreamServiceClientExtension(abc.ABC):
             service="temporal.api.streamservice.v1.StreamService",
             endpoint="__temporal_system",
         )
-        while True:
+
+        async def read(
+            request: ReadRecordsRequest,
+        ) -> tuple[
+            ReadRecordsRequest | None, collections.abc.Sequence[StreamRecord[BodyT]]
+        ]:
             handle = await nexus_client.start_operation(
                 operation="ReadRecords",
                 arg=request,
@@ -376,11 +384,9 @@ class StreamServiceClientExtension(abc.ABC):
                 rpc_timeout=rpc_timeout,
             )
             response = await handle.result()
-            next_request = _support.next_read_request(request, response)
-            yield response
-            if next_request is None:
-                return
-            request = next_request
+            return _support.next_read_request(request, response), response.records or []
+
+        return PollIterator(request, read, _support.resume_read_request)
 
     async def _stream_service_describe_stream(
         self,

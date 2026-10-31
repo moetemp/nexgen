@@ -50,3 +50,15 @@ def next_read_request(
         return dataclasses.replace(request, last=None)
     # `last` takes no `from_offset`, and a `from_offset` overrides `start`.
     return dataclasses.replace(request, from_offset=next_offset, start=None, last=None)
+
+
+class _ReadItem(typing.Protocol):
+    @property
+    def offset(self) -> int | None: ...
+
+
+def resume_read_request(request: _ReadRequestT, item: _ReadItem) -> _ReadRequestT:
+    # A read that resumes after an item starts past its offset, and reads no `last` again.
+    return dataclasses.replace(
+        request, from_offset=(item.offset or 0) + 1, start=None, last=None
+    )

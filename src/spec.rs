@@ -678,6 +678,12 @@ pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub poll_next: F::Text,
     /// The targets whose API gets the poll.
     pub poll_targets: GenerationTargets,
+    /// The key of the response's list field whose items the poll yields (`items=`). Without
+    /// it, the poll yields each response.
+    pub poll_items: Option<String>,
+    /// The support helper that turns a page's request and one of its items into the request that
+    /// resumes after that item (`resume=`).
+    pub poll_resume: F::Text,
     pub data: F::OperationData,
 }
 
@@ -716,6 +722,8 @@ impl<F: TypeFamily> OperationSpec<F> {
             serialization_context: map.map_text(self.serialization_context),
             poll_next: map.map_text(self.poll_next),
             poll_targets: self.poll_targets,
+            poll_items: self.poll_items,
+            poll_resume: map.map_text(self.poll_resume),
             data,
         }
     }

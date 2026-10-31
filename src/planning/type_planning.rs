@@ -659,6 +659,8 @@ impl<'a> TypePlanningContext<'a> {
             serialization_context: operation.serialization_context.clone(),
             poll_next: operation.poll_next.clone(),
             poll_targets: operation.poll_targets,
+            poll_items: operation.poll_items.clone(),
+            poll_resume: operation.poll_resume.clone(),
             data: PlannedOperationData {
                 output_resource_return: plan_operation_resource_return(
                     &self.spec,
@@ -2107,6 +2109,8 @@ interface alerts {
                     serialization_context: LanguageStringSpec::default(),
                     poll_next: LanguageStringSpec::default(),
                     poll_targets: crate::nexgen_config::GenerationTargets::NONE,
+                    poll_items: None,
+                    poll_resume: LanguageStringSpec::default(),
                     data: (),
                 }],
                 resources: Vec::new(),

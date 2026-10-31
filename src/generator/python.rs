@@ -794,6 +794,32 @@ impl<'a> ApiPlanner<'a> {
                 GeneratedFileOrigin::fixed("generated Python resources package initializer"),
             )?;
         }
+        if let Some(operation) = services
+            .iter()
+            .flat_map(|service| &service.operations)
+            .find(|operation| {
+                operation.poll_items.is_some()
+                    && operation.poll_next(GenerationTarget::Client).is_some()
+                    && targets.client
+            })
+        {
+            if model_names.iter().any(|name| name == "PollIterator") {
+                return Err(Error::PythonGeneratedNameConflict {
+                    name: "PollIterator".to_string(),
+                    generated_by: format!("the item iterator of poll `{}`", operation.name),
+                    conflicting_declaration: "a model of the package".to_string(),
+                });
+            }
+            let mut source = String::new();
+            render_generated_file_header(&mut source);
+            source.push_str("\nimport collections.abc\nimport typing\n\n\n");
+            source.push_str(PYTHON_POLL_ITERATOR);
+            files.insert(
+                "_poll.py",
+                source,
+                GeneratedFileOrigin::fixed("generated Python poll iterator"),
+            )?;
+        }
         if !services.is_empty() {
             files.insert(
                 "services.py",
@@ -1111,6 +1137,7 @@ impl<'a> ApiPlanner<'a> {
         }
         render_client_resource_data_import(&mut output, &body, "..");
         render_support_import(&mut output, &body, self.support_package, false);
+        render_poll_iterator_import(&mut output, &body, ".._poll");
         render_definition_type_checking_imports(
             &mut output,
             &body,
@@ -1727,6 +1754,11 @@ impl<'a> ApiPlanner<'a> {
             render_named_python_import(&mut output, ".", &used_resource_names);
         }
         render_support_import(&mut output, &body, self.support_package, false);
+        let poll_module = match target.and_then(GenerationTarget::package_dir) {
+            None => ".._poll",
+            Some(_) => "..._poll",
+        };
+        render_poll_iterator_import(&mut output, &body, poll_module);
         render_definition_type_checking_imports(&mut output, &body, resource.definition.value());
         if !body.is_empty() {
             output.push('\n');
@@ -2084,6 +2116,39 @@ impl<'a> ApiPlanner<'a> {
             .collect()
     }
 
+    /// The response attribute whose items a poll yields, and the annotation of an item.
+    fn poll_items(
+        &self,
+        operation: &OperationSpec<PlannedFamily>,
+        key: &str,
+    ) -> Result<(String, String)> {
+        let unsupported = || Error::UnsupportedPoll {
+            path: self.source_path.to_path_buf(),
+            operation: operation.name.clone(),
+            reason: format!("has `items` that names `{key}`, which isn't a list in its response"),
+        };
+        let Some(PlannedType::Record(record)) = operation.output_type() else {
+            return Err(unsupported());
+        };
+        let field = self
+            .api_plan
+            .record(&record.full_name)
+            .and_then(|record| record.fields.get(key))
+            .ok_or_else(unsupported)?;
+        let kind = match &field.field_type {
+            PlannedType::Option(inner) => inner.as_ref(),
+            kind => kind,
+        };
+        let PlannedType::List(item) = kind else {
+            return Err(unsupported());
+        };
+        let attr = self
+            .model_field_attr(&record.full_name, key)
+            .ok_or_else(unsupported)?;
+        let item = resolve_python_value_type(self.api_plan, &self.external_models, item)?;
+        Ok((attr, item.annotation))
+    }
+
     /// The attribute of a record field in the rendered model, by key.
     fn model_field_attr(&self, full_name: &str, key: &str) -> Option<String> {
         let record = self.api_plan.record(full_name)?;
@@ -2147,13 +2212,15 @@ impl<'a> ApiPlanner<'a> {
             return;
         };
         let method_name = python_field_name(&method.name);
-        output.push_str("\n    async def ");
+        let (keyword, annotation) = operation.poll_iterator_signature();
+        output.push_str("\n    ");
+        output.push_str(keyword);
         output.push_str(&poll_function_name(&method_name));
         output.push_str("(\n");
         self.render_resource_method_params(output, method, true);
-        output.push_str("    ) -> collections.abc.AsyncGenerator[");
-        output.push_str(&operation.output_annotation);
-        output.push_str(", None]:\n");
+        output.push_str("    ) -> ");
+        output.push_str(&annotation);
+        output.push_str(":\n");
         // A parameter fills the request field of the same name, so it gets the doc of that field.
         let field_docs = operation
             .target_unpacked_input(GenerationTarget::Client)
@@ -2170,7 +2237,11 @@ impl<'a> ApiPlanner<'a> {
         render_python_docstring(
             output,
             "        ",
-            Some(&poll_function_summary(&method_name, method.doc.as_deref())),
+            Some(&poll_function_summary(
+                &method_name,
+                method.doc.as_deref(),
+                operation,
+            )),
             &args,
             None,
             operation.experimental,
@@ -2185,7 +2256,7 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("        nexus_client = self.");
         output.push_str(&resource_client_identifier(resource, "_nexus_client"));
         output.push('\n');
-        render_client_poll_loop(output, operation, next_expr, "self.");
+        render_client_poll_body(output, operation, next_expr, "self.");
     }
 
     fn python_resource_method_result_annotation(&self, method: &PlannedResourceMethod) -> String {
@@ -2500,6 +2571,12 @@ impl<'a> ApiPlanner<'a> {
             &local_python_model_type_expr(&output_ref),
             &output_type_parameters,
         );
+        let poll_items = match &operation.poll_items {
+            Some(key) if operation.poll_next.value().is_some() => {
+                Some(self.poll_items(operation, key)?)
+            }
+            _ => None,
+        };
         let descriptor_output_ref = match operation.output_type() {
             Some(PlannedType::Record(record)) => python_erased_generic_record_annotation(
                 &output_ref,
@@ -2547,6 +2624,11 @@ impl<'a> ApiPlanner<'a> {
                 .value()
                 .map(|helper| format!("_support.{helper}")),
             poll_targets: operation.poll_targets,
+            poll_items,
+            poll_resume_expr: operation
+                .poll_resume
+                .value()
+                .map(|helper| format!("_support.{helper}")),
             output_resource_return,
             output_direct_result,
             client_resource: None,
@@ -3921,6 +4003,10 @@ struct RenderedOperation<'a> {
     /// The support helper that gives the next request of a poll.
     poll_next_expr: Option<String>,
     poll_targets: GenerationTargets,
+    /// The response attribute whose items the poll yields, with the item's annotation.
+    poll_items: Option<(String, String)>,
+    /// The support helper that resumes a read after one item.
+    poll_resume_expr: Option<String>,
     output_resource_return: Option<PlannedOperationResourceReturn>,
     output_direct_result: bool,
     /// The resource that the operation returns directly, for the client target.
@@ -4042,6 +4128,24 @@ impl RenderedOperation<'_> {
     }
 
     /// The poll helper, when the target gets the poll.
+    /// The keyword and the return annotation of a poll iterator. An item poll returns a
+    /// `PollIterator` at once, and another poll is an async generator of pages.
+    fn poll_iterator_signature(&self) -> (&'static str, String) {
+        match &self.poll_items {
+            Some((_, item)) => (
+                "def ",
+                format!("PollIterator[{}, {item}]", operation_input_annotation(self)),
+            ),
+            None => (
+                "async def ",
+                format!(
+                    "collections.abc.AsyncGenerator[{}, None]",
+                    self.output_annotation
+                ),
+            ),
+        }
+    }
+
     fn poll_next(&self, target: GenerationTarget) -> Option<&str> {
         self.poll_next_expr
             .as_deref()
@@ -7152,6 +7256,68 @@ fn validate_rpc_option_names(services: &[RenderedService<'_>]) -> Result<()> {
     Ok(())
 }
 
+/// The iterator of a poll with `items=`. It reads a page when it runs out of items, and keeps the
+/// request that resumes after the last item that it yielded.
+const PYTHON_POLL_ITERATOR: &str = r#"_PollRequestT = typing.TypeVar("_PollRequestT")
+_PollItemT = typing.TypeVar("_PollItemT")
+
+
+@typing.final
+class PollIterator(typing.Generic[_PollRequestT, _PollItemT]):
+    """Yields each item that a poll reads, page by page.
+
+    ``next_request`` is the request to resume with. With a ``resume`` helper, it resumes after
+    the last item that the iterator yielded. Without one, it reads that item's page again,
+    until the iterator yields the page's last item. It is ``None`` after the last page.
+    """
+
+    def __init__(
+        self,
+        request: _PollRequestT,
+        read: collections.abc.Callable[
+            [_PollRequestT],
+            collections.abc.Awaitable[
+                tuple[_PollRequestT | None, collections.abc.Sequence[_PollItemT]]
+            ],
+        ],
+        resume: collections.abc.Callable[[_PollRequestT, _PollItemT], _PollRequestT]
+        | None,
+    ) -> None:
+        self.next_request: _PollRequestT | None = request
+        self._read: collections.abc.Callable[
+            [_PollRequestT],
+            collections.abc.Awaitable[
+                tuple[_PollRequestT | None, collections.abc.Sequence[_PollItemT]]
+            ],
+        ] = read
+        self._resume: (
+            collections.abc.Callable[[_PollRequestT, _PollItemT], _PollRequestT] | None
+        ) = resume
+        self._page: list[_PollItemT] = []
+        self._page_request: _PollRequestT = request
+        self._page_next: _PollRequestT | None = None
+
+    def __aiter__(self) -> PollIterator[_PollRequestT, _PollItemT]:
+        return self
+
+    async def __anext__(self) -> _PollItemT:
+        while not self._page:
+            if self.next_request is None:
+                raise StopAsyncIteration
+            self._page_request = self.next_request
+            self._page_next, items = await self._read(self._page_request)
+            self._page = list(items)
+            if not self._page:
+                self.next_request = self._page_next
+        item = self._page.pop(0)
+        # After a page's last item, the next read starts where the page helper says.
+        if not self._page:
+            self.next_request = self._page_next
+        elif self._resume is not None:
+            self.next_request = self._resume(self._page_request, item)
+        return item
+"#;
+
 /// The Nexus client that a client extension starts operations with. It has the `start_operation`
 /// of `temporalio.client.NexusClient`, so `Client.create_nexus_client` can supply it.
 const PYTHON_CLIENT_NEXUS_PROTOCOL: &str = r#"_OutputT = typing.TypeVar("_OutputT")
@@ -9268,8 +9434,23 @@ fn poll_function_name(name: &str) -> String {
     format!("iter_{name}")
 }
 
-fn poll_function_summary(name: &str, doc: Option<&str>) -> String {
-    let summary = format!("Yield each response of ``{name}`` until the poll helper stops.");
+fn poll_function_summary(
+    name: &str,
+    doc: Option<&str>,
+    operation: &RenderedOperation<'_>,
+) -> String {
+    let summary = match (&operation.poll_items, &operation.poll_resume_expr) {
+        (Some(_), Some(_)) => format!(
+            "Yield each item that ``{name}`` reads, page by page. The iterator's \
+             ``next_request`` resumes after the last item that it yielded."
+        ),
+        (Some(_), None) => format!(
+            "Yield each item that ``{name}`` reads, page by page. The iterator's \
+             ``next_request`` reads the current page again, until it yields the page's last \
+             item."
+        ),
+        (None, _) => format!("Yield each response of ``{name}`` until the poll helper stops."),
+    };
     match doc.map(str::trim).filter(|doc| !doc.is_empty()) {
         Some(doc) => format!("{summary}\n\n{doc}"),
         None => summary,
@@ -9285,7 +9466,11 @@ fn render_operation_poll_function(
 ) {
     let target = GenerationTarget::Client;
     let body_indent = target_body_indent(target);
-    render_operation_signature_start(output, target, &poll_function_name(&operation.attr_name));
+    let (keyword, annotation) = operation.poll_iterator_signature();
+    start_line(output, target, keyword);
+    output.push_str(&poll_function_name(&operation.attr_name));
+    output.push_str("(\n");
+    start_line(output, target, "    self,\n");
     operation
         .render_public_runtime_type_parameters(output, &format!("{}    ", target_indent(target)));
     let unpacked_input = operation.target_unpacked_input(target);
@@ -9313,9 +9498,9 @@ fn render_operation_poll_function(
     }
     let keyword_only = unpacked_input.is_some_and(|input| !input.parameters.is_empty());
     render_rpc_option_parameters(output, "        ", keyword_only);
-    start_line(output, target, ") -> collections.abc.AsyncGenerator[");
-    output.push_str(&operation.output_annotation);
-    output.push_str(", None]:\n");
+    start_line(output, target, ") -> ");
+    output.push_str(&annotation);
+    output.push_str(":\n");
     let args = unpacked_input
         .map(|unpacked_input| unpacked_operation_doc_args(unpacked_input, None))
         .unwrap_or_default();
@@ -9325,6 +9510,7 @@ fn render_operation_poll_function(
         Some(&poll_function_summary(
             &operation.attr_name,
             operation.doc.as_deref(),
+            operation,
         )),
         &args,
         None,
@@ -9347,7 +9533,45 @@ fn render_operation_poll_function(
     }
     // The iteration uses one Nexus client for every page.
     render_inline_nexus_client(output, target, service);
-    render_client_poll_loop(output, operation, next_expr, "");
+    render_client_poll_body(output, operation, next_expr, "");
+}
+
+/// Imports the package's `PollIterator`, when the body has an item poll.
+fn render_poll_iterator_import(output: &mut String, body: &str, module: &str) {
+    if body.contains("PollIterator(") {
+        output.push_str(&format!("from {module} import PollIterator\n"));
+    }
+}
+
+/// The body of a client poll iterator, after the first request and the Nexus client. An item poll
+/// hands a page reader to a `PollIterator`.
+fn render_client_poll_body(
+    output: &mut String,
+    operation: &RenderedOperation<'_>,
+    next_expr: &str,
+    receiver: &str,
+) {
+    let Some((items_attr, item_annotation)) = &operation.poll_items else {
+        render_client_poll_loop(output, operation, next_expr, receiver);
+        return;
+    };
+    let target = GenerationTarget::Client;
+    let request = operation_input_annotation(operation);
+    output.push('\n');
+    start_line(output, target, "    async def read(\n");
+    start_line(output, target, &format!("        request: {request},\n"));
+    start_line(output, target, "    ) -> ");
+    output.push_str(&format!(
+        "tuple[{request} | None, collections.abc.Sequence[{item_annotation}]]:\n"
+    ));
+    render_client_poll_response(output, operation, receiver);
+    start_line(output, target, "        return ");
+    output.push_str(&format!(
+        "{next_expr}(request, response), response.{items_attr} or []\n\n"
+    ));
+    start_line(output, target, "    return PollIterator(request, read, ");
+    output.push_str(operation.poll_resume_expr.as_deref().unwrap_or("None"));
+    output.push_str(")\n");
 }
 
 /// The loop of a client poll iterator, after the first request and the Nexus client. Each page
@@ -9360,6 +9584,24 @@ fn render_client_poll_loop(
 ) {
     let target = GenerationTarget::Client;
     start_line(output, target, "    while True:\n");
+    render_client_poll_response(output, operation, receiver);
+    // The helper runs first, so a change to the yielded page doesn't change the next request.
+    start_line(output, target, "        next_request = ");
+    output.push_str(next_expr);
+    output.push_str("(request, response)\n");
+    start_line(output, target, "        yield response\n");
+    start_line(output, target, "        if next_request is None:\n");
+    start_line(output, target, "            return\n");
+    start_line(output, target, "        request = next_request\n");
+}
+
+/// Starts one page of a client poll as a new operation, and sets `response`.
+fn render_client_poll_response(
+    output: &mut String,
+    operation: &RenderedOperation<'_>,
+    receiver: &str,
+) {
+    let target = GenerationTarget::Client;
     start_line(
         output,
         target,
@@ -9386,14 +9628,6 @@ fn render_client_poll_loop(
     } else {
         start_line(output, target, "        response = await handle.result()\n");
     }
-    // The helper runs first, so a change to the yielded page doesn't change the next request.
-    start_line(output, target, "        next_request = ");
-    output.push_str(next_expr);
-    output.push_str("(request, response)\n");
-    start_line(output, target, "        yield response\n");
-    start_line(output, target, "        if next_request is None:\n");
-    start_line(output, target, "            return\n");
-    start_line(output, target, "        request = next_request\n");
 }
 
 /// The name of the private client method that starts the operation and awaits the result.

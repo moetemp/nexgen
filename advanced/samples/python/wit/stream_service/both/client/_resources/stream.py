@@ -24,10 +24,12 @@ from ...models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamReadStart,
+    StreamRecord,
     StreamRef,
     _StreamRefTransferTypeConverter,
 )
 import temporal_support as _support
+from ..._poll import PollIterator
 
 
 BodyT = typing.TypeVar("BodyT")
@@ -154,7 +156,7 @@ class Stream(typing.Generic[BodyT]):
         )
         return await handle.result()
 
-    async def iter_read(
+    def iter_read(
         self,
         from_offset: int | None = None,
         start: StreamReadStart | None = None,
@@ -165,8 +167,9 @@ class Stream(typing.Generic[BodyT]):
         *,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
-    ) -> collections.abc.AsyncGenerator[ReadRecordsResponse[BodyT], None]:
-        """Yield each response of ``read`` until the poll helper stops.
+    ) -> PollIterator[ReadRecordsRequest, StreamRecord[BodyT]]:
+        """Yield each item that ``read`` reads, page by page. The iterator's
+        ``next_request`` resumes after the last item that it yielded.
 
         Read one page of Records. The poll iterator reads them all.
 
@@ -194,7 +197,12 @@ class Stream(typing.Generic[BodyT]):
             max_bytes=max_bytes,
         )
         nexus_client = self._nexus_client
-        while True:
+
+        async def read(
+            request: ReadRecordsRequest,
+        ) -> tuple[
+            ReadRecordsRequest | None, collections.abc.Sequence[StreamRecord[BodyT]]
+        ]:
             handle = await nexus_client.start_operation(
                 operation="ReadRecords",
                 arg=request,
@@ -204,11 +212,9 @@ class Stream(typing.Generic[BodyT]):
                 rpc_timeout=rpc_timeout,
             )
             response = await handle.result()
-            next_request = _support.next_read_request(request, response)
-            yield response
-            if next_request is None:
-                return
-            request = next_request
+            return _support.next_read_request(request, response), response.records or []
+
+        return PollIterator(request, read, _support.resume_read_request)
 
     async def describe(
         self,

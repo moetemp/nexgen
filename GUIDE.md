@@ -2546,8 +2546,8 @@ type or transform expression refers to an otherwise-unavailable module.
 ### @nexus.poll
 
 **Placement:** Operation (function) **Syntax:**
-`@nexus.poll <language>="<support-helper>" targets="client"`, where `<language>`
-is `python`, `typescript` or `dotnet`.
+`@nexus.poll <language>="<support-helper>" targets="client" [items="<field>"] [python-resume="<support-helper>"]`,
+where `<language>` is `python`, `typescript` or `dotnet`.
 
 Generates an async iterator on the client extension, and on each client resource
 method that binds the operation. Python names it `iter_<name>`, TypeScript names
@@ -2555,6 +2555,13 @@ it `iter<Name>`, and .NET names it `<Name>PagesAsync`. The iterator sends the
 request, yields the response, and calls `<support-helper>(request, response)`
 for the next request. The helper is a sync function in the `--support-package`.
 It returns `None` (`undefined` in TypeScript, `null` in .NET) to stop.
+
+In Python, `items` names a list field of the response, and the iterator yields
+the items of each page instead of the responses. It is a `PollIterator`, whose
+`next_request` lets a caller save its place. The `python-resume` helper takes a
+page's request and one of its items, and returns the request that resumes after
+that item. Without it, `next_request` reads the item's page again, until the
+iterator yields the page's last item. TypeScript and .NET yield the responses.
 
 In .NET, `<Name>PagesAsync` has the parameters of `<Name>Async` and a
 `CancellationToken`, and it returns an `IAsyncEnumerable` of the responses, as
@@ -2592,6 +2599,39 @@ The stream sample's full helpers are in
   TypeScript also refuses a request with type parameters.
 - Use `asyncio.timeout` to limit a whole iteration. After an error, start a new
   iteration at the last page's `next_offset`.
+
+`items` names a list field of the response, which can be an `option`. The
+iterator then yields the items, not the pages, and it is a `PollIterator` of the
+package. Its `next_request` is the request to resume with, and it is `None`
+after the last page. `resume` (or `python-resume`) names a helper
+`(page request, item) -> request` that resumes after one item. With it,
+`next_request` resumes after the last item that the iterator yielded. Without
+it, `next_request` reads the current page again until the iterator yields the
+page's last item, so a resumed read can yield an item twice. After a page's last
+item, or after a page with no item, `next_request` is the page helper's request.
+Only Python reads `items` and `resume` so far. TypeScript and .NET still yield
+the pages.
+
+A caller saves `next_request`, and resumes by passing its fields to the
+operation's `iter_<name>`. A resource method's iterator takes only the method's
+parameters, so it resumes only when they hold those fields, such as
+`from_offset` of the Stream's `iter_read`.
+
+```wit
+/// @nexus.poll python="next_read_request" items="records"
+///   python-resume="resume_read_request" target="client"
+read-records: func(request: read-records-request) -> read-records-response;
+```
+
+```python
+def resume_read_request(request, item):
+    return dataclasses.replace(request, from_offset=(item.offset or 0) + 1, last=None)
+```
+
+nexgen refuses `items` that names no list field of the response or a field with
+`@nexus.omit`, and `resume` with no `items`. Python also refuses `items` whose
+field isn't a list in the response model, such as a proto `bytes` field, and an
+item poll in a package with a model named `PollIterator`.
 
 ---
 

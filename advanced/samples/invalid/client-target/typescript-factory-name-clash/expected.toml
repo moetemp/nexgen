@@ -1,0 +1,8 @@
+languages = ["typescript"]
+targets = ["client"]
+
+[error]
+kind = "type-script-generated-name-conflict"
+contains = [
+  "TypeScript generated name `getJob` for the client factory of resource `Job` conflicts with a client method of service `Scheduler`",
+]

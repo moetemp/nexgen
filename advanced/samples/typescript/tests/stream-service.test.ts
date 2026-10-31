@@ -1,8 +1,12 @@
 import "./setup-protos.ts";
+import type { Client } from "@temporalio/client";
 import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
 import Long from "long";
+import type * as nexus from "nexus-rpc";
 import { beforeEach, describe, expect, test, vi } from "vitest";
+
+import type { NexusServiceClient } from "../wit/stream-service/both/client/nexus-client.ts";
 
 import {
   type ReadRecordsResponse,
@@ -11,8 +15,8 @@ import {
   describeStreamResponseTransferTypeConverter,
   readRecordsRequestTransferTypeConverter,
   readRecordsResponseTransferTypeConverter,
-} from "../wit/stream-service/workflow/models.ts";
-import { Stream } from "../wit/stream-service/workflow/resources.ts";
+} from "../wit/stream-service/both/models.ts";
+import { Stream } from "../wit/stream-service/both/resources.ts";
 
 const startOperation = vi.hoisted(() => vi.fn());
 vi.mock("@temporalio/workflow", () => ({
@@ -131,5 +135,17 @@ describe("stream-service generated output", () => {
       const model = readRecordsRequestTransferTypeConverter.fromTransferType(proto);
       expect(model.fromOffset?.equals(request.fromOffset)).toBe(true);
     }
+  });
+
+  test("the SDK's Nexus service client is the client target's Nexus client", () => {
+    // Only `tsc` checks this, on the return type.
+    function nexusClient<T extends nexus.ServiceDefinition>(
+      client: Client,
+      options: { service: T; endpoint: string },
+    ): NexusServiceClient<T> {
+      return client.nexus.createServiceClient(options);
+    }
+
+    expect(nexusClient).toBeTypeOf("function");
   });
 });

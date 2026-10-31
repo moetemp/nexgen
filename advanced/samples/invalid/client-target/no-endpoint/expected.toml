@@ -1,4 +1,4 @@
-languages = ["python"]
+languages = ["python", "typescript"]
 targets = ["workflow", "client"]
 
 [error]

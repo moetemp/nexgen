@@ -46,12 +46,12 @@ system_nexus = true
 descriptors = ["temporal_api.bin", "streams.bin"]
 
 [stream-service.workflow]
-languages = ["typescript", "dotnet"]
+languages = ["dotnet"]
 targets = ["workflow"]
 
-# Only Python has the client target, so its output has both APIs.
+# Python and TypeScript have the client target, so their output has both APIs.
 [stream-service.both]
-languages = ["python"]
+languages = ["python", "typescript"]
 targets = ["workflow", "client"]
 
 # A System Nexus operation that returns a resource.

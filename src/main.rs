@@ -64,7 +64,7 @@ struct GenerateArgs {
     #[cfg(feature = "advanced")]
     #[arg(long = "system-nexus")]
     system_nexus: bool,
-    /// Generate APIs for these callers: workflow or client (Python only).
+    /// Generate APIs for these callers: workflow or client (Python and TypeScript).
     /// Defaults to models and definitions only. Repeat the flag or use commas.
     #[cfg(feature = "advanced")]
     #[arg(long = "targets", value_enum, value_delimiter = ',')]

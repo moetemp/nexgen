@@ -1,0 +1,8 @@
+languages = ["typescript"]
+targets = ["workflow", "client"]
+
+[error]
+kind = "type-script-generated-name-conflict"
+contains = [
+  "TypeScript generated name `createNexusClient` for the hook of each client extension conflicts with a client method of operation `Connector.CreateNexusClient`",
+]

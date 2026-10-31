@@ -1,0 +1,8 @@
+languages = ["typescript"]
+targets = ["workflow", "client"]
+
+[error]
+kind = "type-script-generated-name-conflict"
+contains = [
+  "TypeScript generated name `NexusServiceClient` for the type that the client hook returns conflicts with type `NexusServiceClient`",
+]

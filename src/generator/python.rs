@@ -5374,7 +5374,7 @@ fn render_enum(output: &mut String, enumeration: &RenderedEnum) {
         let name = &enumeration.name;
         output.push_str(&format!(
             "\n\ndef {}(value: int) -> {name}:\n",
-            python_proto::enum_from_number_function_name(name)
+            python_proto::enum_from_proto_function_name(name)
         ));
         output.push_str("    try:\n");
         output.push_str(&format!("        return {name}(value)\n"));

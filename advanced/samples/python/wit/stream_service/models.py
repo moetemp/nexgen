@@ -27,7 +27,7 @@ class StreamProducerKind(enum.IntEnum):
     StreamProducerKindStandaloneActivity = 5
 
 
-def _stream_producer_kind_from_number(value: int) -> StreamProducerKind:
+def _stream_producer_kind_from_proto(value: int) -> StreamProducerKind:
     try:
         return StreamProducerKind(value)
     except ValueError:
@@ -42,7 +42,7 @@ class ExecutionType(enum.IntEnum):
     ExecutionTypeNexusOperation = 3
 
 
-def _execution_type_from_number(value: int) -> ExecutionType:
+def _execution_type_from_proto(value: int) -> ExecutionType:
     try:
         return ExecutionType(value)
     except ValueError:
@@ -65,7 +65,7 @@ class StreamCloseStatus(enum.IntEnum):
     StreamCloseStatusTimedOut = 5
 
 
-def _stream_close_status_from_number(value: int) -> StreamCloseStatus:
+def _stream_close_status_from_proto(value: int) -> StreamCloseStatus:
     try:
         return StreamCloseStatus(value)
     except ValueError:
@@ -80,7 +80,7 @@ class StreamStatus(enum.IntEnum):
     StreamStatusExpired = 3
 
 
-def _stream_status_from_number(value: int) -> StreamStatus:
+def _stream_status_from_proto(value: int) -> StreamStatus:
     try:
         return StreamStatus(value)
     except ValueError:
@@ -198,7 +198,7 @@ class _ProducerTransferTypeConverter(
         id = value.id
         return Producer(
             id=id,
-            kind=_stream_producer_kind_from_number(value.kind)
+            kind=_stream_producer_kind_from_proto(value.kind)
             if value.kind != 0
             else None,
             epoch=_ProducerEpochTransferTypeConverter().from_transfer_type(
@@ -437,7 +437,7 @@ class _ExecutionTransferTypeConverter(
         type_hint: type[Execution],
     ) -> Execution:
         return Execution(
-            type=_execution_type_from_number(value.type) if value.type != 0 else None,
+            type=_execution_type_from_proto(value.type) if value.type != 0 else None,
             business_id=value.business_id if bool(value.business_id) else None,
             run_id=value.run_id if bool(value.run_id) else None,
         )
@@ -1124,7 +1124,7 @@ class _SupersessionTransferTypeConverter(
         return Supersession(
             producer_id=producer_id,
             failed_tasks=list(value.failed_tasks),
-            producer_kind=_stream_producer_kind_from_number(value.producer_kind)
+            producer_kind=_stream_producer_kind_from_proto(value.producer_kind)
             if value.producer_kind != 0
             else None,
             epoch=_ProducerEpochTransferTypeConverter().from_transfer_type(
@@ -1273,7 +1273,7 @@ class _StreamCloseTransferTypeConverter(
             failure=_support.failure_from_proto(value.failure)
             if value.HasField("failure")
             else None,
-            status=_stream_close_status_from_number(value.status)
+            status=_stream_close_status_from_proto(value.status)
             if value.status != 0
             else None,
         )
@@ -1383,7 +1383,7 @@ class _DescribeStreamResponseTransferTypeConverter(
         type_hint: type[DescribeStreamResponse],
     ) -> DescribeStreamResponse:
         return DescribeStreamResponse(
-            status=_stream_status_from_number(value.status)
+            status=_stream_status_from_proto(value.status)
             if value.status != 0
             else None,
             last_offset=value.last_offset if value.last_offset != 0 else None,

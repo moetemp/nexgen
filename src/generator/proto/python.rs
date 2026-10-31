@@ -580,8 +580,8 @@ fn generated_enum_field_type(model: &EnumSpec<PlannedFamily>) -> Option<Resolved
     let reference = enum_python_ref(&proto.proto)?;
     let mut imports = PythonImports::default();
     imports.module_imports.insert(reference.module_path);
-    let from_number = if model.values.iter().any(|value| value.fallback) {
-        enum_from_number_function_name(&model.name)
+    let from_proto = if model.values.iter().any(|value| value.fallback) {
+        enum_from_proto_function_name(&model.name)
     } else {
         model.name.clone()
     };
@@ -591,7 +591,7 @@ fn generated_enum_field_type(model: &EnumSpec<PlannedFamily>) -> Option<Resolved
         kind: ResolvedFieldKind::Enum,
         wire_conversion: Some(WireValueConversion {
             annotation: model.name.clone(),
-            from_wire: format!("{from_number}({{wire}})"),
+            from_wire: format!("{from_proto}({{wire}})"),
             to_wire: format!("{}({{value}})", reference.type_ref),
             imports: PythonImports::default(),
             supports_unpacked_input: false,
@@ -599,9 +599,12 @@ fn generated_enum_field_type(model: &EnumSpec<PlannedFamily>) -> Option<Resolved
     })
 }
 
-/// The models module function that decodes a proto number as an enum with a fallback case.
-pub(in crate::generator) fn enum_from_number_function_name(enum_name: &str) -> String {
-    format!("_{}_from_number", enum_name.to_snake_case())
+/// The models module function that decodes a proto value as an enum with a fallback case.
+///
+/// The fallback applies to decoded wire values only. Code that builds the enum from an `int`
+/// still gets a `ValueError` for a value that the enum doesn't know.
+pub(in crate::generator) fn enum_from_proto_function_name(enum_name: &str) -> String {
+    format!("_{}_from_proto", enum_name.to_snake_case())
 }
 
 pub(in crate::generator) fn enum_value(value_type: &PlannedType) -> Option<PythonProtoEnumValue> {

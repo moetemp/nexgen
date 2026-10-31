@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
     NotificationSettings,
     UpdateNotificationSettingsRequest,
 )
+import temporal_support as _support
 
 
 async def _update_notification_settings(
@@ -38,3 +40,20 @@ async def update_notification_settings(
         settings=settings,
     )
     return await _update_notification_settings(request)
+
+
+def start_update_notification_settings(
+    *,
+    user_id: str,
+    email_enabled: bool,
+    sms_enabled: bool,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[None]]:
+    """Start ``update_notification_settings`` at the call, as ``workflow.start_activity``
+    places an Activity, so sync Workflow code keeps the operation's place in the command
+    order. The task gives what ``update_notification_settings`` returns.
+    """
+    return _support.start_now(
+        update_notification_settings(
+            user_id=user_id, email_enabled=email_enabled, sms_enabled=sms_enabled
+        )
+    )

@@ -1,0 +1,1 @@
+Each function of the Python Workflow target has a sync `start_<name>`, which starts the operation at the call through the support package's `start_now` and returns an `asyncio.Task`. So `@workflow.init` and sync handlers keep the operation's place in the command order.

@@ -8,12 +8,20 @@ import typing
 import nexusrpc
 import temporalio.converter
 from . import services as _services
-from .operations.first_operation import first_operation
-from .operations.second_operation import second_operation
+from .operations.first_operation import (
+    first_operation,
+    start_first_operation,
+)
+from .operations.second_operation import (
+    second_operation,
+    start_second_operation,
+)
 
 __all__ = [
     "first_operation",
     "second_operation",
+    "start_first_operation",
+    "start_second_operation",
 ]
 
 

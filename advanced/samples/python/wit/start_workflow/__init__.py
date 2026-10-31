@@ -8,10 +8,22 @@ import typing
 import nexusrpc
 import temporalio.converter
 from . import services as _services
-from .operations.start_workflow import start_workflow
-from ._resources.started_workflow import restart_workflow
-from ._resources.started_workflow import cancel_workflow
-from .operations.signal_with_start import signal_with_start
+from .operations.start_workflow import (
+    start_workflow,
+    start_start_workflow,
+)
+from ._resources.started_workflow import (
+    restart_workflow,
+    start_restart_workflow,
+)
+from ._resources.started_workflow import (
+    cancel_workflow,
+    start_cancel_workflow,
+)
+from .operations.signal_with_start import (
+    signal_with_start,
+    start_signal_with_start,
+)
 from ._resources.started_workflow import get_started_workflow
 
 __all__ = [
@@ -19,6 +31,10 @@ __all__ = [
     "get_started_workflow",
     "restart_workflow",
     "signal_with_start",
+    "start_cancel_workflow",
+    "start_restart_workflow",
+    "start_signal_with_start",
+    "start_start_workflow",
     "start_workflow",
 ]
 

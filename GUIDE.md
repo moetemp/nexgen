@@ -1744,6 +1744,26 @@ separate the targets with commas.
   selected independently or alongside `workflow`. nexgen refuses it for a
   service with no `@nexus.endpoint`.
 
+In Python, each function of the Workflow target has a sync `start_<name>` with
+the same parameters. It starts the operation at the call, and returns an
+`asyncio.Task` that gives what the async function returns. Python runs a
+coroutine only when something awaits it, so sync Workflow code, such as
+`@workflow.init` or a sync handler, needs it to place the operation in the
+command order, as `workflow.start_activity` places an Activity.
+
+```python
+@workflow.init
+def __init__(self, input: Input) -> None:
+    self._turns = stream_service.start_create_stream(Turn, id="turns")
+```
+
+The support package's `start_now(call)` starts the call. The sample's runs it in
+an eager task on Python 3.12 or later, and before that, it steps the call to its
+first wait itself. A request with a function field gets no sync start, and
+nexgen refuses a sync start with the name of another function of the package.
+TypeScript promises and .NET tasks start at the call, so their functions need no
+sync start.
+
 Python keeps shared models and service contracts in the root package. Client
 APIs live in `client/`. Workflow-only generation keeps its API in the root
 package; when both targets are selected, the workflow API lives in `workflow/`.

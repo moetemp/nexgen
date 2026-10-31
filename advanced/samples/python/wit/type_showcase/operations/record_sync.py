@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
     RecordSyncRequest,
     SyncReport,
 )
+import temporal_support as _support
 
 
 async def _record_sync(
@@ -33,3 +35,15 @@ async def record_sync(
         report=report,
     )
     return await _record_sync(request)
+
+
+def start_record_sync(
+    *,
+    user_id: str,
+    report: SyncReport,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[None]]:
+    """Start ``record_sync`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``record_sync`` returns.
+    """
+    return _support.start_now(record_sync(user_id=user_id, report=report))

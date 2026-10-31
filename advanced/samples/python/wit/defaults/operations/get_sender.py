@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import GetSenderRequest
 from .._resources import Sender
 from .._resources._resource_data import SenderData
+import temporal_support as _support
 
 
 async def _get_sender(
@@ -36,3 +38,14 @@ async def get_sender(
         token=token,
     )
     return await _get_sender(request)
+
+
+def start_get_sender(
+    *,
+    token: str,
+) -> asyncio.Task[Sender]:
+    """Start ``get_sender`` at the call, as ``workflow.start_activity`` places an Activity,
+    so sync Workflow code keeps the operation's place in the command order. The task
+    gives what ``get_sender`` returns.
+    """
+    return _support.start_now(get_sender(token=token))

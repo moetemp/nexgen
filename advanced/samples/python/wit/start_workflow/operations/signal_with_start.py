@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
@@ -43,3 +44,17 @@ async def signal_with_start(
         reason=reason,
     )
     return await _signal_with_start(request)
+
+
+def start_signal_with_start(
+    *,
+    workflow_execution: WorkflowExecution,
+    reason: str | None = None,
+) -> asyncio.Task[SignalResult]:
+    """Start ``signal_with_start`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``signal_with_start`` returns.
+    """
+    return _support.start_now(
+        signal_with_start(workflow_execution=workflow_execution, reason=reason)
+    )

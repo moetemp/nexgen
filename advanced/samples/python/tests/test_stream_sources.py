@@ -116,6 +116,38 @@ async def test_a_workflow_publish_fills_the_workflow_writer(
     ]
 
 
+async def test_a_sync_start_places_the_operation_at_the_call(
+    nexus_client: FakeNexusClient,
+) -> None:
+    ref = StreamRef(id="s1")
+
+    task = stream_module.start_append_records(
+        ref=ref, records=[AppendRecord(body="hi")]
+    )
+
+    # Sync Workflow code awaits nothing, so the start can't wait for the caller's await.
+    assert nexus_client.inputs == [
+        AppendRecordsRequest(
+            ref=ref,
+            records=[AppendRecord(body="hi")],
+            writer=StreamWriter(
+                producer=Producer(id="wf:r2", run_id="r2"), failed_tasks=[]
+            ),
+        )
+    ]
+    handle = await task
+    assert await handle == AppendRecordsResponse(last_offset=1)
+
+
+async def test_a_sync_create_gives_the_stream(nexus_client: FakeNexusClient) -> None:
+    task = stream_service.start_create_stream(str, id="turns")
+
+    assert len(nexus_client.inputs) == 1
+    stream = await task
+    assert stream.ref == StreamRef(id="turns")
+    _ = assert_type(stream, Stream[str])
+
+
 def test_a_workflow_read_takes_no_last() -> None:
     # Replay needs a fixed range, so the WIT omits `last` from the Workflow API.
     assert "last" not in inspect.signature(stream_module.read_records).parameters

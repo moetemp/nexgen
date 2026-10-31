@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import typing
 import typing_extensions
 import temporalio.nexus.system
@@ -223,6 +224,21 @@ async def append_records(
     return await _append_records(request)
 
 
+def start_append_records(
+    *,
+    ref: StreamRef,
+    records: list[AppendRecord[BodyT]],
+    sequence: int | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[AppendRecordsResponse]]:
+    """Start ``append_records`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``append_records`` returns.
+    """
+    return _support.start_now(
+        append_records(ref=ref, records=records, sequence=sequence)
+    )
+
+
 async def _close_stream(
     request: CloseStreamRequest,
 ) -> temporalio.workflow.NexusOperationHandle[CloseStreamResponse,]:
@@ -255,6 +271,17 @@ async def close_stream(
         writer=_support.workflow_writer(),
     )
     return await _close_stream(request)
+
+
+def start_close_stream(
+    *,
+    ref: StreamRef,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[CloseStreamResponse]]:
+    """Start ``close_stream`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``close_stream`` returns.
+    """
+    return _support.start_now(close_stream(ref=ref))
 
 
 async def _read_records(
@@ -319,6 +346,35 @@ async def read_records(
     return await _read_records(request, body_type)
 
 
+def start_read_records(
+    body_type: type[BodyT],
+    *,
+    ref: StreamRef,
+    from_offset: int | None = None,
+    start: StreamReadStart | None = None,
+    max_records: int | None = None,
+    wait: datetime.timedelta | None = None,
+    create_wait: datetime.timedelta | None = None,
+    max_bytes: int | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[ReadRecordsResponse[BodyT]]]:
+    """Start ``read_records`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``read_records`` returns.
+    """
+    return _support.start_now(
+        read_records(
+            body_type,
+            ref=ref,
+            from_offset=from_offset,
+            start=start,
+            max_records=max_records,
+            wait=wait,
+            create_wait=create_wait,
+            max_bytes=max_bytes,
+        )
+    )
+
+
 async def _describe_stream(
     request: DescribeStreamRequest,
 ) -> temporalio.workflow.NexusOperationHandle[DescribeStreamResponse,]:
@@ -350,3 +406,14 @@ async def describe_stream(
         ref=ref,
     )
     return await _describe_stream(request)
+
+
+def start_describe_stream(
+    *,
+    ref: StreamRef,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[DescribeStreamResponse]]:
+    """Start ``describe_stream`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``describe_stream`` returns.
+    """
+    return _support.start_now(describe_stream(ref=ref))

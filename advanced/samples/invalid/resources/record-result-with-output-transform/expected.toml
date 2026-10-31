@@ -1,0 +1,6 @@
+languages = ["python"]
+targets = ["workflow"]
+
+[error]
+kind = "invalid-resource-method"
+contains = ["returns the response of operation `AddItems`, which has an output transform"]

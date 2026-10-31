@@ -5,6 +5,7 @@
 using System;
 using System.CodeDom.Compiler;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Nexgen.Support;
 
@@ -27,11 +28,12 @@ namespace Temporalio.Workflows.Client
         private readonly Temporalio.Client.NexusClient nexusClient;
 
         [GeneratedCode("nexgen", null)]
-        public async Task<AppendRecordsResponse> PublishAsync(IReadOnlyList<AppendRecord<TBody>> records)
+        public async Task<long> PublishAsync(params TBody[] values)
         {
-            var request = new AppendRecordsRequest<TBody>(StreamValue, records, Nexgen.Support.StreamActivityContext.LocalActivityFailedTasks(), Nexgen.Support.StreamActivityContext.Producer(), Nexgen.Support.StreamActivityContext.LocalActivityPreviousCompletedTask());
+            var recordsValue = values.Select(value => new AppendRecord<TBody>(value)).ToList();
+            var request = new AppendRecordsRequest<TBody>(StreamValue, recordsValue, Nexgen.Support.StreamActivityContext.LocalActivityFailedTasks(), Nexgen.Support.StreamActivityContext.Producer(), Nexgen.Support.StreamActivityContext.LocalActivityPreviousCompletedTask());
             var result = await nexusClient.ExecuteNexusOperationAsync<AppendRecordsResponse>("AppendRecords", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
-            return result;
+            return result.LastOffset ?? 0L;
         }
 
         [GeneratedCode("nexgen", null)]

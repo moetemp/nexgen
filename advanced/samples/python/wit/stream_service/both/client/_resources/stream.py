@@ -71,15 +71,14 @@ class Stream(typing.Generic[BodyT]):
 
     async def publish(
         self,
-        records: list[AppendRecord[BodyT]] | None = None,
-        *,
+        *values: BodyT,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
-    ) -> AppendRecordsResponse:
+    ) -> int:
         """Publish values, and return the offset of the last one."""
         request = AppendRecordsRequest(
             stream=self.stream,
-            records=records or [],
+            records=[AppendRecord(body=value) for value in values],
             failed_tasks=_support.local_activity_failed_tasks(),
             producer=_support.client_producer(),
             previous_completed_task=_support.local_activity_previous_completed_task(),
@@ -93,7 +92,8 @@ class Stream(typing.Generic[BodyT]):
             rpc_metadata=rpc_metadata or {},
             rpc_timeout=rpc_timeout,
         )
-        return await handle.result()
+        response = await handle.result()
+        return response.last_offset or 0
 
     async def close(
         self,

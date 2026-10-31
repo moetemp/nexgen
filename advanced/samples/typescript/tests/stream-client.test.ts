@@ -104,11 +104,11 @@ describe("stream-service client target", () => {
     const client = new Client({ CreateStream: [created], AppendRecords: [appended] });
 
     const stream = await client.createStream({ id: "s1" });
-    const response = await stream.publish([]);
+    const lastOffset = await stream.publish();
 
     expect(stream).toBeInstanceOf(Stream);
     expect([stream.stream, stream.created]).toEqual([ref, true]);
-    expect(response.lastOffset?.toNumber()).toBe(0);
+    expect(lastOffset.toNumber()).toBe(0);
     expect(client.calls).toEqual([
       {
         service: STREAM_SERVICE,
@@ -143,7 +143,7 @@ describe("stream-service client target", () => {
     };
 
     await activityContext.run({ info } as Context, () =>
-      client.getStream(ref, undefined).publish([]),
+      client.getStream(ref, undefined).publish(),
     );
 
     expect(client.calls.map((call) => call.input)).toEqual([

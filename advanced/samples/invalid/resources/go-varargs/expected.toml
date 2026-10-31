@@ -1,0 +1,6 @@
+languages = ["go"]
+targets = ["workflow"]
+
+[error]
+kind = "unsupported-go-type"
+contains = ["Go doesn't support `@nexus.varargs`"]

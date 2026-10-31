@@ -21,6 +21,7 @@ import wit.stream_service.both as workflow_package
 import wit.stream_service.both._resources.stream as workflow_stream_module
 from wit.stream_service.both.client import Stream, StreamServiceClientExtension
 from wit.stream_service.both.models import (
+    AppendRecord,
     AppendRecordsRequest,
     AppendRecordsResponse,
     CreateStreamRequest,
@@ -133,11 +134,11 @@ async def test_a_created_stream_publishes_on_the_system_endpoint() -> None:
     )
 
     stream = await client.create_stream(Texts, id="s1")
-    response = await stream.publish(records=[])
+    last_offset = await stream.publish()
 
     assert isinstance(stream, Stream)
     assert (stream.stream, stream.created) == (ref, True)
-    assert response.last_offset == 0
+    assert last_offset == 0
     assert client.calls == [
         (
             STREAM_SERVICE,
@@ -174,7 +175,7 @@ async def test_an_activity_publish_takes_the_producer_of_its_attempt(
     ref = StreamRef(id="s1")
     client = Client({"AppendRecords": [AppendRecordsResponse(last_offset=1)]})
 
-    _ = await client.get_stream(Texts, stream=ref).publish(records=[])
+    _ = await client.get_stream(Texts, stream=ref).publish()
 
     assert client.calls == [
         (
@@ -186,6 +187,32 @@ async def test_an_activity_publish_takes_the_producer_of_its_attempt(
             ),
         )
     ]
+
+
+async def test_a_publish_wraps_each_value_and_returns_the_last_offset() -> None:
+    ref = StreamRef(id="s1")
+    client = Client(
+        {
+            "AppendRecords": [
+                AppendRecordsResponse(first_offset=4, last_offset=5),
+                AppendRecordsResponse(),
+            ]
+        }
+    )
+    stream = client.get_stream(Texts, stream=ref)
+
+    last_offset = await stream.publish("a", "b")
+    empty = await stream.publish()
+
+    _ = assert_type(last_offset, int)
+    assert last_offset == 5
+    assert client.calls[0][3] == AppendRecordsRequest(
+        stream=ref,
+        records=[AppendRecord(body="a"), AppendRecord(body="b")],
+        producer=Producer(id="client:sample"),
+    )
+    # `last_offset` has no presence on the wire, so an empty publish answers 0.
+    assert empty == 0
 
 
 async def test_a_create_takes_the_ref_fields_as_parameters() -> None:

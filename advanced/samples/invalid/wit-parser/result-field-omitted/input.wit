@@ -1,0 +1,32 @@
+package test:result-field-omitted@1.0.0;
+
+world system { export batch-service; }
+
+/// @nexus.endpoint "batches"
+interface batch-service {
+  /// @nexus.unwrap
+  record batch-item {
+    value: string,
+  }
+
+  resource batch {
+    constructor(batch-id: string);
+
+    // The response model leaves out `task-token`, so the method can't return it.
+    /// @nexus.result-field "task-token"
+    add-items: func(items: list<batch-item>) -> add-items-response;
+  }
+
+  record add-items-request {
+    batch-id: string,
+    items: list<batch-item>,
+  }
+
+  record add-items-response {
+    last-item-id: option<string>,
+    /// @nexus.omit
+    task-token: option<string>,
+  }
+
+  add-items: func(request: add-items-request) -> add-items-response;
+}

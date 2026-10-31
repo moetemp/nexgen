@@ -24,12 +24,13 @@ use crate::planning::{
     PlannedProtoType, PlannedProtoTypeInfo, PlannedRecordType, PlannedResource,
     PlannedResourceField, PlannedResourceMethod, PlannedResourceMethodBindingSpec,
     PlannedResourceMethodResultKind, PlannedSpec, PlannedType, PlannedWireFieldBinding,
-    operation_input_model, operation_output_direct_result,
+    operation_input_model, operation_output_direct_result, resource_method_result_field,
+    unwrapped_field,
 };
 use crate::planning::{RequestPlan, RequestPlanSource, ResolvedResourceBindingSource};
 use crate::spec::{
     AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FieldOrigin, FlagsSpec,
-    FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, LanguageImportSpec,
+    FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, IntSpec, LanguageImportSpec,
     LanguageImportStyle, ModulePath, OperationSpec, RecordFieldSpec, RecordSpec, SelectedTextSpec,
     TypeReplacementSpec, TypeSpec, VariantSpec,
 };
@@ -4995,7 +4996,7 @@ fn render_resources_module(
             ("common", "@temporalio/common", true),
         ],
     );
-    render_typescript_requirement_imports(&mut imports, &rendered.requirements);
+    render_resource_long_import(&mut imports, &rendered.requirements, &body);
     render_value_imports(
         &mut imports,
         "./models",
@@ -6414,13 +6415,27 @@ pub(in crate::generator) fn render_resource_with_annotations(
         let result = typescript_resource_method_result_type(method, api_plan);
         requirements.merge(&result.requirements);
         let result_annotation = result.annotation;
+        let result_field = typescript_resource_method_result_field(method, api_plan);
+        requirements.long |= result_field
+            .as_ref()
+            .is_some_and(|(annotation, _)| annotation.starts_with("Long"));
         output.push('\n');
         output.push_str("  public async ");
         output.push_str(&typescript_generated_field_name(&method.name));
         output.push_str("(\n");
-        render_resource_method_params(output, method, &param_annotation, &mut requirements);
+        render_resource_method_params(
+            output,
+            method,
+            &param_annotation,
+            &mut requirements,
+            api_plan,
+        );
         output.push_str("  ): Promise<");
-        output.push_str(&result_annotation);
+        output.push_str(
+            result_field
+                .as_ref()
+                .map_or(&result_annotation, |(annotation, _)| annotation),
+        );
         output.push_str("> {\n");
         match &method.binding {
             PlannedResourceMethodBindingSpec::Operation {
@@ -6435,6 +6450,7 @@ pub(in crate::generator) fn render_resource_with_annotations(
                     .expect("bound operation should exist on the resource service");
                 let branchable_params =
                     branchable_request_method_params(method, request_plan, operation, api_plan);
+                let param_exprs = typescript_resource_method_param_exprs(method, api_plan);
                 let endpoint_expr = None;
                 let client_expr = service
                     .endpoint
@@ -6445,36 +6461,24 @@ pub(in crate::generator) fn render_resource_with_annotations(
                     request_plan,
                     crate::nexgen_config::GenerationTarget::Workflow,
                 );
-                if *direct_return {
-                    output.push_str(&render_resource_method_operation_body(
-                        4,
-                        service,
-                        resource,
-                        operation,
-                        endpoint_expr,
-                        client_expr,
-                        &result_annotation,
-                        request_plan,
-                        &branchable_params,
-                        true,
-                        fills_source,
-                        GenerationTarget::Workflow,
-                    ));
-                } else {
-                    output.push_str(&render_resource_method_operation_body(
-                        4,
-                        service,
-                        resource,
-                        operation,
-                        endpoint_expr,
-                        client_expr,
-                        &result_annotation,
-                        request_plan,
-                        &branchable_params,
-                        false,
-                        fills_source,
-                        GenerationTarget::Workflow,
-                    ));
+                let body = render_resource_method_operation_body(
+                    4,
+                    service,
+                    resource,
+                    operation,
+                    endpoint_expr,
+                    client_expr,
+                    &result_annotation,
+                    request_plan,
+                    &param_exprs,
+                    &branchable_params,
+                    *direct_return,
+                    fills_source,
+                    GenerationTarget::Workflow,
+                );
+                match &result_field {
+                    Some((_, value)) => output.push_str(&return_response_field(&body, value)),
+                    None => output.push_str(&body),
                 }
             }
             PlannedResourceMethodBindingSpec::Stub => {
@@ -6576,25 +6580,178 @@ fn render_resource_method_params(
     method: &PlannedResourceMethod,
     param_annotation: &impl Fn(&PlannedResourceMethod, &PlannedResourceField) -> ResolvedFieldType,
     requirements: &mut TypeScriptRequirements,
+    api_plan: &PlannedSpec,
 ) {
     // TypeScript refuses an optional parameter before a required one, and WIT allows
     // any order, so such a parameter takes `undefined` explicitly.
     let last_required = method.params.iter().rposition(|param| !param.optional);
     for (index, param) in method.params.iter().enumerate() {
         let before_required = last_required.is_some_and(|last| index < last);
+        let list = !param.optional && param.function.is_none();
+        // A list of a `@nexus.unwrap` record takes the record's one field.
+        let unwrapped = match &param.kind {
+            PlannedType::List(item) if list => unwrapped_field(api_plan, item).map(|(_, field)| {
+                let proto = matches!(
+                    item.as_ref(),
+                    PlannedType::Record(record) if api_plan.record(&record.full_name).is_some_and(
+                        |record| matches!(record.source, Some(ExternalTypeSourceSpec::Proto(_)))
+                    )
+                );
+                let item = typescript_resource_field_type(
+                    &field.field_type,
+                    !field.required,
+                    None,
+                    proto,
+                    api_plan,
+                );
+                ResolvedFieldType {
+                    annotation: typescript_array_annotation(&item.annotation),
+                    ..item
+                }
+            }),
+            _ => None,
+        };
+        let rendered = unwrapped.unwrap_or_else(|| param_annotation(method, param));
+        requirements.merge(&rendered.requirements);
         output.push_str("    ");
+        if let Some(name) = method
+            .varargs
+            .as_deref()
+            .filter(|_| index + 1 == method.params.len())
+            && list
+            && matches!(param.kind, PlannedType::List(_))
+        {
+            output.push_str("...");
+            output.push_str(&typescript_generated_field_name(name));
+            output.push_str(": ");
+            output.push_str(&rendered.annotation);
+            output.push_str(",\n");
+            continue;
+        }
         output.push_str(&typescript_generated_field_name(&param.name));
         if param.optional && !before_required {
             output.push('?');
         }
         output.push_str(": ");
-        let rendered = param_annotation(method, param);
-        requirements.merge(&rendered.requirements);
         output.push_str(&rendered.annotation);
         if param.optional && before_required {
             output.push_str(" | undefined");
         }
         output.push_str(",\n");
+    }
+}
+
+/// The request value of each list parameter that differs from the parameter. A varargs parameter
+/// takes its API name, and an item of a `@nexus.unwrap` record is wrapped in its record.
+fn typescript_resource_method_param_exprs(
+    method: &PlannedResourceMethod,
+    api_plan: &PlannedSpec,
+) -> BTreeMap<String, String> {
+    method
+        .params
+        .iter()
+        .enumerate()
+        .filter_map(|(index, param)| {
+            let PlannedType::List(item) = &param.kind else {
+                return None;
+            };
+            let source = method
+                .varargs
+                .as_deref()
+                .filter(|_| index + 1 == method.params.len())
+                .unwrap_or(&param.name);
+            let source = typescript_generated_field_name(source);
+            let expr = match unwrapped_field(api_plan, item) {
+                Some((_, field)) => {
+                    let name = typescript_generated_field_name(&field.name);
+                    let member = if name == "value" {
+                        name
+                    } else {
+                        format!("{name}: value")
+                    };
+                    format!("{source}.map((value) => ({{ {member} }}))")
+                }
+                None => source,
+            };
+            Some((param.name.clone(), expr))
+        })
+        .collect()
+}
+
+/// The annotation and the expression of the response field that a method returns. A field
+/// with no presence gives its zero value when the response leaves it unset.
+fn typescript_resource_method_result_field(
+    method: &PlannedResourceMethod,
+    api_plan: &PlannedSpec,
+) -> Option<(String, String)> {
+    let (record, _, field, optional) = resource_method_result_field(api_plan, method)?;
+    let kind = match &field.field_type {
+        PlannedType::Option(inner) => inner.as_ref(),
+        kind => kind,
+    };
+    // The model of a proto-backed response has its 64-bit numbers as `Long`.
+    let long = matches!(record.source, Some(ExternalTypeSourceSpec::Proto(_)))
+        && matches!(kind, PlannedType::Int(IntSpec::I64 | IntSpec::U64));
+    let base = if long {
+        "Long".to_string()
+    } else {
+        typescript_resource_field_type(kind, false, None, false, api_plan).annotation
+    };
+    let zero = (!optional && !field.required)
+        .then(|| match kind {
+            PlannedType::Int(_) if base == "Long" => Some("Long.ZERO"),
+            PlannedType::Int(_) | PlannedType::Float => Some("0"),
+            PlannedType::Bool => Some("false"),
+            PlannedType::String => Some("\"\""),
+            _ => None,
+        })
+        .flatten();
+    let name = typescript_generated_field_name(&field.name);
+    Some(match zero {
+        Some(zero) => (base, format!("response.{name} ?? {zero}")),
+        None if field.required => (base, format!("response.{name}")),
+        None => (format!("{base} | undefined"), format!("response.{name}")),
+    })
+}
+
+/// Makes each `return await <call>;` of a method body keep the response in `response`, and
+/// return `value` of it instead. A call may span lines, up to the `;` at its own indent.
+fn return_response_field(body: &str, value: &str) -> String {
+    const DECLARATION: &str = "const response = await ";
+    let mut output = String::new();
+    let mut open_indent = None::<String>;
+    for line in body.lines() {
+        let indent = &line[..line.len() - line.trim_start().len()];
+        let line = match line.trim_start().strip_prefix("return await ") {
+            Some(call) if open_indent.is_none() => {
+                open_indent = Some(indent.to_string());
+                format!("{indent}{DECLARATION}{call}")
+            }
+            _ => line.to_string(),
+        };
+        output.push_str(&line);
+        output.push('\n');
+        if let Some(open) = &open_indent
+            && line.ends_with(';')
+            && (line.starts_with(&format!("{open}{DECLARATION}")) || indent == open)
+        {
+            output.push_str(&format!("{open}return {value};\n"));
+            open_indent = None;
+        }
+    }
+    output
+}
+
+/// A zero 64-bit result reads `Long.ZERO`, so such a module imports the value.
+fn render_resource_long_import(
+    output: &mut String,
+    requirements: &TypeScriptRequirements,
+    body: &str,
+) {
+    if body.contains("Long.ZERO") {
+        output.push_str("import Long from \"long\";\n");
+    } else {
+        render_typescript_requirement_imports(output, requirements);
     }
 }
 
@@ -6858,6 +7015,7 @@ fn render_resource_method_operation_body(
     client_expr: Option<String>,
     result_annotation: &str,
     request_plan: &RequestPlan,
+    param_exprs: &BTreeMap<String, String>,
     branchable_params: &[String],
     direct_return: bool,
     fills_source: bool,
@@ -6880,6 +7038,7 @@ fn render_resource_method_operation_body(
             client_expr.clone(),
             result_annotation,
             request_plan,
+            param_exprs,
             remaining,
             direct_return,
             fills_source,
@@ -6896,6 +7055,7 @@ fn render_resource_method_operation_body(
             client_expr,
             result_annotation,
             request_plan,
+            param_exprs,
             remaining,
             direct_return,
             fills_source,
@@ -6946,7 +7106,7 @@ fn render_resource_method_operation_body(
             .collect(),
         _ => Vec::new(),
     };
-    let request_expr = render_request_plan_typescript(&caller_plan, &unfilled_sources);
+    let request_expr = render_request_plan_typescript(&caller_plan, &unfilled_sources, param_exprs);
     let mut output = String::new();
     if complete_request && let Some(initialization) = default_initialization {
         output.push_str(&format!(
@@ -7137,7 +7297,12 @@ fn render_resource_start_operation(
 }
 
 /// Renders a request plan, with `top_level_fields` added to the top-level request.
-fn render_request_plan_typescript(plan: &RequestPlan, top_level_fields: &[String]) -> String {
+/// A request value of a resource method. `param_exprs` holds the values of list parameters.
+fn render_request_plan_typescript(
+    plan: &RequestPlan,
+    top_level_fields: &[String],
+    param_exprs: &BTreeMap<String, String>,
+) -> String {
     let top_message = match plan {
         RequestPlan::Construct { message_name, .. } => Some(message_name.as_str()),
         RequestPlan::Source(_) => None,
@@ -7157,7 +7322,12 @@ fn render_request_plan_typescript(plan: &RequestPlan, top_level_fields: &[String
             }
         },
         |name| format!("this.{}", typescript_generated_field_name(name)),
-        typescript_generated_field_name,
+        |name| {
+            param_exprs
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| typescript_generated_field_name(name))
+        },
     )
 }
 
@@ -7898,7 +8068,7 @@ fn render_client_package(
             &default_language_imports(language_imports, services),
             &[("common", "@temporalio/common", true)],
         );
-        render_typescript_requirement_imports(&mut imports, &requirements);
+        render_resource_long_import(&mut imports, &requirements, &body);
         render_value_imports(
             &mut imports,
             "../models",
@@ -8874,13 +9044,27 @@ fn render_client_resource(
         let result = typescript_resource_method_result_type(method, api_plan);
         requirements.merge(&result.requirements);
         let result_annotation = result.annotation;
+        let result_field = typescript_resource_method_result_field(method, api_plan);
+        requirements.long |= result_field
+            .as_ref()
+            .is_some_and(|(annotation, _)| annotation.starts_with("Long"));
         output.push('\n');
         output.push_str("  public async ");
         output.push_str(&typescript_generated_field_name(&method.name));
         output.push_str("(\n");
-        render_resource_method_params(output, method, &param_annotation, &mut requirements);
+        render_resource_method_params(
+            output,
+            method,
+            &param_annotation,
+            &mut requirements,
+            api_plan,
+        );
         output.push_str("  ): Promise<");
-        output.push_str(&result_annotation);
+        output.push_str(
+            result_field
+                .as_ref()
+                .map_or(&result_annotation, |(annotation, _)| annotation),
+        );
         output.push_str("> {\n");
         match &method.binding {
             PlannedResourceMethodBindingSpec::Operation {
@@ -8895,7 +9079,7 @@ fn render_client_resource(
                     .expect("bound operation should exist on the resource service");
                 let branchable_params =
                     branchable_request_method_params(method, request_plan, operation, api_plan);
-                output.push_str(&render_resource_method_operation_body(
+                let body = render_resource_method_operation_body(
                     4,
                     service,
                     resource,
@@ -8904,11 +9088,16 @@ fn render_client_resource(
                     Some("this.#nexusClient".to_string()),
                     &result_annotation,
                     request_plan,
+                    &typescript_resource_method_param_exprs(method, api_plan),
                     &branchable_params,
                     *direct_return,
                     false,
                     GenerationTarget::Client,
-                ));
+                );
+                match &result_field {
+                    Some((_, value)) => output.push_str(&return_response_field(&body, value)),
+                    None => output.push_str(&body),
+                }
             }
             PlannedResourceMethodBindingSpec::Stub => {
                 output.push_str("    throw new Error(");
@@ -8927,6 +9116,7 @@ fn render_client_resource(
             method,
             &param_annotation,
             &mut requirements,
+            api_plan,
         );
     }
     output.push_str("}\n");
@@ -8941,6 +9131,7 @@ fn render_client_resource_poll_method(
     method: &PlannedResourceMethod,
     param_annotation: &impl Fn(&PlannedResourceMethod, &PlannedResourceField) -> ResolvedFieldType,
     requirements: &mut TypeScriptRequirements,
+    api_plan: &PlannedSpec,
 ) {
     let PlannedResourceMethodBindingSpec::Operation {
         operation_name,
@@ -8969,7 +9160,7 @@ fn render_client_resource_poll_method(
     output.push_str("  public async *");
     output.push_str(&poll_function_name(&method_name));
     output.push_str("(\n");
-    render_resource_method_params(output, method, param_annotation, requirements);
+    render_resource_method_params(output, method, param_annotation, requirements, api_plan);
     output.push_str("  ): AsyncGenerator<");
     output.push_str(&operation.output_operation_annotation);
     output.push_str(", void> {\n");
@@ -8978,7 +9169,11 @@ fn render_client_resource_poll_method(
         .as_ref()
         .expect("a polled operation should have a request");
     let unfilled_sources = client_unfilled_sources(input, request_plan);
-    let request_expr = render_request_plan_typescript(request_plan, &unfilled_sources);
+    let request_expr = render_request_plan_typescript(
+        request_plan,
+        &unfilled_sources,
+        &typescript_resource_method_param_exprs(method, api_plan),
+    );
     render_client_request_from_plan(output, "    ", input, &request_expr, true);
     render_client_poll_loop(
         output,

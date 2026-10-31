@@ -765,6 +765,11 @@ pub struct ResourceMethodSpec<F: TypeFamily = AuthoredFamily> {
     pub params: Vec<ResourceFieldSpec<F>>,
     pub result: Option<ResourceResultSpec<F>>,
     pub operation_name: Option<String>,
+    /// Set when `@nexus.varargs` makes the method take the items of its last parameter, a list,
+    /// as positional arguments. It is the API name of that parameter.
+    pub varargs: Option<String>,
+    /// The key of the response field that the method returns, from `@nexus.result-field`.
+    pub result_field: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -831,6 +836,8 @@ impl<F: TypeFamily> ResourceMethodSpec<F> {
                 .collect(),
             result: self.result.map(|result| result.map_names_with(map)),
             operation_name: self.operation_name,
+            varargs: self.varargs,
+            result_field: self.result_field,
         }
     }
 }
@@ -855,6 +862,9 @@ pub struct RecordSpec<F: TypeFamily = AuthoredFamily> {
     pub source: Option<ExternalTypeSourceSpec<F>>,
     pub experimental: bool,
     pub flatten_in_api: bool,
+    /// Set by `@nexus.unwrap`. The convenience API takes the record's one field in place of the
+    /// record.
+    pub unwrap: bool,
     pub fields: IndexMap<String, RecordFieldSpec<F>>,
     pub data: F::RecordData,
 }
@@ -1087,6 +1097,7 @@ impl<F: TypeFamily> RecordSpec<F> {
             source: self.source.map(|source| source.map_names_with(map)),
             experimental: self.experimental,
             flatten_in_api: self.flatten_in_api,
+            unwrap: self.unwrap,
             fields: self
                 .fields
                 .into_iter()

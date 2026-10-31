@@ -390,6 +390,7 @@ interface stream-service {
   /// @nexus.definition python="temporal_support.StreamDefinition"
   ///   typescript="StreamDefinition" typescript-import="../../../support/temporal_model_converters"
   ///   dotnet="Nexgen.Support.StreamDefinition"
+  /// @nexus.flatten-in-api param="stream" fields="id backend" keep=true
   resource %stream {
     constructor(%stream: stream-ref, created: option<bool>);
 

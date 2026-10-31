@@ -1,0 +1,17 @@
+package test:resource-fill@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  // A factory has no sibling fields, so it takes no fill.
+  /// @nexus.flatten-in-api param="execution" fields="workflow-id" fill="run-id=workflow-id"
+  resource run {
+    constructor(execution: workflow-execution);
+  }
+}

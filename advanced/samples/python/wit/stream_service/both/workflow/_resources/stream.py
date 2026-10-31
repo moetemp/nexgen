@@ -22,6 +22,9 @@ from ...models import (
 )
 import temporal_support as _support
 
+if typing.TYPE_CHECKING:
+    import temporal_support
+
 
 BodyT = typing.TypeVar("BodyT")
 
@@ -107,6 +110,29 @@ class Stream(typing.Generic[BodyT]):
         )
         handle = await _describe_stream(request)
         return await handle
+
+
+def stream(
+    definition: type[temporal_support.StreamDefinition[BodyT]],
+    *,
+    id: str | None = None,
+    stream: StreamRef | None = None,
+    backend: str | None = None,
+    created: bool | None = None,
+) -> Stream[BodyT]:
+    """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``stream``."""
+    (body_type,) = _support.definition_type_arguments(definition)
+    if stream is None:
+        if id is None:
+            raise TypeError("pass id or stream")
+        stream = StreamRef(id=id, backend=backend)
+    elif id is not None or backend is not None:
+        raise TypeError("pass stream or its fields, not both")
+    return Stream(
+        stream=stream,
+        created=created,
+        body_type=body_type,
+    )
 
 
 async def _append_records(

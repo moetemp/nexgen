@@ -196,7 +196,7 @@ async def test_sdk_factory_needs_no_adapter() -> None:
     )
     stream = await client.create_stream(Texts, id="sdk-stream")
     assert stream.stream == ref
-    stored = client.get_stream(stream=ref, created=None, body_type=str)
+    stored = client.get_stream(Texts, stream=ref)
     assert (await stored.describe()).last_offset == 5
     assert [call.operation for call in answers.started] == [
         "CreateStream",
@@ -275,9 +275,7 @@ async def test_an_activity_publish_takes_the_producer_of_its_attempt(
         Client, {"AppendRecords": AppendRecordsResponse(last_offset=1)}
     )
 
-    _ = await client.get_stream(stream=ref, created=None, body_type=str).publish(
-        records=[]
-    )
+    _ = await client.get_stream(Texts, stream=ref).publish(records=[])
 
     assert [started.arg for started in answers.started] == [
         AppendRecordsRequest(
@@ -303,14 +301,39 @@ async def test_a_create_takes_the_ref_fields_as_parameters() -> None:
     assert SYSTEM_CONVERTER.from_payload(payload, CreateStreamRequest) == request
 
 
+async def test_a_factory_builds_a_handle_with_no_call() -> None:
+    client, answers = connect(
+        Client, {"DescribeStream": DescribeStreamResponse(last_offset=5)}
+    )
+
+    by_id = client.get_stream(Turns, id="s1", backend="redis")
+    by_ref = client.get_stream(Turns, stream=StreamRef(id="s2"))
+
+    _ = assert_type(by_id, Stream[Turn])
+    assert by_id.stream == StreamRef(id="s1", backend="redis")
+    assert by_id.body_type is Turn
+    assert by_ref.stream == StreamRef(id="s2")
+    assert answers.started == []
+    # The handle calls through the client that built it.
+    _ = await by_id.describe()
+    assert [started.operation for started in answers.started] == ["DescribeStream"]
+
+
+def test_a_factory_takes_the_ref_fields_or_the_ref() -> None:
+    client, _ = connect(Client, {})
+
+    with pytest.raises(TypeError, match="pass id or stream"):
+        _ = client.get_stream(Turns)
+    with pytest.raises(TypeError, match="not both"):
+        _ = client.get_stream(Turns, id="s1", stream=StreamRef(id="s1"))
+
+
 async def test_a_stored_stream_ref_rebuilds_the_handle() -> None:
     client, answers = connect(
         Client, {"DescribeStream": DescribeStreamResponse(last_offset=7)}
     )
     ref = StreamRef(id="stored-stream")
-    response = await client.get_stream(
-        stream=ref, created=None, body_type=str
-    ).describe()
+    response = await client.get_stream(Texts, stream=ref).describe()
     assert response.last_offset == 7
     assert len(client.created_clients) == 1
     assert answers.started[0].arg == DescribeStreamRequest(stream=ref)
@@ -385,7 +408,7 @@ def test_a_resource_requires_a_nexus_client() -> None:
 def test_resource_serialization_carries_only_identity_fields() -> None:
     client, _ = connect(Client, {})
     ref = StreamRef(id="stored-stream")
-    stream = client.get_stream(stream=ref, created=None, body_type=str)
+    stream = client.get_stream(Texts, stream=ref)
     converter = temporalio.converter.PayloadConverter.default
     decoded = typing.cast(
         workflow_resources.Stream[str],
@@ -410,7 +433,7 @@ async def test_a_read_that_does_not_wait_stops_at_an_empty_page_that_did_not_mov
         ReadRecordsResponse[str](next_offset=3),
     ]
     client, answers = connect(Client, {"ReadRecords": list(pages)})
-    stream = client.get_stream(stream=ref, created=None, body_type=str)
+    stream = client.get_stream(Texts, stream=ref)
 
     read = [page async for page in stream.iter_read(from_offset=1)]
 
@@ -433,7 +456,7 @@ async def test_a_waiting_read_goes_on_after_an_empty_page_at_the_same_offset() -
         ReadRecordsResponse[str](done=True),
     ]
     client, answers = connect(Client, {"ReadRecords": list(pages)})
-    stream = client.get_stream(stream=ref, created=None, body_type=str)
+    stream = client.get_stream(Texts, stream=ref)
 
     read = [page async for page in stream.iter_read(from_offset=1, wait=wait)]
 
@@ -486,7 +509,7 @@ async def test_a_done_first_page_ends_the_read() -> None:
         )
     ]
     client, answers = connect(Client, {"ReadRecords": list(pages)})
-    stream = client.get_stream(stream=ref, created=None, body_type=str)
+    stream = client.get_stream(Texts, stream=ref)
 
     read = [page async for page in stream.iter_read()]
 
@@ -510,7 +533,7 @@ async def test_a_changed_page_does_not_change_the_next_request() -> None:
             ]
         },
     )
-    stream = client.get_stream(stream=ref, created=None, body_type=str)
+    stream = client.get_stream(Texts, stream=ref)
 
     async for page in stream.iter_read(from_offset=1, wait=wait):
         page.next_offset = 9

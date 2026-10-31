@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["`ref` isn't a parameter of the constructor"]

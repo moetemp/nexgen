@@ -1,0 +1,17 @@
+package test:resource-keep-not-a-bool@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  // `keep` is `true` or `false`.
+  /// @nexus.flatten-in-api param="execution" fields="workflow-id" keep=yes
+  resource run {
+    constructor(execution: workflow-execution);
+  }
+}

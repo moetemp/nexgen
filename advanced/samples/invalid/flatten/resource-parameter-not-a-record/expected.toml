@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.flatten-in-api", "the type of `label` isn't a record"]

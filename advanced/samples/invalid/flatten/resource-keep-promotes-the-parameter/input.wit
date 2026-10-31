@@ -1,0 +1,17 @@
+package test:resource-keep-promotes-the-parameter@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  record workflow-execution {
+    workflow-id: string,
+    execution: option<string>,
+  }
+
+  // With `keep`, the factory takes `execution` and its field `execution`.
+  /// @nexus.flatten-in-api param="execution" fields="workflow-id execution" keep=true
+  resource run {
+    constructor(execution: workflow-execution);
+  }
+}

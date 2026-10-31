@@ -383,7 +383,7 @@ interface stream-service {
   // response sets created, so a stream built from a ref has none.
   /// @nexus.doc "One Stream. Build it from a stream-ref, or get it from a create."
   /// @nexus.type-parameter "body-t"
-  // TODO: implement @nexus.flatten-in-api param="ref" fields="id backend" keep=true
+  /// @nexus.flatten-in-api param="ref" fields="id backend" keep=true
   resource %stream {
     constructor(ref: stream-ref, created: option<bool>);
 

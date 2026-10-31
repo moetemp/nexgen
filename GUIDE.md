@@ -1664,6 +1664,33 @@ await job.restart()
 nexgen refuses a factory name that is also the name of a client method of a
 service in the package.
 
+In Python, the Workflow package has a factory too, for each resource that has a
+method. It is a function of the package with the snake-case name of the
+resource, such as `stream_service.stream(id="chat-1", body_type=Turn)`, and its
+handle calls the Workflow operations. nexgen refuses it when its name is the
+name of an operation function or of a module of the package. A Python factory
+takes the constructor fields by keyword, and then the runtime type of each type
+parameter. An optional field defaults to `None`.
+
+`@nexus.flatten-in-api` on the resource makes the factory take some fields of
+one constructor parameter's record in place of the parameter. With `keep=true`,
+the factory also takes the whole value, and a call gives either the value or the
+required promoted fields. The factory must promote every required field of the
+record, and its parameters can't share a name in any case. TypeScript and .NET
+factories take the whole parameter.
+
+```wit
+/// @nexus.flatten-in-api param="ref" fields="id backend" keep=true
+resource %stream {
+  constructor(ref: stream-ref, created: option<bool>);
+}
+```
+
+```python
+stream = client.get_stream(id="chat-1:turns", backend="redis", body_type=Turn)
+same = client.get_stream(ref=StreamRef(id="chat-1:turns"), body_type=Turn)
+```
+
 Sources work in the client target as well. Restrict workflow-only helpers with
 `targets="workflow"`. If a required resource-method request field has neither an
 applicable source nor a resource field or method parameter supplying it,
@@ -1715,7 +1742,7 @@ below, such as protobuf bindings, function signatures, and conflicting options.
 | `@nexus.poll`                           | freestanding function                                                                         |
 | `@nexus.serialization-context`          | freestanding function                                                                         |
 | `@nexus.output-transform`               | freestanding function                                                                         |
-| `@nexus.flatten-in-api`                 | record, record field                                                                          |
+| `@nexus.flatten-in-api`                 | record, record field, resource                                                                |
 | `@nexus.flattened-type`                 | record field                                                                                  |
 | `@nexus.function`                       | type alias, record field                                                                      |
 | `@nexus.function-args`                  | freestanding function                                                                         |
@@ -2516,14 +2543,19 @@ The stream sample's full helpers are in
 
 ### @nexus.flatten-in-api
 
-**Placement:** Record type (with `@nexus.proto`), or a field whose type is such
-a record **Syntax:** `@nexus.flatten-in-api` (no arguments) on a record,
-`@nexus.flatten-in-api fields="<field> ..."` on a field
+**Placement:** Record type (with `@nexus.proto`), a field whose type is such a
+record, or a resource **Syntax:** `@nexus.flatten-in-api` (no arguments) on a
+record, `@nexus.flatten-in-api fields="<field> ..."` on a field,
+`@nexus.flatten-in-api param="<parameter>" fields="<field> ..." [keep=true]` on
+a resource
 
 Flattens the record's fields into the parent record's generated API surface
 instead of creating a nested model. On a field, it flattens only the fields in
 `fields`. See
-[Flattening some fields of one field](#flattening-some-fields-of-one-field).
+[Flattening some fields of one field](#flattening-some-fields-of-one-field). On
+a resource, a Python factory takes the fields in `fields` in place of the
+constructor parameter in `param`. See
+[Generation Targets](#generation-targets).
 
 ```wit
 /// @nexus.proto "temporal.api.sdk.v1.UserMetadata"

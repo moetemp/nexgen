@@ -304,6 +304,33 @@ async def test_a_create_takes_the_handle_fields_as_parameters() -> None:
     assert SYSTEM_CONVERTER.from_payload(payload, CreateStreamRequest) == request
 
 
+async def test_a_factory_builds_a_handle_with_no_call() -> None:
+    client, answers = connect(
+        Client, {"DescribeStream": DescribeStreamResponse(last_offset=5)}
+    )
+
+    by_id = client.get_stream(id="s1", backend="redis", body_type=Turn)
+    by_ref = client.get_stream(ref=StreamRef(id="s2"), body_type=Turn)
+
+    _ = assert_type(by_id, Stream[Turn])
+    assert by_id.ref == StreamRef(id="s1", backend="redis")
+    assert by_id.body_type is Turn
+    assert by_ref.ref == StreamRef(id="s2")
+    assert answers.started == []
+    # The handle calls through the client that built it.
+    _ = await by_id.describe()
+    assert [started.operation for started in answers.started] == ["DescribeStream"]
+
+
+def test_a_factory_takes_the_handle_fields_or_the_handle() -> None:
+    client, _ = connect(Client, {})
+
+    with pytest.raises(TypeError, match="pass id or ref"):
+        _ = client.get_stream(body_type=str)
+    with pytest.raises(TypeError, match="not both"):
+        _ = client.get_stream(id="s1", ref=StreamRef(id="s1"), body_type=str)
+
+
 async def test_a_stored_stream_ref_rebuilds_the_resource() -> None:
     client, answers = connect(
         Client, {"DescribeStream": DescribeStreamResponse(last_offset=7)}

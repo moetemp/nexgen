@@ -1,0 +1,6 @@
+languages = ["python"]
+targets = ["workflow"]
+
+[error]
+kind = "python-generated-name-conflict"
+contains = ["Python generated name `models` for the factory of resource `Models` conflicts with the module `models` of the package"]

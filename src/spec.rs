@@ -724,8 +724,23 @@ pub struct ResourceSpec<F: TypeFamily = AuthoredFamily> {
     /// The type parameters that the resource declares, in order. It may use only these.
     pub type_parameters: Vec<TypeParameterSpec>,
     pub fields: Vec<ResourceFieldSpec<F>>,
+    /// Set when `@nexus.flatten-in-api` on the resource makes the factory take fields of one
+    /// constructor parameter.
+    pub flatten: Option<ResourceFlattenSpec>,
     pub methods: Vec<ResourceMethodSpec<F>>,
     pub data: F::ResourceData,
+}
+
+/// A resource's `@nexus.flatten-in-api`. The factory takes the fields in `fields` of the record
+/// of one constructor parameter in place of the parameter. Each name in `fields` is a field key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResourceFlattenSpec {
+    /// The constructor parameter, by WIT name.
+    pub param: String,
+    /// The fields of the parameter's record that become parameters, in order.
+    pub fields: Vec<String>,
+    /// Whether the factory also takes the whole value, as the other choice.
+    pub keep: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -766,6 +781,7 @@ impl<F: TypeFamily> ResourceSpec<F> {
                 .into_iter()
                 .map(|field| field.map_names_with(map))
                 .collect(),
+            flatten: self.flatten,
             methods: self
                 .methods
                 .into_iter()

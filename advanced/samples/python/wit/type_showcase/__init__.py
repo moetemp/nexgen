@@ -17,6 +17,7 @@ from ._resources.user import deactivate
 from ._resources.user import update_labels
 from .operations.update_notification_settings import update_notification_settings
 from .operations.get_sync_settings import get_sync_settings
+from ._resources.user import user
 
 __all__ = [
     "deactivate",
@@ -28,6 +29,7 @@ __all__ = [
     "update_email",
     "update_labels",
     "update_notification_settings",
+    "user",
 ]
 
 

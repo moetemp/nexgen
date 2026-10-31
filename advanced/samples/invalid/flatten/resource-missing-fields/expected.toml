@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["invalid WIT directive `@nexus.flatten-in-api` on interface `history-service` resource `Run`", "on a resource, needs a constructor parameter and fields of its record, such as `param=\"stream\" fields=\"id\"`"]

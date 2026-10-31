@@ -1,0 +1,1 @@
+Python gives each resource with a method a factory in the Workflow package too. `@nexus.flatten-in-api param="..." fields="..." [keep=true]` on a resource makes a Python factory take fields of one constructor parameter.

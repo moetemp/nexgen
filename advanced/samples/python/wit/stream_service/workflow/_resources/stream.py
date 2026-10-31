@@ -106,6 +106,28 @@ class Stream(typing.Generic[BodyT]):
         return await handle
 
 
+def stream(
+    *,
+    id: str | None = None,
+    ref: StreamRef | None = None,
+    backend: str | None = None,
+    created: bool | None = None,
+    body_type: type[BodyT] | None = None,
+) -> Stream[BodyT]:
+    """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``ref``."""
+    if ref is None:
+        if id is None:
+            raise TypeError("pass id or ref")
+        ref = StreamRef(id=id, backend=backend)
+    elif id is not None or backend is not None:
+        raise TypeError("pass ref or its fields, not both")
+    return Stream(
+        ref=ref,
+        created=created,
+        body_type=body_type,
+    )
+
+
 async def _append_records(
     request: AppendRecordsRequest[BodyT],
 ) -> temporalio.workflow.NexusOperationHandle[AppendRecordsResponse,]:

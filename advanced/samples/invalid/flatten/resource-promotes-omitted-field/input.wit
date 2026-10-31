@@ -1,0 +1,21 @@
+package temporal:nexus@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.proto "temporal.api.common.v1.WorkflowExecution"
+  record workflow-execution {
+    workflow-id: string,
+    /// @nexus.omit
+    run-id: placeholder,
+  }
+
+  // The record omits `run-id`, so the factory has no value for it.
+  /// @nexus.flatten-in-api param="execution" fields="workflow-id run-id"
+  resource run {
+    constructor(execution: workflow-execution);
+  }
+}

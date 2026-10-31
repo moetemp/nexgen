@@ -153,6 +153,8 @@ pub(crate) struct PlannedResource {
     /// The type parameters that the resource declares, in order.
     pub(crate) type_parameters: Vec<crate::spec::TypeParameterSpec>,
     pub(crate) fields: Vec<PlannedResourceField>,
+    /// The constructor parameter whose fields the factory takes, if any.
+    pub(crate) flatten: Option<crate::spec::ResourceFlattenSpec>,
     pub(crate) methods: Vec<PlannedResourceMethod>,
 }
 

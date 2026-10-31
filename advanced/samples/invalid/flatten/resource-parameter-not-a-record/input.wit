@@ -1,0 +1,17 @@
+package test:resource-parameter-not-a-record@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  record workflow-execution {
+    workflow-id: string,
+    run-id: option<string>,
+  }
+
+  // `label` is a string, which has no fields.
+  /// @nexus.flatten-in-api param="label" fields="workflow-id"
+  resource run {
+    constructor(execution: workflow-execution, label: string);
+  }
+}

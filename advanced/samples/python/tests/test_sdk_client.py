@@ -324,7 +324,7 @@ async def test_a_read_that_does_not_wait_stops_at_an_empty_page_that_did_not_mov
         ReadRecordsRequest(stream=ref, from_offset=1),
         ReadRecordsRequest(stream=ref, from_offset=3),
     ]
-    # One Nexus client serves the iteration, and each page is a new operation.
+    # The iteration uses one Nexus client, and each page is a new operation.
     assert len(client.created_clients) == 1
     assert len({started.id for started in answers.started}) == len(pages)
 

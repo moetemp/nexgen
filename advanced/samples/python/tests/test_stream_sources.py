@@ -10,7 +10,9 @@ import uuid
 
 import pytest
 import temporalio.workflow
+from typing_extensions import assert_type
 
+import wit.stream_service.both.workflow as stream_service
 import wit.stream_service.both.workflow._resources.stream as stream_module
 from wit.stream_service.both.workflow._resources import Stream
 from wit.stream_service.both.models import (
@@ -110,3 +112,12 @@ async def test_a_workflow_publish_fills_the_workflow_writer(
 def test_a_workflow_read_takes_no_last() -> None:
     # Replay needs a fixed range, so the WIT omits `last` from the Workflow API.
     assert "last" not in inspect.signature(stream_module.read_records).parameters
+
+
+def test_a_workflow_factory_builds_a_handle_on_the_run_operations() -> None:
+    handle = stream_service.get_stream(id="turns", backend="redis", body_type=str)
+
+    _ = assert_type(handle, Stream[str])
+    assert handle.ref == StreamRef(id="turns", backend="redis")
+    assert handle.created is None
+    assert handle.body_type is str

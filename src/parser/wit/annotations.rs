@@ -273,8 +273,8 @@ const CATALOG: &[Annotation] = {
         },
         Annotation {
             name: "flatten-in-api",
-            sites: &[Record, Field],
-            keys: &["fields"],
+            sites: &[Record, Field, Resource],
+            keys: &["fields", "param", "keep"],
             language_keys: &[],
             repeatable: false,
             languages: None,
@@ -385,9 +385,14 @@ impl Annotation {
     }
 
     fn accepts_key(&self, key: &str, site: Site) -> bool {
-        // A record flattens all of its fields, and a field lists the fields of its record.
+        // A record flattens all of its fields. A field lists the fields of its record, and a
+        // resource gives a constructor parameter and the fields of its record.
         if self.name == "flatten-in-api" {
-            return site == Site::Field && key == "fields";
+            return match site {
+                Site::Field => key == "fields",
+                Site::Resource => ["param", "fields", "keep"].contains(&key),
+                _ => false,
+            };
         }
         if self.name == "type"
             && site == Site::Field

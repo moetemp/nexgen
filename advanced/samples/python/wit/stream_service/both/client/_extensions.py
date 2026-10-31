@@ -46,11 +46,19 @@ class StreamServiceClientExtension(abc.ABC):
     def get_stream(
         self,
         *,
-        ref: StreamRef,
-        created: bool | None,
+        id: str | None = None,
+        ref: StreamRef | None = None,
+        backend: str | None = None,
+        created: bool | None = None,
         body_type: type[BodyT] | None = None,
     ) -> Stream[BodyT]:
-        """Return the ``Stream`` handle that has these identity fields."""
+        """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``ref``."""
+        if ref is None:
+            if id is None:
+                raise TypeError("pass id or ref")
+            ref = StreamRef(id=id, backend=backend)
+        elif id is not None or backend is not None:
+            raise TypeError("pass ref or its fields, not both")
         return Stream(
             self.create_nexus_client(
                 service=StreamService,

@@ -1,0 +1,5 @@
+descriptors = "temporal"
+
+[error]
+kind = "invalid-wit"
+contains = ["resource `run` parameter `execution` flattens fields of `history-service.workflow-execution`, but doesn't promote its required field `workflow_id`"]

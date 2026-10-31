@@ -1898,28 +1898,11 @@ fn build_field_flatten(
                 .to_string(),
         ));
     };
-    let mut ty = *ty;
-    let record = loop {
-        let Type::Id(id) = ty else {
-            return Err(invalid("the field's type isn't a record".to_string()));
-        };
-        match &resolve.types[id].kind {
-            TypeDefKind::Option(inner) | TypeDefKind::Type(inner) => ty = *inner,
-            TypeDefKind::Record(record) => break record,
-            _ => return Err(invalid("the field's type isn't a record".to_string())),
-        }
-    };
+    let record = flattened_record(resolve, *ty)
+        .ok_or_else(|| invalid("the field's type isn't a record".to_string()))?;
     let fields = fields
         .split_whitespace()
-        .map(|name| {
-            let field = record
-                .fields
-                .iter()
-                .find(|field| field.name == name)
-                .ok_or_else(|| invalid(format!("`{name}` isn't a field of the field's record")))?;
-            let directives = parse_directives(field.docs.contents.as_deref(), path, context)?;
-            record_field_key(field, &directives, path, context)
-        })
+        .map(|name| flattened_field_key(record, name, "field's record", path, context))
         .collect::<Result<Vec<_>>>()?;
     if fields.is_empty() {
         return Err(invalid(
@@ -1981,6 +1964,98 @@ fn build_field_default(
         });
     }
     Ok(expression)
+}
+
+/// A resource's `@nexus.flatten-in-api`. It gives a constructor parameter, and fields of that
+/// parameter's record by WIT name.
+fn build_resource_flatten(
+    resolve: &Resolve,
+    constructor: Option<&Function>,
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<ResourceFlattenSpec>> {
+    let Some(flatten) = directive(directives, "flatten-in-api", path, context)? else {
+        return Ok(None);
+    };
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.flatten-in-api".to_string(),
+        reason,
+    };
+    let (Some(param), Some(fields)) = (flatten.value("param"), flatten.value("fields")) else {
+        return Err(invalid(
+            "on a resource, needs a constructor parameter and fields of its record, such as \
+             `param=\"stream\" fields=\"id\"`"
+                .to_string(),
+        ));
+    };
+    let keep = match flatten.value("keep") {
+        None | Some("false") => false,
+        Some("true") => true,
+        Some(other) => return Err(invalid(format!("`keep={other}` isn't `true` or `false`"))),
+    };
+    let ty = constructor
+        .and_then(|constructor| constructor.params.iter().find(|item| item.name == param))
+        .map(|item| item.ty)
+        .ok_or_else(|| invalid(format!("`{param}` isn't a parameter of the constructor")))?;
+    let record = flattened_record(resolve, ty)
+        .ok_or_else(|| invalid(format!("the type of `{param}` isn't a record")))?;
+    let fields = fields
+        .split_whitespace()
+        .map(|name| flattened_field_key(record, name, "parameter's record", path, context))
+        .collect::<Result<Vec<_>>>()?;
+    if fields.is_empty() {
+        return Err(invalid(
+            "on a resource, promotes at least one field of the parameter's record".to_string(),
+        ));
+    }
+    let mut named = BTreeSet::new();
+    if let Some(key) = fields.iter().find(|key| !named.insert(key.as_str())) {
+        return Err(invalid(format!("has `{key}` twice in `fields`")));
+    }
+    Ok(Some(ResourceFlattenSpec {
+        param: param.to_string(),
+        fields,
+        keep,
+    }))
+}
+
+/// The record of a flattened field or parameter, through `option` and type aliases.
+fn flattened_record(resolve: &Resolve, mut ty: Type) -> Option<&Record> {
+    loop {
+        let Type::Id(id) = ty else {
+            return None;
+        };
+        match &resolve.types[id].kind {
+            TypeDefKind::Option(inner) | TypeDefKind::Type(inner) => ty = *inner,
+            TypeDefKind::Record(record) => return Some(record),
+            _ => return None,
+        }
+    }
+}
+
+/// The key of the field of a flattened record that a flatten gives by WIT name.
+fn flattened_field_key(
+    record: &Record,
+    name: &str,
+    owner: &str,
+    path: &Path,
+    context: &str,
+) -> Result<String> {
+    let field = record
+        .fields
+        .iter()
+        .find(|field| field.name == name)
+        .ok_or_else(|| Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: context.to_string(),
+            directive: "@nexus.flatten-in-api".to_string(),
+            reason: format!("`{name}` isn't a field of the {owner}"),
+        })?;
+    let directives = parse_directives(field.docs.contents.as_deref(), path, context)?;
+    record_field_key(field, &directives, path, context)
 }
 
 fn build_source_call(
@@ -2947,6 +3022,9 @@ fn build_resource(
         None => Vec::new(),
     };
 
+    let flatten =
+        build_resource_flatten(resolve, constructor, &resource_directives, path, &context)?;
+
     let methods = interface
         .functions
         .values()
@@ -2980,6 +3058,7 @@ fn build_resource(
         // `ResourceTypeParameterPass` infers them from what the resource uses.
         type_parameters: Vec::new(),
         fields,
+        flatten,
         methods,
         data: (),
     })

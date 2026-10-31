@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import datetime
+import collections.abc
 import typing
 
 from typing_extensions import override
@@ -32,8 +34,10 @@ class NexusClient:
         *,
         id: str,
         result_type: type[typing.Any] | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Handle:
-        del id, result_type
+        del id, result_type, rpc_metadata, rpc_timeout
         self._client.calls.append((self._service, self._endpoint, operation, arg))
         return Handle(self._client.answers[operation])
 

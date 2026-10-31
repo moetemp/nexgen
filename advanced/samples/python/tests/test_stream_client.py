@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import collections.abc
 import dataclasses
 import datetime
 import typing
@@ -84,9 +85,12 @@ class NexusClient:
         *,
         id: str,
         result_type: type[typing.Any] | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Handle:
         self._client.calls.append((self._service, self._endpoint, operation, arg))
         self._client.operation_ids.append(id)
+        self._client.rpc_options.append((rpc_metadata, rpc_timeout))
         answer = self._client.answers[operation].pop(0)
         # A payload answer decodes with the result type, as a real Nexus client does.
         if isinstance(answer, Payload) and result_type is not None:
@@ -101,6 +105,12 @@ class Client(StreamServiceClientExtension):
         self.answers: dict[str, list[object]] = answers
         self.calls: list[tuple[str, str, str, object]] = []
         self.operation_ids: list[str] = []
+        self.rpc_options: list[
+            tuple[
+                collections.abc.Mapping[str, str | bytes] | None,
+                datetime.timedelta | None,
+            ]
+        ] = []
         self.nexus_clients: int = 0
 
     @override
@@ -303,3 +313,21 @@ async def test_a_handle_decodes_its_bodies_with_its_body_type() -> None:
     _ = assert_type(page, ReadRecordsResponse[Turn])
     # The body arrives as a payload, and the handle's body type decodes it.
     assert page.records == [record]
+
+
+async def test_a_call_and_a_resource_method_pass_their_rpc_options() -> None:
+    client = Client(
+        {
+            "CreateStream": [CreateStreamResult(stream=StreamRef(id="s1"))],
+            "DescribeStream": [DescribeStreamResponse(last_offset=5)],
+        }
+    )
+    timeout = datetime.timedelta(seconds=3)
+
+    stream = await client.create_stream(Texts, id="s1", rpc_timeout=timeout)
+    _ = await stream.describe(rpc_metadata={"authorization": "token"})
+
+    assert client.rpc_options == [
+        ({}, timeout),
+        ({"authorization": "token"}, None),
+    ]

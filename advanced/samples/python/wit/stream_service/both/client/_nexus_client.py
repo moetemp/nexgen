@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import collections.abc
+import datetime
 import typing
 import uuid
 
@@ -28,6 +30,8 @@ class _NexusClient(typing.Protocol):  # pyright: ignore[reportUnusedClass]
         *,
         id: str,
         result_type: type[_OutputT],
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] = ...,
+        rpc_timeout: datetime.timedelta | None = ...,
     ) -> _NexusOperationHandle[_OutputT]: ...
 
     @typing.overload
@@ -37,6 +41,8 @@ class _NexusClient(typing.Protocol):  # pyright: ignore[reportUnusedClass]
         arg: typing.Any,
         *,
         id: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] = ...,
+        rpc_timeout: datetime.timedelta | None = ...,
     ) -> _NexusOperationHandle[typing.Any]: ...
 
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import collections.abc
 import dataclasses
+import datetime
 
 from .._nexus_client import (
     _NexusClient,
@@ -27,6 +29,9 @@ class Job:
 
     async def restart(
         self,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         request = RestartRequest(
             job_id=self.job_id,
@@ -36,6 +41,8 @@ class Job:
             operation="Restart",
             arg=request,
             id=_operation_id(),
+            rpc_metadata=rpc_metadata or {},
+            rpc_timeout=rpc_timeout,
         )
         await handle.result()
 

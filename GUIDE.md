@@ -1572,6 +1572,11 @@ await stream.publish(records=records)
 
 Each call starts the operation with a new random operation ID.
 
+Each Python call takes the keyword options `rpc_metadata` and `rpc_timeout`,
+which default to `None`, and passes them to the `start_operation` of its Nexus
+client. The methods of a client resource take them too. nexgen refuses a request
+field or a method parameter with one of these names.
+
 Each operation also has a private method that takes the request, such as
 `_stream_service_create_stream`. Its name has the service name. Two services of
 one package can't have methods of the same name, private or public, and nexgen

@@ -24,9 +24,9 @@ from ..models import (
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamErrorDetails,
+    StreamHandle,
     StreamReadStart,
     StreamRecord,
-    StreamRef,
 )
 from ._resources import Stream
 import temporal_support as _support
@@ -85,24 +85,24 @@ class StreamServiceClientExtension(abc.ABC):
         definition: type[temporal_support.StreamDefinition[BodyT]],
         *,
         id: str | None = None,
-        stream: StreamRef | None = None,
+        handle: StreamHandle | None = None,
         backend: str | None = None,
         created: bool | None = None,
     ) -> Stream[BodyT]:
-        """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``stream``."""
+        """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``handle``."""
         (body_type,) = _support.definition_type_arguments(definition)
-        if stream is None:
+        if handle is None:
             if id is None:
-                raise TypeError("pass id or stream")
-            stream = StreamRef(id=id, backend=backend)
+                raise TypeError("pass id or handle")
+            handle = StreamHandle(id=id, backend=backend)
         elif id is not None or backend is not None:
-            raise TypeError("pass stream or its fields, not both")
+            raise TypeError("pass handle or its fields, not both")
         return Stream(
             self._create_nexus_client(
                 service="temporal.api.streamservice.v1.StreamService",
                 endpoint="__temporal_system",
             ),
-            stream=stream,
+            handle=handle,
             created=created,
             body_type=body_type,
         )
@@ -129,12 +129,12 @@ class StreamServiceClientExtension(abc.ABC):
                 rpc_timeout=rpc_timeout,
             )
             result = await handle.result()
-            if result.stream is None:
-                raise RuntimeError("CreateStream answered without `stream`")
+            if result.handle is None:
+                raise RuntimeError("CreateStream answered without `handle`")
             resource = Stream(
                 nexus_client,
                 body_type=body_type,
-                stream=result.stream,
+                handle=result.handle,
                 created=result.created or None,
             )
             return resource
@@ -167,14 +167,15 @@ class StreamServiceClientExtension(abc.ABC):
                 reads it.
         """
         (body_type,) = _support.definition_type_arguments(definition)
-        ref = StreamRef(
+        stream_handle = StreamHandle(
             backend=backend,
             id=id,
         )
         request = CreateStreamRequest(
             id=id,
             retention=retention,
-            ref=ref,
+            withdraw_run=_support.withdraw_run(),
+            stream_handle=stream_handle,
         )
         return await self._stream_service_create_stream(
             request, body_type, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
@@ -213,18 +214,26 @@ class StreamServiceClientExtension(abc.ABC):
     async def append_records(
         self,
         *,
-        stream: StreamRef,
+        handle: StreamHandle,
         records: list[AppendRecord[BodyT]] | None = None,
+        sequence: int | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> AppendRecordsResponse:
-        """Append one batch. Workflow code makes the call from a Local Activity."""
+        """Append one batch. Workflow code makes the call from a Local Activity.
+
+        Args:
+            sequence: The batch number in this epoch. Empty takes the next one, and a
+                retry writes it again.
+        """
         request = AppendRecordsRequest(
-            stream=stream,
+            handle=handle,
             records=records or [],
             failed_tasks=_support.local_activity_failed_tasks(),
             producer=_support.client_producer(),
+            sequence=sequence,
             previous_completed_task=_support.local_activity_previous_completed_task(),
+            withdraw_run=_support.withdraw_run(),
         )
         return await self._stream_service_append_records(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
@@ -263,14 +272,19 @@ class StreamServiceClientExtension(abc.ABC):
     async def close_stream(
         self,
         *,
-        stream: StreamRef,
+        handle: StreamHandle,
         result: typing.Any | None = None,
         failure: BaseException | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> CloseStreamResponse:
+        """
+        Args:
+            failure: Empty completes the Stream. A cancel failure cancels it. Any other
+                fails it.
+        """
         request = CloseStreamRequest(
-            stream=stream,
+            handle=handle,
             producer=_support.client_producer(),
             result=result,
             failure=failure,
@@ -314,7 +328,7 @@ class StreamServiceClientExtension(abc.ABC):
         self,
         body_type: type[BodyT],
         *,
-        stream: StreamRef,
+        handle: StreamHandle,
         from_offset: int | None = None,
         start: StreamReadStart | None = None,
         max_records: int | None = None,
@@ -345,7 +359,7 @@ class StreamServiceClientExtension(abc.ABC):
                 returned alone.
         """
         request = ReadRecordsRequest(
-            stream=stream,
+            handle=handle,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -362,7 +376,7 @@ class StreamServiceClientExtension(abc.ABC):
         self,
         body_type: type[BodyT],
         *,
-        stream: StreamRef,
+        handle: StreamHandle,
         from_offset: int | None = None,
         start: StreamReadStart | None = None,
         max_records: int | None = None,
@@ -396,7 +410,7 @@ class StreamServiceClientExtension(abc.ABC):
                 returned alone.
         """
         request = ReadRecordsRequest(
-            stream=stream,
+            handle=handle,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -470,12 +484,12 @@ class StreamServiceClientExtension(abc.ABC):
     async def describe_stream(
         self,
         *,
-        stream: StreamRef,
+        handle: StreamHandle,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
     ) -> DescribeStreamResponse:
         request = DescribeStreamRequest(
-            stream=stream,
+            handle=handle,
         )
         return await self._stream_service_describe_stream(
             request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout

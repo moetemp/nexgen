@@ -23,6 +23,7 @@ import { Stream } from "../wit/stream-service/both/resources.ts";
 const startOperation = vi.hoisted(() => vi.fn());
 vi.mock("@temporalio/workflow", () => ({
   createNexusServiceClient: () => ({ startOperation }),
+  inWorkflowContext: () => true,
   workflowInfo: () => ({
     workflowId: "chat-1",
     firstExecutionRunId: "r1",
@@ -102,19 +103,19 @@ describe("stream-service generated output", () => {
 
   test("maps every field of a read request through its proto", () => {
     const proto: temporal.api.streamservice.v1.IReadRecordsRequest = {
-      stream: { id: "stream-1", owner: { businessId: "workflow-1" } },
+      handle: { id: "stream-1", owner: { businessId: "workflow-1" } },
       fromOffset: Long.fromNumber(7),
       maxRecords: 10,
     };
 
     const model = readRecordsRequestTransferTypeConverter.fromTransferType(proto);
 
-    expect(model.stream.id).toBe("stream-1");
-    expect(model.stream.owner?.businessId).toBe("workflow-1");
+    expect(model.handle.id).toBe("stream-1");
+    expect(model.handle.owner?.businessId).toBe("workflow-1");
     expect(model.fromOffset?.toNumber()).toBe(7);
     expect(model.maxRecords).toBe(10);
     expect(
-      readRecordsRequestTransferTypeConverter.toTransferType(model).stream?.id,
+      readRecordsRequestTransferTypeConverter.toTransferType(model).handle?.id,
     ).toBe("stream-1");
   });
 
@@ -131,13 +132,13 @@ describe("stream-service generated output", () => {
 
   test("a Workflow create names the run chain that owns the stream", async () => {
     startOperation.mockResolvedValue({
-      result: async () => ({ stream: { id: "chat-1:r1:turns" } }),
+      result: async () => ({ handle: { id: "chat-1:r1:turns" } }),
     });
 
     await createStream({ name: "turns" }, { backend: "redis" });
 
     const [, request] = startOperation.mock.calls[0];
-    expect(request.ref).toEqual({
+    expect(request.streamHandle).toEqual({
       backend: "redis",
       id: "chat-1:r1:turns",
       owner: {

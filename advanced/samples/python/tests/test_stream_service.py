@@ -18,8 +18,8 @@ from wit.stream_service.both.models import (
     StreamItemData,
     StreamItemSuperseded,
     StreamRecord,
-    StreamRef,
-    Supersession,
+    StreamHandle,
+    StreamSuperseded,
 )
 
 
@@ -42,7 +42,7 @@ def test_read_items_round_trip_as_their_records() -> None:
             ),
             StreamRecord(
                 item=StreamItemSuperseded(
-                    Supersession(producer_id="workflow-1", failed_tasks=[7])
+                    StreamSuperseded(producer_id="workflow-1", failed_tasks=[7])
                 ),
                 offset=2,
             ),
@@ -83,12 +83,14 @@ def test_a_record_of_an_unknown_item_kind_has_no_item() -> None:
 
 def test_a_request_without_its_stream_is_refused() -> None:
     converter = models._AppendRecordsRequestTransferTypeConverter[object]()
-    wire = converter.to_transfer_type(AppendRecordsRequest(stream=StreamRef(id="s-1")))
-    assert wire.stream.id == "s-1"
+    wire = converter.to_transfer_type(
+        AppendRecordsRequest(handle=StreamHandle(id="s-1"))
+    )
+    assert wire.handle.id == "s-1"
 
-    wire.ClearField("stream")
+    wire.ClearField("handle")
     with pytest.raises(
-        ValueError, match="missing required field AppendRecordsRequest.stream"
+        ValueError, match="missing required field AppendRecordsRequest.handle"
     ):
         _ = converter.from_transfer_type(wire, AppendRecordsRequest)
 
@@ -108,7 +110,7 @@ def test_an_unknown_enum_number_decodes_as_the_fallback_case() -> None:
 def test_an_unknown_number_of_an_enum_with_no_fallback_fails_the_message() -> None:
     converter = models._ReadRecordsRequestTransferTypeConverter()
     wire = request_response_pb2.ReadRecordsRequest(
-        stream=message_pb2.StreamRef(id="s-1"),
+        handle=message_pb2.StreamHandle(id="s-1"),
         start=stream_pb2.StreamReadStart.ValueType(9),
     )
 

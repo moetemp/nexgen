@@ -4,7 +4,7 @@ import type * as common from "@temporalio/common";
 import type * as nexus from "nexus-rpc";
 import { createReadRecordsResponseTransferTypeConverter } from "../models";
 import type {
-  StreamRef,
+  StreamHandle,
   CreateStreamRequest,
   AppendRecordsResponse,
   AppendRecordsRequest,
@@ -33,9 +33,9 @@ function requiredField<T>(
 
 type CreateStreamInput = CreateStreamRequest extends infer Input
   ? Input extends unknown
-    ? Omit<Input, "owner" | "ref" | "withdrawRun"> & {
+    ? Omit<Input, "owner" | "streamHandle" | "withdrawRun"> & {
         owner?: never;
-        ref?: never;
+        streamHandle?: never;
         withdrawRun?: never;
       } & { backend?: string }
     : never
@@ -46,16 +46,11 @@ type AppendRecordsInput<BodyT> =
     ? Input extends unknown
       ? Omit<
           Input,
-          | "failedTasks"
-          | "previousCompletedTask"
-          | "producer"
-          | "sequence"
-          | "withdrawRun"
+          "failedTasks" | "previousCompletedTask" | "producer" | "withdrawRun"
         > & {
           failedTasks?: never;
           previousCompletedTask?: never;
           producer?: never;
-          sequence?: never;
           withdrawRun?: never;
         }
       : never
@@ -121,7 +116,7 @@ export function StreamServiceClientExtension<
      * Returns the `Stream` handle that has these identity fields.
      */
     public getStream<BodyT = unknown>(
-      stream: StreamRef,
+      handle: StreamHandle,
       created: boolean | undefined,
       bodyType?: common.TypeInfo<BodyT>,
     ): Stream<BodyT> {
@@ -130,7 +125,7 @@ export function StreamServiceClientExtension<
           service: streamService,
           endpoint: "__temporal_system",
         }),
-        stream,
+        handle,
         created,
         bodyType,
       );
@@ -146,7 +141,8 @@ export function StreamServiceClientExtension<
       const { backend, ...requestFields } = requestInput;
       const request = {
         ...requestFields,
-        ref: { backend, id: requestFields.id },
+        withdrawRun: support.withdrawRun(),
+        streamHandle: { backend, id: requestFields.id },
       } as CreateStreamRequest;
       const nexusClient = this.createNexusClient({
         service: streamService,
@@ -160,7 +156,7 @@ export function StreamServiceClientExtension<
       const result = await handle.result();
       return new Stream(
         nexusClient,
-        requiredField(result.stream, "resource", "stream"),
+        requiredField(result.handle, "resource", "handle"),
         result.created ?? undefined,
         bodyType,
       );
@@ -179,6 +175,7 @@ export function StreamServiceClientExtension<
         failedTasks: support.localActivityFailedTasks(),
         producer: support.clientProducer(),
         previousCompletedTask: support.localActivityPreviousCompletedTask(),
+        withdrawRun: support.withdrawRun(),
       } as AppendRecordsRequest<BodyT>;
       const nexusClient = this.createNexusClient({
         service: streamService,

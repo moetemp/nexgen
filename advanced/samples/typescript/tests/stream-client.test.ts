@@ -19,7 +19,7 @@ import {
   type DescribeStreamResponse,
   type ReadRecordsResponse,
   StreamReadStart,
-  type StreamRef,
+  type StreamHandle,
 } from "../wit/stream-service/both/models.ts";
 
 const STREAM_SERVICE = "temporal.api.streamservice.v1.StreamService";
@@ -67,8 +67,10 @@ class Client extends StreamServiceClientExtension(Object) {
 
 // The model converters decode a body with the payload converter of the Workflow.
 beforeEach(() => {
+  // A first attempt, so `withdrawRun()` withdraws nothing.
   vi.stubGlobal("__TEMPORAL_ACTIVATOR__", {
     payloadConverter: common.defaultPayloadConverter,
+    info: { attempt: 1 },
   });
 });
 
@@ -95,27 +97,27 @@ async function readAll<T>(pages: AsyncIterable<T>): Promise<T[]> {
 
 describe("stream-service client target", () => {
   test("a created stream publishes on the system endpoint", async () => {
-    const ref: StreamRef = { id: "s1" };
+    const ref: StreamHandle = { id: "s1" };
     const appended: AppendRecordsResponse = {
       firstOffset: Long.fromNumber(0),
       lastOffset: Long.fromNumber(0),
     };
-    const created: CreateStreamResult = { stream: ref, created: true };
+    const created: CreateStreamResult = { handle: ref, created: true };
     const client = new Client({ CreateStream: [created], AppendRecords: [appended] });
 
     const stream = await client.createStream({ id: "s1" });
     const lastOffset = await stream.publish();
 
     expect(stream).toBeInstanceOf(Stream);
-    expect([stream.stream, stream.created]).toEqual([ref, true]);
+    expect([stream.handle, stream.created]).toEqual([ref, true]);
     expect(lastOffset.toNumber()).toBe(0);
     expect(client.calls).toEqual([
       {
         service: STREAM_SERVICE,
         endpoint: SYSTEM_ENDPOINT,
         operation: "CreateStream",
-        // The ref copies the id.
-        input: { id: "s1", ref: { id: "s1" } },
+        // The handle copies the id.
+        input: { id: "s1", streamHandle: { id: "s1" } },
       },
       {
         service: STREAM_SERVICE,
@@ -123,7 +125,7 @@ describe("stream-service client target", () => {
         operation: "AppendRecords",
         // The client fills the producer and the Local Activity fields from its sources.
         input: {
-          stream: ref,
+          handle: ref,
           records: [],
           failedTasks: [],
           producer: { id: "client:sample" },
@@ -134,7 +136,7 @@ describe("stream-service client target", () => {
   });
 
   test("an Activity publish takes the producer of its attempt", async () => {
-    const ref: StreamRef = { id: "s1" };
+    const ref: StreamHandle = { id: "s1" };
     const appended: AppendRecordsResponse = { lastOffset: Long.fromNumber(1) };
     const client = new Client({ AppendRecords: [appended] });
     const info = {
@@ -148,7 +150,7 @@ describe("stream-service client target", () => {
 
     expect(client.calls.map((call) => call.input)).toEqual([
       {
-        stream: ref,
+        handle: ref,
         records: [],
         failedTasks: [],
         producer: { id: "act:r1:a1", runId: "r1" },
@@ -157,19 +159,19 @@ describe("stream-service client target", () => {
   });
 
   test("a create takes the fields of the ref as parameters", async () => {
-    const created: CreateStreamResult = { stream: { id: "s1" } };
+    const created: CreateStreamResult = { handle: { id: "s1" } };
     const client = new Client({ CreateStream: [created] });
 
     await client.createStream({ id: "s1", backend: "redis" });
 
-    // The ref copies the id, and takes the backend.
+    // The handle copies the id, and takes the backend.
     expect(client.calls.map((call) => call.input)).toEqual([
-      { id: "s1", ref: { backend: "redis", id: "s1" } },
+      { id: "s1", streamHandle: { backend: "redis", id: "s1" } },
     ]);
   });
 
   test("a stored stream ref rebuilds the handle", async () => {
-    const ref: StreamRef = { id: "s2" };
+    const ref: StreamHandle = { id: "s2" };
     const described: DescribeStreamResponse = { lastOffset: Long.fromNumber(7) };
     const client = new Client({ DescribeStream: [described] });
 
@@ -181,13 +183,13 @@ describe("stream-service client target", () => {
         service: STREAM_SERVICE,
         endpoint: SYSTEM_ENDPOINT,
         operation: "DescribeStream",
-        input: { stream: ref },
+        input: { handle: ref },
       },
     ]);
   });
 
   test("a read that doesn't wait stops at an empty page that didn't move", async () => {
-    const ref: StreamRef = { id: "s1" };
+    const ref: StreamHandle = { id: "s1" };
     const pages: ReadRecordsResponse<unknown>[] = [
       {
         records: [{ offset: Long.fromNumber(1) }, { offset: Long.fromNumber(2) }],
@@ -197,13 +199,13 @@ describe("stream-service client target", () => {
     ];
     const client = new Client({ ReadRecords: [...pages] });
 
-    const read = await readAll(client.iterReadRecords({ stream: ref, last: 2 }));
+    const read = await readAll(client.iterReadRecords({ handle: ref, last: 2 }));
 
     expect(read).toEqual(pages);
     expect(client.calls.map((call) => call.input)).toEqual([
-      { stream: ref, last: 2 },
+      { handle: ref, last: 2 },
       {
-        stream: ref,
+        handle: ref,
         fromOffset: Long.fromNumber(3),
         start: undefined,
         last: undefined,
@@ -215,7 +217,7 @@ describe("stream-service client target", () => {
   });
 
   test("a waiting read goes on after an empty page at the same offset", async () => {
-    const ref: StreamRef = { id: "s1" };
+    const ref: StreamHandle = { id: "s1" };
     const pages: ReadRecordsResponse<unknown>[] = [
       { records: [{ offset: Long.fromNumber(1) }], nextOffset: Long.fromNumber(2) },
       { nextOffset: Long.fromNumber(2) },
@@ -225,7 +227,7 @@ describe("stream-service client target", () => {
 
     const read = await readAll(
       client.iterReadRecords({
-        stream: ref,
+        handle: ref,
         fromOffset: Long.fromNumber(1),
         wait: "30s",
       }),
@@ -233,21 +235,21 @@ describe("stream-service client target", () => {
 
     expect(read).toEqual(pages);
     expect(client.calls.map((call) => call.input)).toMatchObject([
-      { stream: ref, fromOffset: Long.fromNumber(1), wait: "30s" },
-      { stream: ref, fromOffset: Long.fromNumber(2), wait: "30s" },
-      { stream: ref, fromOffset: Long.fromNumber(2), wait: "30s" },
+      { handle: ref, fromOffset: Long.fromNumber(1), wait: "30s" },
+      { handle: ref, fromOffset: Long.fromNumber(2), wait: "30s" },
+      { handle: ref, fromOffset: Long.fromNumber(2), wait: "30s" },
     ]);
   });
 
   test("a stream read from the end stays at the first next offset", async () => {
-    const ref: StreamRef = { id: "s1" };
+    const ref: StreamHandle = { id: "s1" };
     const pages: ReadRecordsResponse<unknown>[] = [
       { nextOffset: Long.fromNumber(5) },
       { records: [{ offset: Long.fromNumber(5) }], nextOffset: Long.fromNumber(6) },
       { done: true },
     ];
     const client = new Client({
-      CreateStream: [{ stream: ref }],
+      CreateStream: [{ handle: ref }],
       ReadRecords: [...pages],
     });
     const stream = await client.createStream({ id: "s1" });
@@ -258,16 +260,16 @@ describe("stream-service client target", () => {
 
     expect(read).toEqual(pages);
     expect(client.calls.slice(1).map((call) => call.input)).toMatchObject([
-      { stream: ref, start: StreamReadStart.StreamReadStartEnd, wait: "30s" },
-      { stream: ref, fromOffset: Long.fromNumber(5), start: undefined, wait: "30s" },
-      { stream: ref, fromOffset: Long.fromNumber(6), start: undefined, wait: "30s" },
+      { handle: ref, start: StreamReadStart.StreamReadStartEnd, wait: "30s" },
+      { handle: ref, fromOffset: Long.fromNumber(5), start: undefined, wait: "30s" },
+      { handle: ref, fromOffset: Long.fromNumber(6), start: undefined, wait: "30s" },
     ]);
     // The iterator uses the Nexus client that `createStream` gave the handle.
     expect(client.nexusClients).toBe(1);
   });
 
   test("a done first page ends the read", async () => {
-    const ref: StreamRef = { id: "s1" };
+    const ref: StreamHandle = { id: "s1" };
     const pages: ReadRecordsResponse<unknown>[] = [
       {
         records: [{ offset: Long.fromNumber(0) }],
@@ -277,14 +279,14 @@ describe("stream-service client target", () => {
     ];
     const client = new Client({ ReadRecords: [...pages] });
 
-    const read = await readAll(client.iterReadRecords({ stream: ref }));
+    const read = await readAll(client.iterReadRecords({ handle: ref }));
 
     expect(read).toEqual(pages);
-    expect(client.calls.map((call) => call.input)).toEqual([{ stream: ref }]);
+    expect(client.calls.map((call) => call.input)).toEqual([{ handle: ref }]);
   });
 
   test("a changed page doesn't change the next request", async () => {
-    const ref: StreamRef = { id: "s1" };
+    const ref: StreamHandle = { id: "s1" };
     const client = new Client({
       ReadRecords: [
         { records: [{ offset: Long.fromNumber(1) }], nextOffset: Long.fromNumber(2) },
@@ -293,7 +295,7 @@ describe("stream-service client target", () => {
     });
 
     for await (const page of client.iterReadRecords({
-      stream: ref,
+      handle: ref,
       fromOffset: Long.fromNumber(1),
       wait: "30s",
     })) {
@@ -301,14 +303,14 @@ describe("stream-service client target", () => {
     }
 
     expect(client.calls.map((call) => call.input)).toMatchObject([
-      { stream: ref, fromOffset: Long.fromNumber(1), wait: "30s" },
-      { stream: ref, fromOffset: Long.fromNumber(2), wait: "30s" },
+      { handle: ref, fromOffset: Long.fromNumber(1), wait: "30s" },
+      { handle: ref, fromOffset: Long.fromNumber(2), wait: "30s" },
     ]);
   });
 
   test("a handle decodes the bodies of a read with its body type", async () => {
     const client = new Client({
-      CreateStream: [{ stream: { id: "s1" } }],
+      CreateStream: [{ handle: { id: "s1" } }],
       ReadRecords: [{ done: true }],
     });
     const stream = await client.createStream({ id: "s1" }, turnType);
@@ -334,14 +336,14 @@ describe("stream-service client target", () => {
 
   test("a client stream converts as its fields", async () => {
     const client = new Client({
-      CreateStream: [{ stream: { id: "s1" }, created: false }],
+      CreateStream: [{ handle: { id: "s1" }, created: false }],
     });
     const stream = await client.createStream({ id: "s1" }, turnType);
     const converter = common.defaultPayloadConverter;
 
     // The Nexus client and the body type aren't data.
     expect(converter.fromPayload(converter.toPayload(stream))).toStrictEqual({
-      stream: { id: "s1" },
+      handle: { id: "s1" },
       created: false,
     });
   });

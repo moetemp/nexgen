@@ -48,14 +48,18 @@ namespace Temporalio.Workflows.Client
         /// <summary>
         /// Initializes a new instance of the <see cref="AppendRecordsOptions{TBody}"/> class.
         /// </summary>
-        public AppendRecordsOptions(StreamRef stream, IReadOnlyList<AppendRecord<TBody>> records)
+        public AppendRecordsOptions(StreamHandle handle, IReadOnlyList<AppendRecord<TBody>> records)
         {
-            Stream = stream;
+            Handle = handle;
             Records = records;
         }
 
-        public StreamRef Stream { get; set; }
+        public StreamHandle Handle { get; set; }
         public IReadOnlyList<AppendRecord<TBody>> Records { get; set; }
+        /// <summary>
+        /// The batch number in this epoch. Empty takes the next one, and a retry writes it again.
+        /// </summary>
+        public long? Sequence { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -64,13 +68,16 @@ namespace Temporalio.Workflows.Client
         /// <summary>
         /// Initializes a new instance of the <see cref="CloseStreamOptions"/> class.
         /// </summary>
-        public CloseStreamOptions(StreamRef stream)
+        public CloseStreamOptions(StreamHandle handle)
         {
-            Stream = stream;
+            Handle = handle;
         }
 
-        public StreamRef Stream { get; set; }
+        public StreamHandle Handle { get; set; }
         public object? Result { get; set; }
+        /// <summary>
+        /// Empty completes the Stream. A cancel failure cancels it. Any other fails it.
+        /// </summary>
         public System.Exception? Failure { get; set; }
     }
 
@@ -83,12 +90,12 @@ namespace Temporalio.Workflows.Client
         /// <summary>
         /// Initializes a new instance of the <see cref="ReadRecordsOptions"/> class.
         /// </summary>
-        public ReadRecordsOptions(StreamRef stream)
+        public ReadRecordsOptions(StreamHandle handle)
         {
-            Stream = stream;
+            Handle = handle;
         }
 
-        public StreamRef Stream { get; set; }
+        public StreamHandle Handle { get; set; }
         /// <summary>
         /// Start offset. Empty uses start. OUT_OF_RANGE past the newest offset + 1.
         /// </summary>
@@ -125,12 +132,12 @@ namespace Temporalio.Workflows.Client
         /// <summary>
         /// Initializes a new instance of the <see cref="DescribeStreamOptions"/> class.
         /// </summary>
-        public DescribeStreamOptions(StreamRef stream)
+        public DescribeStreamOptions(StreamHandle handle)
         {
-            Stream = stream;
+            Handle = handle;
         }
 
-        public StreamRef Stream { get; set; }
+        public StreamHandle Handle { get; set; }
     }
 
     /// <summary>
@@ -150,8 +157,8 @@ namespace Temporalio.Workflows.Client
         /// Returns the <c>Stream</c> handle that has these identity fields.
         /// </summary>
         [GeneratedCode("nexgen", null)]
-        public static Stream<TBody> GetStream<TBody>(this Temporalio.Client.ITemporalClient client, StreamRef streamValue, bool? created) =>
-            new(client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService"), streamValue, created);
+        public static Stream<TBody> GetStream<TBody>(this Temporalio.Client.ITemporalClient client, StreamHandle handle, bool? created) =>
+            new(client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService"), handle, created);
 
         /// <param name="client">The client that starts the operation.</param>
         /// <param name="request">Create a Stream, or get the open one. A closed, expired or another owner's Stream fails.</param>
@@ -160,7 +167,7 @@ namespace Temporalio.Workflows.Client
         {
             var nexusClient = client.CreateNexusClient("__temporal_system", "temporal.api.streamservice.v1.StreamService");
             var result = await nexusClient.ExecuteNexusOperationAsync<CreateStreamResult>("CreateStream", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
-            return new Stream<TBody>(nexusClient, (result.Stream ?? throw new System.InvalidOperationException("CreateStream answered without `stream`")), result.Created);
+            return new Stream<TBody>(nexusClient, (result.Handle ?? throw new System.InvalidOperationException("CreateStream answered without `handle`")), result.Created);
         }
 
         /// <param name="client">The client that starts the operation.</param>
@@ -168,10 +175,10 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public static Task<Stream<TBody>> CreateStreamAsync<TBody>(this Temporalio.Client.ITemporalClient client, CreateStreamOptions options)
         {
-            var request = new CreateStreamRequest(options.Id, default)
+            var request = new CreateStreamRequest(options.Id, Nexgen.Support.StreamWorkflowContext.WithdrawRun(), default)
             {
                 Retention = options.Retention,
-                Ref = new StreamRef(options.Id) { Backend = options.Backend },
+                StreamHandle = new StreamHandle(options.Id) { Backend = options.Backend },
             };
             return CreateStreamAsync<TBody>(client, request);
         }
@@ -197,7 +204,10 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public static Task<AppendRecordsResponse> AppendRecordsAsync<TBody>(this Temporalio.Client.ITemporalClient client, AppendRecordsOptions<TBody> options)
         {
-            var request = new AppendRecordsRequest<TBody>(options.Stream, options.Records, Nexgen.Support.StreamActivityContext.LocalActivityFailedTasks(), Nexgen.Support.StreamActivityContext.Producer(), Nexgen.Support.StreamActivityContext.LocalActivityPreviousCompletedTask());
+            var request = new AppendRecordsRequest<TBody>(options.Handle, options.Records, Nexgen.Support.StreamActivityContext.LocalActivityFailedTasks(), Nexgen.Support.StreamActivityContext.Producer(), Nexgen.Support.StreamActivityContext.LocalActivityPreviousCompletedTask(), Nexgen.Support.StreamWorkflowContext.WithdrawRun())
+            {
+                Sequence = options.Sequence,
+            };
             return AppendRecordsAsync(client, request);
         }
 
@@ -216,7 +226,7 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public static Task<CloseStreamResponse> CloseStreamAsync(this Temporalio.Client.ITemporalClient client, CloseStreamOptions options)
         {
-            var request = new CloseStreamRequest(options.Stream, Nexgen.Support.StreamActivityContext.Producer())
+            var request = new CloseStreamRequest(options.Handle, Nexgen.Support.StreamActivityContext.Producer())
             {
                 Result = options.Result,
                 Failure = options.Failure,
@@ -245,7 +255,7 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public static Task<ReadRecordsResponse<TBody>> ReadRecordsAsync<TBody>(this Temporalio.Client.ITemporalClient client, ReadRecordsOptions options)
         {
-            var request = new ReadRecordsRequest(options.Stream)
+            var request = new ReadRecordsRequest(options.Handle)
             {
                 FromOffset = options.FromOffset,
                 Start = options.Start,
@@ -288,7 +298,7 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public static IAsyncEnumerable<ReadRecordsResponse<TBody>> ReadRecordsPagesAsync<TBody>(this Temporalio.Client.ITemporalClient client, ReadRecordsOptions options, System.Threading.CancellationToken cancellationToken = default)
         {
-            var request = new ReadRecordsRequest(options.Stream)
+            var request = new ReadRecordsRequest(options.Handle)
             {
                 FromOffset = options.FromOffset,
                 Start = options.Start,
@@ -317,7 +327,7 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public static Task<DescribeStreamResponse> DescribeStreamAsync(this Temporalio.Client.ITemporalClient client, DescribeStreamOptions options)
         {
-            var request = new DescribeStreamRequest(options.Stream);
+            var request = new DescribeStreamRequest(options.Handle);
             return DescribeStreamAsync(client, request);
         }
 

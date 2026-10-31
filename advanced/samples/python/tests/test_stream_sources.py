@@ -31,7 +31,7 @@ from wit.stream_service.both.models import (
     Producer,
     StreamErrorDetails,
     StreamErrorReason,
-    StreamRef,
+    StreamHandle,
 )
 from wit.stream_service.both.operations.create_stream import create_stream
 
@@ -45,6 +45,8 @@ class FakeWorkflowInfo:
     workflow_id: str
     first_execution_run_id: str
     run_id: str
+    attempt: int = 1
+    continued_run_id: str | None = None
 
 
 class FakeNexusClient:
@@ -60,7 +62,7 @@ class FakeNexusClient:
         async def result() -> object:
             if operation == "AppendRecords":
                 return AppendRecordsResponse(last_offset=1)
-            return CreateStreamResult(stream=StreamRef(id="chat-1:r1:turns"))
+            return CreateStreamResult(handle=StreamHandle(id="chat-1:r1:turns"))
 
         return result()
 
@@ -84,14 +86,14 @@ async def test_a_workflow_create_fills_its_sources(
 ) -> None:
     stream = await create_stream(Turns, retention=datetime.timedelta(days=1))
 
-    # The id comes from the definition, and the owner from the run, before the request is built.
-    # The ref copies the id, and names the run chain that owns the Stream.
+    # The id comes from the definition, and the owner from the run. The handle copies the id,
+    # and names the run chain that owns the Stream.
     assert nexus_client.inputs == [
         CreateStreamRequest(
             id="chat-1:r1:turns",
             retention=datetime.timedelta(days=1),
             owner=Producer(id="wf:r2", run_id="r2"),
-            ref=StreamRef(
+            stream_handle=StreamHandle(
                 id="chat-1:r1:turns",
                 owner=Execution(
                     type=ExecutionType.ExecutionTypeWorkflow,
@@ -104,18 +106,36 @@ async def test_a_workflow_create_fills_its_sources(
     assert stream.body_type is str
 
 
+async def test_a_retry_run_withdraws_the_records_of_the_run_that_it_retries(
+    nexus_client: FakeNexusClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(temporalio.workflow, "in_workflow", lambda: True)
+    monkeypatch.setattr(
+        temporalio.workflow,
+        "info",
+        lambda: FakeWorkflowInfo(
+            "chat-1", "r1", "r3", attempt=2, continued_run_id="r2"
+        ),
+    )
+
+    _ = await create_stream(Turns)
+
+    request = typing.cast(CreateStreamRequest, nexus_client.inputs[0])
+    assert request.withdraw_run == "r2"
+
+
 async def test_a_workflow_publish_fills_the_workflow_producer(
     nexus_client: FakeNexusClient,
 ) -> None:
-    ref = StreamRef(id="s1")
-    stream = Stream(body_type=str, stream=ref, created=None)
+    ref = StreamHandle(id="s1")
+    stream = Stream(body_type=str, handle=ref, created=None)
 
     last_offset = await stream.publish("hi")
 
     assert last_offset == 1
     assert nexus_client.inputs == [
         AppendRecordsRequest(
-            stream=ref,
+            handle=ref,
             records=[AppendRecord(body="hi")],
             producer=Producer(id="wf:r2", run_id="r2"),
         )
@@ -125,16 +145,16 @@ async def test_a_workflow_publish_fills_the_workflow_producer(
 async def test_a_sync_start_places_the_operation_at_the_call(
     nexus_client: FakeNexusClient,
 ) -> None:
-    ref = StreamRef(id="s1")
+    ref = StreamHandle(id="s1")
 
     task = stream_module.start_append_records(
-        stream=ref, records=[AppendRecord(body="hi")]
+        handle=ref, records=[AppendRecord(body="hi")]
     )
 
     # Sync Workflow code awaits nothing, so the start can't wait for the caller's await.
     assert nexus_client.inputs == [
         AppendRecordsRequest(
-            stream=ref,
+            handle=ref,
             records=[AppendRecord(body="hi")],
             producer=Producer(id="wf:r2", run_id="r2"),
         )
@@ -148,7 +168,7 @@ async def test_a_sync_create_gives_the_stream(nexus_client: FakeNexusClient) -> 
 
     assert len(nexus_client.inputs) == 1
     stream = await task
-    assert stream.stream == StreamRef(id="chat-1:r1:turns")
+    assert stream.handle == StreamHandle(id="chat-1:r1:turns")
     _ = assert_type(stream, Stream[str])
 
 
@@ -184,7 +204,7 @@ def test_a_workflow_factory_builds_a_handle_on_the_run_operations() -> None:
 
     _ = assert_type(handle, Stream[str])
     assert handle == Stream(
-        body_type=str, stream=StreamRef(id="chat-1:r1:turns", backend="redis")
+        body_type=str, handle=StreamHandle(id="chat-1:r1:turns", backend="redis")
     )
 
 
@@ -224,7 +244,7 @@ async def test_workflow_code_raises_the_class_of_a_local_activity_failure(
     monkeypatch.setattr(
         temporalio.workflow, "info", lambda: FakeWorkflowInfo("chat-1", "r1", "r2")
     )
-    stream = Stream(body_type=str, stream=StreamRef(id="s1"))
+    stream = Stream(body_type=str, handle=StreamHandle(id="s1"))
 
     # The handle's result fails, after the start, and the method converts that too.
     with pytest.raises(StreamFencedError) as raised:

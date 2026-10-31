@@ -11,7 +11,7 @@ from ..models import (
     CreateStreamRequest,
     CreateStreamResult,
     StreamErrorDetails,
-    StreamRef,
+    StreamHandle,
 )
 from .._resources import Stream
 import temporal_support as _support
@@ -40,11 +40,11 @@ async def _create_stream(
             output_type=CreateStreamResult,
         )
         result = await handle
-        if result.stream is None:
-            raise RuntimeError("CreateStream answered without `stream`")
+        if result.handle is None:
+            raise RuntimeError("CreateStream answered without `handle`")
         return Stream(
             body_type=body_type,
-            stream=result.stream,
+            handle=result.handle,
             created=result.created or None,
         )
     except StreamError:
@@ -72,7 +72,7 @@ async def create_stream(
     """
     (body_type,) = _support.definition_type_arguments(definition)
     id = _support.workflow_stream_id(definition)
-    ref = StreamRef(
+    stream_handle = StreamHandle(
         backend=backend,
         id=id,
         owner=_support.workflow_handle_owner(),
@@ -80,8 +80,9 @@ async def create_stream(
     request = CreateStreamRequest(
         id=id,
         retention=retention,
+        withdraw_run=_support.withdraw_run(),
         owner=_support.workflow_owner(),
-        ref=ref,
+        stream_handle=stream_handle,
     )
     return await _create_stream(request, body_type)
 

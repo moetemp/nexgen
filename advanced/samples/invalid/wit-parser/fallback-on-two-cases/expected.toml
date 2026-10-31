@@ -3,7 +3,6 @@ descriptors = "temporal"
 [error]
 kind = "invalid-wit-directive"
 contains = [
-  "@nexus.fallback",
-  "models.alert-level",
+  "invalid WIT directive `@nexus.fallback` on type `models.alert-level`",
   "is on `severity-unspecified` and `severity-medium`, but an enum has one fallback case",
 ]

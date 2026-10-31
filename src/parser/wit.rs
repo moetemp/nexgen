@@ -789,6 +789,9 @@ fn enum_fallback_case(
 }
 
 /// Refuses `@nexus.fallback` on a type, and on the cases of a variant or flags.
+///
+/// A misplaced fallback would have no effect, so the enum would still fail on a case that a newer
+/// peer sends. The author learns that at run time, not at generation time.
 fn reject_misplaced_fallback_in_type(
     resolve: &Resolve,
     type_id: TypeId,

@@ -8,17 +8,42 @@ import typing
 import nexusrpc
 import temporalio.converter
 from . import services as _services
-from .operations.activity_options_operation import activity_options_operation
-from .operations.failure_operation import failure_operation
+from .operations.activity_options_operation import (
+    activity_options_operation,
+    start_activity_options_operation,
+)
+from .operations.failure_operation import (
+    failure_operation,
+    start_failure_operation,
+)
 from .operations.workflow_execution_info_operation import (
     workflow_execution_info_operation,
+    start_workflow_execution_info_operation,
 )
-from .operations.task_queue_partitions_operation import task_queue_partitions_operation
-from .operations.bad_binaries_operation import bad_binaries_operation
-from .operations.alert_operation import alert_operation
-from .operations.callback_internal_operation import callback_internal_operation
-from .operations.callback_nexus_operation import callback_nexus_operation
-from .operations.namespace_info_operation import namespace_info_operation
+from .operations.task_queue_partitions_operation import (
+    task_queue_partitions_operation,
+    start_task_queue_partitions_operation,
+)
+from .operations.bad_binaries_operation import (
+    bad_binaries_operation,
+    start_bad_binaries_operation,
+)
+from .operations.alert_operation import (
+    alert_operation,
+    start_alert_operation,
+)
+from .operations.callback_internal_operation import (
+    callback_internal_operation,
+    start_callback_internal_operation,
+)
+from .operations.callback_nexus_operation import (
+    callback_nexus_operation,
+    start_callback_nexus_operation,
+)
+from .operations.namespace_info_operation import (
+    namespace_info_operation,
+    start_namespace_info_operation,
+)
 
 __all__ = [
     "activity_options_operation",
@@ -28,6 +53,15 @@ __all__ = [
     "callback_nexus_operation",
     "failure_operation",
     "namespace_info_operation",
+    "start_activity_options_operation",
+    "start_alert_operation",
+    "start_bad_binaries_operation",
+    "start_callback_internal_operation",
+    "start_callback_nexus_operation",
+    "start_failure_operation",
+    "start_namespace_info_operation",
+    "start_task_queue_partitions_operation",
+    "start_workflow_execution_info_operation",
     "task_queue_partitions_operation",
     "workflow_execution_info_operation",
 ]

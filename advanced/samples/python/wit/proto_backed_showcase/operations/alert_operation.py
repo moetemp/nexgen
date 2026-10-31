@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
     Alert,
     AlertLevel,
 )
+import temporal_support as _support
 
 
 async def _alert_operation(
@@ -34,3 +36,15 @@ async def alert_operation(
         severity=severity,
     )
     return await _alert_operation(request)
+
+
+def start_alert_operation(
+    *,
+    message: str,
+    severity: AlertLevel | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[Alert]]:
+    """Start ``alert_operation`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``alert_operation`` returns.
+    """
+    return _support.start_now(alert_operation(message=message, severity=severity))

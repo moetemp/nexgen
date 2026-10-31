@@ -718,7 +718,7 @@ impl<'a> ApiPlanner<'a> {
         let mut package_model_names = package_model_names.into_iter().collect::<Vec<_>>();
         sort_python_model_names(&mut package_model_names, &self.variants, model_fragments);
         if targets.workflow {
-            validate_workflow_factory_names(services)?;
+            validate_workflow_package_names(services)?;
         }
         self.validate_factory_parameter_names(services)?;
         let render_init = |root_package_imports: &RootPackageImports| {
@@ -5495,6 +5495,7 @@ fn render_optional_python_imports_with_skipped_language_modules(
     skipped_language_modules: &BTreeSet<String>,
 ) -> bool {
     let simple_imports = [
+        ("import asyncio\n", "asyncio"),
         ("import collections.abc\n", "collections.abc"),
         ("import dataclasses\n", "dataclasses"),
         ("import enum\n", "enum"),
@@ -6798,7 +6799,12 @@ fn render_package_init(
             service
                 .operations
                 .iter()
-                .map(|operation| operation.attr_name.clone())
+                .flat_map(|operation| {
+                    std::iter::once(operation.attr_name.clone()).chain(
+                        operation_has_start_function(operation)
+                            .then(|| start_operation_function_name(operation)),
+                    )
+                })
                 .chain(workflow_factory_resources(service).map(workflow_resource_factory_name))
         })
         .collect::<BTreeSet<_>>()
@@ -6847,11 +6853,11 @@ fn render_package_init(
                     format!(".operations.{}", operation.attr_name)
                 };
                 if service.endpoint.is_some() {
-                    render_named_python_import(
-                        &mut output,
-                        &module,
-                        std::slice::from_ref(&operation.attr_name),
-                    );
+                    let mut names = vec![operation.attr_name.clone()];
+                    if operation_has_start_function(operation) {
+                        names.push(start_operation_function_name(operation));
+                    }
+                    render_named_python_import(&mut output, &module, &names);
                 }
             }
             for resource in workflow_factory_resources(service) {
@@ -7770,9 +7776,9 @@ fn workflow_factory_resources<'a>(
         .filter(|resource| service.endpoint.is_some() && !resource.methods.is_empty())
 }
 
-/// The package exports the Workflow factory of each resource next to the operation functions and
-/// the modules of the package.
-fn validate_workflow_factory_names(services: &[RenderedService<'_>]) -> Result<()> {
+/// The package exports the Workflow factory of each resource and the sync start of each operation
+/// function next to the operation functions and the modules of the package.
+fn validate_workflow_package_names(services: &[RenderedService<'_>]) -> Result<()> {
     let mut names = ["client", "models", "operations", "services"]
         .map(|module| {
             (
@@ -7803,6 +7809,27 @@ fn validate_workflow_factory_names(services: &[RenderedService<'_>]) -> Result<(
                     name,
                     generated_by,
                     conflicting_declaration,
+                });
+            }
+        }
+    }
+    for service in services.iter().filter(|service| service.endpoint.is_some()) {
+        for operation in service
+            .operations
+            .iter()
+            .filter(|operation| operation_has_start_function(operation))
+        {
+            // Two sync starts of one name come from two functions of one name, which clash on
+            // their module first.
+            let name = start_operation_function_name(operation);
+            if let Some(conflicting_declaration) = names.get(&name) {
+                return Err(Error::PythonGeneratedNameConflict {
+                    name,
+                    generated_by: format!(
+                        "the sync start of operation `{}.{}`",
+                        service.name, operation.name
+                    ),
+                    conflicting_declaration: conflicting_declaration.clone(),
                 });
             }
         }
@@ -9850,6 +9877,15 @@ fn render_operation_functions(
         output.push('\n');
         render_client_request_method(output, service, operation);
     }
+    if target == GenerationTarget::Workflow && operation_has_start_function(operation) {
+        output.push('\n');
+        render_start_operation_function(
+            output,
+            service,
+            operation,
+            operation.target_unpacked_input(target),
+        );
+    }
     if target == GenerationTarget::Client
         && let Some(next_expr) = operation.poll_next(GenerationTarget::Client)
     {
@@ -11042,6 +11078,111 @@ fn python_docstring_literal_text(value: &str) -> String {
         }
     }
     escaped
+}
+
+/// Whether a Workflow function has a sync `start_<name>`. A request with a function field has
+/// overloads, so it has none.
+fn operation_has_start_function(operation: &RenderedOperation<'_>) -> bool {
+    operation
+        .unpacked_input
+        .as_ref()
+        .is_none_or(|unpacked_input| unpacked_input.functions.is_empty())
+}
+
+fn start_operation_function_name(operation: &RenderedOperation<'_>) -> String {
+    format!("start_{}", operation.attr_name)
+}
+
+/// The sync `start_<name>` of a Workflow function. Python runs a coroutine only when something
+/// awaits it, so sync Workflow code, such as `@workflow.init` or a sync handler, can't place the
+/// operation at the call with the async function. The support package's `start_now` runs the
+/// coroutine up to its first wait at the call, as `workflow.start_activity` places an Activity.
+fn render_start_operation_function(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    unpacked_input: Option<&RenderedUnpackedInput>,
+) {
+    if operation.deprecated {
+        output.push_str(
+            "@typing_extensions.deprecated(\"This operation is deprecated.\", category=None)\n",
+        );
+    }
+    output.push_str("def ");
+    output.push_str(&start_operation_function_name(operation));
+    output.push_str("(\n");
+    let runtime_type_arguments = || {
+        operation
+            .runtime_type_arguments
+            .iter()
+            .map(|name| python_runtime_type_argument_name(name))
+            .collect::<Vec<_>>()
+    };
+    let mut arguments = Vec::new();
+    match unpacked_input {
+        Some(unpacked_input) => {
+            operation.render_public_runtime_type_parameters(output, "    ");
+            if operation.runtime_type_definition.is_some() {
+                arguments.push("definition".to_string());
+            } else {
+                arguments.extend(runtime_type_arguments());
+            }
+            if !unpacked_input.parameters.is_empty() {
+                output.push_str("    *,\n");
+            }
+            for field in &unpacked_input.parameters {
+                output.push_str("    ");
+                output.push_str(&field.attr_name);
+                output.push_str(": ");
+                output.push_str(&python_parameter_annotation(
+                    &field.annotation,
+                    &field.default_kind,
+                ));
+                if let Some(default_expr) = python_parameter_default_expr(&field.default_kind) {
+                    render_python_default_expr(output, &default_expr, "    ");
+                }
+                output.push_str(",\n");
+                arguments.push(format!("{}={}", field.attr_name, field.attr_name));
+            }
+        }
+        None => {
+            operation.render_request_definition_parameter(output, "    ");
+            if operation.runtime_type_definition.is_some() {
+                arguments.push("definition".to_string());
+            }
+            if let Some(input) = &operation.input {
+                output.push_str("    request: ");
+                output.push_str(&input.annotation);
+                output.push_str(",\n");
+                arguments.push("request".to_string());
+            }
+            operation.render_request_runtime_type_parameters(output, "    ");
+            if operation.runtime_type_definition.is_none() {
+                arguments.extend(runtime_type_arguments());
+            }
+        }
+    }
+    output.push_str(") -> asyncio.Task[");
+    output.push_str(&operation_public_return_annotation(service, operation));
+    output.push_str("]:\n");
+    render_python_docstring(
+        output,
+        "    ",
+        Some(&format!(
+            "Start ``{name}`` at the call, as ``workflow.start_activity`` places an Activity, so \
+             sync Workflow code keeps the operation's place in the command order. The task gives \
+             what ``{name}`` returns.",
+            name = operation.attr_name
+        )),
+        &[],
+        None,
+        false,
+    );
+    output.push_str("    return _support.start_now(");
+    output.push_str(&operation.attr_name);
+    output.push('(');
+    output.push_str(&arguments.join(", "));
+    output.push_str("))\n");
 }
 
 fn render_unpacked_operation_function(

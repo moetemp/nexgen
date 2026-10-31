@@ -8,14 +8,26 @@ import typing
 import nexusrpc
 import temporalio.converter
 from . import services as _services
-from .operations.submit import submit
-from .operations.get_sender import get_sender
-from ._resources.sender import submit_from_sender
+from .operations.submit import (
+    submit,
+    start_submit,
+)
+from .operations.get_sender import (
+    get_sender,
+    start_get_sender,
+)
+from ._resources.sender import (
+    submit_from_sender,
+    start_submit_from_sender,
+)
 from ._resources.sender import sender
 
 __all__ = [
     "get_sender",
     "sender",
+    "start_get_sender",
+    "start_submit",
+    "start_submit_from_sender",
     "submit",
     "submit_from_sender",
 ]

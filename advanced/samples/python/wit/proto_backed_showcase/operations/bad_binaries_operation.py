@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
     BadBinaries,
     BadBinary,
 )
+import temporal_support as _support
 
 
 async def _bad_binaries_operation(
@@ -32,3 +34,14 @@ async def bad_binaries_operation(
         binaries=binaries or {},
     )
     return await _bad_binaries_operation(request)
+
+
+def start_bad_binaries_operation(
+    *,
+    binaries: dict[str, BadBinary] | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[BadBinaries]]:
+    """Start ``bad_binaries_operation`` at the call, as ``workflow.start_activity`` places
+    an Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``bad_binaries_operation`` returns.
+    """
+    return _support.start_now(bad_binaries_operation(binaries=binaries))

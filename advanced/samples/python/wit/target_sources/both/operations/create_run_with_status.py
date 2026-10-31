@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
@@ -12,6 +13,7 @@ from .._resources import (
     Run,
     RunWithStatus,
 )
+import temporal_support as _support
 
 
 async def _create_run_with_status(
@@ -46,3 +48,15 @@ async def create_run_with_status(
         query=query,
     )
     return await _create_run_with_status(request)
+
+
+def start_create_run_with_status(
+    *,
+    job_id: str,
+    query: str | None = None,
+) -> asyncio.Task[RunWithStatus]:
+    """Start ``create_run_with_status`` at the call, as ``workflow.start_activity`` places
+    an Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``create_run_with_status`` returns.
+    """
+    return _support.start_now(create_run_with_status(job_id=job_id, query=query))

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import PlaceRequest
 from .._resources import Job
+import temporal_support as _support
 
 
 async def _place(
@@ -31,3 +33,14 @@ async def place(
         job_id=job_id,
     )
     return await _place(request)
+
+
+def start_place(
+    *,
+    job_id: str,
+) -> asyncio.Task[Job]:
+    """Start ``place`` at the call, as ``workflow.start_activity`` places an Activity, so
+    sync Workflow code keeps the operation's place in the command order. The task gives
+    what ``place`` returns.
+    """
+    return _support.start_now(place(job_id=job_id))

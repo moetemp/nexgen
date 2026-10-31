@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import temporalio.workflow
 
 from ..models import RestartRequest
+import temporal_support as _support
 
 
 @dataclasses.dataclass
@@ -53,3 +55,14 @@ async def restart(
         job_id=job_id,
     )
     return await _restart(request)
+
+
+def start_restart(
+    *,
+    job_id: str,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[None]]:
+    """Start ``restart`` at the call, as ``workflow.start_activity`` places an Activity, so
+    sync Workflow code keeps the operation's place in the command order. The task gives
+    what ``restart`` returns.
+    """
+    return _support.start_now(restart(job_id=job_id))

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
     WorkflowExecution,
     WorkflowExecutionInfo,
 )
+import temporal_support as _support
 
 
 async def _workflow_execution_info_operation(
@@ -34,3 +36,20 @@ async def workflow_execution_info_operation(
         parent_execution=parent_execution,
     )
     return await _workflow_execution_info_operation(request)
+
+
+def start_workflow_execution_info_operation(
+    *,
+    execution: WorkflowExecution,
+    parent_execution: WorkflowExecution | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[WorkflowExecutionInfo]]:
+    """Start ``workflow_execution_info_operation`` at the call, as
+    ``workflow.start_activity`` places an Activity, so sync Workflow code keeps the
+    operation's place in the command order. The task gives what
+    ``workflow_execution_info_operation`` returns.
+    """
+    return _support.start_now(
+        workflow_execution_info_operation(
+            execution=execution, parent_execution=parent_execution
+        )
+    )

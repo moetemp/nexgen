@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
@@ -9,6 +10,7 @@ from ..models import (
     RunResult,
 )
 from .._resources import Run
+import temporal_support as _support
 
 
 async def _create_run(
@@ -40,3 +42,15 @@ async def create_run(
         query=query,
     )
     return await _create_run(request)
+
+
+def start_create_run(
+    *,
+    job_id: str,
+    query: str | None = None,
+) -> asyncio.Task[Run]:
+    """Start ``create_run`` at the call, as ``workflow.start_activity`` places an Activity,
+    so sync Workflow code keeps the operation's place in the command order. The task
+    gives what ``create_run`` returns.
+    """
+    return _support.start_now(create_run(job_id=job_id, query=query))

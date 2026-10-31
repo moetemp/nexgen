@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import CallbackInternal
+import temporal_support as _support
 
 
 async def _callback_internal_operation(
@@ -29,3 +31,14 @@ async def callback_internal_operation(
         data=data,
     )
     return await _callback_internal_operation(request)
+
+
+def start_callback_internal_operation(
+    *,
+    data: bytes,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[CallbackInternal]]:
+    """Start ``callback_internal_operation`` at the call, as ``workflow.start_activity``
+    places an Activity, so sync Workflow code keeps the operation's place in the command
+    order. The task gives what ``callback_internal_operation`` returns.
+    """
+    return _support.start_now(callback_internal_operation(data=data))

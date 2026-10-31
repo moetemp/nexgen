@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import CallbackNexus
+import temporal_support as _support
 
 
 async def _callback_nexus_operation(
@@ -31,3 +33,15 @@ async def callback_nexus_operation(
         header=header or {},
     )
     return await _callback_nexus_operation(request)
+
+
+def start_callback_nexus_operation(
+    *,
+    url: str,
+    header: dict[str, str] | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[CallbackNexus]]:
+    """Start ``callback_nexus_operation`` at the call, as ``workflow.start_activity``
+    places an Activity, so sync Workflow code keeps the operation's place in the command
+    order. The task gives what ``callback_nexus_operation`` returns.
+    """
+    return _support.start_now(callback_nexus_operation(url=url, header=header))

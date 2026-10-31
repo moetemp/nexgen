@@ -1699,6 +1699,44 @@ await job.restart()
 nexgen refuses a factory name that is also the name of a client method of a
 service in the package.
 
+In Python, the Workflow package has a factory too, for each resource that has a
+method. It is a function of the package with the snake-case name of the
+resource, such as `stream_service.stream(Turns, id="chat-1")`, and its handle
+calls the Workflow operations. nexgen refuses it when its name is the name of an
+operation function or of a module of the package. A Python factory takes the
+definition of a resource with `@nexus.definition`, or else its runtime types,
+and then the constructor fields by keyword. An optional field defaults to
+`None`.
+
+`@nexus.flatten-in-api` on the resource makes the factory take some fields of
+one constructor parameter's record in place of the parameter. With `keep=true`,
+the factory also takes the whole value, and a call gives either the value or the
+required promoted fields. The factory must promote every required field of the
+record, and its parameters can't share a name in any case. TypeScript and .NET
+factories take the whole parameter.
+
+```wit
+/// @nexus.flatten-in-api param="stream" fields="id backend" keep=true
+resource %stream {
+  constructor(%stream: stream-ref, created: option<bool>);
+}
+```
+
+```python
+stream = client.get_stream(Turns, id="chat-1:turns", backend="redis")
+same = client.get_stream(Turns, stream=StreamRef(id="chat-1:turns"))
+```
+
+A Python resource with one required field of a non-generic proto-backed record,
+and no other required field, passes as that record. Each package's class has a
+transfer converter, so a client `Stream` passes to Workflow code as its
+`StreamRef`, in the `json/protobuf` encoding of the default converter. The type
+hint gives the type arguments of a decoded handle, as in `Stream[Turn]`. A
+client can't decode such a handle, since a client handle needs a client, so
+decode the ref and pass it to the factory. Such a resource is a plain class, not
+a dataclass, since the SDK converter applies a transfer type inside another
+value, such as a dataclass field, only to a class that isn't a dataclass.
+
 In TypeScript, the `client/` package has `index.ts`, `extension.ts`,
 `resources.ts` and `nexus-client.ts`. `<Service>ClientExtension(Base)` is a
 mixin. A client class extends it and implements `createNexusClient`, which takes
@@ -1995,8 +2033,9 @@ values of the response with these types.
   as `CreateStreamAsync<Turn>(options)`.
 
 The factory of a client resource takes the runtime types too, as
-`get_stream(stream=ref, created=None, body_type=Turn)`,
-`getStream(ref, undefined, turnType)` or `GetStream<Turn>(streamRef, null)`.
+`getStream(ref, undefined, turnType)` or `GetStream<Turn>(streamRef, null)`. The
+Python factory of a resource with `@nexus.definition` takes the definition, as
+`get_stream(Turns, stream=ref)`.
 
 An operation that returns the resource can take a definition in place of its
 runtime types. See [`@nexus.definition`](#nexusdefinition).
@@ -2470,16 +2509,20 @@ The stream sample's full helpers are in
 
 ### @nexus.flatten-in-api
 
-**Placement:** Record type (with `@nexus.proto`), or a field whose type is such
-a record **Syntax:** `@nexus.flatten-in-api` (no arguments) on a record,
+**Placement:** Record type (with `@nexus.proto`), a field whose type is such a
+record, or a resource **Syntax:** `@nexus.flatten-in-api` (no arguments) on a
+record,
 `@nexus.flatten-in-api fields="<field> ..." fill="<field>=<sibling> ..."` on a
-field
+field,
+`@nexus.flatten-in-api param="<parameter>" fields="<field> ..." [keep=true]` on
+a resource
 
 Flattens the record's fields into the parent record's generated API surface
 instead of creating a nested model. On a field, it flattens only the fields that
 `fields` names, `fill` copies sibling fields into the record, and an
 `@nexus.source field=` fills a field of the record from a source. See
-[Flattening some fields of one field](#flattening-some-fields-of-one-field).
+[Flattening some fields of one field](#flattening-some-fields-of-one-field). On
+a resource, it flattens one constructor parameter in the Python factories.
 
 ```wit
 /// @nexus.proto "temporal.api.sdk.v1.UserMetadata"

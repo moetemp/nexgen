@@ -1,0 +1,5 @@
+languages = ["python"]
+
+[error]
+kind = "python-generated-name-conflict"
+contains = ["the definition of the `get_run` factory", "field `definition` of resource `run`"]

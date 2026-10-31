@@ -1,0 +1,20 @@
+package test:python-workflow-factory@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  // The Workflow factory of `models` has the name of the module of the models.
+  resource models {
+    constructor(id: string);
+
+    /// @nexus.operation "job"
+    run: func();
+  }
+
+  record job-request {
+    id: string,
+  }
+
+  job: func(request: job-request);
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import collections.abc
 import dataclasses
 import datetime
+import json
 import typing
 
 import pytest
@@ -15,6 +16,7 @@ from temporalio.api.common.v1 import Payload
 from typing_extensions import assert_type, override
 
 import temporal_support
+from tests.nested_transfer_types import NESTED_DATA_CONVERTER
 import wit.stream_service.both as workflow_package
 import wit.stream_service.both._resources.stream as workflow_stream_module
 from wit.stream_service.both.client import Stream, StreamServiceClientExtension
@@ -172,7 +174,7 @@ async def test_an_activity_publish_takes_the_producer_of_its_attempt(
     ref = StreamRef(id="s1")
     client = Client({"AppendRecords": [AppendRecordsResponse(last_offset=1)]})
 
-    _ = await client.get_stream(stream=ref, created=None).publish(records=[])
+    _ = await client.get_stream(Texts, stream=ref).publish(records=[])
 
     assert client.calls == [
         (
@@ -201,11 +203,91 @@ async def test_a_create_takes_the_ref_fields_as_parameters() -> None:
     assert SYSTEM_CONVERTER.from_payload(payload, CreateStreamRequest) == request
 
 
+async def test_a_factory_builds_a_handle_with_no_call() -> None:
+    client = Client({"DescribeStream": [DescribeStreamResponse(last_offset=5)]})
+
+    by_id = client.get_stream(Turns, id="s1", backend="redis")
+    by_ref = client.get_stream(Turns, stream=StreamRef(id="s2"))
+
+    _ = assert_type(by_id, Stream[Turn])
+    assert by_id.stream == StreamRef(id="s1", backend="redis")
+    assert by_id.body_type is Turn
+    assert by_ref.stream == StreamRef(id="s2")
+    assert client.calls == []
+    # The handle calls through the client that built it.
+    _ = await by_id.describe()
+    assert [operation for _, _, operation, _ in client.calls] == ["DescribeStream"]
+
+
+def test_a_factory_takes_the_ref_fields_or_the_ref() -> None:
+    client = Client({})
+
+    with pytest.raises(TypeError, match="pass id or stream"):
+        _ = client.get_stream(Turns)
+    with pytest.raises(TypeError, match="not both"):
+        _ = client.get_stream(Turns, id="s1", stream=StreamRef(id="s1"))
+
+
+async def test_a_client_stream_passes_to_workflow_code_as_its_ref() -> None:
+    converter = temporalio.converter.DataConverter.default
+    client_stream = Client({}).get_stream(Turns, id="s1", backend="redis")
+
+    (payload,) = await converter.encode([client_stream])
+    (workflow_stream,) = await converter.decode(
+        [payload], [workflow_stream_module.Stream[Turn]]
+    )
+
+    # Each target has its own class, and a Stream crosses as its StreamRef in the json/protobuf
+    # encoding. The type hint gives the body type.
+    assert payload.metadata["encoding"] == b"json/protobuf"
+    assert payload.metadata["messageType"] == b"temporal.api.stream.v1.StreamRef"
+    assert workflow_stream == workflow_stream_module.Stream(
+        StreamRef(id="s1", backend="redis")
+    )
+    assert workflow_stream.body_type is Turn
+
+
+async def test_a_client_cant_decode_a_stream() -> None:
+    converter = temporalio.converter.DataConverter.default
+    (payload,) = await converter.encode(
+        [workflow_stream_module.Stream(StreamRef(id="s1"))]
+    )
+
+    with pytest.raises(TypeError, match="needs a client"):
+        _ = await converter.decode([payload], [Stream[Turn]])
+
+
+@dataclasses.dataclass
+class PublishInput:
+    stream: workflow_stream_module.Stream[Turn]
+    streams: list[workflow_stream_module.Stream[Turn]]
+
+
+async def test_a_handle_passes_as_its_ref_inside_a_dataclass_and_a_list() -> None:
+    first = workflow_stream_module.Stream(StreamRef(id="s1"), body_type=Turn)
+    second = workflow_stream_module.Stream(
+        StreamRef(id="s2", backend="redis"), body_type=Turn
+    )
+    value = PublishInput(stream=first, streams=[first, second])
+
+    (payload,) = await NESTED_DATA_CONVERTER.encode([value])
+    (decoded,) = await NESTED_DATA_CONVERTER.decode([payload], [PublishInput])
+
+    # Each handle is its ref on the wire, and the field type gives the body type.
+    assert json.loads(payload.data) == {
+        "stream": {"id": "s1"},
+        "streams": [{"id": "s1"}, {"id": "s2", "backend": "redis"}],
+    }
+    assert decoded == value
+    assert decoded.stream.body_type is Turn
+    assert decoded.streams[1].body_type is Turn
+
+
 async def test_a_stored_stream_ref_rebuilds_the_handle() -> None:
     ref = StreamRef(id="s2")
     client = Client({"DescribeStream": [DescribeStreamResponse(last_offset=7)]})
 
-    response = await client.get_stream(stream=ref, created=None).describe()
+    response = await client.get_stream(Texts, stream=ref).describe()
 
     assert response.last_offset == 7
     assert client.calls == [

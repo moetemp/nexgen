@@ -150,7 +150,11 @@ pub(crate) struct PlannedResource {
     pub(crate) type_name: String,
     /// The type parameters that the resource declares, in order.
     pub(crate) type_parameters: Vec<crate::spec::TypeParameterSpec>,
+    /// The SDK type that gives the type arguments, which the factory takes.
+    pub(crate) definition: SelectedTextSpec,
     pub(crate) fields: Vec<PlannedResourceField>,
+    /// The constructor parameter whose fields the factory takes, if any.
+    pub(crate) flatten: Option<crate::spec::ResourceFlattenSpec>,
     pub(crate) methods: Vec<PlannedResourceMethod>,
 }
 

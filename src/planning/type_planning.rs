@@ -458,7 +458,9 @@ impl ApiSpecTransform<OperationLoweredFamily, PlannedFamily> for TypePlanningMap
                 doc: None,
                 type_name: name.to_upper_camel_case(),
                 type_parameters: Vec::new(),
+                definition: SelectedTextSpec::default(),
                 fields: Vec::new(),
+                flatten: None,
                 methods: Vec::new(),
             })
     }
@@ -867,6 +869,11 @@ impl<'a> TypePlanningContext<'a> {
                 .iter()
                 .map(|field| self.planned_resource_field(field))
                 .collect(),
+            definition: service
+                .resource(&resource.name)
+                .map(|spec| spec.definition.clone())
+                .unwrap_or_default(),
+            flatten: resource.flatten.clone(),
             methods,
         })
     }

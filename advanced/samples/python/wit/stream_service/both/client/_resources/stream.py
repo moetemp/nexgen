@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import collections.abc
-import dataclasses
 import typing
+import typing_extensions
 import datetime
+import temporalio.api.stream.v1.message_pb2
+import temporalio.converter
 
 from .._nexus_client import (
     _NexusClient,
@@ -23,6 +25,7 @@ from ...models import (
     ReadRecordsResponse,
     StreamReadStart,
     StreamRef,
+    _StreamRefTransferTypeConverter,
 )
 import temporal_support as _support
 
@@ -30,7 +33,6 @@ import temporal_support as _support
 BodyT = typing.TypeVar("BodyT")
 
 
-@dataclasses.dataclass(init=False)
 class Stream(typing.Generic[BodyT]):
     """A handle on one Stream. Build it from a stream-ref, or get it from a create."""
 
@@ -43,7 +45,7 @@ class Stream(typing.Generic[BodyT]):
         /,
         *,
         stream: StreamRef,
-        created: bool | None,
+        created: bool | None = None,
         body_type: type[BodyT] | None = None,
     ) -> None:
         self._nexus_client: _NexusClient = nexus_client
@@ -54,6 +56,18 @@ class Stream(typing.Generic[BodyT]):
         self.body_type: type[BodyT] = body_type or typing.cast(
             "type[BodyT]", typing.Any
         )
+
+    @typing_extensions.override
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Stream):
+            return NotImplemented
+        return (self.stream, self.created) == (other.stream, other.created)
+
+    __hash__: typing.ClassVar[None] = None  # pyright: ignore[reportIncompatibleMethodOverride]
+
+    @typing_extensions.override
+    def __repr__(self) -> str:
+        return f"Stream(stream={self.stream!r}, created={self.created!r})"
 
     async def publish(
         self,
@@ -216,6 +230,37 @@ class Stream(typing.Generic[BodyT]):
             rpc_timeout=rpc_timeout,
         )
         return await handle.result()
+
+
+class _StreamTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        Stream[BodyT], temporalio.api.stream.v1.message_pb2.StreamRef
+    ]
+):
+    """Passes a ``Stream`` as its ``stream``. A client can't decode a handle, since the
+    handle needs a client. Decode the ``stream`` and pass it to ``get_stream``.
+    """
+
+    transfer_type: type[temporalio.api.stream.v1.message_pb2.StreamRef] | None = (
+        temporalio.api.stream.v1.message_pb2.StreamRef
+    )
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: temporalio.api.stream.v1.message_pb2.StreamRef,
+        type_hint: type[Stream[BodyT]],
+    ) -> Stream[BodyT]:
+        raise TypeError("a client Stream needs a client. Pass its stream to get_stream")
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self, value: Stream[BodyT]
+    ) -> temporalio.api.stream.v1.message_pb2.StreamRef:
+        return _StreamRefTransferTypeConverter().to_transfer_type(value.stream)
+
+
+temporalio.converter.transfer_type_convertible(_StreamTransferTypeConverter)(Stream)  # pyright: ignore[reportUnusedCallResult]
 
 
 __all__ = ["Stream"]

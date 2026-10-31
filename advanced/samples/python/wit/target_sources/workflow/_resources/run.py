@@ -24,6 +24,18 @@ class Run:
         await handle
 
 
+def run(
+    *,
+    job_id: str,
+    run_id: str | None = None,
+) -> Run:
+    """A handle on an existing ``Run``, with no call."""
+    return Run(
+        job_id=job_id,
+        run_id=run_id,
+    )
+
+
 @dataclasses.dataclass(slots=True)
 class RunWithStatus:
     run: Run

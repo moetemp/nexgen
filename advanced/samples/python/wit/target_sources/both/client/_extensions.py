@@ -76,7 +76,7 @@ class SourceServiceClientExtension(abc.ABC):
         *,
         job_id: str,
     ) -> Job:
-        """Return the ``Job`` handle that has these identity fields."""
+        """A handle on an existing ``Job``, with no call."""
         return Job(
             self._create_nexus_client(
                 service="SourceService",
@@ -88,7 +88,7 @@ class SourceServiceClientExtension(abc.ABC):
     def get_marker(
         self,
     ) -> Marker:
-        """Return the ``Marker`` handle that has these identity fields."""
+        """A handle on an existing ``Marker``, with no call."""
         return Marker(
             self._create_nexus_client(
                 service="SourceService",
@@ -100,9 +100,9 @@ class SourceServiceClientExtension(abc.ABC):
         self,
         *,
         job_id: str,
-        run_id: str | None,
+        run_id: str | None = None,
     ) -> Run:
-        """Return the ``Run`` handle that has these identity fields."""
+        """A handle on an existing ``Run``, with no call."""
         return Run(
             self._create_nexus_client(
                 service="SourceService",

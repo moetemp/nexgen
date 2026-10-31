@@ -22,6 +22,16 @@ class Job:
         await handle
 
 
+def job(
+    *,
+    job_id: str,
+) -> Job:
+    """A handle on an existing ``Job``, with no call."""
+    return Job(
+        job_id=job_id,
+    )
+
+
 async def _restart(
     request: RestartRequest,
 ) -> temporalio.workflow.NexusOperationHandle[None,]:

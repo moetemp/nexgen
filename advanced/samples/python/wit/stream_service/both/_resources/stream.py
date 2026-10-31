@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import dataclasses
 import typing
+import typing_extensions
 import datetime
+import temporalio.api.stream.v1.message_pb2
+import temporalio.converter
 import temporalio.workflow
 
 from ..models import (
@@ -19,14 +21,17 @@ from ..models import (
     ReadRecordsResponse,
     StreamReadStart,
     StreamRef,
+    _StreamRefTransferTypeConverter,
 )
 import temporal_support as _support
+
+if typing.TYPE_CHECKING:
+    import temporal_support
 
 
 BodyT = typing.TypeVar("BodyT")
 
 
-@dataclasses.dataclass(init=False)
 class Stream(typing.Generic[BodyT]):
     """A handle on one Stream. Build it from a stream-ref, or get it from a create."""
 
@@ -36,7 +41,7 @@ class Stream(typing.Generic[BodyT]):
     def __init__(
         self,
         stream: StreamRef,
-        created: bool | None,
+        created: bool | None = None,
         *,
         body_type: type[BodyT] | None = None,
     ) -> None:
@@ -47,6 +52,18 @@ class Stream(typing.Generic[BodyT]):
         self.body_type: type[BodyT] = body_type or typing.cast(
             "type[BodyT]", typing.Any
         )
+
+    @typing_extensions.override
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Stream):
+            return NotImplemented
+        return (self.stream, self.created) == (other.stream, other.created)
+
+    __hash__: typing.ClassVar[None] = None  # pyright: ignore[reportIncompatibleMethodOverride]
+
+    @typing_extensions.override
+    def __repr__(self) -> str:
+        return f"Stream(stream={self.stream!r}, created={self.created!r})"
 
     async def publish(
         self,
@@ -107,6 +124,66 @@ class Stream(typing.Generic[BodyT]):
         )
         handle = await _describe_stream(request)
         return await handle
+
+
+def stream(
+    definition: type[temporal_support.StreamDefinition[BodyT]],
+    *,
+    id: str | None = None,
+    stream: StreamRef | None = None,
+    backend: str | None = None,
+    created: bool | None = None,
+) -> Stream[BodyT]:
+    """A handle on an existing ``Stream``, with no call. Pass ``id`` or ``stream``."""
+    (body_type,) = _support.definition_type_arguments(definition)
+    if stream is None:
+        if id is None:
+            raise TypeError("pass id or stream")
+        stream = StreamRef(id=id, backend=backend)
+    elif id is not None or backend is not None:
+        raise TypeError("pass stream or its fields, not both")
+    return Stream(
+        stream=stream,
+        created=created,
+        body_type=body_type,
+    )
+
+
+class _StreamTransferTypeConverter(
+    temporalio.converter.TransferTypeConverter[
+        Stream[BodyT], temporalio.api.stream.v1.message_pb2.StreamRef
+    ]
+):
+    """Passes a ``Stream`` as its ``stream``. A decoded handle calls the Workflow
+    operations.
+    """
+
+    transfer_type: type[temporalio.api.stream.v1.message_pb2.StreamRef] | None = (
+        temporalio.api.stream.v1.message_pb2.StreamRef
+    )
+
+    @typing_extensions.override
+    def from_transfer_type(
+        self,
+        value: temporalio.api.stream.v1.message_pb2.StreamRef,
+        type_hint: type[Stream[BodyT]],
+    ) -> Stream[BodyT]:
+        (body_type,) = typing.get_args(type_hint) or (typing.Any,)
+        return Stream(
+            stream=_StreamRefTransferTypeConverter().from_transfer_type(
+                value, StreamRef
+            ),
+            body_type=typing.cast(type[BodyT], body_type),
+        )
+
+    @typing_extensions.override
+    def to_transfer_type(
+        self, value: Stream[BodyT]
+    ) -> temporalio.api.stream.v1.message_pb2.StreamRef:
+        return _StreamRefTransferTypeConverter().to_transfer_type(value.stream)
+
+
+temporalio.converter.transfer_type_convertible(_StreamTransferTypeConverter)(Stream)  # pyright: ignore[reportUnusedCallResult]
 
 
 async def _append_records(

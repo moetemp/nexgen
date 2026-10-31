@@ -1,0 +1,28 @@
+package test:python-factory-definition-field@1.0.0;
+
+world system { export history-service; }
+
+/// @nexus.endpoint "history"
+interface history-service {
+  type placeholder = string;
+
+  /// @nexus.type-parameter
+  type value-t = placeholder;
+
+  record set-request {
+    workflow-id: string,
+    value: value-t,
+  }
+
+  // The factory takes the definition first, so a `definition` parameter would clash with it.
+  /// @nexus.type-parameter "value-t"
+  /// @nexus.definition python="temporal_support.JobDefinition"
+  resource run {
+    constructor(workflow-id: string, definition: option<string>);
+
+    /// @nexus.operation "set"
+    set: func(value: value-t);
+  }
+
+  set: func(request: set-request);
+}

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
     GetSyncSettingsRequest,
     SyncSettings,
 )
+import temporal_support as _support
 
 
 async def _get_sync_settings(
@@ -43,3 +45,18 @@ async def get_sync_settings(
         settings=settings,
     )
     return await _get_sync_settings(request)
+
+
+def start_get_sync_settings(
+    *,
+    user_id: str,
+    region: str | None = None,
+    checkpoint: str | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[SyncSettings]]:
+    """Start ``get_sync_settings`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``get_sync_settings`` returns.
+    """
+    return _support.start_now(
+        get_sync_settings(user_id=user_id, region=region, checkpoint=checkpoint)
+    )

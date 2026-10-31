@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
@@ -65,3 +66,36 @@ async def submit(
         metadata=metadata,
     )
     return await _submit(request)
+
+
+def start_submit(
+    *,
+    attempts: int | None = None,
+    enabled: bool | None = None,
+    ratio: float | None = None,
+    mode: MyEnum | None = None,
+    permissions: MyFlags | None = None,
+    namespace: str | None = None,
+    alias_label: str | None = None,
+    retry: RecordWithDefaults | None = None,
+    summary: str | None = None,
+    details: str | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[Request]]:
+    """Start ``submit`` at the call, as ``workflow.start_activity`` places an Activity, so
+    sync Workflow code keeps the operation's place in the command order. The task gives
+    what ``submit`` returns.
+    """
+    return _support.start_now(
+        submit(
+            attempts=attempts,
+            enabled=enabled,
+            ratio=ratio,
+            mode=mode,
+            permissions=permissions,
+            namespace=namespace,
+            alias_label=alias_label,
+            retry=retry,
+            summary=summary,
+            details=details,
+        )
+    )

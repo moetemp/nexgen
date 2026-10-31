@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import temporalio.workflow
 
@@ -49,3 +50,24 @@ async def start_workflow(
         namespace=_support.workflow_namespace(),
     )
     return await _start_workflow(request)
+
+
+def start_start_workflow(
+    *,
+    workflow: str,
+    workflow_id: str,
+    task_queue: str,
+    workflow_start_delay: datetime.timedelta | None = None,
+) -> asyncio.Task[WorkflowHandle]:
+    """Start ``start_workflow`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``start_workflow`` returns.
+    """
+    return _support.start_now(
+        start_workflow(
+            workflow=workflow,
+            workflow_id=workflow_id,
+            task_queue=task_queue,
+            workflow_start_delay=workflow_start_delay,
+        )
+    )

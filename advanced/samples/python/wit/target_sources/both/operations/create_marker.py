@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import CreateMarkerRequest
 from .._resources import Marker
+import temporal_support as _support
 
 
 async def _create_marker(
@@ -26,3 +28,11 @@ async def _create_marker(
 async def create_marker() -> Marker:
     request = CreateMarkerRequest()
     return await _create_marker(request)
+
+
+def start_create_marker() -> asyncio.Task[Marker]:
+    """Start ``create_marker`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``create_marker`` returns.
+    """
+    return _support.start_now(create_marker())

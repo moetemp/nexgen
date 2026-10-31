@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import temporalio.workflow
 
 from ..models import CancelRunRequest
+import temporal_support as _support
 
 
 @dataclasses.dataclass
@@ -65,3 +67,15 @@ async def cancel_run(
         run_id=run_id,
     )
     return await _cancel_run(request)
+
+
+def start_cancel_run(
+    *,
+    job_id: str,
+    run_id: str | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[None]]:
+    """Start ``cancel_run`` at the call, as ``workflow.start_activity`` places an Activity,
+    so sync Workflow code keeps the operation's place in the command order. The task
+    gives what ``cancel_run`` returns.
+    """
+    return _support.start_now(cancel_run(job_id=job_id, run_id=run_id))

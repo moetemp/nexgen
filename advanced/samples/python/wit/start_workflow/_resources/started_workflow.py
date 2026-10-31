@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import datetime
 import temporalio.workflow
@@ -96,6 +97,20 @@ async def cancel_workflow(
     return await _cancel_workflow(request)
 
 
+def start_cancel_workflow(
+    *,
+    workflow_execution: WorkflowExecution,
+    reason: str | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[CancelWorkflowResponse]]:
+    """Start ``cancel_workflow`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``cancel_workflow`` returns.
+    """
+    return _support.start_now(
+        cancel_workflow(workflow_execution=workflow_execution, reason=reason)
+    )
+
+
 async def _restart_workflow(
     request: StartWorkflowRequest,
 ) -> StartedWorkflow:
@@ -131,3 +146,24 @@ async def restart_workflow(
         namespace=_support.workflow_namespace(),
     )
     return await _restart_workflow(request)
+
+
+def start_restart_workflow(
+    *,
+    workflow: str,
+    workflow_id: str,
+    task_queue: str,
+    workflow_start_delay: datetime.timedelta | None = None,
+) -> asyncio.Task[StartedWorkflow]:
+    """Start ``restart_workflow`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``restart_workflow`` returns.
+    """
+    return _support.start_now(
+        restart_workflow(
+            workflow=workflow,
+            workflow_id=workflow_id,
+            task_queue=task_queue,
+            workflow_start_delay=workflow_start_delay,
+        )
+    )

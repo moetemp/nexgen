@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import temporalio.workflow
 
@@ -69,6 +70,17 @@ async def restart(
     return await _restart(request)
 
 
+def start_restart(
+    *,
+    job_id: str,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[None]]:
+    """Start ``restart`` at the call, as ``workflow.start_activity`` places an Activity, so
+    sync Workflow code keeps the operation's place in the command order. The task gives
+    what ``restart`` returns.
+    """
+    return _support.start_now(restart(job_id=job_id))
+
+
 async def _refresh(
     request: CreateJobRequest,
 ) -> Job:
@@ -92,3 +104,14 @@ async def refresh(
         job_id=job_id,
     )
     return await _refresh(request)
+
+
+def start_refresh(
+    *,
+    job_id: str,
+) -> asyncio.Task[Job]:
+    """Start ``refresh`` at the call, as ``workflow.start_activity`` places an Activity, so
+    sync Workflow code keeps the operation's place in the command order. The task gives
+    what ``refresh`` returns.
+    """
+    return _support.start_now(refresh(job_id=job_id))

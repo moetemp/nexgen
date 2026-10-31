@@ -8,10 +8,14 @@ import typing
 import nexusrpc
 import temporalio.converter
 from . import services as _services
-from .operations.complete import complete
+from .operations.complete import (
+    complete,
+    start_complete,
+)
 
 __all__ = [
     "complete",
+    "start_complete",
 ]
 
 

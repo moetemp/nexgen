@@ -8,14 +8,38 @@ import typing
 import nexusrpc
 import temporalio.converter
 from . import services as _services
-from .operations.get_user import get_user
-from ._resources.user import update_email
-from ._resources.user import rename
-from .operations.set_profile import set_profile
-from .operations.record_sync import record_sync
-from ._resources.user import deactivate
-from .operations.update_notification_settings import update_notification_settings
-from .operations.get_sync_settings import get_sync_settings
+from .operations.get_user import (
+    get_user,
+    start_get_user,
+)
+from ._resources.user import (
+    update_email,
+    start_update_email,
+)
+from ._resources.user import (
+    rename,
+    start_rename,
+)
+from .operations.set_profile import (
+    set_profile,
+    start_set_profile,
+)
+from .operations.record_sync import (
+    record_sync,
+    start_record_sync,
+)
+from ._resources.user import (
+    deactivate,
+    start_deactivate,
+)
+from .operations.update_notification_settings import (
+    update_notification_settings,
+    start_update_notification_settings,
+)
+from .operations.get_sync_settings import (
+    get_sync_settings,
+    start_get_sync_settings,
+)
 from ._resources.user import user
 
 __all__ = [
@@ -25,6 +49,14 @@ __all__ = [
     "record_sync",
     "rename",
     "set_profile",
+    "start_deactivate",
+    "start_get_sync_settings",
+    "start_get_user",
+    "start_record_sync",
+    "start_rename",
+    "start_set_profile",
+    "start_update_email",
+    "start_update_notification_settings",
     "update_email",
     "update_notification_settings",
     "user",

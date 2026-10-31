@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import CreateJobRequest
 from .._resources import Job
+import temporal_support as _support
 
 
 async def _create_job(
@@ -31,3 +33,14 @@ async def create_job(
         job_id=job_id,
     )
     return await _create_job(request)
+
+
+def start_create_job(
+    *,
+    job_id: str,
+) -> asyncio.Task[Job]:
+    """Start ``create_job`` at the call, as ``workflow.start_activity`` places an Activity,
+    so sync Workflow code keeps the operation's place in the command order. The task
+    gives what ``create_job`` returns.
+    """
+    return _support.start_now(create_job(job_id=job_id))

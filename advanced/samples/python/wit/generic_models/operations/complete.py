@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import typing
 import temporalio.workflow
 
@@ -11,6 +12,7 @@ from ..models import (
     GetterProbe,
     Inner,
 )
+import temporal_support as _support
 
 
 ContextT = typing.TypeVar("ContextT")
@@ -55,3 +57,28 @@ async def complete(
         probe=probe,
     )
     return await _complete(request)
+
+
+def start_complete(
+    *,
+    context: ContextT,
+    contexts: list[ContextT] | None = None,
+    by_name: dict[str, ContextT] | None = None,
+    nested: Inner[ContextT],
+    probe: GetterProbe[ContextT] | None = None,
+) -> asyncio.Task[
+    temporalio.workflow.NexusOperationHandle[GenericResponse[ContextT, object, object]]
+]:
+    """Start ``complete`` at the call, as ``workflow.start_activity`` places an Activity,
+    so sync Workflow code keeps the operation's place in the command order. The task
+    gives what ``complete`` returns.
+    """
+    return _support.start_now(
+        complete(
+            context=context,
+            contexts=contexts,
+            by_name=by_name,
+            nested=nested,
+            probe=probe,
+        )
+    )

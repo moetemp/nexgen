@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import FailureContainer
+import temporal_support as _support
 
 
 async def _failure_operation(
@@ -29,3 +31,14 @@ async def failure_operation(
         failure=failure,
     )
     return await _failure_operation(request)
+
+
+def start_failure_operation(
+    *,
+    failure: BaseException | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[FailureContainer]]:
+    """Start ``failure_operation`` at the call, as ``workflow.start_activity`` places an
+    Activity, so sync Workflow code keeps the operation's place in the command order.
+    The task gives what ``failure_operation`` returns.
+    """
+    return _support.start_now(failure_operation(failure=failure))

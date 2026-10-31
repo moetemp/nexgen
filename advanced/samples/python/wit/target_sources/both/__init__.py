@@ -8,14 +8,38 @@ import typing
 import nexusrpc
 import temporalio.converter
 from . import services as _services
-from .operations.submit import submit
-from .operations.create_job import create_job
-from ._resources.job import refresh
-from .operations.create_marker import create_marker
-from ._resources.job import restart
-from .operations.create_run import create_run
-from .operations.create_run_with_status import create_run_with_status
-from ._resources.run import cancel_run
+from .operations.submit import (
+    submit,
+    start_submit,
+)
+from .operations.create_job import (
+    create_job,
+    start_create_job,
+)
+from ._resources.job import (
+    refresh,
+    start_refresh,
+)
+from .operations.create_marker import (
+    create_marker,
+    start_create_marker,
+)
+from ._resources.job import (
+    restart,
+    start_restart,
+)
+from .operations.create_run import (
+    create_run,
+    start_create_run,
+)
+from .operations.create_run_with_status import (
+    create_run_with_status,
+    start_create_run_with_status,
+)
+from ._resources.run import (
+    cancel_run,
+    start_cancel_run,
+)
 from ._resources.job import job
 from ._resources.run import run
 
@@ -29,6 +53,14 @@ __all__ = [
     "refresh",
     "restart",
     "run",
+    "start_cancel_run",
+    "start_create_job",
+    "start_create_marker",
+    "start_create_run",
+    "start_create_run_with_status",
+    "start_refresh",
+    "start_restart",
+    "start_submit",
     "submit",
 ]
 

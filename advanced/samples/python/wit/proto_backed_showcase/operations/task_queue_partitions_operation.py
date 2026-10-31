@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import temporalio.workflow
 
 from ..models import (
     TaskQueuePartition,
     TaskQueuePartitions,
 )
+import temporal_support as _support
 
 
 async def _task_queue_partitions_operation(
@@ -34,3 +36,21 @@ async def task_queue_partitions_operation(
         activity_task_queue_partitions=activity_task_queue_partitions or [],
     )
     return await _task_queue_partitions_operation(request)
+
+
+def start_task_queue_partitions_operation(
+    *,
+    workflow_task_queue_partitions: list[TaskQueuePartition] | None = None,
+    activity_task_queue_partitions: list[TaskQueuePartition] | None = None,
+) -> asyncio.Task[temporalio.workflow.NexusOperationHandle[TaskQueuePartitions]]:
+    """Start ``task_queue_partitions_operation`` at the call, as
+    ``workflow.start_activity`` places an Activity, so sync Workflow code keeps the
+    operation's place in the command order. The task gives what
+    ``task_queue_partitions_operation`` returns.
+    """
+    return _support.start_now(
+        task_queue_partitions_operation(
+            workflow_task_queue_partitions=workflow_task_queue_partitions,
+            activity_task_queue_partitions=activity_task_queue_partitions,
+        )
+    )

@@ -31,6 +31,38 @@ function requiredField<T>(
   return value;
 }
 
+type CreateStreamInput = CreateStreamRequest extends infer Input
+  ? Input extends unknown
+    ? Omit<Input, "owner" | "withdrawRun"> & { owner?: never; withdrawRun?: never }
+    : never
+  : never;
+
+type AppendRecordsInput<BodyT> =
+  AppendRecordsRequest<BodyT> extends infer Input
+    ? Input extends unknown
+      ? Omit<
+          Input,
+          | "failedTasks"
+          | "previousCompletedTask"
+          | "producer"
+          | "sequence"
+          | "withdrawRun"
+        > & {
+          failedTasks?: never;
+          previousCompletedTask?: never;
+          producer?: never;
+          sequence?: never;
+          withdrawRun?: never;
+        }
+      : never
+    : never;
+
+type CloseStreamInput = CloseStreamRequest extends infer Input
+  ? Input extends unknown
+    ? Omit<Input, "producer"> & { producer?: never }
+    : never
+  : never;
+
 /**
  * Starts the operations of `StreamService` from code outside a Workflow.
  *
@@ -104,7 +136,7 @@ export function StreamServiceClientExtension<
      * @param request - Request for the operation.
      */
     public async createStream<BodyT>(
-      request: CreateStreamRequest,
+      request: CreateStreamInput,
       bodyType?: common.TypeInfo<BodyT>,
     ): Promise<Stream<BodyT>> {
       const nexusClient = this.createNexusClient({
@@ -131,8 +163,14 @@ export function StreamServiceClientExtension<
      * @param request - Request for the operation.
      */
     public async appendRecords<BodyT>(
-      request: AppendRecordsRequest<BodyT>,
+      requestInput: AppendRecordsInput<BodyT>,
     ): Promise<AppendRecordsResponse> {
+      const request = {
+        ...requestInput,
+        failedTasks: support.localActivityFailedTasks(),
+        producer: support.clientProducer(),
+        previousCompletedTask: support.localActivityPreviousCompletedTask(),
+      } as AppendRecordsRequest<BodyT>;
       const nexusClient = this.createNexusClient({
         service: streamService,
         endpoint: "__temporal_system",
@@ -149,8 +187,12 @@ export function StreamServiceClientExtension<
      * @param request - Request for the operation.
      */
     public async closeStream(
-      request: CloseStreamRequest,
+      requestInput: CloseStreamInput,
     ): Promise<CloseStreamResponse> {
+      const request = {
+        ...requestInput,
+        producer: support.clientProducer(),
+      } as CloseStreamRequest;
       const nexusClient = this.createNexusClient({
         service: streamService,
         endpoint: "__temporal_system",

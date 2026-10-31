@@ -8,6 +8,7 @@ import datetime
 import typing
 
 import pytest
+import temporalio.activity
 import temporalio.converter
 import temporalio.nexus.system
 from temporalio.api.common.v1 import Payload
@@ -24,6 +25,7 @@ from wit.stream_service.both.models import (
     CreateStreamResult,
     DescribeStreamRequest,
     DescribeStreamResponse,
+    Producer,
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamData,
@@ -140,8 +142,41 @@ async def test_a_created_stream_publishes_on_the_system_endpoint() -> None:
             STREAM_SERVICE,
             SYSTEM_ENDPOINT,
             "AppendRecords",
-            AppendRecordsRequest(stream=ref, records=[]),
+            # The client fills the producer from its source.
+            AppendRecordsRequest(
+                stream=ref, records=[], producer=Producer(id="client:sample")
+            ),
         ),
+    ]
+
+
+@dataclasses.dataclass
+class FakeActivityInfo:
+    workflow_run_id: str
+    activity_id: str
+
+
+async def test_an_activity_publish_takes_the_producer_of_its_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(temporalio.activity, "in_activity", lambda: True)
+    monkeypatch.setattr(
+        temporalio.activity, "info", lambda: FakeActivityInfo("r1", "a1")
+    )
+    ref = StreamRef(id="s1")
+    client = Client({"AppendRecords": [AppendRecordsResponse(last_offset=1)]})
+
+    _ = await client.get_stream(stream=ref, created=None).publish(records=[])
+
+    assert client.calls == [
+        (
+            STREAM_SERVICE,
+            SYSTEM_ENDPOINT,
+            "AppendRecords",
+            AppendRecordsRequest(
+                stream=ref, records=[], producer=Producer(id="act:r1:a1", run_id="r1")
+            ),
+        )
     ]
 
 

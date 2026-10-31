@@ -1,0 +1,13 @@
+package temporal:duplicate-source-target@1.0.0;
+
+world system { export example; }
+
+interface example {
+  record request {
+    /// @nexus.source targets="workflow" value="first()"
+    /// @nexus.source targets="workflow" value="second()"
+    owner: option<string>,
+  }
+
+  submit: func(request: request);
+}

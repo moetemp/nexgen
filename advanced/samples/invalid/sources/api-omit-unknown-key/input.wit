@@ -1,0 +1,12 @@
+package temporal:api-omit-unknown-key@1.0.0;
+
+world system { export example; }
+
+interface example {
+  record request {
+    /// @nexus.api-omit reason="set by the server"
+    owner: option<string>,
+  }
+
+  submit: func(request: request);
+}

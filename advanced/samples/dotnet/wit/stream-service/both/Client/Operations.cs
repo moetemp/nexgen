@@ -34,14 +34,6 @@ namespace Temporalio.Workflows.Client
         /// </summary>
         public System.TimeSpan? Retention { get; set; }
         /// <summary>
-        /// Retry run only. The previous run, whose Records this withdraws.
-        /// </summary>
-        public string? WithdrawRun { get; set; }
-        /// <summary>
-        /// The Workflow run that owns the Stream. The Workflow transport sets it.
-        /// </summary>
-        public Producer? Owner { get; set; }
-        /// <summary>
         /// The ref, whose id is stream-id. A create with an owner needs the ref's owner.
         /// </summary>
         public StreamRef? Ref { get; set; }
@@ -64,10 +56,6 @@ namespace Temporalio.Workflows.Client
 
         public StreamRef Stream { get; set; }
         public IReadOnlyList<AppendRecord<TBody>> Records { get; set; }
-        /// <summary>
-        /// Required outside a Workflow. In a Workflow the transport sets it.
-        /// </summary>
-        public Producer? Producer { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -82,7 +70,6 @@ namespace Temporalio.Workflows.Client
         }
 
         public StreamRef Stream { get; set; }
-        public Producer? Producer { get; set; }
         public object? Result { get; set; }
         public System.Exception? Failure { get; set; }
     }
@@ -181,11 +168,9 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public static Task<Stream<TBody>> CreateStreamAsync<TBody>(this Temporalio.Client.ITemporalClient client, CreateStreamOptions options)
         {
-            var request = new CreateStreamRequest(options.Id)
+            var request = new CreateStreamRequest(options.Id, default)
             {
                 Retention = options.Retention,
-                WithdrawRun = options.WithdrawRun,
-                Owner = options.Owner,
                 Ref = options.Ref,
             };
             return CreateStreamAsync<TBody>(client, request);
@@ -212,10 +197,7 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public static Task<AppendRecordsResponse> AppendRecordsAsync<TBody>(this Temporalio.Client.ITemporalClient client, AppendRecordsOptions<TBody> options)
         {
-            var request = new AppendRecordsRequest<TBody>(options.Stream, options.Records)
-            {
-                Producer = options.Producer,
-            };
+            var request = new AppendRecordsRequest<TBody>(options.Stream, options.Records, Nexgen.Support.StreamActivityContext.LocalActivityFailedTasks(), Nexgen.Support.StreamActivityContext.Producer(), Nexgen.Support.StreamActivityContext.LocalActivityPreviousCompletedTask());
             return AppendRecordsAsync(client, request);
         }
 
@@ -234,9 +216,8 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public static Task<CloseStreamResponse> CloseStreamAsync(this Temporalio.Client.ITemporalClient client, CloseStreamOptions options)
         {
-            var request = new CloseStreamRequest(options.Stream)
+            var request = new CloseStreamRequest(options.Stream, Nexgen.Support.StreamActivityContext.Producer())
             {
-                Producer = options.Producer,
                 Result = options.Result,
                 Failure = options.Failure,
             };

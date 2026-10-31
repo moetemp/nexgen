@@ -29,7 +29,7 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public async Task<AppendRecordsResponse> PublishAsync(IReadOnlyList<AppendRecord<TBody>> records)
         {
-            var request = new AppendRecordsRequest<TBody>(StreamValue, records);
+            var request = new AppendRecordsRequest<TBody>(StreamValue, records, Nexgen.Support.StreamActivityContext.LocalActivityFailedTasks(), Nexgen.Support.StreamActivityContext.Producer(), Nexgen.Support.StreamActivityContext.LocalActivityPreviousCompletedTask());
             var result = await nexusClient.ExecuteNexusOperationAsync<AppendRecordsResponse>("AppendRecords", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
             return result;
         }
@@ -37,7 +37,7 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public async Task CloseAsync(object? result, System.Exception? failure)
         {
-            var request = new CloseStreamRequest(StreamValue) { Result = result, Failure = failure };
+            var request = new CloseStreamRequest(StreamValue, Nexgen.Support.StreamActivityContext.Producer()) { Result = result, Failure = failure };
             await nexusClient.ExecuteNexusOperationAsync<CloseStreamResponse>("CloseStream", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
         }
 

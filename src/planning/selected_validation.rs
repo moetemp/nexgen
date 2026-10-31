@@ -6,9 +6,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::error::{Error, Result};
+use crate::nexgen_config::GenerationTarget;
 use crate::spec::{
     ApiSpec, ApiSpecLeaf, CompilerPass, ExternalTypeSpec, FunctionArgsSpec, FunctionResultSpec,
-    OperationSpec, ResourceSpec, SelectedFamily, ServiceSpec, TypeSpec,
+    OperationSpec, RecordSpec, ResourceSpec, SelectedFamily, ServiceSpec, TypeSpec,
 };
 
 pub(crate) struct SelectedValidationPass;
@@ -87,6 +88,7 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
 
     for service in &spec.services {
         for operation in &service.operations {
+            validate_definition_sources(spec, service, operation, &invalid)?;
             let mut generated_names = BTreeMap::<String, String>::new();
             let operation_parameters = operation
                 .input_type()
@@ -161,23 +163,9 @@ fn validate_definition_parameter(
     returned: &str,
     invalid: &dyn Fn(String) -> Error,
 ) -> Result<()> {
-    let takes_definition = service
-        .resource(returned)
-        .is_some_and(|resource| resource.definition.value().is_some())
-        && !service.resources.iter().any(|resource| {
-            resource
-                .methods
-                .iter()
-                .any(|method| method.operation_name.as_deref() == Some(operation.name.as_str()))
-        });
-    let request = match operation.input_type() {
-        Some(TypeSpec::Record(record)) => spec.record(record.as_str()),
-        Some(TypeSpec::External(ExternalTypeSpec::Proto(proto))) => {
-            spec.record_for_proto(proto.as_str())
-        }
-        _ => None,
-    };
-    if takes_definition && request.is_some_and(|request| request.fields.contains_key("definition"))
+    if operation_takes_definition(service, operation, returned)
+        && operation_request(spec, operation)
+            .is_some_and(|request| request.fields.contains_key("definition"))
     {
         return Err(invalid(format!(
             "operation `{}` takes the definition of `{returned}` as `definition`, so its request \
@@ -186,6 +174,83 @@ fn validate_definition_parameter(
         )));
     }
     Ok(())
+}
+
+/// A source runs where the request is built. Only the Workflow call of an operation that takes a
+/// definition has `definition` there.
+fn validate_definition_sources(
+    spec: &ApiSpec<SelectedFamily>,
+    service: &ServiceSpec<SelectedFamily>,
+    operation: &OperationSpec<SelectedFamily>,
+    invalid: &dyn Fn(String) -> Error,
+) -> Result<()> {
+    let Some(request) = operation_request(spec, operation) else {
+        return Ok(());
+    };
+    let takes_definition = match operation.output_type() {
+        Some(TypeSpec::Resource(returned)) => {
+            operation_takes_definition(service, operation, returned.as_str())
+        }
+        _ => false,
+    };
+    for (field_name, field) in &request.fields {
+        let reads_definition = |target| {
+            field
+                .source_for(target)
+                .is_some_and(|source| source_reads_definition(source))
+        };
+        if reads_definition(GenerationTarget::Client) {
+            return Err(invalid(format!(
+                "record `{}` field `{field_name}` has a client source that reads `definition`; \
+                 only a Workflow source can read it",
+                request.full_name
+            )));
+        }
+        if reads_definition(GenerationTarget::Workflow) && !takes_definition {
+            return Err(invalid(format!(
+                "record `{}` field `{field_name}` has a source that reads `definition`, but \
+                 operation `{}` takes no definition",
+                request.full_name, operation.name
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn operation_takes_definition(
+    service: &ServiceSpec<SelectedFamily>,
+    operation: &OperationSpec<SelectedFamily>,
+    returned: &str,
+) -> bool {
+    service
+        .resource(returned)
+        .is_some_and(|resource| resource.definition.value().is_some())
+        && !service.resources.iter().any(|resource| {
+            resource
+                .methods
+                .iter()
+                .any(|method| method.operation_name.as_deref() == Some(operation.name.as_str()))
+        })
+}
+
+fn operation_request<'a>(
+    spec: &'a ApiSpec<SelectedFamily>,
+    operation: &OperationSpec<SelectedFamily>,
+) -> Option<&'a RecordSpec<SelectedFamily>> {
+    match operation.input_type() {
+        Some(TypeSpec::Record(record)) => spec.record(record.as_str()),
+        Some(TypeSpec::External(ExternalTypeSpec::Proto(proto))) => {
+            spec.record_for_proto(proto.as_str())
+        }
+        _ => None,
+    }
+}
+
+fn source_reads_definition(source: &str) -> bool {
+    source.split_once('(').is_some_and(|(_, args)| {
+        args.split(|character: char| !(character.is_alphanumeric() || character == '_'))
+            .any(|word| word == "definition")
+    })
 }
 
 /// A resource may use only the type parameters that it declares, and it must use each of them.

@@ -9,7 +9,6 @@ import temporalio.workflow
 from ..models import (
     CreateStreamRequest,
     CreateStreamResult,
-    Producer,
     StreamRef,
 )
 from .._resources import Stream
@@ -48,27 +47,20 @@ async def _create_stream(
 async def create_stream(
     definition: type[temporal_support.StreamDefinition[BodyT]],
     *,
-    id: str,
     retention: datetime.timedelta | None = None,
-    withdraw_run: str | None = None,
-    owner: Producer | None = None,
     ref: StreamRef | None = None,
 ) -> Stream[BodyT]:
     """
     Args:
-        id: The Stream id. Required, and never empty.
         retention: The age after which a Record is dropped. Empty is the Store default.
-        withdraw_run: Retry run only. The previous run, whose Records this withdraws.
-        owner: The Workflow run that owns the Stream. The Workflow transport sets it.
         ref: The ref, whose id is stream-id. A create with an owner needs the ref's
             owner.
     """
     (body_type,) = _support.definition_type_arguments(definition)
     request = CreateStreamRequest(
-        id=id,
+        id=_support.workflow_stream_id(definition),
         retention=retention,
-        withdraw_run=withdraw_run,
-        owner=owner,
+        owner=_support.workflow_owner(),
         ref=ref,
     )
     return await _create_stream(request, body_type)

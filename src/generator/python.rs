@@ -2248,7 +2248,7 @@ impl<'a> ApiPlanner<'a> {
                 });
                 continue;
             }
-            if matches!(planned_field.origin, Some(FieldOrigin::ApiOmitted)) {
+            if planned_field.api_omitted_for(target) {
                 continue;
             }
             let default_kind =
@@ -2396,8 +2396,7 @@ impl<'a> ApiPlanner<'a> {
                 .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldOrigin::is_omitted))
                 .zip(nested_rendered_model.fields.iter())
                 .filter(|((_, field), _)| {
-                    !matches!(field.origin, Some(FieldOrigin::ApiOmitted))
-                        && field.source_for(target).is_none()
+                    !field.api_omitted_for(target) && field.source_for(target).is_none()
                 })
                 .map(
                     |((nested_field_name, nested_planned_field), nested_rendered_field)| {
@@ -7364,10 +7363,9 @@ fn resource_return_binding_expr_python(binding: &PlannedOperationResourceFieldBi
             proto_field_name: _,
             origin,
         } => {
-            if matches!(
-                origin,
-                Some(FieldOrigin::Source { .. } | FieldOrigin::Omitted)
-            ) {
+            if matches!(origin, Some(FieldOrigin::Omitted))
+                || origin.as_ref().is_some_and(FieldOrigin::is_sourced)
+            {
                 let expr = format!("request.{}", python_field_name(field_name));
                 if binding.optional {
                     format!("{expr} or None")

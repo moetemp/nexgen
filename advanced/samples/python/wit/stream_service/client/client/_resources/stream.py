@@ -64,6 +64,9 @@ class Stream(typing.Generic[BodyT]):
         request = AppendRecordsRequest(
             stream=self.stream,
             records=records or [],
+            failed_tasks=_support.local_activity_failed_tasks(),
+            producer=_support.client_producer(),
+            previous_completed_task=_support.local_activity_previous_completed_task(),
         )
         handle = await self._nexus_client.start_operation(
             operation=StreamService.append_records,
@@ -87,6 +90,7 @@ class Stream(typing.Generic[BodyT]):
             stream=self.stream,
             result=result,
             failure=failure,
+            producer=_support.client_producer(),
         )
         handle = await self._nexus_client.start_operation(
             operation=StreamService.close_stream,

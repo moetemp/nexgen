@@ -432,15 +432,13 @@ impl<'a> ApiPlanner<'a> {
                             let mut fields = record
                                 .fields
                                 .values()
-                                .filter(|field| {
-                                    matches!(field.origin, Some(FieldOrigin::ApiOmitted))
-                                })
-                                .map(|field| field.name.clone())
+                                .filter(|field| field.api_omitted_for(target))
+                                .map(|field| typescript_generated_field_name(&field.name))
                                 .collect::<Vec<_>>();
                             fields.extend(
-                                record
-                                    .sources_for(target)
-                                    .map(|(name, _, _)| name.to_string()),
+                                record.sources_for(target).map(|(_, field, _)| {
+                                    typescript_generated_field_name(&field.name)
+                                }),
                             );
                             fields.sort();
                             fields.dedup();
@@ -448,13 +446,61 @@ impl<'a> ApiPlanner<'a> {
                         })
                         .unwrap_or_default(),
                     sourced_fields: input_model
-                        .map(|model| {
-                            model
+                        .zip(record)
+                        .map(|(model, record)| {
+                            let mut fields = model
                                 .sourced_fields
                                 .iter()
                                 .filter(|field| field.source_expressions.contains_key(&target))
                                 .cloned()
-                                .collect()
+                                .collect::<Vec<_>>();
+                            // The model needs a required list that the target's API omits, so
+                            // the request has it empty.
+                            fields.extend(
+                                record
+                                    .fields
+                                    .values()
+                                    .filter(|field| {
+                                        field.required
+                                            && field.api_omitted_for(target)
+                                            && matches!(field.field_type, PlannedType::List(_))
+                                    })
+                                    .filter_map(|field| {
+                                        let name = typescript_generated_field_name(&field.name);
+                                        model
+                                            .sourced_fields
+                                            .iter()
+                                            .find(|rendered| rendered.name == name)
+                                            .cloned()
+                                            .or_else(|| {
+                                                model
+                                                    .fields
+                                                    .iter()
+                                                    .find(|rendered| rendered.name == name)
+                                                    .map(|rendered| RenderedSourcedField {
+                                                        name: rendered.name.clone(),
+                                                        wire_name: rendered.wire_name.clone(),
+                                                        annotation: rendered.annotation.clone(),
+                                                        doc: rendered.doc.clone(),
+                                                        optional: false,
+                                                        source_expressions: BTreeMap::new(),
+                                                        visible: true,
+                                                        from_wire_expr: rendered
+                                                            .from_wire_expr
+                                                            .clone(),
+                                                        to_wire_expr: rendered.to_wire_expr.clone(),
+                                                    })
+                                            })
+                                    })
+                                    .map(|field| RenderedSourcedField {
+                                        source_expressions: BTreeMap::from([(
+                                            target,
+                                            "[]".to_string(),
+                                        )]),
+                                        ..field
+                                    }),
+                            );
+                            fields
                         })
                         .unwrap_or_default(),
                     default_initialization,
@@ -736,7 +782,7 @@ impl<'a> ApiPlanner<'a> {
         let sourced_fields = planned_model
             .sourced_fields()
             .map(|(field_name, field, expressions)| {
-                self.build_sourced_field(field_name, field, expressions)
+                self.build_sourced_field(&planned_model, field_name, field, expressions)
             })
             .collect();
 
@@ -1277,16 +1323,47 @@ impl<'a> ApiPlanner<'a> {
 
     fn build_sourced_field(
         &mut self,
+        record: &RecordSpec<PlannedFamily>,
         field_name: &str,
         field: &RecordFieldSpec<PlannedFamily>,
         expressions: &BTreeMap<GenerationTarget, FieldExpression>,
     ) -> RenderedSourcedField {
-        let field_name = typescript_generated_field_name(field_name);
-
         let source_expressions = expressions
             .iter()
             .map(|(target, expression)| (*target, sourced_support_call(&expression.value)))
-            .collect();
+            .collect::<BTreeMap<_, _>>();
+        // A target with no source can leave an optional field unset, so it converts like a
+        // caller-supplied field.
+        if !field.required {
+            let rendered = self.build_field(record, field_name, field);
+            return RenderedSourcedField {
+                name: rendered.name,
+                wire_name: rendered.wire_name,
+                annotation: rendered.annotation,
+                doc: rendered.doc,
+                optional: true,
+                source_expressions,
+                visible: true,
+                from_wire_expr: rendered.from_wire_expr,
+                to_wire_expr: rendered.to_wire_expr,
+            };
+        }
+        let proto_backed = matches!(record.source, Some(ExternalTypeSourceSpec::Proto(_)));
+        let long_ints = std::mem::replace(&mut self.long_ints, proto_backed);
+        let rendered = self.build_required_sourced_field(field_name, field, source_expressions);
+        self.long_ints = long_ints;
+        rendered
+    }
+
+    fn build_required_sourced_field(
+        &mut self,
+        field_name: &str,
+        field: &RecordFieldSpec<PlannedFamily>,
+        source_expressions: BTreeMap<GenerationTarget, String>,
+    ) -> RenderedSourcedField {
+        let wire_name = typescript_generated_field_name(field_name);
+        let field_name = typescript_generated_field_name(&field.name);
+
         // Transfer conversion is data-only; sources are evaluated by the API,
         // never while serializing a shared model.
         let source_expr = format!("model.{field_name}");
@@ -1300,16 +1377,18 @@ impl<'a> ApiPlanner<'a> {
             let value_type = self.resolve_planned_value_type(value);
             return RenderedSourcedField {
                 name: field_name.clone(),
+                wire_name: wire_name.clone(),
                 annotation: Self::typescript_field_annotation(
                     field,
                     format!("Record<string, {}>", value_type.annotation),
                 ),
                 doc,
+                optional: false,
                 source_expressions,
                 visible: true,
                 from_wire_expr: map_value_from_wire_expr(
                     &value_type,
-                    &format!("{{wire}}.{field_name}"),
+                    &format!("{{wire}}.{wire_name}"),
                 ),
                 to_wire_expr: map_value_to_wire_expr_from_expr(&value_type, &source_expr),
             };
@@ -1324,16 +1403,18 @@ impl<'a> ApiPlanner<'a> {
         if repeated {
             return RenderedSourcedField {
                 name: field_name.clone(),
+                wire_name: wire_name.clone(),
                 annotation: Self::typescript_field_annotation(
                     field,
                     typescript_array_annotation(&resolved_type.annotation),
                 ),
                 doc,
+                optional: false,
                 source_expressions,
                 visible: true,
                 from_wire_expr: format!(
                     "{} ?? []",
-                    repeated_from_wire_expr(&resolved_type, &format!("{{wire}}.{field_name}"))
+                    repeated_from_wire_expr(&resolved_type, &format!("{{wire}}.{wire_name}"))
                 ),
                 to_wire_expr: repeated_to_wire_expr_from_expr(&resolved_type, &source_expr),
             };
@@ -1341,14 +1422,16 @@ impl<'a> ApiPlanner<'a> {
 
         RenderedSourcedField {
             name: field_name.clone(),
+            wire_name: wire_name.clone(),
             annotation: Self::typescript_field_annotation(field, resolved_type.annotation.clone()),
             doc,
+            optional: false,
             source_expressions,
             visible: true,
             from_wire_expr: required_from_wire_expr(
                 &resolved_type,
                 "sourced field",
-                &format!("{{wire}}.{field_name}"),
+                &format!("{{wire}}.{wire_name}"),
                 &field_name,
                 field,
             ),
@@ -3310,8 +3393,10 @@ pub(in crate::generator) struct RenderedFlattenedField {
 #[derive(Debug, Clone)]
 pub(in crate::generator) struct RenderedSourcedField {
     pub(in crate::generator) name: String,
+    pub(in crate::generator) wire_name: String,
     annotation: String,
     doc: Option<String>,
+    optional: bool,
     source_expressions: BTreeMap<GenerationTarget, String>,
     visible: bool,
     pub(in crate::generator) from_wire_expr: String,
@@ -5384,7 +5469,7 @@ fn render_invocation_model_base_type(output: &mut String, model: &RenderedModel)
             output,
             "  ",
             &field.name,
-            false,
+            field.optional,
             &field.annotation,
             field.doc.as_deref(),
         );
@@ -5884,7 +5969,7 @@ pub(in crate::generator) fn render_model_declaration(output: &mut String, model:
                     output,
                     "  ",
                     &field.name,
-                    false,
+                    field.optional,
                     &field.annotation,
                     field.doc.as_deref(),
                 );
@@ -5985,12 +6070,12 @@ fn typescript_operation_defaults(
     let omitted = record
         .fields
         .values()
-        .filter(|field| matches!(field.origin, Some(FieldOrigin::ApiOmitted)))
-        .map(|field| field.name.clone())
+        .filter(|field| field.api_omitted_for(target))
+        .map(|field| typescript_generated_field_name(&field.name))
         .chain(
             record
                 .sources_for(target)
-                .map(|(name, _, _)| name.to_string()),
+                .map(|(_, field, _)| typescript_generated_field_name(&field.name)),
         )
         .collect::<BTreeSet<_>>();
     let mut input_annotation = format!(
@@ -6713,13 +6798,7 @@ fn render_resource_method_operation_body(
                     .iter()
                     .all(|field| typescript_generated_field_name(&field.field_name) != source.name)
             })
-            .map(|source| {
-                format!(
-                    "{}: {}",
-                    source.name,
-                    source.source_expressions[&GenerationTarget::Workflow]
-                )
-            })
+            .map(|source| format!("{}: {}", source.name, source.source_expressions[&target]))
             .collect(),
         _ => Vec::new(),
     };
@@ -6994,10 +7073,9 @@ fn resource_return_binding_expr_typescript(
             proto_field_name,
             origin,
         } => {
-            if matches!(
-                origin,
-                Some(FieldOrigin::Source { .. } | FieldOrigin::Omitted)
-            ) {
+            if matches!(origin, Some(FieldOrigin::Omitted))
+                || origin.as_ref().is_some_and(FieldOrigin::is_sourced)
+            {
                 let expr = format!(
                     "request.{}",
                     typescript_generated_field_name(proto_field_name)

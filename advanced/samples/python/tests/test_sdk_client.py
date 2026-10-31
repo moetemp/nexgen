@@ -13,6 +13,7 @@ import typing
 import uuid
 
 import pytest
+import temporalio.activity
 import temporalio.client
 import temporalio.converter
 import temporalio.nexus.system
@@ -39,6 +40,7 @@ from wit.stream_service.both.models import (
     CreateStreamResult,
     DescribeStreamRequest,
     DescribeStreamResponse,
+    Producer,
     ReadRecordsRequest,
     ReadRecordsResponse,
     StreamData,
@@ -237,7 +239,10 @@ async def test_an_operation_starts_through_the_sdk_nexus_client() -> None:
         "__temporal_system",
         "AppendRecords",
     )
-    assert append.arg == AppendRecordsRequest(stream=stream.stream, records=[])
+    # The client fills the producer from its source.
+    assert append.arg == AppendRecordsRequest(
+        stream=stream.stream, records=[], producer=Producer(id="client:sample")
+    )
     assert uuid.UUID(append.id)
     assert append.result_type is AppendRecordsResponse
     assert (close.service, close.endpoint, close.operation) == (
@@ -245,8 +250,39 @@ async def test_an_operation_starts_through_the_sdk_nexus_client() -> None:
         SYSTEM_ENDPOINT,
         "CloseStream",
     )
-    assert close.arg == CloseStreamRequest(stream=stream.stream)
+    assert close.arg == CloseStreamRequest(
+        stream=stream.stream, producer=Producer(id="client:sample")
+    )
     assert close.result_type is CloseStreamResponse
+
+
+@dataclasses.dataclass
+class FakeActivityInfo:
+    workflow_run_id: str
+    activity_id: str
+
+
+async def test_an_activity_publish_takes_the_producer_of_its_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(temporalio.activity, "in_activity", lambda: True)
+    monkeypatch.setattr(
+        temporalio.activity, "info", lambda: FakeActivityInfo("r1", "a1")
+    )
+    ref = StreamRef(id="s1")
+    client, answers = connect(
+        Client, {"AppendRecords": AppendRecordsResponse(last_offset=1)}
+    )
+
+    _ = await client.get_stream(stream=ref, created=None, body_type=str).publish(
+        records=[]
+    )
+
+    assert [started.arg for started in answers.started] == [
+        AppendRecordsRequest(
+            stream=ref, records=[], producer=Producer(id="act:r1:a1", run_id="r1")
+        )
+    ]
 
 
 async def test_a_stored_stream_ref_rebuilds_the_handle() -> None:

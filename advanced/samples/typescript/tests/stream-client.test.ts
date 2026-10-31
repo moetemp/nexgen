@@ -1,8 +1,13 @@
+import {
+  type Context,
+  asyncLocalStorage as activityContext,
+} from "@temporalio/activity";
 import * as common from "@temporalio/common";
 import Long from "long";
 import type * as nexus from "nexus-rpc";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import "../support/client.ts";
 import {
   type NexusServiceClient,
   Stream,
@@ -115,7 +120,37 @@ describe("stream-service client target", () => {
         service: STREAM_SERVICE,
         endpoint: SYSTEM_ENDPOINT,
         operation: "AppendRecords",
-        input: { stream: ref, records: [] },
+        // The client fills the producer and the Local Activity fields from its sources.
+        input: {
+          stream: ref,
+          records: [],
+          failedTasks: [],
+          producer: { id: "client:sample" },
+          previousCompletedTask: undefined,
+        },
+      },
+    ]);
+  });
+
+  test("an Activity publish takes the producer of its attempt", async () => {
+    const ref: StreamRef = { id: "s1" };
+    const appended: AppendRecordsResponse = { lastOffset: Long.fromNumber(1) };
+    const client = new Client({ AppendRecords: [appended] });
+    const info = {
+      activityId: "a1",
+      workflowExecution: { workflowId: "w1", runId: "r1" },
+    };
+
+    await activityContext.run({ info } as Context, () =>
+      client.getStream(ref, undefined).publish([]),
+    );
+
+    expect(client.calls.map((call) => call.input)).toEqual([
+      {
+        stream: ref,
+        records: [],
+        failedTasks: [],
+        producer: { id: "act:r1:a1", runId: "r1" },
       },
     ]);
   });

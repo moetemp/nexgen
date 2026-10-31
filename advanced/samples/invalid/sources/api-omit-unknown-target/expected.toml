@@ -1,0 +1,3 @@
+[error]
+kind = "invalid-wit-directive"
+contains = ["@nexus.api-omit", "unknown api-omit target `activity`"]

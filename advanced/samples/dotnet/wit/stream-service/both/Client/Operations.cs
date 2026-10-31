@@ -34,14 +34,6 @@ namespace Temporalio.Workflows.Client
         /// </summary>
         public System.TimeSpan? Retention { get; set; }
         /// <summary>
-        /// Retry run only. The previous run, whose Records this withdraws.
-        /// </summary>
-        public string? WithdrawRun { get; set; }
-        /// <summary>
-        /// The Workflow run that owns the Stream. The Workflow transport sets it.
-        /// </summary>
-        public Producer? Owner { get; set; }
-        /// <summary>
         /// The ref, whose id is stream-id. A create with an owner needs the ref's owner.
         /// </summary>
         public StreamRef? Ref { get; set; }
@@ -82,11 +74,9 @@ namespace Temporalio.Workflows.Client
         [GeneratedCode("nexgen", null)]
         public static Task<Stream<TBody>> CreateStreamAsync<TBody>(this Temporalio.Client.ITemporalClient client, CreateStreamOptions options)
         {
-            var request = new CreateStreamRequest(options.Id)
+            var request = new CreateStreamRequest(options.Id, default)
             {
                 Retention = options.Retention,
-                WithdrawRun = options.WithdrawRun,
-                Owner = options.Owner,
                 Ref = options.Ref,
             };
             return CreateStreamAsync<TBody>(client, request);

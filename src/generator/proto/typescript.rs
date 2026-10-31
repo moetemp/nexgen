@@ -1092,7 +1092,7 @@ fn render_model_to_proto_function(
         for field in &model.sourced_fields {
             output.push_str(&format!(
                 "  proto.{} = {};\n",
-                field.name, field.to_wire_expr
+                field.wire_name, field.to_wire_expr
             ));
         }
         output.push_str("  return proto;\n");
@@ -1110,7 +1110,7 @@ fn render_model_to_proto_function(
         }
         for field in &model.sourced_fields {
             output.push_str("    ");
-            output.push_str(&field.name);
+            output.push_str(&field.wire_name);
             output.push_str(": ");
             output.push_str(&field.to_wire_expr);
             output.push_str(",\n");

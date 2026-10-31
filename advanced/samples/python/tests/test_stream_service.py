@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import collections.abc
+import dataclasses
 import importlib
 import subprocess
 import sys
@@ -28,6 +29,13 @@ from wit.stream_service.both import workflow as both_workflow
 
 class Texts(temporal_support.StreamDefinition[str]):
     name: typing.ClassVar[str] = "texts"
+
+
+@dataclasses.dataclass
+class FakeWorkflowInfo:
+    workflow_id: str
+    first_execution_run_id: str
+    run_id: str
 
 
 @pytest.fixture(
@@ -154,7 +162,7 @@ async def test_workflow_apis_call_the_stream_service(
         "CreateStream": model_types.CreateStreamResult(stream=ref, created=True),
         "AppendRecords": model_types.AppendRecordsResponse(last_offset=3),
     }
-    calls: list[tuple[str, object]] = []
+    calls: list[tuple[str, typing.Any]] = []
 
     class NexusClient:
         async def start_operation(
@@ -178,12 +186,27 @@ async def test_workflow_apis_call_the_stream_service(
         return NexusClient()
 
     monkeypatch.setattr(temporalio.workflow, "create_nexus_client", create_client)
-    stream = await api.create_stream(Texts, id="workflow-stream")
+    monkeypatch.setattr(
+        temporalio.workflow, "info", lambda: FakeWorkflowInfo("wf-1", "r1", "r2")
+    )
+    stream = await api.create_stream(Texts)
     response = await stream.publish(records=[])
     assert response.last_offset == 3
-    assert calls == [
-        ("CreateStream", model_types.CreateStreamRequest(id="workflow-stream")),
-        ("AppendRecords", model_types.AppendRecordsRequest(stream=ref, records=[])),
+    # The Workflow target fills the id, the owner and the producer from its sources.
+    run = model_types.Producer(id="wf:r2", run_id="r2")
+    expected = [
+        (
+            "CreateStream",
+            model_types.CreateStreamRequest(id="wf-1:r1:texts", owner=run),
+        ),
+        (
+            "AppendRecords",
+            model_types.AppendRecordsRequest(stream=ref, records=[], producer=run),
+        ),
+    ]
+    # The sources build the models of one package, so the calls compare as data.
+    assert [(name, dataclasses.asdict(arg)) for name, arg in calls] == [
+        (name, dataclasses.asdict(arg)) for name, arg in expected
     ]
 
 

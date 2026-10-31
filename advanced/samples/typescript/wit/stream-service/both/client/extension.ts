@@ -18,6 +18,12 @@ function requiredField<T>(
   return value;
 }
 
+type CreateStreamInput = CreateStreamRequest extends infer Input
+  ? Input extends unknown
+    ? Omit<Input, "owner" | "withdrawRun"> & { owner?: never; withdrawRun?: never }
+    : never
+  : never;
+
 /**
  * Starts the operations of `StreamService` from code outside a Workflow.
  *
@@ -83,7 +89,7 @@ export function StreamServiceClientExtension<
      * @param request - Request for the operation.
      */
     public async createStream<BodyT>(
-      request: CreateStreamRequest,
+      request: CreateStreamInput,
       bodyType?: common.TypeInfo<BodyT>,
     ): Promise<Stream<BodyT>> {
       const nexusClient = this.createNexusClient({

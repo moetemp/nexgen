@@ -19,29 +19,9 @@ namespace Temporalio.Workflows
     public class CreateStreamOptions
     {
         /// <summary>
-        /// Initializes a new instance of the <see cref="CreateStreamOptions"/> class.
-        /// </summary>
-        public CreateStreamOptions(string id)
-        {
-            Id = id;
-        }
-
-        /// <summary>
-        /// The Stream id. Required, and never empty.
-        /// </summary>
-        public string Id { get; set; }
-        /// <summary>
         /// The age after which a Record is dropped. Empty is the Store default.
         /// </summary>
         public System.TimeSpan? Retention { get; set; }
-        /// <summary>
-        /// Retry run only. The previous run, whose Records this withdraws.
-        /// </summary>
-        public string? WithdrawRun { get; set; }
-        /// <summary>
-        /// The Workflow run that owns the Stream. The Workflow transport sets it.
-        /// </summary>
-        public Producer? Owner { get; set; }
         /// <summary>
         /// The ref, whose id is stream-id. A create with an owner needs the ref's owner.
         /// </summary>
@@ -65,10 +45,6 @@ namespace Temporalio.Workflows
 
         public StreamRef Stream { get; set; }
         public IReadOnlyList<AppendRecord<TBody>> Records { get; set; }
-        /// <summary>
-        /// Required outside a Workflow. In a Workflow the transport sets it.
-        /// </summary>
-        public Producer? Producer { get; set; }
     }
 
     [GeneratedCode("nexgen", null)]
@@ -83,7 +59,6 @@ namespace Temporalio.Workflows
         }
 
         public StreamRef Stream { get; set; }
-        public Producer? Producer { get; set; }
         public object? Result { get; set; }
         public System.Exception? Failure { get; set; }
     }
@@ -123,10 +98,6 @@ namespace Temporalio.Workflows
         /// How long to wait for an uncreated Stream. Empty fails at once. At most 60 s.
         /// </summary>
         public System.TimeSpan? CreateWait { get; set; }
-        /// <summary>
-        /// Read the newest this many Records, oldest first. No from-offset. No wait.
-        /// </summary>
-        public int? Last { get; set; }
         /// <summary>
         /// The maximum Record bytes in a page. A larger Record is still returned alone.
         /// </summary>
@@ -169,14 +140,12 @@ namespace Temporalio.Workflows
         /// <param name="definition">Gives the type arguments of the resource.</param>
         /// <param name="options">Create a Stream, or get the open one. A closed, expired or another owner's Stream fails.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(Nexgen.Support.StreamDefinition<TBody> definition, CreateStreamOptions options)
+        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(Nexgen.Support.StreamDefinition<TBody> definition, CreateStreamOptions? options = null)
         {
-            var request = new CreateStreamRequest(options.Id)
+            var request = new CreateStreamRequest(Nexgen.Support.StreamWorkflowContext.StreamId(definition), Nexgen.Support.StreamWorkflowContext.Owner())
             {
-                Retention = options.Retention,
-                WithdrawRun = options.WithdrawRun,
-                Owner = options.Owner,
-                Ref = options.Ref,
+                Retention = options?.Retention,
+                Ref = options?.Ref,
             };
             return CreateStreamAsync<TBody>(request);
         }
@@ -200,10 +169,7 @@ namespace Temporalio.Workflows
         [GeneratedCode("nexgen", null)]
         public static Task<AppendRecordsResponse> AppendRecordsAsync<TBody>(AppendRecordsOptions<TBody> options)
         {
-            var request = new AppendRecordsRequest<TBody>(options.Stream, options.Records)
-            {
-                Producer = options.Producer,
-            };
+            var request = new AppendRecordsRequest<TBody>(options.Stream, options.Records, default, Nexgen.Support.StreamWorkflowContext.Producer(), default);
             return AppendRecordsAsync(request);
         }
 
@@ -220,9 +186,8 @@ namespace Temporalio.Workflows
         [GeneratedCode("nexgen", null)]
         public static Task<CloseStreamResponse> CloseStreamAsync(CloseStreamOptions options)
         {
-            var request = new CloseStreamRequest(options.Stream)
+            var request = new CloseStreamRequest(options.Stream, Nexgen.Support.StreamWorkflowContext.Producer())
             {
-                Producer = options.Producer,
                 Result = options.Result,
                 Failure = options.Failure,
             };
@@ -255,7 +220,6 @@ namespace Temporalio.Workflows
                 MaxRecords = options.MaxRecords,
                 Wait = options.Wait,
                 CreateWait = options.CreateWait,
-                Last = options.Last,
                 MaxBytes = options.MaxBytes,
             };
             return ReadRecordsAsync<TBody>(request);

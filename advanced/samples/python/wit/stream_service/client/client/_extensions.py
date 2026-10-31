@@ -12,7 +12,6 @@ import datetime
 from ..services import StreamService
 from ..models import (
     CreateStreamRequest,
-    Producer,
     StreamRef,
 )
 from ._resources.stream import Stream
@@ -99,8 +98,6 @@ class StreamServiceClientExtension(abc.ABC):
         *,
         id: str,
         retention: datetime.timedelta | None = None,
-        withdraw_run: str | None = None,
-        owner: Producer | None = None,
         ref: StreamRef | None = None,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
@@ -110,10 +107,6 @@ class StreamServiceClientExtension(abc.ABC):
             id: The Stream id. Required, and never empty.
             retention: The age after which a Record is dropped. Empty is the Store
                 default.
-            withdraw_run: Retry run only. The previous run, whose Records this
-                withdraws.
-            owner: The Workflow run that owns the Stream. The Workflow transport sets
-                it.
             ref: The ref, whose id is stream-id. A create with an owner needs the ref's
                 owner.
         """
@@ -121,8 +114,6 @@ class StreamServiceClientExtension(abc.ABC):
         request = CreateStreamRequest(
             id=id,
             retention=retention,
-            withdraw_run=withdraw_run,
-            owner=owner,
             ref=ref,
         )
         return await self._stream_service_create_stream(

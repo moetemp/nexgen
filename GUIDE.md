@@ -1043,6 +1043,11 @@ Nexgen prefixes the helper call, but it does not add arguments. The configured
 package supplies the helper. The `@nexus.output-transform` directive is
 different: its value remains a raw expression.
 
+A source runs where the request is built, so the Workflow call of an operation
+that takes a definition can pass `definition` to its source, as in
+`workflow_stream_id(definition)`. nexgen refuses such a source in the client
+target, and in an operation that takes no definition.
+
 ### Omitted Fields
 
 Fields annotated with `@nexus.omit` are excluded entirely from the generated
@@ -1068,7 +1073,20 @@ making it a public operation parameter.
 headers: option<header>,
 ```
 
-`@nexus.api-omit` cannot be combined with `@nexus.omit` or `@nexus.source`.
+`targets="workflow"` or `targets="client"` omits the field from those targets
+only. Another target takes it as an argument, or fills it from a `@nexus.source`
+for that target:
+
+```wit
+/// @nexus.source targets="workflow" python="workflow_owner()" typescript="workflowOwner()" dotnet="StreamWorkflowContext.Owner()"
+/// @nexus.api-omit targets="client"
+owner: option<producer>,
+```
+
+The call leaves an API-omitted field unset, so the field must be an `option<T>`
+or a `list<T>`, which is empty when unset. `@nexus.api-omit` cannot be combined
+with `@nexus.omit`, with `@nexus.default`, or with a `@nexus.source` for the
+same target.
 
 ### Flattened Records
 

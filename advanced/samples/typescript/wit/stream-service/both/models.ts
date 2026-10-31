@@ -213,10 +213,6 @@ export const executionTransferTypeConverter = {
 };
 export interface CreateStreamRequest {
   /**
-   * The Stream id. Required, and never empty.
-   */
-  id: string;
-  /**
    * The age after which a Record is dropped. Empty is the Store default.
    */
   retention?: common.Duration;
@@ -225,29 +221,33 @@ export interface CreateStreamRequest {
    */
   withdrawRun?: string;
   /**
-   * The Workflow run that owns the Stream. The Workflow transport sets it.
-   */
-  owner?: Producer;
-  /**
    * The ref, whose id is stream-id. A create with an owner needs the ref's owner.
    */
   ref?: StreamRef;
+  /**
+   * The Stream id. Required, and never empty.
+   */
+  id: string;
+  /**
+   * The Workflow run that owns the Stream. The Workflow transport sets it.
+   */
+  owner?: Producer;
 }
 
 function createStreamRequestFromProto(
   proto: temporal.api.streamservice.v1.ICreateStreamRequest,
 ): CreateStreamRequest {
   return {
-    id: requiredField(
-      proto.streamId === "" ? undefined : proto.streamId,
-      "CreateStreamRequest",
-      "id",
-    ),
     retention:
       proto.retention == null ? undefined : support.durationFromProto(proto.retention),
     withdrawRun: proto.withdrawRun ?? undefined,
-    owner: proto.owner == null ? undefined : producerFromProto(proto.owner),
     ref: proto.ref == null ? undefined : streamRefFromProto(proto.ref),
+    id: requiredField(
+      proto.streamId === "" ? undefined : proto.streamId,
+      "sourced field",
+      "id",
+    ),
+    owner: proto.owner == null ? undefined : producerFromProto(proto.owner),
   };
 }
 
@@ -255,12 +255,12 @@ function createStreamRequestToProto(
   model: CreateStreamRequest,
 ): temporal.api.streamservice.v1.ICreateStreamRequest {
   return {
-    streamId: requiredField(model.id, "CreateStreamRequest", "id"),
     retention:
       model.retention == null ? undefined : support.durationToProto(model.retention),
     withdrawRun: model.withdrawRun,
-    owner: model.owner == null ? undefined : producerToProto(model.owner),
     ref: model.ref == null ? undefined : streamRefToProto(model.ref),
+    streamId: model.id,
+    owner: model.owner == null ? undefined : producerToProto(model.owner),
   };
 }
 
@@ -469,9 +469,25 @@ export interface AppendRecordsRequest<BodyT> {
   stream: StreamRef;
   records?: AppendRecord<BodyT>[];
   /**
+   * The batch number in this epoch, 1 or more. It is part of the dedupe key.
+   */
+  sequence?: Long;
+  /**
+   * Retry run only. The previous run, whose Records this withdraws.
+   */
+  withdrawRun?: string;
+  /**
+   * Local Activity only. The run's failed or timed out Workflow Tasks.
+   */
+  failedTasks: Long[];
+  /**
    * Required outside a Workflow. In a Workflow the transport sets it.
    */
   producer?: Producer;
+  /**
+   * Local Activity only. The run's last completed Workflow Task.
+   */
+  previousCompletedTask?: WorkflowTaskEpoch;
 }
 
 function appendRecordsRequestFromProto<BodyT>(
@@ -487,7 +503,16 @@ function appendRecordsRequestFromProto<BodyT>(
     records: proto.records?.map((value: any) =>
       appendRecordFromProto(value, { bodyT: typeInfo.bodyT }),
     ),
+    sequence:
+      proto.sequence == null ? undefined : Long.fromValue(proto.sequence, false),
+    withdrawRun: proto.withdrawRun ?? undefined,
+    failedTasks:
+      proto.failedTasks?.map((value: any) => Long.fromValue(value, false)) ?? [],
     producer: proto.producer == null ? undefined : producerFromProto(proto.producer),
+    previousCompletedTask:
+      proto.previousCompletedTask == null
+        ? undefined
+        : workflowTaskEpochFromProto(proto.previousCompletedTask),
   };
 }
 
@@ -504,7 +529,15 @@ function appendRecordsRequestToProto<BodyT>(
     records: model.records?.map((value) =>
       appendRecordToProto(value, { bodyT: typeInfo.bodyT }),
     ),
+    sequence:
+      model.sequence == null ? undefined : Long.fromValue(model.sequence, false),
+    withdrawRun: model.withdrawRun,
+    failedTasks: model.failedTasks?.map((value) => Long.fromValue(value, false)),
     producer: model.producer == null ? undefined : producerToProto(model.producer),
+    previousCompletedTask:
+      model.previousCompletedTask == null
+        ? undefined
+        : workflowTaskEpochToProto(model.previousCompletedTask),
   };
 }
 
@@ -602,6 +635,51 @@ export function createAppendRecordTransferTypeConverter<BodyT>(
     },
   };
 }
+export interface WorkflowTaskEpoch {
+  startedEventId?: Long;
+  attempt?: number;
+  startedTime?: Timestamp;
+}
+
+function workflowTaskEpochFromProto(
+  proto: temporal.api.stream.v1.IWorkflowTaskEpoch,
+): WorkflowTaskEpoch {
+  return {
+    startedEventId:
+      proto.startedEventId == null
+        ? undefined
+        : Long.fromValue(proto.startedEventId, false),
+    attempt: proto.attempt ?? undefined,
+    startedTime:
+      proto.startedTime == null ? undefined : timestampFromProto(proto.startedTime),
+  };
+}
+
+function workflowTaskEpochToProto(
+  model: WorkflowTaskEpoch,
+): temporal.api.stream.v1.IWorkflowTaskEpoch {
+  return {
+    startedEventId:
+      model.startedEventId == null
+        ? undefined
+        : Long.fromValue(model.startedEventId, false),
+    attempt: model.attempt,
+    startedTime:
+      model.startedTime == null ? undefined : timestampToProto(model.startedTime),
+  };
+}
+
+export const workflowTaskEpochTransferTypeConverter = {
+  fromTransferType(
+    value: temporal.api.stream.v1.IWorkflowTaskEpoch,
+  ): WorkflowTaskEpoch {
+    return workflowTaskEpochFromProto(value);
+  },
+
+  toTransferType(value: WorkflowTaskEpoch): temporal.api.stream.v1.IWorkflowTaskEpoch {
+    return workflowTaskEpochToProto(value);
+  },
+};
 export type CloseStreamResponse = Record<string, never>;
 
 function closeStreamResponseFromProto(
@@ -631,9 +709,9 @@ export const closeStreamResponseTransferTypeConverter = {
 };
 export interface CloseStreamRequest {
   stream: StreamRef;
-  producer?: Producer;
   result?: common.Payload;
   failure?: Error;
+  producer?: Producer;
 }
 
 function closeStreamRequestFromProto(
@@ -643,10 +721,10 @@ function closeStreamRequestFromProto(
     stream: streamRefFromProto(
       requiredField(proto.stream, "CloseStreamRequest", "stream"),
     ),
-    producer: proto.producer == null ? undefined : producerFromProto(proto.producer),
     result: proto.result == null ? undefined : support.payloadFromProto(proto.result),
     failure:
       proto.failure == null ? undefined : support.errorFromFailure(proto.failure),
+    producer: proto.producer == null ? undefined : producerFromProto(proto.producer),
   };
 }
 
@@ -657,9 +735,9 @@ function closeStreamRequestToProto(
     stream: streamRefToProto(
       requiredField(model.stream, "CloseStreamRequest", "stream"),
     ),
-    producer: model.producer == null ? undefined : producerToProto(model.producer),
     result: model.result == null ? undefined : support.payloadToProto(model.result),
     failure: model.failure == null ? undefined : support.errorToFailure(model.failure),
+    producer: model.producer == null ? undefined : producerToProto(model.producer),
   };
 }
 
@@ -1000,51 +1078,6 @@ export const supersessionTransferTypeConverter = {
 
   toTransferType(value: Supersession): temporal.api.stream.v1.ISupersession {
     return supersessionToProto(value);
-  },
-};
-export interface WorkflowTaskEpoch {
-  startedEventId?: Long;
-  attempt?: number;
-  startedTime?: Timestamp;
-}
-
-function workflowTaskEpochFromProto(
-  proto: temporal.api.stream.v1.IWorkflowTaskEpoch,
-): WorkflowTaskEpoch {
-  return {
-    startedEventId:
-      proto.startedEventId == null
-        ? undefined
-        : Long.fromValue(proto.startedEventId, false),
-    attempt: proto.attempt ?? undefined,
-    startedTime:
-      proto.startedTime == null ? undefined : timestampFromProto(proto.startedTime),
-  };
-}
-
-function workflowTaskEpochToProto(
-  model: WorkflowTaskEpoch,
-): temporal.api.stream.v1.IWorkflowTaskEpoch {
-  return {
-    startedEventId:
-      model.startedEventId == null
-        ? undefined
-        : Long.fromValue(model.startedEventId, false),
-    attempt: model.attempt,
-    startedTime:
-      model.startedTime == null ? undefined : timestampToProto(model.startedTime),
-  };
-}
-
-export const workflowTaskEpochTransferTypeConverter = {
-  fromTransferType(
-    value: temporal.api.stream.v1.IWorkflowTaskEpoch,
-  ): WorkflowTaskEpoch {
-    return workflowTaskEpochFromProto(value);
-  },
-
-  toTransferType(value: WorkflowTaskEpoch): temporal.api.stream.v1.IWorkflowTaskEpoch {
-    return workflowTaskEpochToProto(value);
   },
 };
 export interface StreamClose {

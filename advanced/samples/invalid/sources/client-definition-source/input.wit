@@ -1,0 +1,14 @@
+package temporal:client-definition-source@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  record start-job-request {
+    /// @nexus.source python="job_id(definition)" typescript="jobId(definition)"
+    ///   go="JobId(definition)" dotnet="Context.JobId(definition)"
+    id: string,
+  }
+
+  start-job: func(request: start-job-request);
+}

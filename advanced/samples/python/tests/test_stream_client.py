@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import typing
 
 from typing_extensions import override
@@ -18,6 +19,8 @@ from wit.stream_service.both.models import (
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
+    StreamReadStart,
+    StreamRecord,
     StreamRef,
 )
 
@@ -109,14 +112,15 @@ async def test_a_stored_stream_ref_rebuilds_the_handle() -> None:
     ]
 
 
-async def test_the_client_reads_every_page_and_keeps_the_offset_on_an_empty_page() -> (
+async def test_a_read_that_does_not_wait_stops_at_an_empty_page_that_did_not_move() -> (
     None
 ):
     ref = StreamRef(id="s1")
     pages = [
+        ReadRecordsResponse(
+            records=[StreamRecord(offset=1), StreamRecord(offset=2)], next_offset=3
+        ),
         ReadRecordsResponse(next_offset=3),
-        ReadRecordsResponse(),
-        ReadRecordsResponse(done=True),
     ]
     client = Client({"ReadRecords": list(pages)})
 
@@ -126,19 +130,41 @@ async def test_the_client_reads_every_page_and_keeps_the_offset_on_an_empty_page
     assert [call[3] for call in client.calls] == [
         ReadRecordsRequest(stream=ref, last=2),
         ReadRecordsRequest(stream=ref, from_offset=3),
-        # The empty page has no next offset, so the read stays at offset 3.
-        ReadRecordsRequest(stream=ref, from_offset=3),
     ]
     # One Nexus client serves the iteration, and each page is a new operation.
     assert client.nexus_clients == 1
     assert len(set(client.operation_ids)) == len(pages)
 
 
-async def test_a_stream_reads_every_page_on_its_own_nexus_client() -> None:
+async def test_a_waiting_read_goes_on_after_an_empty_page_at_the_same_offset() -> None:
     ref = StreamRef(id="s1")
+    wait = datetime.timedelta(seconds=30)
     pages = [
+        ReadRecordsResponse(records=[StreamRecord(offset=1)], next_offset=2),
         ReadRecordsResponse(next_offset=2),
-        ReadRecordsResponse(),
+        ReadRecordsResponse(done=True),
+    ]
+    client = Client({"ReadRecords": list(pages)})
+
+    read = [
+        page
+        async for page in client.iter_read_records(stream=ref, from_offset=1, wait=wait)
+    ]
+
+    assert read == pages
+    assert [call[3] for call in client.calls] == [
+        ReadRecordsRequest(stream=ref, from_offset=1, wait=wait),
+        ReadRecordsRequest(stream=ref, from_offset=2, wait=wait),
+        ReadRecordsRequest(stream=ref, from_offset=2, wait=wait),
+    ]
+
+
+async def test_a_stream_read_from_the_end_stays_at_the_first_next_offset() -> None:
+    ref = StreamRef(id="s1")
+    wait = datetime.timedelta(seconds=30)
+    pages = [
+        ReadRecordsResponse(next_offset=5),
+        ReadRecordsResponse(records=[StreamRecord(offset=5)], next_offset=6),
         ReadRecordsResponse(done=True),
     ]
     client = Client(
@@ -146,15 +172,36 @@ async def test_a_stream_reads_every_page_on_its_own_nexus_client() -> None:
     )
     stream = await client.create_stream(id="s1")
 
-    read = [page async for page in stream.iter_read(from_offset=1)]
+    read = [
+        page
+        async for page in stream.iter_read(
+            start=StreamReadStart.StreamReadStartEnd, wait=wait
+        )
+    ]
 
     assert read == pages
     assert [call[3] for call in client.calls[1:]] == [
-        ReadRecordsRequest(stream=ref, from_offset=1),
-        ReadRecordsRequest(stream=ref, from_offset=2),
-        ReadRecordsRequest(stream=ref, from_offset=2),
+        ReadRecordsRequest(
+            stream=ref, start=StreamReadStart.StreamReadStartEnd, wait=wait
+        ),
+        ReadRecordsRequest(stream=ref, from_offset=5, wait=wait),
+        ReadRecordsRequest(stream=ref, from_offset=6, wait=wait),
     ]
+    # The handle reads on the Nexus client of its create.
     assert client.nexus_clients == 1
+
+
+async def test_a_done_first_page_ends_the_read() -> None:
+    ref = StreamRef(id="s1")
+    pages = [
+        ReadRecordsResponse(records=[StreamRecord(offset=0)], next_offset=1, done=True)
+    ]
+    client = Client({"ReadRecords": list(pages)})
+
+    read = [page async for page in client.iter_read_records(stream=ref)]
+
+    assert read == pages
+    assert [call[3] for call in client.calls] == [ReadRecordsRequest(stream=ref)]
 
 
 def test_only_the_client_target_has_the_read_poll() -> None:

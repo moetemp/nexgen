@@ -208,11 +208,11 @@ export interface CreateStreamRequest {
   /**
    * Retry run only. The previous run, whose Records this withdraws.
    */
-  withdrawRun: string;
+  withdrawRun?: string;
   /**
    * Unique for each create call, and the same on its retries.
    */
-  requestId: string;
+  requestId?: string;
 }
 
 function createStreamRequestFromProto(
@@ -228,16 +228,8 @@ function createStreamRequestFromProto(
       proto.idConflictPolicy == null
         ? undefined
         : (proto.idConflictPolicy as number as StreamIdConflictPolicy),
-    withdrawRun: requiredField(
-      proto.withdrawRun === "" ? undefined : proto.withdrawRun,
-      "sourced field",
-      "withdrawRun",
-    ),
-    requestId: requiredField(
-      proto.requestId === "" ? undefined : proto.requestId,
-      "sourced field",
-      "requestId",
-    ),
+    withdrawRun: proto.withdrawRun ?? undefined,
+    requestId: proto.requestId ?? undefined,
   };
 }
 
@@ -321,13 +313,21 @@ export interface AppendRecordsRequest<BodyT> {
    */
   sequence?: Long;
   /**
+   * Local Activity only. The run's failed or timed out Workflow Tasks.
+   */
+  failedTasks: Long[];
+  /**
    * Required outside a Workflow. In a Workflow the transport sets it.
    */
-  producer: Producer;
+  producer?: Producer;
+  /**
+   * Local Activity only. The run's last completed Workflow Task.
+   */
+  previousCompletedTask?: WorkflowTaskEpoch;
   /**
    * Retry run only. The previous run, whose Records this withdraws.
    */
-  withdrawRun: string;
+  withdrawRun?: string;
 }
 
 function appendRecordsRequestFromProto<BodyT>(
@@ -347,14 +347,14 @@ function appendRecordsRequestFromProto<BodyT>(
     ),
     sequence:
       proto.sequence == null ? undefined : Long.fromValue(proto.sequence, false),
-    producer: producerFromProto(
-      requiredField(proto.producer, "sourced field", "producer"),
-    ),
-    withdrawRun: requiredField(
-      proto.withdrawRun === "" ? undefined : proto.withdrawRun,
-      "sourced field",
-      "withdrawRun",
-    ),
+    failedTasks:
+      proto.failedTasks?.map((value: any) => Long.fromValue(value, false)) ?? [],
+    producer: proto.producer == null ? undefined : producerFromProto(proto.producer),
+    previousCompletedTask:
+      proto.previousCompletedTask == null
+        ? undefined
+        : workflowTaskEpochFromProto(proto.previousCompletedTask),
+    withdrawRun: proto.withdrawRun ?? undefined,
   };
 }
 
@@ -375,7 +375,12 @@ function appendRecordsRequestToProto<BodyT>(
     ),
     sequence:
       model.sequence == null ? undefined : Long.fromValue(model.sequence, false),
+    failedTasks: model.failedTasks?.map((value) => Long.fromValue(value, false)),
     producer: model.producer == null ? undefined : producerToProto(model.producer),
+    previousCompletedTask:
+      model.previousCompletedTask == null
+        ? undefined
+        : workflowTaskEpochToProto(model.previousCompletedTask),
     withdrawRun: model.withdrawRun,
   };
 }
@@ -836,7 +841,7 @@ export const closeStreamResponseTransferTypeConverter = {
 };
 export interface CloseStreamRequest {
   ref: StreamRef;
-  producer: Producer;
+  producer?: Producer;
 }
 
 function closeStreamRequestFromProto(
@@ -844,9 +849,7 @@ function closeStreamRequestFromProto(
 ): CloseStreamRequest {
   return {
     ref: streamRefFromProto(requiredField(proto.ref, "CloseStreamRequest", "ref")),
-    producer: producerFromProto(
-      requiredField(proto.producer, "sourced field", "producer"),
-    ),
+    producer: proto.producer == null ? undefined : producerFromProto(proto.producer),
   };
 }
 

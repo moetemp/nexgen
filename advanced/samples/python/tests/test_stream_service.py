@@ -113,7 +113,9 @@ def test_a_record_of_an_unknown_item_kind_has_no_item(models: types.ModuleType) 
 def test_a_request_without_its_handle_is_refused(models: types.ModuleType) -> None:
     converter = models._AppendRecordsRequestTransferTypeConverter[object]()
     wire = converter.to_transfer_type(
-        models.AppendRecordsRequest(ref=models.StreamRef(id="s-1"), records=[])
+        models.AppendRecordsRequest(
+            ref=models.StreamRef(id="s-1"), records=[], failed_tasks=[]
+        )
     )
     assert wire.ref.id == "s-1"
 
@@ -206,7 +208,9 @@ async def test_workflow_apis_call_the_stream_service(
         ),
         (
             "AppendRecords",
-            model_types.AppendRecordsRequest(ref=ref, records=[], producer=run),
+            model_types.AppendRecordsRequest(
+                ref=ref, records=[], failed_tasks=[], producer=run
+            ),
         ),
     ]
     # The sources build the models of one package, so the calls compare as data.

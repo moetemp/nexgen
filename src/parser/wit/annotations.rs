@@ -168,7 +168,7 @@ const CATALOG: &[Annotation] = {
         Annotation {
             name: "api-omit",
             sites: &[Field],
-            keys: &[],
+            keys: &["targets"],
             language_keys: &[],
             repeatable: false,
             languages: None,

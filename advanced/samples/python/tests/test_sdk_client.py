@@ -13,6 +13,7 @@ import typing
 import uuid
 
 import pytest
+import temporalio.activity
 import temporalio.client
 import temporalio.converter
 import temporalio.nexus.system
@@ -236,7 +237,10 @@ async def test_an_operation_starts_through_the_sdk_nexus_client() -> None:
     )
     # A client call fills the producer from its source.
     assert append.arg == AppendRecordsRequest(
-        ref=stream.ref, records=[], producer=Producer(id="client:sample")
+        ref=stream.ref,
+        records=[],
+        failed_tasks=[],
+        producer=Producer(id="client:sample"),
     )
     assert uuid.UUID(append.id)
     assert append.result_type is AppendRecordsResponse
@@ -249,6 +253,38 @@ async def test_an_operation_starts_through_the_sdk_nexus_client() -> None:
         ref=stream.ref, producer=Producer(id="client:sample")
     )
     assert close.result_type is CloseStreamResponse
+
+
+@dataclasses.dataclass
+class FakeActivityInfo:
+    workflow_run_id: str
+    activity_id: str
+
+
+async def test_an_activity_publish_takes_the_producer_of_its_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(temporalio.activity, "in_activity", lambda: True)
+    monkeypatch.setattr(
+        temporalio.activity, "info", lambda: FakeActivityInfo("r1", "a1")
+    )
+    ref = StreamRef(id="s1")
+    client, answers = connect(
+        Client, {"AppendRecords": AppendRecordsResponse(last_offset=1)}
+    )
+
+    _ = await client.get_stream(ref=ref, created=None, body_type=str).publish(
+        records=[]
+    )
+
+    assert [started.arg for started in answers.started] == [
+        AppendRecordsRequest(
+            ref=ref,
+            records=[],
+            failed_tasks=[],
+            producer=Producer(id="act:r1:a1", run_id="r1"),
+        )
+    ]
 
 
 async def test_a_stored_stream_ref_rebuilds_the_resource() -> None:

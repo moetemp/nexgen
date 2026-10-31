@@ -44,3 +44,11 @@ def request_id() -> str:
     if temporalio.workflow.in_workflow():
         return str(temporalio.workflow.uuid4())
     return str(uuid.uuid4())
+
+
+def local_activity_failed_tasks() -> list[int]:
+    return []
+
+
+def local_activity_previous_completed_task() -> typing.Any:
+    return None

@@ -8,9 +8,14 @@ import * as support from "../../../../support/temporal_model_converters";
 type AppendRecordsInput<BodyT> =
   AppendRecordsRequest<BodyT> extends infer Input
     ? Input extends unknown
-      ? Omit<Input, "producer" | "withdraw_run"> & {
+      ? Omit<
+          Input,
+          "failedTasks" | "previousCompletedTask" | "producer" | "withdrawRun"
+        > & {
+          failedTasks?: never;
+          previousCompletedTask?: never;
           producer?: never;
-          withdraw_run?: never;
+          withdrawRun?: never;
         }
       : never
     : never;
@@ -27,6 +32,7 @@ export async function appendRecords<BodyT>(
     ...requestInput,
     producer: support.workflowProducer(),
     withdrawRun: support.withdrawRun(),
+    failedTasks: [],
   } as AppendRecordsRequest<BodyT>;
   const client = nexus.createNexusServiceClient({
     service: streamService,

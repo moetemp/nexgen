@@ -311,8 +311,10 @@ class AppendRecordsRequest(typing.Generic[BodyT]):
 
     ref: StreamRef
     records: list[AppendRecord[BodyT]]
+    failed_tasks: list[int]
     producer: Producer | None = None
     sequence: int | None = None
+    previous_completed_task: WorkflowTaskEpoch | None = None
     withdraw_run: str | None = None
 
 
@@ -346,15 +348,22 @@ class _AppendRecordsRequestTransferTypeConverter(
             )
             for item in value.records
         ]
+        failed_tasks = list(value.failed_tasks)
         return AppendRecordsRequest(
             ref=ref,
             records=records,
+            failed_tasks=failed_tasks,
             producer=_ProducerTransferTypeConverter().from_transfer_type(
                 value.producer, Producer
             )
             if value.HasField("producer")
             else None,
             sequence=value.sequence if value.sequence != 0 else None,
+            previous_completed_task=_WorkflowTaskEpochTransferTypeConverter().from_transfer_type(
+                value.previous_completed_task, WorkflowTaskEpoch
+            )
+            if value.HasField("previous_completed_task")
+            else None,
             withdraw_run=value.withdraw_run if bool(value.withdraw_run) else None,
         )
 
@@ -374,12 +383,19 @@ class _AppendRecordsRequestTransferTypeConverter(
             item.CopyFrom(
                 _AppendRecordTransferTypeConverter().to_transfer_type(element)
             )
+        message.failed_tasks.extend(value.failed_tasks)
         if value.producer is not None:
             message.producer.CopyFrom(
                 _ProducerTransferTypeConverter().to_transfer_type(value.producer)
             )
         if value.sequence is not None:
             message.sequence = value.sequence
+        if value.previous_completed_task is not None:
+            message.previous_completed_task.CopyFrom(
+                _WorkflowTaskEpochTransferTypeConverter().to_transfer_type(
+                    value.previous_completed_task
+                )
+            )
         if value.withdraw_run is not None:
             message.withdraw_run = value.withdraw_run
         return message

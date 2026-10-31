@@ -239,7 +239,10 @@ interface stream-service {
     ref: stream-ref,
     records: list<append-record>,
     /// @nexus.doc "Local Activity only. The run's failed or timed out Workflow Tasks."
-    /// @nexus.omit
+    /// @nexus.api-omit targets="workflow"
+    /// @nexus.source targets="client" python="local_activity_failed_tasks()"
+    ///   typescript="localActivityFailedTasks()"
+    ///   dotnet="StreamActivityContext.LocalActivityFailedTasks()"
     failed-tasks: list<s64>,
     /// @nexus.doc "Required outside a Workflow. In a Workflow the transport sets it."
     /// @nexus.source targets="workflow" python="workflow_producer()"
@@ -253,7 +256,10 @@ interface stream-service {
     ///   "The batch number in this epoch. Empty takes the next one, and a retry writes it again."
     sequence: option<s64>,
     /// @nexus.doc "Local Activity only. The run's last completed Workflow Task."
-    /// @nexus.omit
+    /// @nexus.api-omit targets="workflow"
+    /// @nexus.source targets="client" python="local_activity_previous_completed_task()"
+    ///   typescript="localActivityPreviousCompletedTask()"
+    ///   dotnet="StreamActivityContext.LocalActivityPreviousCompletedTask()"
     previous-completed-task: option<workflow-task-epoch>,
     // A wrong run would silently withdraw real Records, so it is never a parameter. The helper
     // gives the previous run in a retry run's Workflow, and nothing elsewhere.
@@ -331,6 +337,7 @@ interface stream-service {
     create-wait: option<duration>,
     // Replay needs a fixed range, so the Workflow API omits `last`.
     /// @nexus.doc "Read the newest this many Records, oldest first. No from-offset. No wait."
+    /// @nexus.api-omit targets="workflow"
     last: option<s32>,
     /// @nexus.doc "The maximum Record bytes in a page. A larger Record is still returned alone."
     max-bytes: option<s64>,

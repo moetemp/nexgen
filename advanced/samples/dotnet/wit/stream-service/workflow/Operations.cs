@@ -113,10 +113,6 @@ namespace Temporalio.Workflows
         /// </summary>
         public System.TimeSpan? CreateWait { get; set; }
         /// <summary>
-        /// Read the newest this many Records, oldest first. No from-offset. No wait.
-        /// </summary>
-        public int? Last { get; set; }
-        /// <summary>
         /// The maximum Record bytes in a page. A larger Record is still returned alone.
         /// </summary>
         public long? MaxBytes { get; set; }
@@ -186,7 +182,7 @@ namespace Temporalio.Workflows
         [GeneratedCode("nexgen", null)]
         public static Task<AppendRecordsResponse> AppendRecordsAsync<TBody>(AppendRecordsOptions<TBody> options)
         {
-            var request = new AppendRecordsRequest<TBody>(options.Ref, options.Records, Nexgen.Support.StreamWorkflowContext.Producer(), Nexgen.Support.StreamWorkflowContext.WithdrawRun())
+            var request = new AppendRecordsRequest<TBody>(options.Ref, options.Records, default, Nexgen.Support.StreamWorkflowContext.Producer(), default, Nexgen.Support.StreamWorkflowContext.WithdrawRun())
             {
                 Sequence = options.Sequence,
             };
@@ -236,7 +232,6 @@ namespace Temporalio.Workflows
                 MaxRecords = options.MaxRecords,
                 Wait = options.Wait,
                 CreateWait = options.CreateWait,
-                Last = options.Last,
                 MaxBytes = options.MaxBytes,
             };
             return ReadRecordsAsync<TBody>(request);

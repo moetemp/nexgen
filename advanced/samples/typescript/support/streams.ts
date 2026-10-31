@@ -1,8 +1,12 @@
 // Sources of the stream sample, in place of those of the Streams SDK.
 
 import * as workflow from "@temporalio/workflow";
+import type Long from "long";
 
-import type { Producer } from "../wit/stream-service/workflow/models";
+import type {
+  Producer,
+  WorkflowTaskEpoch,
+} from "../wit/stream-service/workflow/models";
 
 export function workflowProducer(): Producer {
   const runId = workflow.workflowInfo().runId;
@@ -21,4 +25,12 @@ export function withdrawRun(): string | undefined {
 /** A new id for each create call. A Workflow's replay gives the same id. */
 export function requestId(): string {
   return workflow.inWorkflowContext() ? workflow.uuid4() : crypto.randomUUID();
+}
+
+export function localActivityFailedTasks(): Long[] {
+  return [];
+}
+
+export function localActivityPreviousCompletedTask(): WorkflowTaskEpoch | undefined {
+  return undefined;
 }

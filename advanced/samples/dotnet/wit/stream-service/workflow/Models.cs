@@ -200,11 +200,13 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Initializes a new instance of the <see cref="AppendRecordsRequest{TBody}"/> class.
         /// </summary>
-        public AppendRecordsRequest(StreamRef @ref, IReadOnlyList<AppendRecord<TBody>> records, Producer? producer, string? withdrawRun)
+        public AppendRecordsRequest(StreamRef @ref, IReadOnlyList<AppendRecord<TBody>> records, IReadOnlyList<long>? failedTasks, Producer? producer, WorkflowTaskEpoch? previousCompletedTask, string? withdrawRun)
         {
             Ref = @ref;
             Records = records;
+            FailedTasks = failedTasks ?? System.Array.Empty<long>();
             Producer = producer;
+            PreviousCompletedTask = previousCompletedTask;
             WithdrawRun = withdrawRun;
         }
 
@@ -215,9 +217,17 @@ namespace Temporalio.Workflows
         /// </summary>
         public long? Sequence { get; init; }
         /// <summary>
+        /// Local Activity only. The run's failed or timed out Workflow Tasks.
+        /// </summary>
+        public IReadOnlyList<long> FailedTasks { get; init; }
+        /// <summary>
         /// Required outside a Workflow. In a Workflow the transport sets it.
         /// </summary>
         public Producer? Producer { get; init; }
+        /// <summary>
+        /// Local Activity only. The run's last completed Workflow Task.
+        /// </summary>
+        public WorkflowTaskEpoch? PreviousCompletedTask { get; init; }
         /// <summary>
         /// Retry run only. The previous run, whose Records this withdraws.
         /// </summary>
@@ -225,7 +235,7 @@ namespace Temporalio.Workflows
 
         internal static AppendRecordsRequest<TBody> FromTransferType(Temporalio.Api.StreamService.V1.AppendRecordsRequest wire)
         {
-            return new AppendRecordsRequest<TBody>(StreamRef.FromTransferType(wire.Ref), System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(wire.Records, item => AppendRecord<TBody>.FromTransferType(item))), wire.Producer == null ? null : Producer.FromTransferType(wire.Producer), string.IsNullOrEmpty(wire.WithdrawRun) ? null : wire.WithdrawRun)
+            return new AppendRecordsRequest<TBody>(StreamRef.FromTransferType(wire.Ref), System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(wire.Records, item => AppendRecord<TBody>.FromTransferType(item))), System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(wire.FailedTasks, item => item)), wire.Producer == null ? null : Producer.FromTransferType(wire.Producer), wire.PreviousCompletedTask == null ? null : WorkflowTaskEpoch.FromTransferType(wire.PreviousCompletedTask), string.IsNullOrEmpty(wire.WithdrawRun) ? null : wire.WithdrawRun)
             {
                 Sequence = wire.Sequence == 0 ? null : wire.Sequence,
             };
@@ -234,9 +244,14 @@ namespace Temporalio.Workflows
         internal Temporalio.Api.StreamService.V1.AppendRecordsRequest ToTransferType()
         {
             var proto = new Temporalio.Api.StreamService.V1.AppendRecordsRequest();
+            proto.FailedTasks.Add(System.Linq.Enumerable.Select(FailedTasks, item => item));
             if (Producer is { } producer)
             {
                 proto.Producer = (Temporalio.Api.Stream.V1.Producer)producer.ToTransferType();
+            }
+            if (PreviousCompletedTask is { } previousCompletedTask)
+            {
+                proto.PreviousCompletedTask = (Temporalio.Api.Stream.V1.WorkflowTaskEpoch)previousCompletedTask.ToTransferType();
             }
             if (WithdrawRun is { } withdrawRun)
             {

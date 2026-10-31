@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Temporalio.Workflows;
 
 namespace Nexgen.Support
@@ -15,5 +16,14 @@ namespace Nexgen.Support
         // A new id for each create call. A Workflow's replay gives the same id.
         internal static string RequestId() =>
             (Workflow.InWorkflow ? Workflow.NewGuid() : System.Guid.NewGuid()).ToString();
+    }
+
+    // The client sources.
+    internal static class StreamActivityContext
+    {
+        internal static IReadOnlyList<long> LocalActivityFailedTasks() =>
+            System.Array.Empty<long>();
+
+        internal static WorkflowTaskEpoch? LocalActivityPreviousCompletedTask() => null;
     }
 }

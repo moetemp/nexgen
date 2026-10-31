@@ -277,8 +277,8 @@ class StreamServiceClientExtension(abc.ABC):
         create_wait: datetime.timedelta | None = None,
         last: int | None = None,
         max_bytes: int | None = None,
-    ) -> collections.abc.AsyncIterator[ReadRecordsResponse]:
-        """Yield each response of ``read_records``, until the last one.
+    ) -> collections.abc.AsyncGenerator[ReadRecordsResponse, None]:
+        """Yield each response of ``read_records`` until the poll helper stops.
 
         A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads from a Local
         Activity.
@@ -321,8 +321,8 @@ class StreamServiceClientExtension(abc.ABC):
                 result_type=ReadRecordsResponse,
             )
             response = await handle.result()
-            yield response
             next_request = _support.next_read_request(request, response)
+            yield response
             if next_request is None:
                 return
             request = next_request

@@ -48,7 +48,7 @@ describe("authored protobuf enum and byte models", () => {
   it("keeps the non-defaulted enum optional", () => {
     const model = alerts.fromTransferType({ message: "optional" });
     expect(model.severity).toBeUndefined();
-    expect(alerts.toTransferType(model).severity).toBeUndefined();
+    expect(Object.hasOwn(alerts.toTransferType(model), "severity")).toBe(false);
   });
 
   it("round-trips byte lists including zero and non-ASCII bytes", () => {

@@ -98,14 +98,17 @@ flowchart LR
   case list, order, and numbers; reordered, omitted, and sparse cases are
   rejected before planning. It also checks authored service configuration
   against the requested API targets. Language-specific policies remain in
-  language backends.
+  language backends. Record-containment validation rejects mixed backing through
+  aliases, containers, and variants before binding or target-specific emission;
+  independent operations may use different backing within the same service.
 - `LanguageSelectionPass` selects the target-language values from authored
   language maps.
 - `SelectedValidationPass` validates the selected generic surface after
   selection.
 - `ResourceResolutionPass` resolves resource-method and resource-return facts
   from the API spec and descriptors. With no API target, it keeps only the
-  resource fields, so resources become data classes.
+  resource fields, so resources become data classes. It rejects integer-width
+  mismatches between resource values and the request fields they bind to.
 - `OperationBindingPass` attaches resolved resource facts to their owning
   operations and resources.
 - `OperationLoweringPass` turns wire-backed resource returns into explicit

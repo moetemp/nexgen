@@ -122,7 +122,7 @@ describe("proto-generic generated models", () => {
     expect(wire.provider).not.toHaveProperty("type");
     expect(wire.provider).not.toHaveProperty("nexusEndpoint");
     expect(wire.scaler).not.toHaveProperty("type");
-    expect(wire).not.toHaveProperty("taskQueueTypes");
+    expect(wire.taskQueueTypes).toEqual([]);
 
     const message = temporal.api.compute.v1.ComputeConfigScalingGroup.decode(
       temporal.api.compute.v1.ComputeConfigScalingGroup.encode(wire).finish(),

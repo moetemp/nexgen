@@ -24,6 +24,7 @@ of `@nexus` directives.
   - [Resource Return Binding](#resource-return-binding)
   - [Edge Cases and Error Conditions](#edge-cases-and-error-conditions)
 - [Proto-Backed Models](#proto-backed-models)
+  - [TypeScript Protobuf Payloads](#typescript-protobuf-payloads)
   - [Transfer-Type Conversion](#transfer-type-conversion)
   - [Sourced Fields](#sourced-fields)
   - [Omitted Fields](#omitted-fields)
@@ -829,6 +830,51 @@ enum's name and members, even when its name differs from the protobuf enum's.
 Converters bridge the model and protobuf enum by number. A case with
 [`@nexus.fallback`](#nexusfallback) takes a protobuf number that the enum
 doesn't know.
+
+Records cannot mix JSON and protobuf backing within one value. A plain record
+cannot contain a protobuf-backed record, and a protobuf-backed record cannot
+contain a plain record. This rule applies to every target, including model-only
+modules, and follows aliases, containers, and variant payloads. Give nested
+records consistent backing, or use separate operation inputs. Independent JSON
+and protobuf operations may still share a service. External types with authored
+converters retain their own conversion contracts.
+
+In TypeScript, protobuf-backed `s64` and `u64` fields use `Long`. JSON-backed
+fields use `number`, which cannot represent every integer outside JavaScript's
+safe integer range, from `-(2^53 - 1)` to `2^53 - 1`. A JSON-backed 64-bit value
+can lose precision outside that range; nexgen does not check it at runtime.
+
+Resource constructor fields and method parameters follow the fields they bind
+to. Adding or removing a request record's `@nexus.proto` can therefore change a
+resource signature between `number` and `Long` without changing the resource
+declaration. Unbound `s64` and `u64` resource values remain `number`.
+
+A resource value cannot bind to fields requiring both `Long` and `number`. Use
+consistently protobuf-backed or JSON-backed bindings, or separate resource
+values. Resource-to-request bindings must also use matching integer widths;
+nexgen rejects a 64-bit resource value bound to a 32-bit field, and vice versa.
+
+### TypeScript protobuf payloads
+
+Generated TypeScript transfer converters return real protobufjs messages, not
+plain objects with protobuf-shaped fields. Configure the Temporal client and
+worker with a protobuf-aware payload converter so message types, 64-bit
+integers, bytes, and oneofs survive serialization:
+
+```typescript
+// payload-converter.ts
+import proto from "@temporalio/proto";
+import { DefaultPayloadConverterWithProtobufs } from "@temporalio/common/lib/protobufs.js";
+
+export const payloadConverter = new DefaultPayloadConverterWithProtobufs({
+  protobufRoot: proto,
+});
+```
+
+Pass this module through the SDK's `payloadConverterPath` configuration. For
+custom protos, supply the matching protobufjs root instead of the SDK root. The
+plain JSON payload converter does not reconstruct protobuf messages and is not a
+substitute for this configuration.
 
 ### Transfer-Type Conversion
 

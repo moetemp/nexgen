@@ -1,0 +1,9 @@
+targets = ["workflow"]
+descriptors = "temporal"
+
+[error]
+kind = "invalid-resource-method"
+contains = [
+  """constructor field `seconds` uses a 32-bit integer, but request field \
+     `google.protobuf.Timestamp.seconds` requires a 64-bit integer; use matching integer widths""",
+]

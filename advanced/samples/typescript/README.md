@@ -40,19 +40,27 @@ cargo build-examples --format wit --lang typescript workflow-service
 The definitions-mode JSON-Schema samples (plain data models) live under
 [`samples/typescript`](../../samples/typescript).
 
-## Temporary notification protobuf declarations
+## Protobuf payloads and sample declarations
 
-The notification-service example uses the SDK namespace
-`temporal.api.notificationservice.v1`. Until the TypeScript SDK exports these
-models,
+The workflow/Nexus tests configure the SDK with
+[`support/protobuf-payload-converter.ts`](support/protobuf-payload-converter.ts).
+Generated transfer converters return protobufjs messages, which this converter
+encodes as protobuf payloads rather than ordinary JSON objects.
+
+[`tests/proto-integer-payload.test.ts`](tests/proto-integer-payload.test.ts)
+uses the SDK's `Int64Value` and `UInt64Value` messages to round-trip signed and
+unsigned values outside JavaScript's safe integer range through the SDK's JSON
+and binary protobuf payload converters. It needs no Stream descriptors.
+
+The notification and Stream protos are newer than the SDK. Their tests import
+[`tests/setup-protos.ts`](tests/setup-protos.ts) to load missing runtime message
+constructors from the checked-in descriptors. Matching sample-only declarations
+live in
 [`support/notification-service-proto.d.ts`](support/notification-service-proto.d.ts)
-supplies sample-only interface declarations matching the checked-in descriptor.
-Remove this file and update the SDK dependency **before landing this change**.
-The generator has no fallback types or notification-specific logic.
-
-The notification tests exercise conversion of plain wire objects, including
-generic payloads, failure details, and oneof validation. They do not yet
-exercise notification protobuf binary encoding or SDK message constructors.
+and [`proto/streams.d.ts`](proto/streams.d.ts). These fixtures do not replace
+existing SDK types and are not a generator fallback. Remove them when the SDK
+exports the same definitions. Applications need real runtime definitions for
+every protobuf type they import.
 
 The `proto-generic` and `proto-oneof` samples use the SDK's existing protobuf
 models without a shim. Their tests include binary encode/decode round-trips,

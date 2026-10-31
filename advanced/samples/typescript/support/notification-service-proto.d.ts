@@ -1,10 +1,17 @@
 import "@temporalio/proto";
 
 // TEMPORARY: Remove once the TypeScript SDK exports these models.
-// This sample-only augmentation supplies structural wire types, not protobuf
-// constructors or binary encoding. Keep it aligned with the checked-in descriptor.
+// tests/setup-protos.ts supplies the real runtime constructors from the same
+// checked-in descriptor.
+interface ProtoConstructor<T> {
+  create(properties?: T): T;
+}
+
 declare module "@temporalio/proto" {
   namespace temporal.api.notificationservice.v1 {
+    const OnCompleteRequest: ProtoConstructor<IOnCompleteRequest>;
+    const OnCompleteResponse: ProtoConstructor<IOnCompleteResponse>;
+
     interface IOnCompleteRequest {
       result?: "success" | "failure";
       success?: temporal.api.common.v1.IPayload | null;

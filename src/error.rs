@@ -247,6 +247,18 @@ pub enum Error {
     },
 
     #[error(
+        "{backing}-backed record `{record}` field `{field}` contains {nested_backing}-backed record \
+         `{nested_record}`; nested records must use the same backing. Use consistent backing or separate operations"
+    )]
+    MixedRecordBacking {
+        record: String,
+        field: String,
+        backing: &'static str,
+        nested_record: String,
+        nested_backing: &'static str,
+    },
+
+    #[error(
         "service `{service}` operation `{operation}` output is missing required `type` or `transform` field"
     )]
     IncompleteOperationOutputTransform { service: String, operation: String },

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import collections.abc
 import typing
 import abc
+import datetime
 
 from ._nexus_client import (
     _NexusClient,
@@ -113,6 +115,9 @@ class SourceServiceClientExtension(abc.ABC):
     async def _source_service_submit(
         self,
         request: SubmitRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         nexus_client = self._create_nexus_client(
             service="SourceService",
@@ -122,6 +127,8 @@ class SourceServiceClientExtension(abc.ABC):
             operation="Submit",
             arg=request,
             id=_operation_id(),
+            rpc_metadata=rpc_metadata or {},
+            rpc_timeout=rpc_timeout,
         )
         await handle.result()
 
@@ -130,6 +137,8 @@ class SourceServiceClientExtension(abc.ABC):
         *,
         id: str,
         workflow: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         request = SubmitRequest(
             id=id,
@@ -137,11 +146,16 @@ class SourceServiceClientExtension(abc.ABC):
             workflow=workflow,
             client=_support.client_source(),
         )
-        return await self._source_service_submit(request)
+        return await self._source_service_submit(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _source_service_create_job(
         self,
         request: CreateJobRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Job:
         nexus_client = self._create_nexus_client(
             service="SourceService",
@@ -152,6 +166,8 @@ class SourceServiceClientExtension(abc.ABC):
             arg=request,
             id=_operation_id(),
             result_type=_resource_data.Job,
+            rpc_metadata=rpc_metadata or {},
+            rpc_timeout=rpc_timeout,
         )
         result = await handle.result()
         return Job(
@@ -163,15 +179,22 @@ class SourceServiceClientExtension(abc.ABC):
         self,
         *,
         job_id: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Job:
         request = CreateJobRequest(
             job_id=job_id,
         )
-        return await self._source_service_create_job(request)
+        return await self._source_service_create_job(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _source_service_refresh(
         self,
         request: CreateJobRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Job:
         nexus_client = self._create_nexus_client(
             service="SourceService",
@@ -182,6 +205,8 @@ class SourceServiceClientExtension(abc.ABC):
             arg=request,
             id=_operation_id(),
             result_type=_resource_data.Job,
+            rpc_metadata=rpc_metadata or {},
+            rpc_timeout=rpc_timeout,
         )
         result = await handle.result()
         return Job(
@@ -193,15 +218,22 @@ class SourceServiceClientExtension(abc.ABC):
         self,
         *,
         job_id: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Job:
         request = CreateJobRequest(
             job_id=job_id,
         )
-        return await self._source_service_refresh(request)
+        return await self._source_service_refresh(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _source_service_create_marker(
         self,
         request: CreateMarkerRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Marker:
         nexus_client = self._create_nexus_client(
             service="SourceService",
@@ -212,6 +244,8 @@ class SourceServiceClientExtension(abc.ABC):
             arg=request,
             id=_operation_id(),
             result_type=_resource_data.Marker,
+            rpc_metadata=rpc_metadata or {},
+            rpc_timeout=rpc_timeout,
         )
         _ = await handle.result()
         return Marker(
@@ -220,13 +254,21 @@ class SourceServiceClientExtension(abc.ABC):
 
     async def create_marker(
         self,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Marker:
         request = CreateMarkerRequest()
-        return await self._source_service_create_marker(request)
+        return await self._source_service_create_marker(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _source_service_restart(
         self,
         request: RestartRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         nexus_client = self._create_nexus_client(
             service="SourceService",
@@ -236,6 +278,8 @@ class SourceServiceClientExtension(abc.ABC):
             operation="Restart",
             arg=request,
             id=_operation_id(),
+            rpc_metadata=rpc_metadata or {},
+            rpc_timeout=rpc_timeout,
         )
         await handle.result()
 
@@ -243,16 +287,23 @@ class SourceServiceClientExtension(abc.ABC):
         self,
         *,
         job_id: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         request = RestartRequest(
             job_id=job_id,
             shared=_support.shared_source(),
         )
-        return await self._source_service_restart(request)
+        return await self._source_service_restart(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _source_service_create_run(
         self,
         request: CreateRunRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Run:
         nexus_client = self._create_nexus_client(
             service="SourceService",
@@ -263,6 +314,8 @@ class SourceServiceClientExtension(abc.ABC):
             arg=request,
             id=_operation_id(),
             result_type=RunResult,
+            rpc_metadata=rpc_metadata or {},
+            rpc_timeout=rpc_timeout,
         )
         result = await handle.result()
         resource = Run(
@@ -277,16 +330,23 @@ class SourceServiceClientExtension(abc.ABC):
         *,
         job_id: str,
         query: str | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Run:
         request = CreateRunRequest(
             job_id=job_id,
             query=query,
         )
-        return await self._source_service_create_run(request)
+        return await self._source_service_create_run(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _source_service_create_run_with_status(
         self,
         request: CreateRunRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> RunWithStatus:
         nexus_client = self._create_nexus_client(
             service="SourceService",
@@ -297,6 +357,8 @@ class SourceServiceClientExtension(abc.ABC):
             arg=request,
             id=_operation_id(),
             result_type=SignalWithStartWorkflowExecutionResponse,
+            rpc_metadata=rpc_metadata or {},
+            rpc_timeout=rpc_timeout,
         )
         result = await handle.result()
         return RunWithStatus(
@@ -313,16 +375,23 @@ class SourceServiceClientExtension(abc.ABC):
         *,
         job_id: str,
         query: str | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> RunWithStatus:
         request = CreateRunRequest(
             job_id=job_id,
             query=query,
         )
-        return await self._source_service_create_run_with_status(request)
+        return await self._source_service_create_run_with_status(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
     async def _source_service_cancel_run(
         self,
         request: CancelRunRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         nexus_client = self._create_nexus_client(
             service="SourceService",
@@ -332,6 +401,8 @@ class SourceServiceClientExtension(abc.ABC):
             operation="CancelRun",
             arg=request,
             id=_operation_id(),
+            rpc_metadata=rpc_metadata or {},
+            rpc_timeout=rpc_timeout,
         )
         await handle.result()
 
@@ -340,9 +411,13 @@ class SourceServiceClientExtension(abc.ABC):
         *,
         job_id: str,
         run_id: str | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         request = CancelRunRequest(
             job_id=job_id,
             run_id=run_id,
         )
-        return await self._source_service_cancel_run(request)
+        return await self._source_service_cancel_run(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )

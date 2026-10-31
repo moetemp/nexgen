@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import collections.abc
 import typing
 import abc
+import datetime
 
 from ._nexus_client import (
     _NexusClient,
@@ -65,6 +67,9 @@ class JobsClientExtension(abc.ABC):
     async def _jobs_restart(
         self,
         request: RestartRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         nexus_client = self._create_nexus_client(
             service="Jobs",
@@ -74,6 +79,8 @@ class JobsClientExtension(abc.ABC):
             operation="Restart",
             arg=request,
             id=_operation_id(),
+            rpc_metadata=rpc_metadata or {},
+            rpc_timeout=rpc_timeout,
         )
         await handle.result()
 
@@ -81,11 +88,15 @@ class JobsClientExtension(abc.ABC):
         self,
         *,
         job_id: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> None:
         request = RestartRequest(
             job_id=job_id,
         )
-        return await self._jobs_restart(request)
+        return await self._jobs_restart(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )
 
 
 class OrdersClientExtension(abc.ABC):
@@ -119,6 +130,9 @@ class OrdersClientExtension(abc.ABC):
     async def _orders_place(
         self,
         request: PlaceRequest,
+        *,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Job:
         nexus_client = self._create_nexus_client(
             service="Orders",
@@ -129,6 +143,8 @@ class OrdersClientExtension(abc.ABC):
             arg=request,
             id=_operation_id(),
             result_type=_resource_data.Job,
+            rpc_metadata=rpc_metadata or {},
+            rpc_timeout=rpc_timeout,
         )
         result = await handle.result()
         return Job(
@@ -143,8 +159,12 @@ class OrdersClientExtension(abc.ABC):
         self,
         *,
         job_id: str,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Job:
         request = PlaceRequest(
             job_id=job_id,
         )
-        return await self._orders_place(request)
+        return await self._orders_place(
+            request, rpc_metadata=rpc_metadata, rpc_timeout=rpc_timeout
+        )

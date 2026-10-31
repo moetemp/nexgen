@@ -1,6 +1,7 @@
 import asyncio
 import collections.abc
 import dataclasses
+import datetime
 import typing
 
 import pytest
@@ -55,8 +56,10 @@ class Recorder:
         *,
         id: str,
         result_type: type[typing.Any] | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> Handle:
-        del id, result_type
+        del id, result_type, rpc_metadata, rpc_timeout
         self.calls.append((operation, arg))
         return Handle()
 

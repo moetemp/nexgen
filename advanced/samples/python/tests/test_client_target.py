@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import datetime
+import collections.abc
 import dataclasses
 import types
 import typing
@@ -58,7 +60,10 @@ class FakeNexusClient:
         *,
         id: str,
         result_type: type[typing.Any] | None = None,
+        rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
+        rpc_timeout: datetime.timedelta | None = None,
     ) -> FakeHandle:
+        del rpc_metadata, rpc_timeout
         self._client.calls.append(Call(self._service, self._endpoint, operation, arg))
         self._client.operation_ids.append(id)
         answer = self._client.answers[operation].pop(0)

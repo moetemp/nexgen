@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use nexgen::language::Language;
-use nexgen::nexgen_config::GenerationTargets;
+use nexgen::nexgen_config::GenerationTarget;
 use nexgen::nexgen_config::NexgenConfig;
 use nexgen::{GenerateRequest, generate_to_file};
 
@@ -311,7 +311,7 @@ fn generate_formatted_json_typescript_output(
     root: &Path,
     example_id: &str,
     output_path: &Path,
-    targets: GenerationTargets,
+    targets: &[GenerationTarget],
 ) {
     generate_formatted_json_typescript_output_repr(root, example_id, output_path, targets, None);
 }
@@ -323,7 +323,7 @@ fn generate_formatted_json_typescript_output_repr(
     root: &Path,
     input_id: &str,
     output_path: &Path,
-    targets: GenerationTargets,
+    targets: &[GenerationTarget],
     repr: Option<&str>,
 ) {
     ensure_typescript_dependencies(&typescript_root(root));
@@ -391,12 +391,7 @@ fn typescript_json_examples_render_expected_language_features() {
     let root = project_root();
     for example_id in ["chat", "kb", "showcase", "temporal"] {
         let output_path = unique_output_path(&format!("typescript-json-{example_id}"));
-        generate_formatted_json_typescript_output(
-            &root,
-            example_id,
-            &output_path,
-            GenerationTargets::NONE,
-        );
+        generate_formatted_json_typescript_output(&root, example_id, &output_path, &[]);
         let rendered = read_typescript_output_files(&output_path);
         assert_no_empty_else_blocks(&rendered);
         if example_id == "showcase" {
@@ -475,7 +470,7 @@ fn typescript_json_examples_render_expected_language_features() {
             &root,
             "temporal",
             &output_path,
-            GenerationTargets::NONE,
+            &[],
             Some(repr),
         );
         let rendered = read_typescript_output_files(&output_path);
@@ -493,7 +488,7 @@ fn typescript_json_api_examples_render_successfully() {
             &root,
             example_id,
             &output_path,
-            GenerationTargets::WORKFLOW,
+            &[GenerationTarget::Workflow],
         );
         let rendered = read_typescript_output_files(&output_path);
         assert_no_empty_else_blocks(&rendered);
@@ -505,7 +500,7 @@ fn typescript_json_api_examples_render_successfully() {
             &root,
             "temporal",
             &output_path,
-            GenerationTargets::WORKFLOW,
+            &[GenerationTarget::Workflow],
             Some(repr),
         );
         let rendered = read_typescript_output_files(&output_path);
@@ -1594,7 +1589,7 @@ fn renders_sample_with_versioned_header() {
     let temp_dir = temp.path().join("output");
     generate_to_file(&GenerateRequest {
         config: NexgenConfig {
-            targets: GenerationTargets::WORKFLOW,
+            targets: vec![GenerationTarget::Workflow],
             ..Default::default()
         },
         language: Language::TypeScript,

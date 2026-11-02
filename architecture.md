@@ -111,7 +111,9 @@ flowchart LR
   from the API spec and descriptors. Operations must return resources owned by
   their service, including those held in result records. Return bindings
   determine shared wire models regardless of API targets; resource methods are
-  bound only when an API target is selected.
+  bound only when an API target is selected. It rejects integer-width mismatches
+  between resource values and the request or result fields they bind to,
+  including constructor fields populated by operations that return resources.
 - `OperationBindingPass` attaches resolved resource facts to their owning
   operations and resources.
 - `OperationLoweringPass` turns wire-backed resource returns into explicit

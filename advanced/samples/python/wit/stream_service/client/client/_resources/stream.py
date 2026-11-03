@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import dataclasses
 import typing
+import typing_extensions
 import temporalio.client
 import uuid as _uuid
 import datetime
@@ -23,7 +23,6 @@ from ...models import (
 )
 
 
-@dataclasses.dataclass(init=False)
 class Stream:
     """A handle on one Stream. Build it from a stream-ref, or get it from a create."""
 
@@ -41,6 +40,16 @@ class Stream:
         self._nexus_client: temporalio.client.NexusClient[typing.Any] = nexus_client
         self.stream = stream
         self.created = created
+
+    @typing_extensions.override
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Stream):
+            return NotImplemented
+        return (self.stream, self.created) == (other.stream, other.created)
+
+    @typing_extensions.override
+    def __repr__(self) -> str:
+        return f"Stream(stream={self.stream!r}, created={self.created!r})"
 
     async def publish(
         self,

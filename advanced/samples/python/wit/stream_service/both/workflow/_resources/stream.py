@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import dataclasses
 import typing
+import typing_extensions
 import datetime
 import temporalio.workflow
 
@@ -23,12 +23,29 @@ from ...models import (
 )
 
 
-@dataclasses.dataclass
 class Stream:
     """A handle on one Stream. Build it from a stream-ref, or get it from a create."""
 
     stream: StreamRef
     created: bool | None
+
+    def __init__(
+        self,
+        stream: StreamRef,
+        created: bool | None,
+    ) -> None:
+        self.stream = stream
+        self.created = created
+
+    @typing_extensions.override
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Stream):
+            return NotImplemented
+        return (self.stream, self.created) == (other.stream, other.created)
+
+    @typing_extensions.override
+    def __repr__(self) -> str:
+        return f"Stream(stream={self.stream!r}, created={self.created!r})"
 
     async def publish(
         self,

@@ -6,7 +6,6 @@ interceptor answers each Nexus call in the process, so the test needs no server.
 
 from __future__ import annotations
 
-import dataclasses
 import collections.abc
 import typing
 import uuid
@@ -279,16 +278,19 @@ def test_a_resource_requires_a_nexus_client() -> None:
         _ = Stream(stream=StreamRef(id="s1"), created=None)  # pyright: ignore[reportCallIssue]
 
 
-def test_resource_serialization_carries_only_identity_fields() -> None:
+def test_a_resource_is_not_data_but_its_identity_field_is() -> None:
     client, _ = connect(Client, {})
     ref = StreamRef(id="stored-stream")
     stream = client.get_stream(stream=ref, created=None)
     converter = temporalio.converter.PayloadConverter.default
-    decoded = converter.from_payload(
-        converter.to_payload(stream), workflow_resources.Stream
-    )
-    assert decoded == workflow_resources.Stream(stream=ref, created=None)
-    assert dataclasses.asdict(stream) == {
-        "stream": dataclasses.asdict(ref),
-        "created": None,
-    }
+
+    # A handle has calls, so it never crosses the converter in either direction.
+    with pytest.raises(TypeError, match="not JSON serializable"):
+        _ = converter.to_payload(stream)
+    payload = converter.to_payload(stream.stream)
+    with pytest.raises(TypeError, match="Unserializable type"):
+        _ = converter.from_payload(payload, workflow_resources.Stream)
+    # Code passes the identity field and builds the handle explicitly.
+    decoded = converter.from_payload(payload, StreamRef)
+    assert decoded == ref
+    assert client.get_stream(stream=decoded, created=None) == stream

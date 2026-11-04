@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import collections.abc
 import typing
-import typing_extensions
 import temporalio.client
 import uuid as _uuid
 import datetime
@@ -44,16 +43,6 @@ class Stream:
         self._nexus_client: temporalio.client.NexusClient[typing.Any] = nexus_client
         self.handle = handle
         self.created = created
-
-    @typing_extensions.override
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Stream):
-            return NotImplemented
-        return (self.handle, self.created) == (other.handle, other.created)
-
-    @typing_extensions.override
-    def __repr__(self) -> str:
-        return f"Stream(handle={self.handle!r}, created={self.created!r})"
 
     async def publish(
         self,

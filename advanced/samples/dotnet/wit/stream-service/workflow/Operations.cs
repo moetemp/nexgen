@@ -186,7 +186,7 @@ namespace Temporalio.Workflows
         [GeneratedCode("nexgen", null)]
         public static Task<AppendRecordsResponse> AppendRecordsAsync<TBody>(AppendRecordsOptions<TBody> options)
         {
-            var request = new AppendRecordsRequest<TBody>(options.Ref, options.Records, Nexgen.Support.StreamWorkflowContext.Producer(), Nexgen.Support.StreamWorkflowContext.WithdrawRun())
+            var request = new AppendRecordsRequest<TBody>(options.Ref, options.Records, Nexgen.Support.StreamWorkflowContext.Writer())
             {
                 Sequence = options.Sequence,
             };
@@ -206,7 +206,7 @@ namespace Temporalio.Workflows
         [GeneratedCode("nexgen", null)]
         public static Task<CloseStreamResponse> CloseStreamAsync(CloseStreamOptions options)
         {
-            var request = new CloseStreamRequest(options.Ref, Nexgen.Support.StreamWorkflowContext.Producer());
+            var request = new CloseStreamRequest(options.Ref, Nexgen.Support.StreamWorkflowContext.Writer());
             return CloseStreamAsync(request);
         }
 

@@ -61,8 +61,7 @@ class Stream(typing.Generic[BodyT]):
         request = AppendRecordsRequest(
             ref=self.ref,
             records=records,
-            producer=_support.client_producer(),
-            withdraw_run=_support.withdraw_run(),
+            writer=_support.client_writer(),
         )
         handle = await self._nexus_client.start_operation(
             operation=StreamService.append_records,
@@ -77,7 +76,7 @@ class Stream(typing.Generic[BodyT]):
         """Close the Stream. Readers drain what is left, then end."""
         request = CloseStreamRequest(
             ref=self.ref,
-            producer=_support.client_producer(),
+            writer=_support.client_writer(),
         )
         handle = await self._nexus_client.start_operation(
             operation=StreamService.close_stream,

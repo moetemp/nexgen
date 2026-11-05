@@ -77,7 +77,11 @@ def test_read_items_round_trip_as_their_records(models: types.ModuleType) -> Non
             ),
             models.StreamRecord(
                 item=models.StreamItemSuperseded(
-                    models.StreamSuperseded(producer_id="workflow-1", failed_tasks=[7])
+                    models.StreamSuperseded(
+                        writer=models.StreamWriter(
+                            producer=models.Producer(id="workflow-1"), failed_tasks=[7]
+                        )
+                    )
                 ),
                 offset=2,
             ),
@@ -96,7 +100,7 @@ def test_read_items_round_trip_as_their_records(models: types.ModuleType) -> Non
         "superseded",
     ]
     assert wire.records[0].data.producer.epoch.WhichOneof("kind") == "local_activity"
-    assert wire.records[1].superseded.failed_tasks == [7]
+    assert wire.records[1].superseded.writer.failed_tasks == [7]
     assert converter.from_transfer_type(wire, models.ReadRecordsResponse) == model
 
 
@@ -197,8 +201,10 @@ async def test_workflow_apis_call_the_stream_service(
     stream = await api.create_stream(str, stream_ref=ref)
     response = await stream.publish(records=[])
     assert response.last_offset == 3
-    # The Workflow API fills the request id and the producer from its sources.
-    run = model_types.Producer(id="wf:r2", run_id="r2")
+    # The Workflow API fills the request id and the writer from its sources.
+    writer = model_types.StreamWriter(
+        producer=model_types.Producer(id="wf:r2", run_id="r2"), failed_tasks=[]
+    )
     expected = [
         (
             "CreateStream",
@@ -206,7 +212,7 @@ async def test_workflow_apis_call_the_stream_service(
         ),
         (
             "AppendRecords",
-            model_types.AppendRecordsRequest(ref=ref, records=[], producer=run),
+            model_types.AppendRecordsRequest(ref=ref, records=[], writer=writer),
         ),
     ]
     # The sources build the models of one package, so the calls compare as data.

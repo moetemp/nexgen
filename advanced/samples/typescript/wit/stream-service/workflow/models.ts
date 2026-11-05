@@ -323,11 +323,7 @@ export interface AppendRecordsRequest<BodyT> {
   /**
    * Required outside a Workflow. In a Workflow the transport sets it.
    */
-  producer: Producer;
-  /**
-   * Retry run only. The previous run, whose Records this withdraws.
-   */
-  withdrawRun: string;
+  writer: StreamWriter;
 }
 
 function appendRecordsRequestFromProto<BodyT>(
@@ -347,13 +343,8 @@ function appendRecordsRequestFromProto<BodyT>(
     ),
     sequence:
       proto.sequence == null ? undefined : Long.fromValue(proto.sequence, false),
-    producer: producerFromProto(
-      requiredField(proto.producer, "sourced field", "producer"),
-    ),
-    withdrawRun: requiredField(
-      proto.withdrawRun === "" ? undefined : proto.withdrawRun,
-      "sourced field",
-      "withdrawRun",
+    writer: streamWriterFromProto(
+      requiredField(proto.writer, "sourced field", "writer"),
     ),
   };
 }
@@ -375,8 +366,7 @@ function appendRecordsRequestToProto<BodyT>(
     ),
     sequence:
       model.sequence == null ? undefined : Long.fromValue(model.sequence, false),
-    producer: model.producer == null ? undefined : producerToProto(model.producer),
-    withdrawRun: model.withdrawRun,
+    writer: model.writer == null ? undefined : streamWriterToProto(model.writer),
   };
 }
 
@@ -474,6 +464,70 @@ export function createAppendRecordTransferTypeConverter<BodyT>(
     },
   };
 }
+export interface StreamWriter {
+  /**
+   * Required on a write. Its epoch's case picks the withdrawal rule.
+   */
+  producer?: Producer;
+  /**
+   * Workflow and Local Activity only. The run's last completed Workflow Task.
+   */
+  previousCompletedTask?: WorkflowTaskEpoch;
+  /**
+   * Workflow and Local Activity only. The run's failed or timed out Workflow Tasks.
+   */
+  failedTasks: Long[];
+  /**
+   * Retry run only. The previous run, all of whose Records are withdrawn.
+   */
+  withdrawRun?: string;
+}
+
+function streamWriterFromProto(
+  proto: temporal.api.stream.v1.IStreamWriter,
+): StreamWriter {
+  return {
+    producer: proto.producer == null ? undefined : producerFromProto(proto.producer),
+    previousCompletedTask:
+      proto.previousCompletedTask == null
+        ? undefined
+        : workflowTaskEpochFromProto(proto.previousCompletedTask),
+    failedTasks: requiredField(
+      proto.failedTasks?.map((value: any) => Long.fromValue(value, false)),
+      "StreamWriter",
+      "failedTasks",
+    ),
+    withdrawRun: proto.withdrawRun ?? undefined,
+  };
+}
+
+function streamWriterToProto(
+  model: StreamWriter,
+): temporal.api.stream.v1.IStreamWriter {
+  return {
+    producer: model.producer == null ? undefined : producerToProto(model.producer),
+    previousCompletedTask:
+      model.previousCompletedTask == null
+        ? undefined
+        : workflowTaskEpochToProto(model.previousCompletedTask),
+    failedTasks: requiredField(
+      model.failedTasks?.map((value) => Long.fromValue(value, false)),
+      "StreamWriter",
+      "failedTasks",
+    ),
+    withdrawRun: model.withdrawRun,
+  };
+}
+
+export const streamWriterTransferTypeConverter = {
+  fromTransferType(value: temporal.api.stream.v1.IStreamWriter): StreamWriter {
+    return streamWriterFromProto(value);
+  },
+
+  toTransferType(value: StreamWriter): temporal.api.stream.v1.IStreamWriter {
+    return streamWriterToProto(value);
+  },
+};
 export interface Producer {
   /**
    * Stable across attempts, such as wf:<run id> for a Workflow run.
@@ -836,7 +890,7 @@ export const closeStreamResponseTransferTypeConverter = {
 };
 export interface CloseStreamRequest {
   ref: StreamRef;
-  producer: Producer;
+  writer: StreamWriter;
 }
 
 function closeStreamRequestFromProto(
@@ -844,8 +898,8 @@ function closeStreamRequestFromProto(
 ): CloseStreamRequest {
   return {
     ref: streamRefFromProto(requiredField(proto.ref, "CloseStreamRequest", "ref")),
-    producer: producerFromProto(
-      requiredField(proto.producer, "sourced field", "producer"),
+    writer: streamWriterFromProto(
+      requiredField(proto.writer, "sourced field", "writer"),
     ),
   };
 }
@@ -855,7 +909,7 @@ function closeStreamRequestToProto(
 ): temporal.api.streamservice.v1.ICloseStreamRequest {
   return {
     ref: streamRefToProto(requiredField(model.ref, "CloseStreamRequest", "ref")),
-    producer: model.producer == null ? undefined : producerToProto(model.producer),
+    writer: model.writer == null ? undefined : streamWriterToProto(model.writer),
   };
 }
 
@@ -1120,50 +1174,17 @@ export function createStreamDataTransferTypeConverter<BodyT>(
   };
 }
 export interface StreamSuperseded {
-  producerId: string;
   /**
-   * Workflow only. Started event ids of failed or timed out Workflow Tasks.
+   * The writer that withdraws. Its epoch is empty when only withdraw-run applies.
    */
-  failedTasks: Long[];
-  /**
-   * The withdrawing Producer's epoch, whose case picks the rule.
-   */
-  epoch?: ProducerEpoch;
-  /**
-   * Workflow only. The previous completed Workflow Task of the run.
-   */
-  previousCompletedTask?: WorkflowTaskEpoch;
-  /**
-   * Workflow retry only. The previous run, all of whose Records are withdrawn.
-   */
-  withdrawRun?: string;
-  /**
-   * The withdrawing Producer's run, so no Reader parses ids. Empty for a client.
-   */
-  runId?: string;
+  writer?: StreamWriter;
 }
 
 function streamSupersededFromProto(
   proto: temporal.api.stream.v1.IStreamSuperseded,
 ): StreamSuperseded {
   return {
-    producerId: requiredField(
-      proto.producerId === "" ? undefined : proto.producerId,
-      "StreamSuperseded",
-      "producerId",
-    ),
-    failedTasks: requiredField(
-      proto.failedTasks?.map((value: any) => Long.fromValue(value, false)),
-      "StreamSuperseded",
-      "failedTasks",
-    ),
-    epoch: proto.epoch == null ? undefined : producerEpochFromProto(proto.epoch),
-    previousCompletedTask:
-      proto.previousCompletedTask == null
-        ? undefined
-        : workflowTaskEpochFromProto(proto.previousCompletedTask),
-    withdrawRun: proto.withdrawRun ?? undefined,
-    runId: proto.runId ?? undefined,
+    writer: proto.writer == null ? undefined : streamWriterFromProto(proto.writer),
   };
 }
 
@@ -1171,19 +1192,7 @@ function streamSupersededToProto(
   model: StreamSuperseded,
 ): temporal.api.stream.v1.IStreamSuperseded {
   return {
-    producerId: requiredField(model.producerId, "StreamSuperseded", "producerId"),
-    failedTasks: requiredField(
-      model.failedTasks?.map((value) => Long.fromValue(value, false)),
-      "StreamSuperseded",
-      "failedTasks",
-    ),
-    epoch: model.epoch == null ? undefined : producerEpochToProto(model.epoch),
-    previousCompletedTask:
-      model.previousCompletedTask == null
-        ? undefined
-        : workflowTaskEpochToProto(model.previousCompletedTask),
-    withdrawRun: model.withdrawRun,
-    runId: model.runId,
+    writer: model.writer == null ? undefined : streamWriterToProto(model.writer),
   };
 }
 

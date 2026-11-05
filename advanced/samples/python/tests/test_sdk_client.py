@@ -13,6 +13,7 @@ import typing
 import uuid
 
 import pytest
+import temporalio.activity
 import temporalio.client
 import temporalio.converter
 import temporalio.nexus.system
@@ -21,6 +22,7 @@ import temporalio.workflow
 from temporalio.api.common.v1 import Payload
 from typing_extensions import assert_type, override
 
+import wit.stream_service.both.models as both_models
 import wit.stream_service.both.workflow as workflow_package
 import wit.stream_service.both.workflow._resources.stream as workflow_stream_module
 from wit.stream_service.both.client import Stream, StreamServiceClientExtension
@@ -47,6 +49,7 @@ from wit.stream_service.both.models import (
     StreamReadStart,
     StreamRecord,
     StreamRef,
+    StreamWriter,
 )
 
 
@@ -234,10 +237,9 @@ async def test_an_operation_starts_through_the_sdk_nexus_client() -> None:
         "__temporal_system",
         "AppendRecords",
     )
-    # A client call fills the producer from its source.
-    assert append.arg == AppendRecordsRequest(
-        ref=stream.ref, records=[], producer=Producer(id="client:sample")
-    )
+    # A client call fills the writer from its source.
+    writer = StreamWriter(producer=Producer(id="client:sample"), failed_tasks=[])
+    assert append.arg == AppendRecordsRequest(ref=stream.ref, records=[], writer=writer)
     assert uuid.UUID(append.id)
     assert append.result_type is AppendRecordsResponse
     assert (close.service, close.endpoint, close.operation) == (
@@ -245,10 +247,45 @@ async def test_an_operation_starts_through_the_sdk_nexus_client() -> None:
         SYSTEM_ENDPOINT,
         "CloseStream",
     )
-    assert close.arg == CloseStreamRequest(
-        ref=stream.ref, producer=Producer(id="client:sample")
-    )
+    assert close.arg == CloseStreamRequest(ref=stream.ref, writer=writer)
     assert close.result_type is CloseStreamResponse
+
+
+@dataclasses.dataclass
+class FakeActivityInfo:
+    workflow_run_id: str
+    activity_id: str
+
+
+async def test_a_client_append_sends_the_writer_of_its_activity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(temporalio.activity, "in_activity", lambda: True)
+    monkeypatch.setattr(
+        temporalio.activity, "info", lambda: FakeActivityInfo("r1", "7")
+    )
+    client, answers = connect(
+        Client, {"AppendRecords": AppendRecordsResponse(last_offset=1)}
+    )
+    stream = client.get_stream(ref=StreamRef(id="s1"), created=None, body_type=str)
+
+    _ = await stream.publish(records=[])
+
+    (append,) = answers.started
+    writer = StreamWriter(
+        producer=Producer(id="act:r1:7", run_id="r1"), failed_tasks=[]
+    )
+    assert append.arg == AppendRecordsRequest(
+        ref=StreamRef(id="s1"), records=[], writer=writer
+    )
+    # The writer's fields go in the request's one writer field.
+    converter = both_models._AppendRecordsRequestTransferTypeConverter[str]()
+    wire = converter.to_transfer_type(append.arg)
+    assert wire.writer.producer.id == "act:r1:7"
+    assert wire.writer.producer.run_id == "r1"
+    assert not wire.writer.HasField("previous_completed_task")
+    assert list(wire.writer.failed_tasks) == []
+    assert wire.writer.withdraw_run == ""
 
 
 async def test_a_stored_stream_ref_rebuilds_the_resource() -> None:

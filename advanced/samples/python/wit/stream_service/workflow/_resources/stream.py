@@ -55,8 +55,7 @@ class Stream(typing.Generic[BodyT]):
         request = AppendRecordsRequest(
             ref=self.ref,
             records=records,
-            producer=_support.workflow_producer(),
-            withdraw_run=_support.withdraw_run(),
+            writer=_support.workflow_writer(),
         )
         handle = await _append_records(request)
         return await handle
@@ -67,7 +66,7 @@ class Stream(typing.Generic[BodyT]):
         """Close the Stream. Readers drain what is left, then end."""
         request = CloseStreamRequest(
             ref=self.ref,
-            producer=_support.workflow_producer(),
+            writer=_support.workflow_writer(),
         )
         handle = await _close_stream(request)
         await handle
@@ -134,9 +133,8 @@ async def append_records(
     request = AppendRecordsRequest(
         ref=ref,
         records=records,
-        producer=_support.workflow_producer(),
+        writer=_support.workflow_writer(),
         sequence=sequence,
-        withdraw_run=_support.withdraw_run(),
     )
     return await _append_records(request)
 
@@ -161,7 +159,7 @@ async def close_stream(
 ) -> temporalio.workflow.NexusOperationHandle[CloseStreamResponse,]:
     request = CloseStreamRequest(
         ref=ref,
-        producer=_support.workflow_producer(),
+        writer=_support.workflow_writer(),
     )
     return await _close_stream(request)
 

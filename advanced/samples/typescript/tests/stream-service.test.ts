@@ -46,7 +46,12 @@ describe("stream-service generated output", () => {
         {
           item: {
             tag: "superseded",
-            value: { producerId: "workflow-1", failedTasks: [Long.fromNumber(7)] },
+            value: {
+              writer: {
+                producer: { id: "workflow-1" },
+                failedTasks: [Long.fromNumber(7)],
+              },
+            },
           },
           offset: Long.fromNumber(2),
         },
@@ -59,7 +64,7 @@ describe("stream-service generated output", () => {
       readRecordsResponseTransferTypeConverter.toTransferType(model);
 
     expect(proto.records?.map((record) => record.item)).toEqual(["data", "superseded"]);
-    expect(proto.records?.[1].superseded?.failedTasks?.[0].toNumber()).toBe(7);
+    expect(proto.records?.[1].superseded?.writer?.failedTasks?.[0].toNumber()).toBe(7);
     expect(readRecordsResponseTransferTypeConverter.fromTransferType(proto)).toEqual(
       model,
     );

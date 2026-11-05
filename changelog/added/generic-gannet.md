@@ -1,0 +1,1 @@
+A resource that uses a type parameter, also through its records, is generic in it with no annotation, and its calls decode generic response values with their runtime types. Go and Java refuse a generic resource.

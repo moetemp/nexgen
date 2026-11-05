@@ -531,6 +531,9 @@ Resources are the most complex feature of the code generator. They produce
 classes whose constructor fields represent the resource's identity, and whose
 methods delegate to Nexus operations.
 
+A resource that uses a type parameter is generic. See
+[Generic resources](#generic-resources).
+
 ### Resource Declaration
 
 ```wit
@@ -1973,14 +1976,57 @@ const inputType = {
 };
 ```
 
-Type parameters are also unsupported in resources, map keys, function-signature
-metadata, or resource-bound generic operations.
+Type parameters are also unsupported in map keys and in function-signature
+metadata.
 
 Python represents generic variants as tagged tuples and protobuf oneof-backed
 generic variants as unions of generic case dataclasses. TypeScript uses tagged
 object unions, Go uses sealed interfaces and case structs, and .NET uses nested
 records. References to generic variants are closed automatically wherever they
 occur.
+
+#### Generic resources
+
+A resource that uses a type parameter is generic in it, as a record is, so it
+needs no annotation. Its fields, the parameters and results of its methods, and
+the operations that they bind count, also through records, protos and the
+resources that it returns. The resource takes its parameters in the order that
+it first uses them.
+
+```wit
+/// @nexus.type-parameter
+type body-t = placeholder;
+
+/// @nexus.proto "temporal.api.stream.v1.AppendRecord"
+record append-record {
+  body: body-t,
+}
+
+resource %stream {
+  /// @nexus.operation "append-records"
+  publish: func(records: list<append-record>) -> append-records-response;
+}
+```
+
+The resource keeps a runtime type for each parameter, and its calls decode the
+generic values of a response with them. An operation that returns the resource
+takes a runtime type for each parameter. A method passes the types of its
+resource to the operation that it binds. A record that holds a parameter, also
+through another record, is generic in it by the rules above, so a response that
+holds such a record is generic too.
+
+- Python. `Stream(typing.Generic[BodyT])` takes a `body_type`, so
+  `create_stream(Turn, ...)` returns a `Stream[Turn]`. The client factory takes
+  it too, as in `get_stream(ref=ref, created=None, body_type=Turn)`. The runtime
+  type isn't a dataclass field, so the data converter doesn't encode it, and a
+  decoded handle decodes its values as `typing.Any`.
+- TypeScript. `Stream<BodyT>` takes `bodyType?: common.TypeInfo<BodyT>` after
+  its fields.
+- .NET. A call of `Stream<TBody>` takes the type argument, as in
+  `CreateStreamAsync<Turn>(options)`.
+
+Go and Java refuse a generic resource. nexgen also refuses a generic resource in
+a record field or in the result of an operation with no `@nexus.proto` message.
 
 ---
 

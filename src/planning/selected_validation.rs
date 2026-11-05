@@ -2,12 +2,13 @@
 //! Authored descriptor checks remain in `AuthoredValidationPass`; this pass
 //! consumes selected IR without cloning or selecting authored alternatives.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::spec::{
     ApiSpec, ApiSpecLeaf, CompilerPass, FunctionArgsSpec, FunctionResultSpec, SelectedFamily,
+    TypeSpec,
 };
 
 pub(crate) struct SelectedValidationPass;
@@ -105,45 +106,42 @@ fn validate_generic_model_semantics(spec: &ApiSpec<SelectedFamily>, path: &Path)
                 }
             }
         }
-        for resource in &service.resources {
-            let resource_is_generic = resource
-                .fields
-                .iter()
-                .any(|field| !spec.type_parameters(&field.field_type).is_empty())
-                || resource.methods.iter().any(|method| {
-                    method
-                        .params
-                        .iter()
-                        .any(|param| !spec.type_parameters(&param.field_type).is_empty())
-                        || method.result.as_ref().is_some_and(|result| {
-                            !spec.type_parameters(&result.result_type).is_empty()
-                        })
-                });
-            if resource_is_generic {
+        for operation in &service.operations {
+            let Some(TypeSpec::Resource(returned)) = operation.output_type() else {
+                continue;
+            };
+            if returned.wire_type.is_none()
+                && service
+                    .resource(returned.as_str())
+                    .is_some_and(|resource| !resource.type_parameters.is_empty())
+            {
                 return Err(invalid(format!(
-                    "resource `{}` cannot contain generic type parameters",
-                    resource.name
+                    "operation `{}` returns the generic resource `{}` with no `@nexus.proto` \
+                     message to hold its type arguments",
+                    operation.name, returned
                 )));
             }
+        }
+    }
 
-            for method in &resource.methods {
-                let Some(operation_name) = &method.operation_name else {
-                    continue;
-                };
-                let Some(operation) = service.operation(operation_name) else {
-                    continue;
-                };
-                let operation_is_generic = operation
-                    .input_type()
-                    .is_some_and(|input| !spec.type_parameters(input).is_empty())
-                    || operation
-                        .output_type()
-                        .is_some_and(|output| !spec.type_parameters(output).is_empty());
-                if operation_is_generic {
-                    return Err(invalid(format!(
-                        "resource-bound operation `{operation_name}` cannot use generic type parameters"
-                    )));
-                }
+    // A record that holds a resource builds it from the record's message, with no type argument.
+    let generic_resources = spec
+        .services
+        .iter()
+        .flat_map(|service| &service.resources)
+        .filter(|resource| !resource.type_parameters.is_empty())
+        .map(|resource| resource.name.as_str())
+        .collect::<BTreeSet<_>>();
+    for (_, record) in spec.records() {
+        for (field_name, field) in &record.fields {
+            if let TypeSpec::Resource(resource) = field.field_type.without_option()
+                && generic_resources.contains(resource.as_str())
+            {
+                return Err(invalid(format!(
+                    "record `{}` field `{field_name}` holds the generic resource `{resource}`, \
+                     which is not supported",
+                    record.full_name
+                )));
             }
         }
     }
@@ -157,10 +155,12 @@ mod tests {
     use super::*;
     use crate::descriptors::DescriptorIndex;
     use crate::language::Language;
-    use crate::planning::{AuthoredValidationPass, LanguageSelectionPass};
-    use crate::spec::ApiSpecTree;
+    use crate::planning::{
+        AuthoredValidationPass, LanguageSelectionPass, ResourceTypeParameterPass,
+    };
+    use crate::spec::{ApiSpecNode, ApiSpecTree};
 
-    fn validate(language: Language, wit: &str) -> Result<()> {
+    fn selected(language: Language, wit: &str) -> Result<ApiSpecTree<SelectedFamily>> {
         let spec = crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
             language,
             wit,
@@ -173,7 +173,29 @@ mod tests {
         let selected = LanguageSelectionPass::new(language)
             .apply(authored)
             .expect("language selection is infallible");
-        SelectedValidationPass.apply(selected).map(|_| ())
+        ResourceTypeParameterPass.apply(selected)
+    }
+
+    fn validate(language: Language, wit: &str) -> Result<()> {
+        SelectedValidationPass
+            .apply(selected(language, wit)?)
+            .map(|_| ())
+    }
+
+    fn resource_type_parameters(wit: &str, resource: &str) -> Vec<String> {
+        let tree = selected(Language::Python, wit).unwrap();
+        let ApiSpecNode::Leaf(leaf) = tree.root else {
+            panic!("expected one module");
+        };
+        leaf.spec
+            .services
+            .iter()
+            .find_map(|service| service.resource(resource))
+            .expect("the service has the resource")
+            .type_parameters
+            .iter()
+            .map(|parameter| parameter.name.clone())
+            .collect()
     }
 
     const GENERIC_WIT: &str = r#"
@@ -195,5 +217,62 @@ interface generic-service {
     #[test]
     fn accepts_generic_models() {
         validate(Language::Dotnet, GENERIC_WIT).unwrap();
+    }
+
+    // The resource has no annotation. It holds the parameter only through its records.
+    const RESOURCE_WIT: &str = r#"
+package temporal:nexus@1.0.0;
+world system { export handles; }
+/// @nexus.endpoint "handles"
+interface handles {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+  /// @nexus.type-parameter
+  type body-t = placeholder;
+  /// @nexus.type-parameter
+  type key-t = placeholder;
+  record item { body: body-t, }
+  record page { items: list<item>, }
+  record put-request { id: string, item: item, }
+  record put-response {}
+  record get-request { id: string, }
+  resource handle {
+    constructor(id: string);
+    /// @nexus.operation "put"
+    put: func(item: item) -> put-response;
+    /// @nexus.operation "get"
+    get: func() -> page;
+  }
+  resource plain {
+    constructor(id: string, key: string);
+  }
+  put: func(request: put-request) -> put-response;
+  get: func(request: get-request) -> page;
+}
+"#;
+
+    #[test]
+    fn a_resource_is_generic_in_the_parameters_of_its_records() {
+        assert_eq!(resource_type_parameters(RESOURCE_WIT, "handle"), ["BodyT"]);
+        assert!(resource_type_parameters(RESOURCE_WIT, "plain").is_empty());
+    }
+
+    #[test]
+    fn a_resource_takes_its_type_parameters_in_the_order_that_it_uses_them() {
+        let wit = r#"
+package test:pairs@1.0.0;
+world system { export pairs; }
+interface pairs {
+  type placeholder = string;
+  /// @nexus.type-parameter
+  type key-t = placeholder;
+  /// @nexus.type-parameter
+  type value-t = placeholder;
+  record entry { value: value-t, }
+  resource pair {
+    constructor(value: entry, key: key-t);
+  }
+}
+"#;
+        assert_eq!(resource_type_parameters(wit, "pair"), ["ValueT", "KeyT"]);
     }
 }

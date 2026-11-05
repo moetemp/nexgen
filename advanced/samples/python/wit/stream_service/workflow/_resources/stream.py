@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import typing
 import temporalio.nexus.system
 import datetime
@@ -24,12 +23,19 @@ from ..models import (
 import temporal_support as _support
 
 
-@dataclasses.dataclass
 class Stream:
     """One Stream. Build it from a stream-handle, or get it from a create."""
 
     handle: StreamHandle
     created: bool | None
+
+    def __init__(
+        self,
+        handle: StreamHandle,
+        created: bool | None,
+    ) -> None:
+        self.handle = handle
+        self.created = created
 
     async def publish(
         self,

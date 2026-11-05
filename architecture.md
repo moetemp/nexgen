@@ -115,7 +115,11 @@ Validates authored API intent and source-format constraints. Native
 protobuf-backed enums must match the descriptor's full case list, order, and
 numbers; reordered, omitted, and sparse cases are rejected before planning. It
 also checks authored service configuration against the requested API targets.
-Language-specific policies remain in language backends.
+Language-specific policies remain in language backends. After protobuf binding
+checks, record-containment validation rejects mixed backing through aliases,
+containers, and variants before resource binding or target-specific emission;
+independent operations may use different backing within the same service. It
+also validates constructor fields of resources returned as plain JSON.
 
 ### LanguageSelectionPass
 
@@ -131,7 +135,9 @@ Resolves resource-method and resource-return facts from the API spec and
 descriptors. Operations must return resources owned by their service, including
 those held in result records. Return bindings determine shared wire models
 regardless of API targets; resource methods are bound only when an API target is
-selected.
+selected. It rejects integer-width mismatches between resource values and the
+request or result fields they bind to, including constructor fields populated by
+operations that return resources.
 
 ### OperationBindingPass
 

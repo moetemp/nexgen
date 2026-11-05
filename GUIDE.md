@@ -521,6 +521,9 @@ Resources are the most complex feature of the code generator. They produce
 classes whose constructor fields represent the resource's identity, and whose
 methods delegate to Nexus operations.
 
+A resource can declare type parameters. See
+[Generic resources](#generic-resources).
+
 ### Resource Declaration
 
 ```wit
@@ -1649,7 +1652,7 @@ below, such as protobuf bindings, function signatures, and conflicting options.
 | `@nexus.service-name`                   | interface                                                                                     |
 | `@nexus.delay-load-temporalio-workflow` | interface                                                                                     |
 | `@nexus.proto`                          | record, enum, flags, variant, type alias, resource                                            |
-| `@nexus.type-parameter`                 | type alias                                                                                    |
+| `@nexus.type-parameter`                 | type alias, resource                                                                          |
 | `@nexus.proto-field`                    | record field                                                                                  |
 | `@nexus.name`                           | record field                                                                                  |
 | `@nexus.type`                           | record field, type alias, resource                                                            |
@@ -1678,16 +1681,17 @@ type-alias prose can be written as ordinary documentation comments, but
 `@nexus.doc` there has no generated documentation consumer and is rejected.
 
 `add-rpc-compatible-with` may be repeated to declare multiple compatibility
-targets. `source` and `default` may be repeated with disjoint `targets` sets;
-all other annotations are singletons. For language-specific arguments, the
-recognized prefixes are `dotnet`, `go`, `java`, `python`, `ruby`, and
-`typescript`. Prefixes are accepted only for options that the annotation
-actually consumes, not arbitrarily on every directive. For example, `name` takes
-language names, `proto` takes `<lang>-type` and `<lang>-import`, and `type` on
-an external binding also takes `<lang>-from` and `<lang>-to`. Field `type`
-annotations do not take conversion helpers. `doc` return overrides are only
-valid on freestanding functions, and `function` signatures belong on type
-aliases, not record fields.
+targets. `source` and `default` may be repeated with disjoint `targets` sets. A
+resource repeats `type-parameter`, once for each type parameter. All other
+annotations are singletons. For language-specific arguments, the recognized
+prefixes are `dotnet`, `go`, `java`, `python`, `ruby`, and `typescript`.
+Prefixes are accepted only for options that the annotation actually consumes,
+not arbitrarily on every directive. For example, `name` takes language names,
+`proto` takes `<lang>-type` and `<lang>-import`, and `type` on an external
+binding also takes `<lang>-from` and `<lang>-to`. Field `type` annotations do
+not take conversion helpers. `doc` return overrides are only valid on
+freestanding functions, and `function` signatures belong on type aliases, not
+record fields.
 
 ### Language and System Nexus restrictions
 
@@ -1869,7 +1873,8 @@ Unreachable declarations and omitted oneofs remain valid.
 
 ### @nexus.type-parameter
 
-**Placement:** Type alias **Syntax:** `@nexus.type-parameter` (no arguments)
+**Placement:** Type alias or resource **Syntax:** `@nexus.type-parameter` on a
+type alias, `@nexus.type-parameter "<alias>"` on a resource
 
 Declares an opaque model type parameter. Records and variants infer their
 ordered generic parameters from public fields and case payloads, including
@@ -1937,14 +1942,55 @@ const inputType = {
 };
 ```
 
-Type parameters are also unsupported in resources, map keys, function-signature
-metadata, or resource-bound generic operations.
+Type parameters are also unsupported in map keys and in function-signature
+metadata.
 
 Python represents generic variants as tagged tuples and protobuf oneof-backed
 generic variants as unions of generic case dataclasses. TypeScript uses tagged
 object unions, Go uses sealed interfaces and case structs, and .NET uses nested
 records. References to generic variants are closed automatically wherever they
 occur.
+
+#### Generic resources
+
+A resource declares each type parameter that it uses with
+`@nexus.type-parameter "<alias>"`, in order. The alias can come from another
+interface through `use`.
+
+```wit
+/// @nexus.type-parameter
+type body-t = placeholder;
+
+/// @nexus.proto "temporal.api.stream.v1.AppendRecord"
+record append-record {
+  body: body-t,
+}
+
+/// @nexus.type-parameter "body-t"
+resource %stream { ... }
+```
+
+The resource keeps a runtime type for each parameter, and its calls decode the
+generic values of a response with them. An operation that returns the resource
+takes a runtime type for each parameter. A method passes the types of its
+resource to the operation that it binds. A record that holds a parameter, also
+through another record, is generic in it by the rules above, so a response that
+holds such a record is generic too.
+
+- Python. `Stream(typing.Generic[BodyT])` takes a `body_type`, so
+  `create_stream(Turn, id="s1")` returns a `Stream[Turn]`. The client factory
+  takes it too, as in `get_stream(handle=handle, created=None, body_type=Turn)`.
+  The runtime type isn't a dataclass field, so the data converter doesn't encode
+  it, and a decoded handle decodes its values as `typing.Any`.
+- TypeScript. `Stream<BodyT>` takes `bodyType?: common.TypeInfo<BodyT>` after
+  its fields.
+- .NET. A call of `Stream<TBody>` takes the type argument, as in
+  `CreateStreamAsync<Turn>(options)`.
+
+Go and Java refuse a generic resource. nexgen also refuses a type parameter that
+a resource uses but doesn't declare, or declares but doesn't use, and a generic
+resource in a record field or in the result of an operation with no
+`@nexus.proto` message.
 
 ---
 

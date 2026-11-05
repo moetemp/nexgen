@@ -1979,9 +1979,9 @@ holds such a record is generic too.
 
 - Python. `Stream(typing.Generic[BodyT])` takes a `body_type`, so
   `create_stream(Turn, id="s1")` returns a `Stream[Turn]`. The client factory
-  takes it too, as in `get_stream(handle=handle, created=None, body_type=Turn)`.
-  The runtime type isn't a dataclass field, so the data converter doesn't encode
-  it, and a decoded handle decodes its values as `typing.Any`.
+  takes it too, as in `get_stream(ref=ref, created=None, body_type=Turn)`. The
+  runtime type isn't a dataclass field, so the data converter doesn't encode it,
+  and a decoded handle decodes its values as `typing.Any`.
 - TypeScript. `Stream<BodyT>` takes `bodyType?: common.TypeInfo<BodyT>` after
   its fields.
 - .NET. A call of `Stream<TBody>` takes the type argument, as in

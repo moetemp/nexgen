@@ -18,9 +18,9 @@ from ...models import (
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
-    StreamHandle,
     StreamReadStart,
     StreamRecord,
+    StreamRef,
 )
 import temporal_support as _support
 from .._poll import PollIterator
@@ -30,9 +30,9 @@ BodyT = typing.TypeVar("BodyT")
 
 
 class Stream(typing.Generic[BodyT]):
-    """One Stream. Build it from a stream-handle, or get it from a create."""
+    """One Stream. Build it from a stream-ref, or get it from a create."""
 
-    handle: StreamHandle
+    ref: StreamRef
     created: bool | None
 
     def __init__(
@@ -40,12 +40,12 @@ class Stream(typing.Generic[BodyT]):
         nexus_client: temporalio.client.NexusClient[typing.Any],
         /,
         *,
-        handle: StreamHandle,
+        ref: StreamRef,
         created: bool | None,
         body_type: type[BodyT] | None = None,
     ) -> None:
         self._nexus_client: temporalio.client.NexusClient[typing.Any] = nexus_client
-        self.handle = handle
+        self.ref = ref
         self.created = created
         # Not a dataclass field, so the converter doesn't encode it. A
         # decoded handle decodes its generic values as `typing.Any`.
@@ -59,7 +59,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> AppendRecordsResponse:
         """Publish values, and return the offset of the last one."""
         request = AppendRecordsRequest(
-            handle=self.handle,
+            ref=self.ref,
             records=records,
             producer=_support.client_producer(),
             withdraw_run=_support.withdraw_run(),
@@ -73,14 +73,10 @@ class Stream(typing.Generic[BodyT]):
 
     async def close(
         self,
-        result: typing.Any | None = None,
-        failure: BaseException | None = None,
     ) -> None:
         """Close the Stream. Readers drain what is left, then end."""
         request = CloseStreamRequest(
-            handle=self.handle,
-            result=result,
-            failure=failure,
+            ref=self.ref,
             producer=_support.client_producer(),
         )
         handle = await self._nexus_client.start_operation(
@@ -101,7 +97,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> ReadRecordsResponse[BodyT]:
         """Read one page of Records. The poll iterator reads them all."""
         request = ReadRecordsRequest(
-            handle=self.handle,
+            ref=self.ref,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -131,8 +127,8 @@ class Stream(typing.Generic[BodyT]):
         Read one page of Records. The poll iterator reads them all.
 
         Args:
-            from_offset: Start offset. Empty uses start. OUT_OF_RANGE past the newest
-                offset + 1.
+            from_offset: Start offset. Empty uses start. An offset past the newest one +
+                1 fails.
             start: Where to start when from-offset is empty. Unspecified is the
                 beginning.
             max_records: About this many items per page, 1 to 1000. A Superseded item
@@ -145,7 +141,7 @@ class Stream(typing.Generic[BodyT]):
                 returned alone.
         """
         request = ReadRecordsRequest(
-            handle=self.handle,
+            ref=self.ref,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -185,8 +181,8 @@ class Stream(typing.Generic[BodyT]):
         Read one page of Records. The poll iterator reads them all.
 
         Args:
-            from_offset: Start offset. Empty uses start. OUT_OF_RANGE past the newest
-                offset + 1.
+            from_offset: Start offset. Empty uses start. An offset past the newest one +
+                1 fails.
             start: Where to start when from-offset is empty. Unspecified is the
                 beginning.
             max_records: About this many items per page, 1 to 1000. A Superseded item
@@ -199,7 +195,7 @@ class Stream(typing.Generic[BodyT]):
                 returned alone.
         """
         request = ReadRecordsRequest(
-            handle=self.handle,
+            ref=self.ref,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -227,7 +223,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> DescribeStreamResponse:
         """Describe the Stream's status, newest offset and Retention."""
         request = DescribeStreamRequest(
-            handle=self.handle,
+            ref=self.ref,
         )
         handle = await self._nexus_client.start_operation(
             operation=StreamService.describe_stream,

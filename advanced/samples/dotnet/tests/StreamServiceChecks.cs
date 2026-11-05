@@ -21,12 +21,12 @@ namespace Nexgen.DotNetExamples.Tests
         {
             var converter = DataConverter.Default.PayloadConverter;
             var stream = new StreamServiceExample.Stream<Turn>(
-                new StreamServiceExample.StreamHandle("stream-1"), null);
+                new StreamServiceExample.StreamRef("stream-1"), null);
 
             var decoded = converter.ToValue<StreamServiceExample.Stream<Turn>>(
                 converter.ToPayload(stream));
 
-            Assert.Equal("stream-1", decoded.Handle.Id);
+            Assert.Equal("stream-1", decoded.Ref.Id);
         }
 
         // A data item's body goes through the payload converter of the sample assembly, which a
@@ -42,27 +42,13 @@ namespace Nexgen.DotNetExamples.Tests
                         new StreamServiceExample.StreamSuperseded("workflow-1", new long[] { 7 })),
                     Offset = 2,
                 },
-                new StreamServiceExample.StreamRecord<Turn>
-                {
-                    Item = new StreamServiceExample.StreamItem<Turn>.Close(
-                        new StreamServiceExample.StreamClose
-                        {
-                            Status = StreamServiceExample.StreamCloseStatus
-                                .StreamCloseStatusCompleted,
-                        }),
-                    Offset = 3,
-                },
             });
 
             var wire = Assert.IsType<WireReadRecordsResponse>(
                 CreateSdkConverter(typeof(StreamServiceExample.ReadRecordsResponse<Turn>))
                     .ToTransferType(model));
             Assert.Equal(
-                new[]
-                {
-                    WireStreamRecord.ItemOneofCase.Superseded,
-                    WireStreamRecord.ItemOneofCase.Close,
-                },
+                new[] { WireStreamRecord.ItemOneofCase.Superseded },
                 wire.Records.Select(record => record.ItemCase));
 
             var decoded = FromPayload<StreamServiceExample.ReadRecordsResponse<Turn>>(
@@ -71,12 +57,7 @@ namespace Nexgen.DotNetExamples.Tests
                 decoded.Records[0].Item);
             Assert.Equal("workflow-1", superseded.Value.ProducerId);
             Assert.Equal(new long[] { 7 }, superseded.Value.FailedTasks);
-            var close = Assert.IsType<StreamServiceExample.StreamItem<Turn>.Close>(
-                decoded.Records[1].Item);
-            Assert.Equal(
-                StreamServiceExample.StreamCloseStatus.StreamCloseStatusCompleted,
-                close.Value.Status);
-            Assert.Equal(3, decoded.Records[1].Offset);
+            Assert.Equal(2, decoded.Records[0].Offset);
         }
 
         // A newer server can send a Stream status that this code doesn't know.

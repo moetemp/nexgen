@@ -17,8 +17,8 @@ from ...models import (
     DescribeStreamResponse,
     ReadRecordsRequest,
     ReadRecordsResponse,
-    StreamHandle,
     StreamReadStart,
+    StreamRef,
 )
 import temporal_support as _support
 
@@ -27,19 +27,19 @@ BodyT = typing.TypeVar("BodyT")
 
 
 class Stream(typing.Generic[BodyT]):
-    """One Stream. Build it from a stream-handle, or get it from a create."""
+    """One Stream. Build it from a stream-ref, or get it from a create."""
 
-    handle: StreamHandle
+    ref: StreamRef
     created: bool | None
 
     def __init__(
         self,
-        handle: StreamHandle,
+        ref: StreamRef,
         created: bool | None,
         *,
         body_type: type[BodyT] | None = None,
     ) -> None:
-        self.handle = handle
+        self.ref = ref
         self.created = created
         # Not a dataclass field, so the converter doesn't encode it. A
         # decoded handle decodes its generic values as `typing.Any`.
@@ -53,7 +53,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> AppendRecordsResponse:
         """Publish values, and return the offset of the last one."""
         request = AppendRecordsRequest(
-            handle=self.handle,
+            ref=self.ref,
             records=records,
             producer=_support.workflow_producer(),
             withdraw_run=_support.withdraw_run(),
@@ -63,14 +63,10 @@ class Stream(typing.Generic[BodyT]):
 
     async def close(
         self,
-        result: typing.Any | None = None,
-        failure: BaseException | None = None,
     ) -> None:
         """Close the Stream. Readers drain what is left, then end."""
         request = CloseStreamRequest(
-            handle=self.handle,
-            result=result,
-            failure=failure,
+            ref=self.ref,
             producer=_support.workflow_producer(),
         )
         handle = await _close_stream(request)
@@ -87,7 +83,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> ReadRecordsResponse[BodyT]:
         """Read one page of Records. The poll iterator reads them all."""
         request = ReadRecordsRequest(
-            handle=self.handle,
+            ref=self.ref,
             from_offset=from_offset,
             start=start,
             max_records=max_records,
@@ -103,7 +99,7 @@ class Stream(typing.Generic[BodyT]):
     ) -> DescribeStreamResponse:
         """Describe the Stream's status, newest offset and Retention."""
         request = DescribeStreamRequest(
-            handle=self.handle,
+            ref=self.ref,
         )
         handle = await _describe_stream(request)
         return await handle
@@ -125,7 +121,7 @@ async def _append_records(
 
 async def append_records(
     *,
-    handle: StreamHandle,
+    ref: StreamRef,
     records: list[AppendRecord[BodyT]],
     sequence: int | None = None,
 ) -> temporalio.workflow.NexusOperationHandle[AppendRecordsResponse,]:
@@ -136,7 +132,7 @@ async def append_records(
             writes it again.
     """
     request = AppendRecordsRequest(
-        handle=handle,
+        ref=ref,
         records=records,
         producer=_support.workflow_producer(),
         sequence=sequence,
@@ -161,20 +157,11 @@ async def _close_stream(
 
 async def close_stream(
     *,
-    handle: StreamHandle,
-    result: typing.Any | None = None,
-    failure: BaseException | None = None,
+    ref: StreamRef,
 ) -> temporalio.workflow.NexusOperationHandle[CloseStreamResponse,]:
-    """
-    Args:
-        failure: Empty completes the Stream. A cancel failure cancels it. Any other
-            fails it.
-    """
     request = CloseStreamRequest(
-        handle=handle,
+        ref=ref,
         producer=_support.workflow_producer(),
-        result=result,
-        failure=failure,
     )
     return await _close_stream(request)
 
@@ -197,7 +184,7 @@ async def _read_records(
 async def read_records(
     body_type: type[BodyT],
     *,
-    handle: StreamHandle,
+    ref: StreamRef,
     from_offset: int | None = None,
     start: StreamReadStart | None = None,
     max_records: int | None = None,
@@ -210,8 +197,8 @@ async def read_records(
     Activity.
 
     Args:
-        from_offset: Start offset. Empty uses start. OUT_OF_RANGE past the newest offset
-            + 1.
+        from_offset: Start offset. Empty uses start. An offset past the newest one + 1
+            fails.
         start: Where to start when from-offset is empty. Unspecified is the beginning.
         max_records: About this many items per page, 1 to 1000. A Superseded item stays
             with its Record.
@@ -223,7 +210,7 @@ async def read_records(
             alone.
     """
     request = ReadRecordsRequest(
-        handle=handle,
+        ref=ref,
         from_offset=from_offset,
         start=start,
         max_records=max_records,
@@ -251,9 +238,9 @@ async def _describe_stream(
 
 async def describe_stream(
     *,
-    handle: StreamHandle,
+    ref: StreamRef,
 ) -> temporalio.workflow.NexusOperationHandle[DescribeStreamResponse,]:
     request = DescribeStreamRequest(
-        handle=handle,
+        ref=ref,
     )
     return await _describe_stream(request)

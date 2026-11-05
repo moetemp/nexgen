@@ -12,8 +12,8 @@ import abc
 from ..services import StreamService
 from ..models import (
     CreateStreamRequest,
-    Producer,
-    StreamHandle,
+    StreamIdConflictPolicy,
+    StreamRef,
 )
 from ._resources.stream import Stream
 import temporal_support as _support
@@ -45,7 +45,7 @@ class StreamServiceClientExtension(abc.ABC):
     def get_stream(
         self,
         *,
-        handle: StreamHandle,
+        ref: StreamRef,
         created: bool | None,
         body_type: type[BodyT] | None = None,
     ) -> Stream[BodyT]:
@@ -55,7 +55,7 @@ class StreamServiceClientExtension(abc.ABC):
                 service=StreamService,
                 endpoint=temporalio.nexus.system.TEMPORAL_SYSTEM_ENDPOINT,
             ),
-            handle=handle,
+            ref=ref,
             created=created,
             body_type=body_type,
         )
@@ -75,12 +75,12 @@ class StreamServiceClientExtension(abc.ABC):
             id=f"{_uuid.uuid4()}",
         )
         result = await handle.result()
-        if result.handle is None:
-            raise RuntimeError("CreateStream answered without `handle`")
+        if result.ref is None:
+            raise RuntimeError("CreateStream answered without `ref`")
         resource = Stream(
             nexus_client,
             body_type=body_type,
-            handle=result.handle,
+            ref=result.ref,
             created=result.created or None,
         )
         return resource
@@ -89,26 +89,23 @@ class StreamServiceClientExtension(abc.ABC):
         self,
         body_type: type[BodyT],
         *,
-        id: str,
+        stream_ref: StreamRef,
         retention: datetime.timedelta | None = None,
-        owner: Producer | None = None,
-        stream_handle: StreamHandle | None = None,
+        id_conflict_policy: StreamIdConflictPolicy | None = None,
     ) -> Stream[BodyT]:
         """
         Args:
-            id: The Stream id. Required, and never empty.
+            stream_ref: The ref of the Stream to create. Its id is the Stream id.
             retention: The age after which a Record is dropped. Empty is the Store
                 default.
-            owner: The Workflow run that owns the Stream. The Workflow transport sets
-                it.
-            stream_handle: The handle, whose id is stream-id. With an owner, it needs
-                the handle's owner.
+            id_conflict_policy: What the create does when the Stream exists. Unspecified
+                is fail.
         """
         request = CreateStreamRequest(
-            id=id,
+            stream_ref=stream_ref,
             retention=retention,
             withdraw_run=_support.withdraw_run(),
-            owner=owner,
-            stream_handle=stream_handle,
+            id_conflict_policy=id_conflict_policy,
+            request_id=_support.request_id(),
         )
         return await self._stream_service_create_stream(request, body_type)

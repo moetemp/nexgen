@@ -2586,6 +2586,11 @@ field `<field>` of each response. It returns a `PollIterator`, whose
 - After a page's last item, it is the page helper's request. It is `None` after
   the last page.
 
+`resume_request` is the same, but it is never `None`, so a read that ended can
+resume. After the last page, it is the `python-resume` helper's request for the
+last item. Without the helper, or when the last page has no item, it reads the
+last page again.
+
 ```wit
 /// @nexus.poll python="next_read_request" items="records"
 ///   python-resume="resume_read_request" targets="client"
@@ -2597,9 +2602,16 @@ def resume_read_request(request, item):
     return dataclasses.replace(request, from_offset=item.offset + 1)
 ```
 
-To resume, pass the fields of a saved `next_request` to `iter_<name>_items`. A
+To resume, pass the fields of a saved `resume_request` to `iter_<name>_items`. A
 resource method's iterator takes only the method's parameters, such as
-`from_offset` of the Stream's `iter_read_items`.
+`from_offset` of the Stream's `iter_read_items`:
+
+```python
+records = stream.iter_read_items(from_offset=0)
+async for record in records:
+    print(record.offset)
+later = stream.iter_read_items(from_offset=records.resume_request.from_offset)
+```
 
 The stream sample's full helpers are in
 [`temporal_support/poll.py`](advanced/samples/python/temporal_support/poll.py).

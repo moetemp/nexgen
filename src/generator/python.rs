@@ -6939,6 +6939,10 @@ class PollIterator(typing.Generic[_PollRequestT, _PollItemT]):
     ``next_request`` is the request to resume with. After an item, the resume helper gives
     it. Without a resume helper, it reads the item's page again. After a page's last item,
     it is the page helper's request, which is ``None`` after the last page.
+
+    ``resume_request`` is the same, but it is never ``None``. After the last page, it is
+    the resume helper's request for the last item. Without a resume helper, or when the
+    last page has no item, it reads the last page again.
     """
 
     def __init__(
@@ -6966,6 +6970,7 @@ class PollIterator(typing.Generic[_PollRequestT, _PollItemT]):
             )
 
         self.next_request: _PollRequestT | None = request
+        self.resume_request: _PollRequestT = request
         self._read: collections.abc.Callable[
             [_PollRequestT],
             collections.abc.Awaitable[
@@ -6990,11 +6995,21 @@ class PollIterator(typing.Generic[_PollRequestT, _PollItemT]):
             self._page_next, self._page = await self._read(self._page_request)
             if not self._page:
                 self.next_request = self._page_next
+                # After an empty last page, the read resumes at that page's request.
+                if self._page_next is not None:
+                    self.resume_request = self._page_next
         item = self._page.popleft()
-        if not self._page:
-            self.next_request = self._page_next
-        elif self._resume is not None:
-            self.next_request = self._resume(self._page_request, item)
+        if self._page or self._page_next is None:
+            self.resume_request = (
+                self._page_request
+                if self._resume is None
+                else self._resume(self._page_request, item)
+            )
+        else:
+            self.resume_request = self._page_next
+        # `None` ends the iteration, so only `resume_request` keeps the position after the
+        # last page.
+        self.next_request = self.resume_request if self._page else self._page_next
         return item
 "#;
 
@@ -9198,15 +9213,22 @@ fn poll_iterator_names(
 }
 
 fn poll_items_summary(name: &str, doc: Option<&str>, resume: bool) -> String {
-    let next_request = if resume {
-        "``next_request`` resumes after the last item that the iterator yielded."
+    let (next_request, after_last_page) = if resume {
+        (
+            "``next_request`` resumes after the last item that the iterator yielded.",
+            "still resumes after the last item",
+        )
     } else {
-        "``next_request`` reads the page of the last item again, until the iterator yields the \
-         page's last item."
+        (
+            "``next_request`` reads the page of the last item again, until the iterator yields \
+             the page's last item.",
+            "reads that page again",
+        )
     };
     let summary = format!(
         "Yield each item of ``{}``, page by page.\n\n{next_request} It is ``None`` after the \
-         last page.",
+         last page. ``resume_request`` is the same, but after the last page it \
+         {after_last_page}.",
         poll_function_name(name)
     );
     match doc.map(str::trim).filter(|doc| !doc.is_empty()) {

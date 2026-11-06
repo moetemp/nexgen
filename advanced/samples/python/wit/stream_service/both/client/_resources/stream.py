@@ -218,7 +218,8 @@ class Stream(typing.Generic[BodyT]):
         """Yield each item of ``iter_read``, page by page.
 
         ``next_request`` resumes after the last item that the iterator yielded. It is
-        ``None`` after the last page.
+        ``None`` after the last page. ``resume_request`` is the same, but after the last
+        page it still resumes after the last item.
 
         Read one page of Records. The poll iterator reads them all.
 

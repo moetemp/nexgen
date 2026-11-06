@@ -675,6 +675,7 @@ async def test_iter_read_items_yields_each_record_and_resumes_after_it() -> None
     # where the page ends.
     assert seen == [(10, 11), (12, 15), (20, None)]
     assert read.next_request is None
+    assert read.resume_request.from_offset == 21
     assert [started.arg for started in answers.started] == [
         ReadRecordsRequest(ref=ref, from_offset=10, wait=wait),
         ReadRecordsRequest(ref=ref, from_offset=15, wait=wait),
@@ -712,6 +713,41 @@ async def test_a_new_read_resumes_from_the_next_request_of_a_stopped_read() -> N
     assert [started.arg for started in answers.started] == [
         ReadRecordsRequest(ref=ref, from_offset=1),
         ReadRecordsRequest(ref=ref, from_offset=2),
+    ]
+
+
+async def test_a_read_to_the_end_resumes_from_its_resume_request() -> None:
+    ref = StreamRef(id="s1")
+    client, answers = connect(
+        Client,
+        {
+            "ReadRecords": [
+                ReadRecordsResponse[str](
+                    records=[StreamRecord[str](offset=1), StreamRecord[str](offset=2)],
+                    next_offset=3,
+                ),
+                ReadRecordsResponse[str](records=[], next_offset=3),
+                ReadRecordsResponse[str](
+                    records=[StreamRecord[str](offset=3)], next_offset=4
+                ),
+                ReadRecordsResponse[str](records=[], next_offset=4),
+            ]
+        },
+    )
+    stream = client.get_stream[str](id=ref.id)
+
+    read = stream.iter_read_items(from_offset=1)
+    assert [record.offset async for record in read] == [1, 2]
+    assert read.next_request is None
+    resumed = stream.iter_read_items(from_offset=read.resume_request.from_offset)
+
+    assert [record.offset async for record in resumed] == [3]
+    assert resumed.resume_request.from_offset == 4
+    assert [started.arg for started in answers.started] == [
+        ReadRecordsRequest(ref=ref, from_offset=1),
+        ReadRecordsRequest(ref=ref, from_offset=3),
+        ReadRecordsRequest(ref=ref, from_offset=3),
+        ReadRecordsRequest(ref=ref, from_offset=4),
     ]
 
 
@@ -758,9 +794,9 @@ async def test_without_a_resume_helper_the_next_request_reads_the_page_again() -
         None,
     )
 
-    seen = [(item, read.next_request) async for item in read]
+    seen = [(item, read.next_request, read.resume_request) async for item in read]
 
-    assert seen == [(1, "first"), (2, "second"), (3, None)]
+    assert seen == [(1, "first", "first"), (2, "second", "second"), (3, None, "second")]
 
 
 def test_only_the_client_target_has_the_read_poll() -> None:

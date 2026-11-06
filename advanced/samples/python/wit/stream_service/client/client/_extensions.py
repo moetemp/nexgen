@@ -63,6 +63,55 @@ class _GetStream(typing.Generic[BodyT]):
         )
 
 
+class _ToStream(typing.Generic[BodyT]):
+    """Subscript it with the type arguments to decode with, or the ref gives them."""
+
+    def __init__(
+        self,
+        extension: StreamServiceClientExtension,
+        body_type: type[BodyT] | None = None,
+    ) -> None:
+        self._extension: StreamServiceClientExtension = extension
+        self.body_type: type[BodyT] | None = body_type
+
+    def __getitem__(self, body_type: type[_BodyT]) -> _ToStream[_BodyT]:
+        return _ToStream(self._extension, body_type)
+
+    @typing.overload
+    def __call__(
+        self: _ToStream[None],
+        ref: StreamRef[_BodyT],
+        /,
+    ) -> Stream[_BodyT]: ...
+
+    @typing.overload
+    def __call__(
+        self,
+        ref: StreamRef[BodyT],
+        /,
+    ) -> Stream[BodyT]: ...
+
+    def __call__(
+        self,
+        ref: StreamRef[typing.Any],
+        /,
+    ) -> Stream[typing.Any]:
+        """A handle on the ``Stream`` of a ref, with no call."""
+        # A subscript wins over the type arguments that the ref keeps.
+        type_arguments = typing.get_args(getattr(ref, "__orig_class__", None))
+        body_type = self.body_type
+        if body_type is None:
+            body_type = type_arguments[0] if type_arguments else typing.Any
+        return Stream[body_type](
+            self._extension.create_nexus_client(
+                service=StreamService,
+                endpoint=temporalio.nexus.system.TEMPORAL_SYSTEM_ENDPOINT,
+            ),
+            ref=ref,
+            created=None,
+        )
+
+
 class _CreateStream(typing.Generic[BodyT]):
     """Subscript it with the type arguments that the call decodes with."""
 
@@ -143,6 +192,11 @@ class StreamServiceClientExtension(abc.ABC):
     def get_stream(self) -> _GetStream[typing.Any]:
         """Subscript it with the type arguments that the call decodes with."""
         return _GetStream(self)
+
+    @property
+    def to_stream(self) -> _ToStream[None]:
+        """Subscript it with the type arguments to decode with, or the ref gives them."""
+        return _ToStream(self)
 
     async def _stream_service_create_stream(
         self,

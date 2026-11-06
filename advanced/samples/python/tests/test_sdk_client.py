@@ -21,6 +21,7 @@ import temporalio.nexus.system
 import temporalio.service
 import temporalio.workflow
 from temporalio.api.common.v1 import Payload
+from temporalio.api.stream.v1 import message_pb2
 from typing_extensions import assert_type, override
 
 import wit.stream_service.both.models as both_models
@@ -811,6 +812,70 @@ async def test_a_handle_decodes_its_bodies_with_its_type_parameter(
     assert page.records == [record]
     assert [page.records async for page in stream.iter_read()] == [[record]]
     assert [item async for item in stream.iter_read_items()] == [record]
+
+
+def turn_pages() -> Payload:
+    record = StreamRecord(
+        item=StreamItemData(StreamData(body=Turn(role="model"))), offset=1
+    )
+    return SYSTEM_CONVERTER.to_payload(
+        ReadRecordsResponse[Turn](records=[record], done=True)
+    )
+
+
+async def test_a_typed_ref_round_trips_into_a_typed_handle() -> None:
+    client, _ = connect(
+        Client,
+        {
+            "CreateStream": CreateStreamResult(ref=StreamRef(id="s1")),
+            "ReadRecords": turn_pages(),
+        },
+    )
+    created = await client.create_stream[Turn](id="s1")
+
+    # A Workflow input crosses the client's data converter, which sends a ref as its wire
+    # message. The Workflow parameter's annotation is the type that it decodes with.
+    payloads = await client.data_converter.encode([created.ref])
+    assert payloads == await client.data_converter.encode(
+        [message_pb2.StreamRef(id="s1")]
+    )
+    [decoded] = await client.data_converter.decode(payloads, [StreamRef[Turn]])
+    ref: StreamRef[Turn] = decoded
+    stream = client.to_stream(ref)
+
+    _ = assert_type(created.ref, StreamRef[Turn])
+    _ = assert_type(stream, Stream[Turn])
+    assert stream.ref == created.ref
+    # The ref of a created handle keeps its type argument too.
+    assert client.to_stream(created.ref).body_type is Turn
+    [record] = (await stream.read()).records
+    assert record.item == StreamItemData(StreamData(body=Turn(role="model")))
+    if typing.TYPE_CHECKING:
+        # A subscript that isn't the ref's type argument is a type error.
+        _ = client.to_stream[str](ref)  # pyright: ignore[reportArgumentType]
+
+
+async def test_a_ref_gives_its_type_argument_to_the_handle() -> None:
+    client, _ = connect(Client, {"ReadRecords": turn_pages()})
+    typed = StreamRef[Turn](id="s1")
+    plain = StreamRef(id="s1")
+
+    typed_stream = client.to_stream(typed)
+    plain_stream = client.to_stream(plain)
+
+    _ = assert_type(typed_stream, Stream[Turn])
+    _ = assert_type(plain_stream, Stream[typing.Any])
+    [typed_record] = (await typed_stream.read()).records
+    [plain_record] = (await plain_stream.read()).records
+    assert typed_record.item == StreamItemData(StreamData(body=Turn(role="model")))
+    assert plain_record.item == StreamItemData(StreamData(body={"role": "model"}))
+    # A subscript wins over the type argument of the ref.
+    assert client.to_stream[Turn](plain).body_type is Turn
+    # The ref of a typed handle keeps its type argument, which isn't data.
+    ref = client.get_stream[Turn](id="s1").ref
+    assert client.to_stream(ref).body_type is Turn
+    assert ref == plain
+    assert repr(ref) == repr(plain)
 
 
 async def test_a_call_and_a_resource_method_pass_their_rpc_options() -> None:

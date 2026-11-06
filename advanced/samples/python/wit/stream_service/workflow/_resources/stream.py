@@ -33,15 +33,14 @@ _BodyT = typing.TypeVar("_BodyT")
 class Stream(typing.Generic[BodyT]):
     """One Stream. Build it from a stream-ref, or get it from a create."""
 
-    ref: StreamRef
     created: bool | None
 
     def __init__(
         self,
-        ref: StreamRef,
+        ref: StreamRef[BodyT],
         created: bool | None,
     ) -> None:
-        self.ref = ref
+        self._ref: StreamRef[BodyT] = ref
         self.created = created
 
     @property
@@ -57,6 +56,17 @@ class Stream(typing.Generic[BodyT]):
             (),
         )
         return typing.cast("type[BodyT]", arguments[0] if arguments else typing.Any)
+
+    @property
+    def ref(self) -> StreamRef[BodyT]:
+        # The ref keeps this handle's type arguments, so `to_stream` can rebuild it.
+        if not typing.get_args(getattr(self._ref, "__orig_class__", None)):
+            self._ref = StreamRef[self.body_type](
+                id=self._ref.id,
+                owner=self._ref.owner,
+                backend=self._ref.backend,
+            )
+        return self._ref
 
     async def __aenter__(self) -> typing_extensions.Self:
         return self
@@ -156,6 +166,52 @@ class _GetStream(typing.Generic[BodyT]):
 
 
 get_stream: _GetStream[typing.Any] = _GetStream()
+
+
+class _ToStream(typing.Generic[BodyT]):
+    """Subscript it with the type arguments to decode with, or the ref gives them."""
+
+    def __init__(
+        self,
+        body_type: type[BodyT] | None = None,
+    ) -> None:
+        self.body_type: type[BodyT] | None = body_type
+
+    def __getitem__(self, body_type: type[_BodyT]) -> _ToStream[_BodyT]:
+        return _ToStream(body_type)
+
+    @typing.overload
+    def __call__(
+        self: _ToStream[None],
+        ref: StreamRef[_BodyT],
+        /,
+    ) -> Stream[_BodyT]: ...
+
+    @typing.overload
+    def __call__(
+        self,
+        ref: StreamRef[BodyT],
+        /,
+    ) -> Stream[BodyT]: ...
+
+    def __call__(
+        self,
+        ref: StreamRef[typing.Any],
+        /,
+    ) -> Stream[typing.Any]:
+        """A handle on the ``Stream`` of a ref, with no call."""
+        # A subscript wins over the type arguments that the ref keeps.
+        type_arguments = typing.get_args(getattr(ref, "__orig_class__", None))
+        body_type = self.body_type
+        if body_type is None:
+            body_type = type_arguments[0] if type_arguments else typing.Any
+        return Stream[body_type](
+            ref=ref,
+            created=None,
+        )
+
+
+to_stream: _ToStream[None] = _ToStream()
 
 
 async def _append_records(

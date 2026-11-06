@@ -16,11 +16,11 @@ import pytest
 from temporalio.api.enums.v1 import stream_pb2
 from temporalio.api.stream.v1 import message_pb2
 from temporalio.api.streamservice.v1 import request_response_pb2
-from temporalio.converter import FailureConverter, PayloadConverter
+from temporalio.converter import DataConverter, FailureConverter, PayloadConverter
 import temporalio.nexus.system
 from temporalio.worker import StartNexusOperationInput
 import temporalio.workflow
-from typing_extensions import override
+from typing_extensions import assert_type, override
 
 from wit.stream_service.models import models as models_only
 from wit.stream_service.workflow import models as workflow_models
@@ -269,7 +269,9 @@ async def test_workflow_apis_call_the_stream_service(
     ] == ["a", "b"]
 
 
-@pytest.mark.parametrize("construction", ["create", "direct"])
+@pytest.mark.parametrize(
+    "construction", ["create", "direct", "typed ref", "decoded ref"]
+)
 async def test_workflow_handle_decodes_with_its_type_parameter(
     monkeypatch: pytest.MonkeyPatch, construction: str
 ) -> None:
@@ -310,8 +312,22 @@ async def test_workflow_handle_decodes_with_its_type_parameter(
     monkeypatch.setattr(temporalio.workflow, "uuid4", lambda: uuid.UUID(int=7))
     if construction == "create":
         stream = await workflow_only.create_stream[Turn](id=ref.id)
-    else:
+    elif construction == "direct":
         stream = WorkflowStream[Turn](ref=ref, created=None)
+    elif construction == "typed ref":
+        typed_ref = workflow_models.StreamRef[Turn](id=ref.id)
+        stream = workflow_only.to_stream(typed_ref)
+        _ = assert_type(stream, WorkflowStream[Turn])
+        if typing.TYPE_CHECKING:
+            # A subscript that isn't the ref's type argument is a type error.
+            _ = workflow_only.to_stream[str](typed_ref)  # pyright: ignore[reportArgumentType]
+    else:
+        # A Workflow input decodes with the annotation of its parameter.
+        converter = DataConverter.default
+        payloads = await converter.encode([ref])
+        [decoded] = await converter.decode(payloads, [workflow_models.StreamRef[Turn]])
+        decoded_ref: workflow_models.StreamRef[Turn] = decoded
+        stream = workflow_only.to_stream(decoded_ref)
 
     page = await stream.read()
 
@@ -422,6 +438,23 @@ def test_a_workflow_factory_builds_a_handle_with_no_call(
     assert stream.ref == model_types.StreamRef(id="turns", backend="redis")
     assert stream.created is None
     assert stream.body_type is str
+
+
+@pytest.mark.parametrize(
+    ("api", "model_types"),
+    [(workflow_only, workflow_models), (both_workflow, both_models)],
+    ids=["workflow", "both"],
+)
+def test_a_workflow_ref_gives_its_type_argument_to_the_handle(
+    api: types.ModuleType, model_types: types.ModuleType
+) -> None:
+    typed = model_types.StreamRef[Turn](id="turns")
+    plain = model_types.StreamRef(id="turns")
+
+    assert api.to_stream(typed).body_type is Turn
+    assert api.to_stream(plain).body_type is typing.Any
+    # A subscript wins over the type argument of the ref.
+    assert api.to_stream[str](typed).body_type is str
 
 
 @pytest.mark.parametrize(

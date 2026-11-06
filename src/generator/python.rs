@@ -7,6 +7,9 @@ use indexmap::IndexMap;
 use crate::error::{Error, Result};
 use crate::generator::json_schema::python as python_json;
 use crate::generator::proto::python as python_proto;
+use crate::generator::resource_plan::{
+    ref_type_parameters, resource_ref_field, resource_ref_record,
+};
 use crate::generator::{
     ExternalModelBackend, GeneratedFileMap, GeneratedFileOrigin, GeneratedFiles,
 };
@@ -27,7 +30,7 @@ use crate::spec::{
     AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FieldOrigin, FlagsSpec,
     FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, LanguageImportSpec,
     LanguageImportStyle, ModulePath, OperationPollSpec, OperationSpec, RecordFieldSpec, RecordSpec,
-    SelectedTextSpec, TypeDeclSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
+    SelectedTextSpec, TypeDeclSpec, TypeParameterSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
 };
 use crate::spec::{ApiSpecBranch, ApiSpecNode};
 
@@ -1217,7 +1220,18 @@ impl<'a> ApiPlanner<'a> {
                     &mut classes,
                     service,
                     resource,
+                    ResourceFactory::Get,
                 );
+                if resource_ref_record(resource).is_some() {
+                    factories.push('\n');
+                    self.render_client_resource_factory(
+                        &mut factories,
+                        &mut classes,
+                        service,
+                        resource,
+                        ResourceFactory::To,
+                    );
+                }
             }
             for operation in standalone_operations(service) {
                 if let Some(unpacked_input) =
@@ -1302,34 +1316,41 @@ impl<'a> ApiPlanner<'a> {
         Ok(output)
     }
 
-    /// A public method that builds a client handle from the identity fields of a resource, for
-    /// example from fields that a caller stored. The handle gets a Nexus client for the
-    /// resource's own service. A generic resource's factory is a call class in `classes`.
+    /// A public method that builds a client handle from the identity fields or the ref of a
+    /// resource, for example from data that a caller stored. The handle gets a Nexus client for
+    /// the resource's own service. A generic resource's factory is a call class in `classes`.
     fn render_client_resource_factory(
         &self,
         output: &mut String,
         classes: &mut String,
         service: &RenderedService<'_>,
         resource: &PlannedResource,
+        factory: ResourceFactory,
     ) {
-        let name = client_resource_factory_name(resource);
+        let name = factory.name(resource);
         let receiver = resource_client_identifier(resource, "self");
         let type_variables = resource_type_variable_names(resource);
+        let from_ref = factory == ResourceFactory::To;
         if type_variables.is_empty() {
-            self.render_client_resource_factory_def(output, service, resource, &name, &receiver);
+            self.render_client_resource_factory_def(
+                output, service, resource, factory, &name, &receiver,
+            );
             return;
         }
         let class_name = runtime_type_call_class_name(&name);
-        render_runtime_type_call_property(output, &name, &class_name, &type_variables);
+        render_runtime_type_call_property(output, &name, &class_name, &type_variables, from_ref);
         classes.push_str("\n\n");
         render_runtime_type_call_class_head(
             classes,
             &class_name,
             &type_variables,
             Some(&client_extension_class_name(service)),
+            from_ref,
         );
         classes.push('\n');
-        self.render_client_resource_factory_def(classes, service, resource, "__call__", &receiver);
+        self.render_client_resource_factory_def(
+            classes, service, resource, factory, "__call__", &receiver,
+        );
     }
 
     fn render_client_resource_factory_def(
@@ -1337,11 +1358,23 @@ impl<'a> ApiPlanner<'a> {
         output: &mut String,
         service: &RenderedService<'_>,
         resource: &PlannedResource,
+        factory: ResourceFactory,
         name: &str,
         receiver: &str,
     ) {
         let type_variables = resource_type_variable_names(resource);
         let call_class = !type_variables.is_empty();
+        if factory == ResourceFactory::To {
+            self.render_resource_ref_factory_def(
+                output,
+                "    ",
+                resource,
+                name,
+                Some(receiver),
+                Some(service),
+            );
+            return;
+        }
         self.render_resource_factory_head(output, "    ", resource, name, Some(receiver));
         output.push_str("        return ");
         output.push_str(&resource.type_name);
@@ -1372,9 +1405,19 @@ impl<'a> ApiPlanner<'a> {
     }
 
     /// A generic factory is a call class, since Python can't subscript a function.
-    fn render_workflow_resource_factory(&self, output: &mut String, resource: &PlannedResource) {
-        let name = workflow_resource_factory_name(resource);
+    fn render_workflow_resource_factory(
+        &self,
+        output: &mut String,
+        resource: &PlannedResource,
+        factory: ResourceFactory,
+    ) {
+        let name = factory.name(resource);
         let type_variables = resource_type_variable_names(resource);
+        let from_ref = factory == ResourceFactory::To;
+        if type_variables.is_empty() && from_ref {
+            self.render_resource_ref_factory_def(output, "", resource, &name, None, None);
+            return;
+        }
         if type_variables.is_empty() {
             self.render_resource_factory_head(output, "", resource, &name, None);
             output.push_str("    return ");
@@ -1386,23 +1429,183 @@ impl<'a> ApiPlanner<'a> {
         }
         let class_name = runtime_type_call_class_name(&name);
         let receiver = resource_client_identifier(resource, "self");
-        render_runtime_type_call_class_head(output, &class_name, &type_variables, None);
+        render_runtime_type_call_class_head(output, &class_name, &type_variables, None, from_ref);
         output.push('\n');
-        self.render_resource_factory_head(output, "    ", resource, "__call__", Some(&receiver));
-        output.push_str("        return ");
-        output.push_str(&resource.type_name);
-        let arguments = type_variables
-            .iter()
-            .map(|name| format!("{receiver}.{}", python_runtime_type_argument_name(name)))
-            .collect::<Vec<_>>();
-        render_resource_type_specialization(output, &arguments);
-        output.push_str("(\n");
-        render_resource_factory_arguments(output, "            ", resource);
-        output.push_str("        )\n\n\n");
+        if from_ref {
+            self.render_resource_ref_factory_def(
+                output,
+                "    ",
+                resource,
+                "__call__",
+                Some(&receiver),
+                None,
+            );
+        } else {
+            self.render_resource_factory_head(
+                output,
+                "    ",
+                resource,
+                "__call__",
+                Some(&receiver),
+            );
+            output.push_str("        return ");
+            output.push_str(&resource.type_name);
+            let arguments = type_variables
+                .iter()
+                .map(|name| format!("{receiver}.{}", python_runtime_type_argument_name(name)))
+                .collect::<Vec<_>>();
+            render_resource_type_specialization(output, &arguments);
+            output.push_str("(\n");
+            render_resource_factory_arguments(output, "            ", resource);
+            output.push_str("        )\n");
+        }
         output.push_str(&format!(
-            "{name}: {} = {class_name}()\n",
-            runtime_type_call_class_annotation(&class_name, &type_variables)
+            "\n\n{name}: {} = {class_name}()\n",
+            runtime_type_call_class_annotation(&class_name, &type_variables, from_ref)
         ));
+    }
+
+    /// `to_<resource>` takes only the ref. A generic one takes the type arguments of its subscript,
+    /// or else those that the ref keeps. With `service`, it is a client call, whose `receiver` is
+    /// the extension or, in a call class, holds it.
+    fn render_resource_ref_factory_def(
+        &self,
+        output: &mut String,
+        indent: &str,
+        resource: &PlannedResource,
+        name: &str,
+        receiver: Option<&str>,
+        service: Option<&RenderedService<'_>>,
+    ) {
+        let ref_field = resource_ref_field(resource).expect("the factory takes a ref");
+        let ref_name = python_field_name(&ref_field.name);
+        let type_variables = resource_type_variable_names(resource);
+        let call_class = !type_variables.is_empty();
+        let def =
+            |output: &mut String, receiver: Option<String>, annotation: &str, result: &str| {
+                output.push_str(&format!("{indent}def {name}(\n"));
+                if let Some(receiver) = receiver {
+                    output.push_str(&format!("{indent}    {receiver},\n"));
+                }
+                output.push_str(&format!(
+                    "{indent}    {ref_name}: {annotation},\n{indent}    /,\n{indent}) -> {result}:"
+                ));
+            };
+        let summary = format!(
+            "A handle on the ``{}`` of a ref, with no call.",
+            resource.type_name
+        );
+        let body_indent = format!("{indent}    ");
+        let mut specialization = Vec::new();
+        if call_class {
+            let receiver = receiver.expect("a generic factory is a call class");
+            let class_name = runtime_type_call_class_name(&resource_ref_factory_name(resource));
+            let unsubscripted =
+                runtime_type_call_class_annotation(&class_name, &type_variables, true);
+            let subscripts = type_variables
+                .iter()
+                .map(|name| runtime_type_subscript_variable(name))
+                .collect::<Vec<_>>();
+            let overloads = [
+                (
+                    format!("{receiver}: {unsubscripted}"),
+                    self.python_ref_annotation(resource, |parameter| {
+                        runtime_type_subscript_variable(&parameter.name)
+                    }),
+                    python_type_annotation_with_arguments(&resource.type_name, &subscripts),
+                ),
+                (
+                    receiver.to_string(),
+                    self.python_ref_annotation(resource, |parameter| parameter.name.clone()),
+                    python_type_annotation_with_arguments(&resource.type_name, &type_variables),
+                ),
+            ];
+            for (overload_receiver, annotation, result) in overloads {
+                output.push_str(&format!("{indent}@typing.overload\n"));
+                let annotation = annotation.expect("a generic resource's ref is generic");
+                def(output, Some(overload_receiver), &annotation, &result);
+                output.push_str(" ...\n\n");
+            }
+            let any = vec!["typing.Any".to_string(); type_variables.len()];
+            let annotation = self
+                .python_ref_annotation(resource, |_| "typing.Any".to_string())
+                .expect("a generic resource's ref is generic");
+            def(
+                output,
+                Some(receiver.to_string()),
+                &annotation,
+                &python_type_annotation_with_arguments(&resource.type_name, &any),
+            );
+            output.push('\n');
+            render_python_docstring(output, &body_indent, Some(&summary), &[], None, false);
+            let parameters = self.ref_type_parameters(resource);
+            let type_arguments = resource_client_identifier(resource, "type_arguments");
+            output.push_str(&format!(
+                "{body_indent}# A subscript wins over the type arguments that the ref keeps.\n\
+                 {body_indent}{type_arguments} = typing.get_args(\n\
+                 {body_indent}    getattr({ref_name}, \"__orig_class__\", None)\n\
+                 {body_indent})\n"
+            ));
+            for (name, parameter) in type_variables.iter().zip(&resource.type_parameters) {
+                let argument = python_runtime_type_argument_name(name);
+                let from_ref = parameters
+                    .iter()
+                    .position(|candidate| candidate == parameter)
+                    .map(|position| {
+                        format!("{type_arguments}[{position}] if {type_arguments} else typing.Any")
+                    })
+                    .unwrap_or_else(|| "typing.Any".to_string());
+                output.push_str(&format!(
+                    "{body_indent}{argument} = {receiver}.{argument}\n\
+                     {body_indent}if {argument} is None:\n\
+                     {body_indent}    {argument} = {from_ref}\n"
+                ));
+                specialization.push(argument);
+            }
+        } else {
+            def(
+                output,
+                receiver.map(str::to_string),
+                &self.python_resource_constructor_field_annotation(resource, ref_field),
+                &resource.type_name,
+            );
+            output.push('\n');
+            render_python_docstring(output, &body_indent, Some(&summary), &[], None, false);
+        }
+        output.push_str(&format!("{body_indent}return {}", resource.type_name));
+        render_resource_type_specialization(output, &specialization);
+        output.push_str("(\n");
+        if let Some(service) = service {
+            let receiver = receiver.expect("a client factory has a receiver");
+            let extension = if call_class {
+                format!("{receiver}._extension")
+            } else {
+                receiver.to_string()
+            };
+            output.push_str(&format!(
+                "{body_indent}    {extension}.create_nexus_client(\n\
+                 {body_indent}        service={},\n\
+                 {body_indent}        endpoint={},\n\
+                 {body_indent}    ),\n",
+                service.name,
+                python_endpoint_expr(
+                    service
+                        .endpoint
+                        .as_deref()
+                        .expect("the client target refuses a service with no endpoint"),
+                ),
+            ));
+        }
+        for field in &resource.fields {
+            let field_name = python_field_name(&field.name);
+            let value = if field.name == ref_field.name {
+                field_name.as_str()
+            } else {
+                "None"
+            };
+            output.push_str(&format!("{body_indent}    {field_name}={value},\n"));
+        }
+        output.push_str(&format!("{body_indent})\n"));
     }
 
     fn render_resource_factory_head(
@@ -1592,7 +1795,11 @@ impl<'a> ApiPlanner<'a> {
         let workflow = target == GenerationTarget::Workflow;
         if workflow_factory {
             body.push_str("\n\n");
-            self.render_workflow_resource_factory(&mut body, resource);
+            self.render_workflow_resource_factory(&mut body, resource, ResourceFactory::Get);
+            if resource_ref_record(resource).is_some() {
+                body.push_str("\n\n");
+                self.render_workflow_resource_factory(&mut body, resource, ResourceFactory::To);
+            }
         }
         for (full_name, (_, resource_type)) in resource_holders(self.api_plan) {
             if resource_type != resource.type_name {
@@ -1781,15 +1988,15 @@ impl<'a> ApiPlanner<'a> {
             .map(|field| {
                 (
                     python_field_name(&field.name),
-                    self.python_resource_field_annotation(
-                        &field.kind,
-                        field.optional,
-                        field.function.as_ref(),
-                    ),
+                    self.python_resource_constructor_field_annotation(resource, field),
                 )
             })
             .collect::<Vec<_>>();
+        let typed_ref = target.and_then(|_| self.typed_ref_field(resource));
         for (name, annotation) in &fields {
+            if typed_ref.is_some_and(|field| python_field_name(&field.name) == *name) {
+                continue;
+            }
             output.push_str("    ");
             output.push_str(name);
             output.push_str(": ");
@@ -1803,6 +2010,9 @@ impl<'a> ApiPlanner<'a> {
         }
         if target.is_some() {
             render_runtime_type_properties(output, resource, &type_variables);
+            if let Some(field) = typed_ref {
+                self.render_resource_ref_property(output, resource, field);
+            }
             render_resource_context_manager(output, resource);
         }
         let Some(target) = target else {
@@ -1857,20 +2067,29 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(&format!(
                 "        {}: {},\n",
                 python_field_name(&field.name),
-                self.python_resource_field_annotation(
-                    &field.kind,
-                    field.optional,
-                    field.function.as_ref()
-                )
+                self.python_resource_constructor_field_annotation(resource, field)
             ));
         }
         output.push_str("    ) -> None:\n");
         output.push_str(&format!(
             "        {receiver}.{attribute}: temporalio.client.NexusClient[typing.Any] = {parameter}\n"
         ));
+        self.render_resource_field_assignments(output, resource);
+    }
+
+    fn render_resource_field_assignments(&self, output: &mut String, resource: &PlannedResource) {
+        let receiver = resource_client_identifier(resource, "self");
+        let typed_ref = self.typed_ref_field(resource);
         for field in &resource.fields {
             let name = python_field_name(&field.name);
-            output.push_str(&format!("        {receiver}.{name} = {name}\n"));
+            if typed_ref.is_some_and(|typed_ref| typed_ref.name == field.name) {
+                let annotation = self.python_resource_constructor_field_annotation(resource, field);
+                output.push_str(&format!(
+                    "        {receiver}._{name}: {annotation} = {name}\n"
+                ));
+            } else {
+                output.push_str(&format!("        {receiver}.{name} = {name}\n"));
+            }
         }
     }
 
@@ -1882,18 +2101,11 @@ impl<'a> ApiPlanner<'a> {
             output.push_str(&format!(
                 "        {}: {},\n",
                 python_field_name(&field.name),
-                self.python_resource_field_annotation(
-                    &field.kind,
-                    field.optional,
-                    field.function.as_ref()
-                )
+                self.python_resource_constructor_field_annotation(resource, field)
             ));
         }
         output.push_str("    ) -> None:\n");
-        for field in &resource.fields {
-            let name = python_field_name(&field.name);
-            output.push_str(&format!("        {receiver}.{name} = {name}\n"));
-        }
+        self.render_resource_field_assignments(output, resource);
         if resource.fields.is_empty() {
             output.push_str("        pass\n");
         }
@@ -2298,6 +2510,130 @@ impl<'a> ApiPlanner<'a> {
         } else {
             base
         }
+    }
+
+    fn python_resource_constructor_field_annotation(
+        &self,
+        resource: &PlannedResource,
+        field: &PlannedResourceField,
+    ) -> String {
+        resource_ref_field(resource)
+            .filter(|ref_field| ref_field.name == field.name)
+            .and_then(|_| self.python_ref_annotation(resource, |parameter| parameter.name.clone()))
+            .unwrap_or_else(|| {
+                self.python_resource_field_annotation(
+                    &field.kind,
+                    field.optional,
+                    field.function.as_ref(),
+                )
+            })
+    }
+
+    /// A generic resource's ref takes the resource's type parameters, so it keeps the resource's
+    /// type where code passes it as data. `argument` gives each of them. `None` for a ref with no
+    /// type parameters.
+    fn python_ref_annotation(
+        &self,
+        resource: &PlannedResource,
+        argument: impl Fn(&TypeParameterSpec) -> String,
+    ) -> Option<String> {
+        let record = resource_ref_record(resource)?;
+        let arguments = self.ref_type_arguments(resource, argument);
+        (!arguments.is_empty())
+            .then(|| python_type_annotation_with_arguments(&record.model_name, &arguments))
+    }
+
+    /// The type arguments of a resource's ref, in the order of the ref's own type parameters and
+    /// then the resource's. The ref of another resource can have more, which take `typing.Any`.
+    fn ref_type_arguments(
+        &self,
+        resource: &PlannedResource,
+        argument: impl Fn(&TypeParameterSpec) -> String,
+    ) -> Vec<String> {
+        self.ref_type_parameters(resource)
+            .iter()
+            .map(|parameter| {
+                if resource.type_parameters.contains(parameter) {
+                    argument(parameter)
+                } else {
+                    "typing.Any".to_string()
+                }
+            })
+            .collect()
+    }
+
+    fn ref_type_parameters(&self, resource: &PlannedResource) -> Vec<TypeParameterSpec> {
+        let Some(record) = resource_ref_record(resource) else {
+            return Vec::new();
+        };
+        self.api_plan
+            .record_type_parameters(&record.full_name)
+            .into_iter()
+            .map(|usage| usage.parameter)
+            .chain(ref_type_parameters(self.api_plan, &record.full_name))
+            .collect()
+    }
+
+    /// A generic handle's ref keeps the handle's type arguments in memory, so the handle's `ref`
+    /// is a property. Only a ref with phantom type parameters can keep them.
+    fn typed_ref_field<'r>(
+        &self,
+        resource: &'r PlannedResource,
+    ) -> Option<&'r PlannedResourceField> {
+        let record = resource_ref_record(resource)?;
+        if resource.methods.is_empty()
+            || resource.type_parameters.is_empty()
+            || ref_type_parameters(self.api_plan, &record.full_name).is_empty()
+        {
+            return None;
+        }
+        resource_ref_field(resource)
+    }
+
+    /// Python sets `__orig_class__` after `__init__`, so the ref takes the handle's type arguments
+    /// when code first reads it.
+    fn render_resource_ref_property(
+        &self,
+        output: &mut String,
+        resource: &PlannedResource,
+        field: &PlannedResourceField,
+    ) {
+        let receiver = resource_client_identifier(resource, "self");
+        let name = python_field_name(&field.name);
+        let record = resource_ref_record(resource).expect("a typed ref is a record");
+        let arguments = self.ref_type_arguments(resource, |parameter| {
+            format!(
+                "{receiver}.{}",
+                python_runtime_type_argument_name(&parameter.name)
+            )
+        });
+        output.push_str(&format!(
+            "\n    @property\n    def {name}({receiver}) -> {}:\n",
+            self.python_resource_constructor_field_annotation(resource, field)
+        ));
+        output.push_str(&format!(
+            "        # The ref keeps this handle's type arguments, so `to_{}` can rebuild it.\n",
+            resource.name.to_snake_case()
+        ));
+        output.push_str(&format!(
+            "        if not typing.get_args(\n\
+             \x20           getattr({receiver}._{name}, \"__orig_class__\", None)\n\
+             \x20       ):\n"
+        ));
+        output.push_str(&format!(
+            "            {receiver}._{name} = {}[{}](\n",
+            record.model_name,
+            arguments.join(", ")
+        ));
+        for model_field in &self.models[&record.full_name].fields {
+            let attr = &model_field.attr_name;
+            output.push_str(&format!(
+                "                {attr}={receiver}._{name}.{attr},\n"
+            ));
+        }
+        output.push_str(&format!(
+            "            )\n        return {receiver}._{name}\n"
+        ));
     }
 
     fn python_resource_value_annotation(&self, value: &PlannedType) -> String {
@@ -2959,6 +3295,10 @@ impl<'a> ApiPlanner<'a> {
                     .into_iter()
                     .map(|usage| usage.parameter.name)
                     .collect(),
+                phantom_type_parameters: ref_type_parameters(api_plan, full_name)
+                    .into_iter()
+                    .map(|parameter| phantom_type_variable(&parameter.name))
+                    .collect(),
                 experimental: planned_model.experimental,
                 fields: Vec::new(),
             },
@@ -3468,6 +3808,23 @@ fn render_record_models(
         body.push_str(&python_string_literal(parameter));
         body.push_str(")\n");
     }
+    let phantom_type_parameters = models
+        .iter()
+        .flat_map(|model| model.phantom_type_parameters.iter())
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for parameter in &phantom_type_parameters {
+        // No field gives a phantom parameter, so a bare annotation or a plain constructor call
+        // takes `typing.Any` for it. Its own TypeVar keeps the default off the other models.
+        body.push_str(parameter);
+        body.push_str(" = typing_extensions.TypeVar(");
+        body.push_str(&python_string_literal(parameter));
+        body.push_str(", default=typing.Any)\n");
+    }
+    let type_parameters = type_parameters
+        .into_iter()
+        .chain(phantom_type_parameters)
+        .collect::<BTreeSet<_>>();
     if !type_parameters.is_empty() && !models.is_empty() {
         body.push_str("\n\n");
     }
@@ -3523,16 +3880,30 @@ fn render_record_model(
     model: &RenderedModel,
     wire_block: Option<&RenderedRecordWireBlock>,
 ) {
-    if model_needs_keyword_only_dataclass(model) {
-        output.push_str("@dataclasses.dataclass(slots=True, kw_only=True)\n");
-    } else {
-        output.push_str("@dataclasses.dataclass(slots=True)\n");
+    // A ref keeps its type arguments in `__orig_class__`, which needs an instance `__dict__`.
+    let mut options = Vec::new();
+    if model.phantom_type_parameters.is_empty() {
+        options.push("slots=True");
     }
+    if model_needs_keyword_only_dataclass(model) {
+        options.push("kw_only=True");
+    }
+    output.push_str("@dataclasses.dataclass");
+    if !options.is_empty() {
+        output.push_str(&format!("({})", options.join(", ")));
+    }
+    output.push('\n');
     output.push_str("class ");
     output.push_str(&model.name);
-    if !model.type_parameters.is_empty() {
+    let type_parameters = model
+        .type_parameters
+        .iter()
+        .chain(&model.phantom_type_parameters)
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if !type_parameters.is_empty() {
         output.push_str("(typing.Generic[");
-        output.push_str(&model.type_parameters.join(", "));
+        output.push_str(&type_parameters.join(", "));
         output.push_str("])");
     }
     output.push_str(":\n");
@@ -4090,6 +4461,9 @@ pub(in crate::generator) struct RenderedModel {
     pub(in crate::generator) name: String,
     pub(in crate::generator) doc: Option<String>,
     pub(in crate::generator) type_parameters: Vec<String>,
+    /// The TypeVars of the type parameters of each generic resource whose ref this is. No field
+    /// uses them, so only the class takes them, and the converter doesn't.
+    pub(in crate::generator) phantom_type_parameters: Vec<String>,
     pub(in crate::generator) experimental: bool,
     pub(in crate::generator) fields: Vec<RenderedField>,
 }
@@ -4589,6 +4963,11 @@ fn python_type_annotation_with_arguments(name: &str, arguments: &[String]) -> St
     } else {
         format!("{name}[{}]", arguments.join(", "))
     }
+}
+
+/// A type parameter alias can't start with `_`, so this name never clashes with a model's own.
+fn phantom_type_variable(type_var: &str) -> String {
+    format!("_{type_var}")
 }
 
 fn python_runtime_type_argument_name(type_var: &str) -> String {
@@ -6410,6 +6789,7 @@ fn render_package_init(
                 .iter()
                 .map(|operation| operation.attr_name.clone())
                 .chain(workflow_factory_resources(service).map(workflow_resource_factory_name))
+                .chain(workflow_ref_factory_resources(service).map(resource_ref_factory_name))
         })
         .collect::<BTreeSet<_>>()
         .into_iter()
@@ -6474,6 +6854,13 @@ fn render_package_init(
                     &mut output,
                     &format!("._resources.{}", resource_module_name(resource)),
                     &[workflow_resource_factory_name(resource)],
+                );
+            }
+            for resource in workflow_ref_factory_resources(service) {
+                render_named_python_import(
+                    &mut output,
+                    &format!("._resources.{}", resource_module_name(resource)),
+                    &[resource_ref_factory_name(resource)],
                 );
             }
         }
@@ -6909,13 +7296,18 @@ fn validate_client_names(services: &[RenderedService<'_>]) -> Result<()> {
     // One client class can inherit every extension, so a factory clashes with a method of any
     // service.
     for resource in services.iter().flat_map(|service| &service.resources) {
-        let factory = client_resource_factory_name(resource);
-        if let Some(owner) = owners.get(&factory) {
-            return Err(Error::PythonGeneratedNameConflict {
-                name: factory,
-                generated_by: format!("the client factory of resource `{}`", resource.type_name),
-                conflicting_declaration: format!("a client method of service `{owner}`"),
-            });
+        let ref_factory = resource_ref_record(resource)
+            .map(|_| (resource_ref_factory_name(resource), "client ref factory"));
+        let factories = std::iter::once((client_resource_factory_name(resource), "client factory"))
+            .chain(ref_factory);
+        for (factory, kind) in factories {
+            if let Some(owner) = owners.get(&factory) {
+                return Err(Error::PythonGeneratedNameConflict {
+                    name: factory,
+                    generated_by: format!("the {kind} of resource `{}`", resource.type_name),
+                    conflicting_declaration: format!("a client method of service `{owner}`"),
+                });
+            }
         }
     }
     Ok(())
@@ -7293,6 +7685,35 @@ fn workflow_resource_factory_name(resource: &PlannedResource) -> String {
     client_resource_factory_name(resource)
 }
 
+fn resource_ref_factory_name(resource: &PlannedResource) -> String {
+    format!("to_{}", resource.name.to_snake_case())
+}
+
+/// `get_<resource>` takes the identity fields, with the fields of the ref in its place, and
+/// `to_<resource>` takes the ref whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResourceFactory {
+    Get,
+    To,
+}
+
+impl ResourceFactory {
+    /// Both targets name a factory the same.
+    fn name(self, resource: &PlannedResource) -> String {
+        match self {
+            ResourceFactory::Get => client_resource_factory_name(resource),
+            ResourceFactory::To => resource_ref_factory_name(resource),
+        }
+    }
+}
+
+/// The Workflow package has `to_<resource>` for each resource with a factory and a ref.
+fn workflow_ref_factory_resources<'a>(
+    service: &'a RenderedService<'a>,
+) -> impl Iterator<Item = &'a PlannedResource> {
+    workflow_factory_resources(service).filter(|resource| resource_ref_record(resource).is_some())
+}
+
 /// A method-less handle adds nothing, and a same-named operation that returns it gives the handle.
 fn workflow_factory_resources<'a>(
     service: &'a RenderedService<'a>,
@@ -7336,9 +7757,20 @@ fn validate_workflow_factory_names(services: &[RenderedService<'_>]) -> Result<(
         }
     }
     for service in services {
-        for resource in workflow_factory_resources(service) {
-            let name = workflow_resource_factory_name(resource);
-            let generated_by = format!("the factory of resource `{}`", resource.type_name);
+        let factories = workflow_factory_resources(service)
+            .map(|resource| {
+                (
+                    workflow_resource_factory_name(resource),
+                    "factory",
+                    resource,
+                )
+            })
+            .chain(
+                workflow_ref_factory_resources(service)
+                    .map(|resource| (resource_ref_factory_name(resource), "ref factory", resource)),
+            );
+        for (name, kind, resource) in factories {
+            let generated_by = format!("the {kind} of resource `{}`", resource.type_name);
             if let Some(conflicting_declaration) = names.insert(name.clone(), generated_by.clone())
             {
                 return Err(Error::PythonGeneratedNameConflict {
@@ -10396,6 +10828,7 @@ fn render_unpacked_operation_function(
             output.push_str(&runtime_type_call_class_annotation(
                 &class_name,
                 &operation.runtime_type_arguments,
+                false,
             ));
             output.push_str(" = ");
             output.push_str(&class_name);
@@ -10407,6 +10840,7 @@ fn render_unpacked_operation_function(
             &operation.attr_name,
             &class_name,
             &operation.runtime_type_arguments,
+            false,
         ),
     }
 }
@@ -10507,6 +10941,7 @@ fn render_unpacked_operation_call_class(
         &runtime_type_call_class_name(&operation.attr_name),
         &operation.runtime_type_arguments,
         extension.as_deref(),
+        false,
     );
     output.push('\n');
     render_unpacked_operation_def(output, target, service, operation, unpacked_input, true);
@@ -10520,28 +10955,45 @@ fn runtime_type_subscript_variable(type_variable: &str) -> String {
     format!("_{type_variable}")
 }
 
-/// A call class with `typing.Any` for each type argument, as a call with no subscript has.
-fn runtime_type_call_class_annotation(class_name: &str, type_variables: &[String]) -> String {
-    let arguments = vec!["typing.Any".to_string(); type_variables.len()];
+/// A call class with `typing.Any` for each type argument, as a call with no subscript has. A call
+/// `from_ref` has `None`, since it takes the types of its ref.
+fn runtime_type_call_class_annotation(
+    class_name: &str,
+    type_variables: &[String],
+    from_ref: bool,
+) -> String {
+    let argument = if from_ref { "None" } else { "typing.Any" };
+    let arguments = vec![argument.to_string(); type_variables.len()];
     python_type_annotation_with_arguments(class_name, &arguments)
+}
+
+fn runtime_type_call_summary(from_ref: bool) -> &'static str {
+    if from_ref {
+        "Subscript it with the type arguments to decode with, or the ref gives them."
+    } else {
+        "Subscript it with the type arguments that the call decodes with."
+    }
 }
 
 /// Python can't subscript a function, so a generic call is an object whose subscript binds the
 /// runtime types, as in `create_stream[Turn](...)`. `extension` is the client's extension class.
+/// A call `from_ref` keeps `None` with no subscript, so it can take the types of its ref.
 fn render_runtime_type_call_class_head(
     output: &mut String,
     class_name: &str,
     type_variables: &[String],
     extension: Option<&str>,
+    from_ref: bool,
 ) {
     output.push_str("class ");
     output.push_str(class_name);
     output.push_str("(typing.Generic[");
     output.push_str(&type_variables.join(", "));
     output.push_str("]):\n");
-    output.push_str(
-        "    \"\"\"Subscript it with the type arguments that the call decodes with.\"\"\"\n",
-    );
+    output.push_str(&format!(
+        "    \"\"\"{}\"\"\"\n",
+        runtime_type_call_summary(from_ref)
+    ));
     output.push_str("\n    def __init__(\n        self,\n");
     if let Some(extension) = extension {
         output.push_str("        extension: ");
@@ -10563,10 +11015,16 @@ fn render_runtime_type_call_class_head(
     }
     for name in type_variables {
         let argument = python_runtime_type_argument_name(name);
-        output.push_str(&format!(
-            "        self.{argument}: type[{name}] = typing.cast(\n            \
-             \"type[{name}]\", typing.Any if {argument} is None else {argument}\n        )\n"
-        ));
+        if from_ref {
+            output.push_str(&format!(
+                "        self.{argument}: type[{name}] | None = {argument}\n"
+            ));
+        } else {
+            output.push_str(&format!(
+                "        self.{argument}: type[{name}] = typing.cast(\n            \
+                 \"type[{name}]\", typing.Any if {argument} is None else {argument}\n        )\n"
+            ));
+        }
     }
     let subscripts = type_variables
         .iter()
@@ -10605,6 +11063,7 @@ fn render_runtime_type_call_property(
     call_name: &str,
     class_name: &str,
     type_variables: &[String],
+    from_ref: bool,
 ) {
     output.push_str("    @property\n    def ");
     output.push_str(call_name);
@@ -10612,10 +11071,12 @@ fn render_runtime_type_call_property(
     output.push_str(&runtime_type_call_class_annotation(
         class_name,
         type_variables,
+        from_ref,
     ));
-    output.push_str(
-        ":\n        \"\"\"Subscript it with the type arguments that the call decodes with.\"\"\"\n",
-    );
+    output.push_str(&format!(
+        ":\n        \"\"\"{}\"\"\"\n",
+        runtime_type_call_summary(from_ref)
+    ));
     output.push_str("        return ");
     output.push_str(class_name);
     output.push_str("(self)\n");

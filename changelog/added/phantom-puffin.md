@@ -1,0 +1,1 @@
+In Python, `to_<resource>` builds a resource from its ref, the `@nexus.flatten-in-api` parameter. A generic resource's ref is generic too and keeps its type argument in memory, so `to_stream(ref)` with a `StreamRef[Turn]` gives a `Stream[Turn]`, and a subscript, as in `to_stream[Turn](ref)`, gives the type for a ref with none.

@@ -1,11 +1,49 @@
-//! Shared rendering of resolved resource-method request plans.
+//! Shared rendering of resolved resource-method request plans, and the refs of resources.
 
 use crate::error::{Error, Result};
 use crate::planning::{
-    PlannedFamily, PlannedProtoType, PlannedResourceMethodBindingSpec, PlannedSpec, RequestPlan,
-    RequestPlanField, RequestPlanSource,
+    PlannedFamily, PlannedProtoType, PlannedRecordType, PlannedResource, PlannedResourceField,
+    PlannedResourceMethodBindingSpec, PlannedSpec, PlannedType, RequestPlan, RequestPlanField,
+    RequestPlanSource,
 };
-use crate::spec::{ExternalTypeSourceSpec, FieldOrigin, RecordSpec};
+use crate::spec::{ExternalTypeSourceSpec, FieldOrigin, RecordSpec, TypeParameterSpec};
+
+/// A resource's ref is the constructor parameter that `@nexus.flatten-in-api` names.
+pub(crate) fn resource_ref_field(resource: &PlannedResource) -> Option<&PlannedResourceField> {
+    let name = resource.flatten.as_deref()?;
+    resource.fields.iter().find(|field| field.name == name)
+}
+
+pub(crate) fn resource_ref_record(resource: &PlannedResource) -> Option<&PlannedRecordType> {
+    match resource_ref_field(resource)?.kind.without_option() {
+        PlannedType::Record(record) => Some(record),
+        _ => None,
+    }
+}
+
+/// The type parameters of each generic resource whose ref is the record, minus those of the
+/// record's fields. Code passes a ref as data, so the ref needs the resource's type.
+pub(crate) fn ref_type_parameters(
+    api_plan: &PlannedSpec,
+    record_full_name: &str,
+) -> Vec<TypeParameterSpec> {
+    let own = api_plan.record_type_parameters(record_full_name);
+    let mut parameters = api_plan
+        .services
+        .iter()
+        .flat_map(|service| service.resources.iter().map(|resource| &resource.data))
+        .filter(|resource| {
+            resource_ref_record(resource).is_some_and(|record| record.full_name == record_full_name)
+        })
+        .flat_map(|resource| resource.type_parameters.iter().cloned())
+        .filter(|parameter| !own.iter().any(|usage| usage.parameter == *parameter))
+        .collect::<Vec<_>>();
+    parameters.sort_by(|left, right| {
+        (left.declaration_index, &left.full_name).cmp(&(right.declaration_index, &right.full_name))
+    });
+    parameters.dedup();
+    parameters
+}
 
 pub(crate) fn render_request_plan<FName, FAssign, FConstruct, FResource, FParam>(
     plan: &RequestPlan,
@@ -192,4 +230,104 @@ fn missing_origin_field(
     fields
         .iter()
         .find_map(|field| missing_origin_field(api_plan, &field.value, target))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use crate::descriptors::DescriptorIndex;
+    use crate::language::Language;
+    use crate::planning::{
+        OperationBindingPass, OperationLoweringPass, PlannedSpec, ResourceResolutionPass,
+        ResourceTypeParameterPass, TypePlanningPass, select_spec,
+    };
+    use crate::spec::{ApiSpecLeaf, ApiSpecNode, ApiSpecTree, CompilerPass, ModulePath};
+
+    fn plan(wit: &str) -> PlannedSpec {
+        let authored = crate::parser::parse_api_spec_from_wit_for_language_with_inputs(
+            Language::Python,
+            wit,
+            PathBuf::from("inline.wit"),
+            &[PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("advanced/samples/inputs/deps")],
+        )
+        .unwrap();
+        let descriptors = DescriptorIndex::load(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("advanced/samples/descriptors/temporal_api.bin"),
+        )
+        .unwrap();
+        let tree = ApiSpecTree {
+            root: ApiSpecNode::Leaf(ApiSpecLeaf {
+                module_path: ModulePath::default(),
+                source_root: PathBuf::new(),
+                source_path: PathBuf::new(),
+                spec: select_spec(authored, Language::Python),
+            }),
+        };
+        let tree = ResourceTypeParameterPass.apply(tree).unwrap();
+        let tree = ResourceResolutionPass::new(&descriptors, vec![])
+            .apply(tree)
+            .unwrap();
+        let tree = OperationBindingPass::new().apply(tree).unwrap();
+        let tree = OperationLoweringPass::new().apply(tree).unwrap();
+        let tree = TypePlanningPass::new(&tree, &descriptors)
+            .apply(tree)
+            .unwrap();
+        let ApiSpecNode::Leaf(leaf) = tree.root else {
+            panic!("one leaf");
+        };
+        leaf.spec
+    }
+
+    #[test]
+    fn only_the_ref_of_a_generic_resource_takes_its_type_parameters() {
+        let plan = plan(
+            r#"
+package test:refs;
+
+world system { export queues; }
+
+/// @nexus.endpoint "queues"
+interface queues {
+  use nexus:temporal-types/model@1.0.0.{placeholder};
+
+  /// @nexus.type-parameter
+  type item-t = placeholder;
+
+  record queue-ref { id: string }
+  record push-request { ref: queue-ref, items: list<item-t> }
+  record push-response { count: s64 }
+
+  /// @nexus.flatten-in-api param="ref"
+  resource queue {
+    constructor(ref: queue-ref);
+    push: func(items: list<item-t>) -> push-response;
+  }
+
+  push: func(request: push-request) -> push-response;
+
+  // With no `@nexus.flatten-in-api`, the record isn't the resource's ref.
+  record tag-ref { id: string }
+  resource tagged {
+    constructor(tag: tag-ref, label: item-t);
+  }
+}
+"#,
+        );
+        let parameters = |name: &str| {
+            let (_, record) = plan
+                .records()
+                .find(|(_, record)| record.name == name)
+                .unwrap();
+            super::ref_type_parameters(&plan, &record.full_name)
+                .into_iter()
+                .map(|parameter| parameter.name)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(parameters("QueueRef"), ["ItemT"]);
+        assert!(parameters("PushResponse").is_empty());
+        assert!(parameters("TagRef").is_empty());
+    }
 }

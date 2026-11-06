@@ -1736,6 +1736,10 @@ resource %stream {
 stream = get_stream[Turn](id="chat-1:turns", backend="redis")
 ```
 
+The parameter is the resource's ref, and both targets also have `to_<resource>`,
+which takes it whole, as in `to_stream(ref)`. A generic resource's ref is
+generic too. See [Generic resources](#generic-resources).
+
 Sources work in the client target as well. Restrict workflow-only helpers with
 `targets="workflow"`. If a required resource-method request field has neither an
 applicable source nor a resource field or method parameter supplying it,
@@ -2121,9 +2125,23 @@ resource %stream {
 The handle keeps a runtime type for each type parameter and decodes responses
 with it. Python takes `Stream[Turn](...)` or a subclass of `Stream[Turn]`. A
 Python call takes the types as a subscript, as in `create_stream[Turn](...)` or
-`client.get_stream[Turn](ref=ref)`, since Python can't subscript a function.
+`client.get_stream[Turn](id=...)`, since Python can't subscript a function.
 TypeScript takes `bodyType` after the fields, and .NET takes the type argument,
 as in `CreateStreamAsync<Turn>(options)`.
+
+In Python, the resource's ref takes the resource's type parameters too, so the
+`ref` of a `Stream[Turn]` is a `StreamRef[Turn]`. No field uses them, so they
+default to `typing.Any`, and the ref sends the same message. A ref keeps its
+type argument in memory, but not in its message, equality or repr.
+`StreamRef[Turn](...)`, the `ref` of a `Stream[Turn]` and a decode with the type
+hint `StreamRef[Turn]`, such as a Workflow input's, give it one. `to_stream`
+decodes with it, so it needs a subscript only for a ref with no type argument.
+
+```python
+stream = client.to_stream(ref)  # Stream[Turn] for a StreamRef[Turn]
+stream = client.to_stream[Turn](StreamRef(id="chat-1:turns"))
+stream = client.to_stream[str](ref)  # a type error for a StreamRef[Turn]
+```
 
 Go and Java refuse a generic resource. A record field can't hold one yet, and an
 operation with no `@nexus.proto` message can't return one yet.
@@ -2629,7 +2647,8 @@ record or a field, `@nexus.flatten-in-api param="<parameter>"` on a resource
 Flattens the record's fields into the parent record's generated API surface
 instead of creating a nested model. On a field, it flattens only that call. See
 [Flattening one field](#flattening-one-field). On a resource, the Python factory
-takes the fields of the constructor parameter `param` in its place.
+`get_<resource>` takes the fields of the constructor parameter `param` in its
+place, and `to_<resource>` takes the parameter whole.
 
 ```wit
 /// @nexus.proto "temporal.api.sdk.v1.UserMetadata"

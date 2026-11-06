@@ -383,6 +383,7 @@ interface stream-service {
       max-records: option<s32>,
       wait: option<duration>,
       create-wait: option<duration>,
+      last: option<s32>,
       max-bytes: option<s64>,
     ) -> read-records-response;
 

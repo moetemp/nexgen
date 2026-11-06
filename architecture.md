@@ -137,7 +137,10 @@ those held in result records. Return bindings determine shared wire models
 regardless of API targets; resource methods are bound only when an API target is
 selected. It rejects integer-width mismatches between resource values and the
 request or result fields they bind to, including constructor fields populated by
-operations that return resources.
+operations that return resources. A method binds with all of its parameters. A
+target that omits a filled request field with `@nexus.api-omit` then gets a
+request plan without that parameter. A parameter that every selected target
+omits is dropped from the method.
 
 ### OperationBindingPass
 

@@ -2583,8 +2583,9 @@ type or transform expression refers to an otherwise-unavailable module.
 
 **Placement:** Operation (function) **Syntax:**
 `@nexus.poll <language>="<support-helper>" targets="client"`, where `<language>`
-is `python`, `typescript` or `dotnet`, with optional `items="<field>"` and
-`python-resume="<support-helper>"`.
+is `python`, `typescript` or `dotnet`, with optional `items="<field>"`,
+`python-resume="<support-helper>"`, `python-transform="<support-helper>"` and
+`python-type="<type>"`.
 
 Generates an async iterator on the client extension, and on each client resource
 method that binds the operation. Its name is `iter_<name>` in Python,
@@ -2642,6 +2643,36 @@ To resume, pass the fields of a saved `next_request` to `iter_<name>_items`. A
 resource method's iterator takes only the method's parameters, such as
 `from_offset` of the Stream's `iter_read_items`.
 
+With `python-transform`, each call of `iter_<name>_items` calls the helper with
+no arguments for a new transform, so each iteration starts with new state. The
+transform takes one item and returns the items to yield in its place. An empty
+list skips the item. `python-type` is the type of the yielded items, when it
+isn't the item type. Like the type of `@nexus.output-transform`, it is emitted
+as written.
+
+```wit
+/// @nexus.poll python="next_read_request" items="records"
+///   python-resume="resume_read_request" python-transform="read_item_transform"
+///   python-type="_support.Record[BodyT] | _support.Closed" targets="client"
+read-records: func(request: read-records-request) -> read-records-response;
+```
+
+```python
+def read_item_transform():
+    count = 0  # The number of this read's Records so far.
+
+    def transform(record):
+        nonlocal count
+        if record.item is None:  # A kind that the SDK doesn't know.
+            return []
+        ...
+
+    return transform
+```
+
+The resume helper still takes the page's item. `next_request` reads that item
+again until the iterator yields the last item that the transform made of it.
+
 The stream sample's full helpers are in
 [`temporal_support/poll.py`](advanced/samples/python/temporal_support/poll.py),
 [`support/poll.ts`](advanced/samples/typescript/support/poll.ts) and
@@ -2656,8 +2687,9 @@ The stream sample's full helpers are in
   refuses a request with type parameters.
 - nexgen refuses an `items` field that the response doesn't have, a field with
   `@nexus.omit`, or a field that isn't a list in the model, such as a proto
-  `bytes` field. It also refuses `python-resume` without `items`, and `items` in
-  a package with a model or resource called `PollIterator`.
+  `bytes` field. It also refuses `python-resume` or `python-transform` without
+  `items`, `python-type` without `python-transform`, and `items` in a package
+  with a model or resource called `PollIterator`.
 - Use `asyncio.timeout` to limit a whole iteration. After an error, start a new
   iteration at the last page's `next_offset`.
 

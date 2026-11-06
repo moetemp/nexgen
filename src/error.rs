@@ -99,6 +99,14 @@ pub enum Error {
         conflicting_declaration: String,
     },
 
+    #[error("the Python source `{expression}` of `{record}.{field}` names `client`, but {reason}")]
+    PythonSourceWithoutClient {
+        expression: String,
+        record: String,
+        field: String,
+        reason: String,
+    },
+
     #[error("TypeScript can't flatten a request field of operation `{operation}`: {reason}")]
     UnsupportedTypeScriptFlatten { operation: String, reason: String },
 

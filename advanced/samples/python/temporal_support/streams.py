@@ -53,6 +53,11 @@ def request_id() -> str:
     return str(uuid.uuid4())
 
 
+def default_backend(client: object) -> str | None:
+    """The client's default backend, or None if it has none."""
+    return getattr(client, "default_stream_backend", None)
+
+
 def last_offset(response: typing.Any) -> int:
     """The offset of the last Record that an append wrote, or 0 for none."""
     return response.last_offset or 0

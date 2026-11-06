@@ -670,6 +670,7 @@ impl<'a> ApiPlanner<'a> {
             validate_client_names(services)?;
             validate_rpc_option_names(services)?;
         }
+        validate_client_sources(self.api_plan, &targets)?;
         let mut files = GeneratedFileMap::default();
         files.insert_multi(
             self.external_models.render_support_files()?,
@@ -1342,7 +1343,20 @@ impl<'a> ApiPlanner<'a> {
     ) {
         let type_variables = resource_type_variable_names(resource);
         let call_class = !type_variables.is_empty();
-        self.render_resource_factory_head(output, "    ", resource, name, Some(receiver));
+        let extension = if call_class {
+            format!("{receiver}._extension")
+        } else {
+            receiver.to_string()
+        };
+        self.render_resource_factory_head(
+            output,
+            "    ",
+            resource,
+            name,
+            Some(receiver),
+            GenerationTarget::Client,
+            Some(&extension),
+        );
         output.push_str("        return ");
         output.push_str(&resource.type_name);
         let arguments = type_variables
@@ -1351,11 +1365,6 @@ impl<'a> ApiPlanner<'a> {
             .collect::<Vec<_>>();
         render_resource_type_specialization(output, &arguments);
         output.push_str("(\n");
-        let extension = if call_class {
-            format!("{receiver}._extension")
-        } else {
-            receiver.to_string()
-        };
         output.push_str(&format!("            {extension}.create_nexus_client(\n"));
         output.push_str("                service=");
         output.push_str(service.name);
@@ -1376,7 +1385,15 @@ impl<'a> ApiPlanner<'a> {
         let name = workflow_resource_factory_name(resource);
         let type_variables = resource_type_variable_names(resource);
         if type_variables.is_empty() {
-            self.render_resource_factory_head(output, "", resource, &name, None);
+            self.render_resource_factory_head(
+                output,
+                "",
+                resource,
+                &name,
+                None,
+                GenerationTarget::Workflow,
+                None,
+            );
             output.push_str("    return ");
             output.push_str(&resource.type_name);
             output.push_str("(\n");
@@ -1388,7 +1405,15 @@ impl<'a> ApiPlanner<'a> {
         let receiver = resource_client_identifier(resource, "self");
         render_runtime_type_call_class_head(output, &class_name, &type_variables, None);
         output.push('\n');
-        self.render_resource_factory_head(output, "    ", resource, "__call__", Some(&receiver));
+        self.render_resource_factory_head(
+            output,
+            "    ",
+            resource,
+            "__call__",
+            Some(&receiver),
+            GenerationTarget::Workflow,
+            None,
+        );
         output.push_str("        return ");
         output.push_str(&resource.type_name);
         let arguments = type_variables
@@ -1405,6 +1430,8 @@ impl<'a> ApiPlanner<'a> {
         ));
     }
 
+    /// `client` is the expression of the calling client, in a target that has one.
+    #[allow(clippy::too_many_arguments)]
     fn render_resource_factory_head(
         &self,
         output: &mut String,
@@ -1412,6 +1439,8 @@ impl<'a> ApiPlanner<'a> {
         resource: &PlannedResource,
         name: &str,
         receiver: Option<&str>,
+        target: GenerationTarget,
+        client: Option<&str>,
     ) {
         output.push_str(&format!("{indent}def {name}(\n"));
         if let Some(receiver) = receiver {
@@ -1420,7 +1449,7 @@ impl<'a> ApiPlanner<'a> {
         if !resource.fields.is_empty() {
             output.push_str(&format!("{indent}    *,\n"));
         }
-        let flatten = self.resource_factory_flatten(resource);
+        let flatten = self.resource_factory_flatten(resource, target);
         for field in &resource.fields {
             let name = python_field_name(&field.name);
             let annotation = self.python_resource_field_annotation(
@@ -1464,7 +1493,7 @@ impl<'a> ApiPlanner<'a> {
             flatten
                 .fields
                 .iter()
-                .map(|field| format!("{}={}", field.attr_name, field.value()))
+                .map(|field| format!("{}={}", field.attr_name, field.value(client)))
                 .collect::<Vec<_>>()
                 .join(", ")
         );
@@ -1474,6 +1503,7 @@ impl<'a> ApiPlanner<'a> {
     fn resource_factory_flatten(
         &self,
         resource: &PlannedResource,
+        target: GenerationTarget,
     ) -> Option<ResourceFactoryFlatten> {
         let flatten = resource.flatten.as_ref()?;
         let param = resource
@@ -1513,6 +1543,7 @@ impl<'a> ApiPlanner<'a> {
                             .default_expr
                             .clone()
                             .filter(|_| planned.has_default()),
+                        source_call: planned.source_for(target).map(python_source_call),
                     }
                 })
                 .collect(),
@@ -2712,6 +2743,7 @@ impl<'a> ApiPlanner<'a> {
                 request_fields.push(RenderedUnpackedRequestField {
                     attr_name: rendered_field.attr_name.clone(),
                     value_expr: python_source_call(source_expr),
+                    source: true,
                 });
                 continue;
             }
@@ -2720,6 +2752,7 @@ impl<'a> ApiPlanner<'a> {
                     request_fields.push(RenderedUnpackedRequestField {
                         attr_name: rendered_field.attr_name.clone(),
                         value_expr: "[]".to_string(),
+                        source: false,
                     });
                 }
                 continue;
@@ -2731,6 +2764,7 @@ impl<'a> ApiPlanner<'a> {
                 request_fields.push(RenderedUnpackedRequestField {
                     attr_name: flattened.local_name.clone(),
                     value_expr: flattened.local_name.clone(),
+                    source: false,
                 });
                 for child in &flattened.fields {
                     register_unpacked_parameter_name(
@@ -2781,6 +2815,7 @@ impl<'a> ApiPlanner<'a> {
                 request_fields.push(RenderedUnpackedRequestField {
                     attr_name: rendered_field.attr_name.clone(),
                     value_expr,
+                    source: false,
                 });
                 continue;
             }
@@ -2809,6 +2844,7 @@ impl<'a> ApiPlanner<'a> {
                     &rendered_field.attr_name,
                     target,
                 ),
+                source: false,
             });
         }
 
@@ -2885,9 +2921,8 @@ impl<'a> ApiPlanner<'a> {
                 .iter()
                 .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldOrigin::is_omitted))
                 .zip(nested_rendered_model.fields.iter())
-                .filter(|((_, field), _)| {
-                    !field.api_omitted_for(target) && field.source_for(target).is_none()
-                })
+                // A sourced field stays a parameter, since the caller can pass the whole record.
+                .filter(|((_, field), _)| !field.api_omitted_for(target))
                 .map(
                     |((nested_field_name, nested_planned_field), nested_rendered_field)| {
                         RenderedFlattenedMessageField {
@@ -2917,9 +2952,14 @@ impl<'a> ApiPlanner<'a> {
                                 &nested_rendered_field.attr_name,
                                 target,
                             ),
+                            source_call: nested_planned_field
+                                .source_for(target)
+                                .map(python_source_call),
                             default_kind: if nested_planned_field.api_required(target) {
                                 PythonFieldDefaultKind::Required
-                            } else if nested_planned_field.default_for(target).is_some() {
+                            } else if nested_planned_field.default_for(target).is_some()
+                                || nested_planned_field.source_for(target).is_some()
+                            {
                                 PythonFieldDefaultKind::None
                             } else {
                                 nested_rendered_field.default_kind.clone()
@@ -4128,11 +4168,15 @@ struct FactoryPromotedField {
     annotation: String,
     default_kind: PythonFieldDefaultKind,
     default_expr: Option<String>,
+    /// The source call that fills the parameter when the caller passes `None`.
+    source_call: Option<String>,
 }
 
 impl FactoryPromotedField {
     fn required(&self) -> bool {
-        self.default_kind == PythonFieldDefaultKind::Required && self.default_expr.is_none()
+        self.default_kind == PythonFieldDefaultKind::Required
+            && self.default_expr.is_none()
+            && self.source_call.is_none()
     }
 
     fn parameter(&self) -> String {
@@ -4145,11 +4189,15 @@ impl FactoryPromotedField {
     }
 
     /// The value that the factory passes to the model, so the model keeps its default.
-    fn value(&self) -> String {
+    fn value(&self, client: Option<&str>) -> String {
         let name = &self.attr_name;
-        match &self.default_expr {
-            Some(expr) => format!("{expr} if {name} is None else {name}"),
-            None => name.clone(),
+        match (&self.source_call, &self.default_expr) {
+            (Some(source_call), _) => format!(
+                "({} if {name} is None else {name})",
+                python_bind_source_client(source_call, client)
+            ),
+            (None, Some(expr)) => format!("{expr} if {name} is None else {name}"),
+            (None, None) => name.clone(),
         }
     }
 }
@@ -4175,6 +4223,8 @@ struct RenderedUnpackedInputField {
 struct RenderedUnpackedRequestField {
     attr_name: String,
     value_expr: String,
+    /// The value is a source call, which can name the client.
+    source: bool,
 }
 
 #[derive(Debug)]
@@ -4191,8 +4241,23 @@ struct RenderedFlattenedMessageField {
     annotation: String,
     value_expr: String,
     initialized_expr: String,
+    /// The source call that fills the parameter when the caller passes `None`.
+    source_call: Option<String>,
     default_kind: PythonFieldDefaultKind,
     doc: Option<String>,
+}
+
+impl RenderedFlattenedMessageField {
+    fn initialized_expr(&self, client: Option<&str>) -> String {
+        match &self.source_call {
+            Some(source_call) => format!(
+                "({} if {1} is None else {1})",
+                python_bind_source_client(source_call, client),
+                self.value_expr
+            ),
+            None => self.initialized_expr.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -6662,7 +6727,7 @@ fn render_endpoint_service_object_unpacked_method(
     output.push_str(":\n");
     render_unpacked_operation_docstring(output, "    ", operation, unpacked_input, None);
     for flattened_message in &unpacked_input.flattened_messages {
-        render_flattened_message_setup(output, "    ", flattened_message);
+        render_flattened_message_setup(output, "    ", flattened_message, None);
     }
     output.push_str("        request = ");
     output.push_str(&unpacked_input.model_name);
@@ -6671,7 +6736,7 @@ fn render_endpoint_service_object_unpacked_method(
         output.push_str("            ");
         output.push_str(&field.attr_name);
         output.push('=');
-        output.push_str(&unpacked_request_field_value_expr(field));
+        output.push_str(&unpacked_request_field_value_expr(field, None));
         output.push_str(",\n");
     }
     output.push_str("        )\n");
@@ -7181,6 +7246,99 @@ fn validate_rpc_option_names(services: &[RenderedService<'_>]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// A source that names `client` needs the client that makes the call. Workflow code has none,
+/// and a client resource holds only a Nexus client.
+fn validate_client_sources(api_plan: &PlannedSpec, targets: &[GenerationTarget]) -> Result<()> {
+    let refusal = |record: &RecordSpec<PlannedFamily>,
+                   field: &RecordFieldSpec<PlannedFamily>,
+                   expression: &str,
+                   reason: String| Error::PythonSourceWithoutClient {
+        expression: expression.to_string(),
+        record: record.name.clone(),
+        field: field.name.clone(),
+        reason,
+    };
+    if targets.contains(&GenerationTarget::Workflow) {
+        for record in api_plan.records().map(|(_, record)| record) {
+            if let Some((_, field, expression)) = record
+                .sources_for(GenerationTarget::Workflow)
+                .find(|(_, _, expression)| python_source_names_client(expression))
+            {
+                return Err(refusal(
+                    record,
+                    field,
+                    expression,
+                    "Workflow code has no client, so restrict it with `targets=\"client\"`"
+                        .to_string(),
+                ));
+            }
+        }
+    }
+    if !targets.contains(&GenerationTarget::Client) {
+        return Ok(());
+    }
+    for service in &api_plan.services {
+        for resource in service.resources.iter().map(|resource| &resource.data) {
+            for method in &resource.methods {
+                let PlannedResourceMethodBindingSpec::Operation { request_plan, .. } =
+                    &method.binding
+                else {
+                    continue;
+                };
+                if let Some((record, field, expression)) =
+                    client_source_of_request_plan(api_plan, request_plan)
+                {
+                    return Err(refusal(
+                        record,
+                        field,
+                        expression,
+                        format!(
+                            "the client resource method `{}.{}` has only a Nexus client",
+                            resource.type_name, method.name
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A client source that names `client` and fills a field of the request that the plan builds.
+fn client_source_of_request_plan<'a>(
+    api_plan: &'a PlannedSpec,
+    plan: &RequestPlan,
+) -> Option<(
+    &'a RecordSpec<PlannedFamily>,
+    &'a RecordFieldSpec<PlannedFamily>,
+    &'a str,
+)> {
+    let RequestPlan::Construct {
+        message_name,
+        fields,
+    } = plan
+    else {
+        return None;
+    };
+    crate::generator::resource_plan::record_for_request_name(api_plan, message_name)
+        .and_then(|record| {
+            record
+                .sources_for(GenerationTarget::Client)
+                .find(|(_, field, expression)| {
+                    python_source_names_client(expression)
+                        && fields
+                            .iter()
+                            .all(|planned| planned.field_name != field.name)
+                })
+                .map(|(_, field, expression)| (record, field, expression))
+        })
+        .or_else(|| {
+            fields
+                .iter()
+                .find_map(|field| client_source_of_request_plan(api_plan, &field.value))
+        })
 }
 
 const CLIENT_NEXUS_CLIENT_HOOK: &str = "create_nexus_client";
@@ -9396,7 +9554,7 @@ fn render_poll_function_request(output: &mut String, operation: &RenderedOperati
     let body_indent = target_body_indent(target);
     if let Some(unpacked_input) = operation.target_unpacked_input(target) {
         for flattened_message in &unpacked_input.flattened_messages {
-            render_flattened_message_setup(output, body_indent, flattened_message);
+            render_flattened_message_setup(output, body_indent, flattened_message, Some("self"));
         }
         start_line(output, target, "    request = ");
         output.push_str(&unpacked_input.model_name);
@@ -9405,7 +9563,7 @@ fn render_poll_function_request(output: &mut String, operation: &RenderedOperati
             start_line(output, target, "        ");
             output.push_str(&field.attr_name);
             output.push('=');
-            output.push_str(&unpacked_request_field_value_expr(field));
+            output.push_str(&unpacked_request_field_value_expr(field, Some("self")));
             output.push_str(",\n");
         }
         start_line(output, target, "    )\n");
@@ -10465,8 +10623,13 @@ fn render_unpacked_operation_def(
     }
     render_unpacked_return_annotation(output, target, indent, service, operation);
     render_unpacked_operation_docstring(output, &body_indent, operation, unpacked_input, None);
+    let client = (target == GenerationTarget::Client).then_some(if call_class {
+        "self._extension"
+    } else {
+        "self"
+    });
     for flattened_message in &unpacked_input.flattened_messages {
-        render_flattened_message_setup(output, &body_indent, flattened_message);
+        render_flattened_message_setup(output, &body_indent, flattened_message, client);
     }
     line(output, "    request = ");
     output.push_str(&unpacked_input.model_name);
@@ -10475,7 +10638,7 @@ fn render_unpacked_operation_def(
         line(output, "        ");
         output.push_str(&field.attr_name);
         output.push('=');
-        output.push_str(&unpacked_request_field_value_expr(field));
+        output.push_str(&unpacked_request_field_value_expr(field, client));
         output.push_str(",\n");
     }
     line(output, "    )\n");
@@ -10861,8 +11024,14 @@ fn render_function_unpacked_implementation(
             output.push_str("]\n");
         }
     }
+    let client = (target == GenerationTarget::Client).then_some("self");
     for flattened_message in &unpacked_input.flattened_messages {
-        render_flattened_message_setup(output, target_body_indent(target), flattened_message);
+        render_flattened_message_setup(
+            output,
+            target_body_indent(target),
+            flattened_message,
+            client,
+        );
     }
 
     start_line(output, target, "    request = ");
@@ -10877,7 +11046,7 @@ fn render_function_unpacked_implementation(
                     && function.args_field_name == field.value_expr
             })
             .map(|function| format!("normalized_{}", function.args_field_name))
-            .unwrap_or_else(|| unpacked_request_field_value_expr(field));
+            .unwrap_or_else(|| unpacked_request_field_value_expr(field, client));
         start_line(output, target, "        ");
         output.push_str(&field.attr_name);
         output.push('=');
@@ -10910,10 +11079,12 @@ fn rendered_function_implementation_renders_field(
     true
 }
 
+/// `client` is the expression of the calling client, in code that has one.
 fn render_flattened_message_setup(
     output: &mut String,
     indent: &str,
     flattened_message: &RenderedFlattenedMessage,
+    client: Option<&str>,
 ) {
     let always_construct = flattened_message.required
         || flattened_message
@@ -10932,7 +11103,7 @@ fn render_flattened_message_setup(
             output.push_str("    ");
             output.push_str(&field.attr_name);
             output.push('=');
-            output.push_str(&field.initialized_expr);
+            output.push_str(&field.initialized_expr(client));
             output.push_str(",\n");
         }
         output.push_str(indent);
@@ -10962,7 +11133,7 @@ fn render_flattened_message_setup(
         output.push_str("        ");
         output.push_str(&field.attr_name);
         output.push('=');
-        output.push_str(&field.initialized_expr);
+        output.push_str(&field.initialized_expr(client));
         output.push_str(",\n");
     }
     output.push_str(indent);
@@ -11029,6 +11200,60 @@ fn python_source_call(source_expr: &str) -> String {
     format!("_support.{source_expr}")
 }
 
+/// Each `client` that a source call passes as a value. A `client` in a string, an attribute name
+/// or a keyword name doesn't count.
+fn python_source_client_names(source_expr: &str) -> Vec<std::ops::Range<usize>> {
+    let mut names = Vec::new();
+    let mut quote = None;
+    let mut escaped = false;
+    let mut name_start = None;
+    for (index, character) in source_expr.char_indices().chain([(source_expr.len(), ' ')]) {
+        if let Some(delimiter) = quote {
+            if escaped {
+                escaped = false;
+            } else if character == '\\' {
+                escaped = true;
+            } else if character == delimiter {
+                quote = None;
+            }
+            continue;
+        }
+        if is_python_identifier_char(character) {
+            name_start.get_or_insert(index);
+            continue;
+        }
+        if let Some(start) = name_start.take() {
+            let rest = source_expr[index..].trim_start();
+            if &source_expr[start..index] == "client"
+                && !source_expr[..start].trim_end().ends_with('.')
+                && !(rest.starts_with('=') && !rest.starts_with("=="))
+            {
+                names.push(start..index);
+            }
+        }
+        if matches!(character, '\'' | '"') {
+            quote = Some(character);
+        }
+    }
+    names
+}
+
+fn python_source_names_client(source_expr: &str) -> bool {
+    !python_source_client_names(source_expr).is_empty()
+}
+
+/// The source call with each `client` replaced by the expression of the calling client. Code
+/// with no client keeps the call, since its target refuses a source that names one.
+fn python_bind_source_client(source_call: &str, client: Option<&str>) -> String {
+    let mut bound = source_call.to_string();
+    if let Some(client) = client {
+        for name in python_source_client_names(source_call).into_iter().rev() {
+            bound.replace_range(name, client);
+        }
+    }
+    bound
+}
+
 pub(in crate::generator) fn render_python_default_expr(
     output: &mut String,
     default_expr: &str,
@@ -11049,8 +11274,15 @@ pub(in crate::generator) fn render_python_default_expr(
     output.push(')');
 }
 
-fn unpacked_request_field_value_expr(field: &RenderedUnpackedRequestField) -> String {
-    field.value_expr.clone()
+fn unpacked_request_field_value_expr(
+    field: &RenderedUnpackedRequestField,
+    client: Option<&str>,
+) -> String {
+    if field.source {
+        python_bind_source_client(&field.value_expr, client)
+    } else {
+        field.value_expr.clone()
+    }
 }
 
 fn python_ident(name: &str) -> String {
@@ -11185,6 +11417,20 @@ mod tests {
             with_args,
             "_support.Helpers.namespace(request.id, fallback='default')"
         );
+    }
+
+    #[test]
+    fn binds_only_the_client_names_of_a_source_call() {
+        let call = "_support.backend(client, \"client\", client=client, x=self.client, clients)";
+        assert_eq!(
+            super::python_bind_source_client(call, Some("self._extension")),
+            "_support.backend(self._extension, \"client\", client=self._extension, \
+             x=self.client, clients)"
+        );
+        assert_eq!(super::python_bind_source_client(call, None), call);
+        assert!(!super::python_source_names_client(
+            "backend(clients, 'client', self.client)"
+        ));
     }
 
     #[test]

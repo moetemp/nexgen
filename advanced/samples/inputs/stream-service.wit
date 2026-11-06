@@ -32,7 +32,9 @@ interface stream-service {
   record stream-ref {
     /// @nexus.doc "The Stream id, 1 to 4096 bytes."
     id: string,
+    // A client fills in its own default, so a ref that it passes on names a backend.
     /// @nexus.doc "Registered backend name, empty for the default. The Store never reads it."
+    /// @nexus.source targets="client" python="default_backend(client)"
     backend: option<string>,
   }
 

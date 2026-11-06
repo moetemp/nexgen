@@ -1,6 +1,9 @@
 """Shared Temporal converters used by the advanced generated samples."""
 
+from .poll import Closed as Closed
+from .poll import Record as Record
 from .poll import next_read_request as next_read_request
+from .poll import read_item_transform as read_item_transform
 from .poll import resume_read_request as resume_read_request
 from .streams import client_writer as client_writer
 from .streams import last_offset as last_offset

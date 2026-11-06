@@ -193,6 +193,8 @@ def test_a_workflow_read_takes_no_last(
 ) -> None:
     # Replay needs a fixed range, so the WIT omits `last` from the Workflow API only.
     assert "last" not in inspect.signature(api.read_records).parameters
+    stream = api.get_stream[str](id="s-1")
+    assert "last" not in inspect.signature(stream.read).parameters
     request = model_types.ReadRecordsRequest(
         ref=model_types.StreamRef(id="s-1"), last=3
     )

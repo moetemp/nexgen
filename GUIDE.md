@@ -1160,6 +1160,16 @@ The field must be an `option<T>` or a `list<T>`, since a call leaves it unset.
 An omitted list is sent empty. `@nexus.api-omit` cannot be combined with
 `@nexus.omit`, `@nexus.default`, or a `@nexus.source` for the same target.
 
+A resource method parameter that fills an omitted field is dropped from the
+method in the same targets. Unlike a source, the omission wins over the
+parameter. With the `last` field above, the client's `read` takes `last`, and
+the Workflow `read` doesn't.
+
+```wit
+/// @nexus.operation "read-records"
+read: func(from-offset: option<s64>, last: option<s32>) -> read-records-response;
+```
+
 ### Flattened Records
 
 A record annotated with `@nexus.flatten-in-api` has its fields "promoted" into
@@ -2260,7 +2270,8 @@ Cannot be combined with `@nexus.source`, `@nexus.type`, `@nexus.function`,
 Keeps the field on generated models and in proto conversion, but excludes it
 from generated convenience operation APIs. `targets` limits the omission to
 those targets. Unlike `@nexus.omit`, this preserves the field in the generated
-model. See [API-omitted fields](#api-omitted-fields) for an example.
+model. A resource method parameter that fills the field is dropped in those
+targets too. See [API-omitted fields](#api-omitted-fields) for an example.
 
 Cannot be combined with `@nexus.omit`, `@nexus.default`, or a `@nexus.source`
 for the same target.

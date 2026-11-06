@@ -1,3 +1,4 @@
+using Temporalio.Activities;
 using Temporalio.Workflows;
 
 namespace Nexgen.Support
@@ -20,5 +21,26 @@ namespace Nexgen.Support
         // A new id for each create call. A Workflow's replay gives the same id.
         internal static string RequestId() =>
             (Workflow.InWorkflow ? Workflow.NewGuid() : System.Guid.NewGuid()).ToString();
+    }
+
+    // The client sources. An Activity's attempt produces in an Activity, or else the client.
+    internal static class StreamActivityContext
+    {
+        // The sample has no Local Activity context, so a client writer withdraws nothing.
+        internal static Temporalio.Workflows.StreamWriter Writer() =>
+            new(System.Array.Empty<long>()) { Producer = Producer() };
+
+        private static Temporalio.Workflows.Producer Producer()
+        {
+            if (!ActivityExecutionContext.HasCurrent)
+            {
+                return new("client:sample");
+            }
+            var info = ActivityExecutionContext.Current.Info;
+            return new($"act:{info.WorkflowRunId}:{info.ActivityId}")
+            {
+                RunId = info.WorkflowRunId,
+            };
+        }
     }
 }

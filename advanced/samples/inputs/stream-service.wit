@@ -34,7 +34,9 @@ interface stream-service {
     id: string,
     /// @nexus.doc "The run chain or Standalone Activity of a bound Stream. Empty if standalone."
     owner: option<execution>,
+    // A client fills in its own default, so a ref that it passes on names a backend.
     /// @nexus.doc "Registered backend name, empty for the default. The Store never reads it."
+    /// @nexus.source targets="client" python="default_backend(client)"
     backend: option<string>,
   }
 

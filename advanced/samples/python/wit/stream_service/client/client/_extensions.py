@@ -52,7 +52,15 @@ class _GetStream(typing.Generic[BodyT]):
         created: bool | None = None,
     ) -> Stream[BodyT]:
         """A handle on an existing ``Stream``, with no call."""
-        ref = StreamRef(id=id, owner=owner, backend=backend)
+        ref = StreamRef(
+            id=id,
+            owner=owner,
+            backend=(
+                _support.default_backend(self._extension)
+                if backend is None
+                else backend
+            ),
+        )
         return Stream[self.body_type](
             self._extension.create_nexus_client(
                 service=StreamService,
@@ -106,7 +114,11 @@ class _CreateStream(typing.Generic[BodyT]):
         stream_ref = StreamRef(
             id=id,
             owner=owner,
-            backend=backend,
+            backend=(
+                _support.default_backend(self._extension)
+                if backend is None
+                else backend
+            ),
         )
         request = CreateStreamRequest(
             stream_ref=stream_ref,

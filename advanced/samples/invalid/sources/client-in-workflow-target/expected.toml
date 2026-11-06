@@ -1,0 +1,8 @@
+languages = ["python"]
+targets = ["workflow"]
+
+[error]
+kind = "python-source-without-client"
+contains = [
+  "the Python source `default_backend(client)` of `Request.backend` names `client`, but Workflow code has no client, so restrict it with `targets=\"client\"`",
+]

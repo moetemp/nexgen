@@ -1099,6 +1099,30 @@ Nexgen prefixes the helper call, but it does not add arguments. The configured
 package supplies the helper. The `@nexus.output-transform` directive is
 different: its value remains a raw expression.
 
+In Python, a sourced field of a `@nexus.flatten-in-api` record stays a parameter
+of the operation or the `get_<resource>` factory. The source fills it only when
+the caller passes `None`.
+
+In the Python client target, a source call can name `client`. Nexgen replaces it
+with the client that makes the call, which is the object that inherits the
+`<Service>ClientExtension`. Restrict such a source with `targets="client"`.
+nexgen refuses it in the Workflow target, which has no client. It also refuses
+it where a client resource method fills the field, since a resource holds only a
+Nexus client.
+
+```wit
+record stream-ref {
+  id: string,
+  /// @nexus.source targets="client" python="default_backend(client)"
+  backend: option<string>,
+}
+```
+
+```python
+stream = client.get_stream[Turn](id="chat-1:turns")  # The client's default.
+stream = client.get_stream[Turn](id="chat-1:turns", backend="redis")
+```
+
 ### Omitted Fields
 
 Fields annotated with `@nexus.omit` are excluded entirely from the generated
@@ -2276,6 +2300,9 @@ namespace: string,
 Repeated source directives must have disjoint target sets. A directive without
 `targets` covers all targets, so it overlaps any other source directive on the
 same field. Overlaps are errors, not declaration-order overrides.
+
+In the Python client target, the call can name `client`, the client that makes
+the call. See [Sourced Fields](#sourced-fields).
 
 Cannot be combined with `@nexus.default` for the same language.
 

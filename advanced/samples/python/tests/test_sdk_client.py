@@ -434,6 +434,27 @@ async def test_a_factory_builds_a_handle_with_no_call() -> None:
     assert [started.operation for started in answers.started] == ["DescribeStream"]
 
 
+class BackendClient(Client):
+    default_stream_backend: str = "redis"
+
+
+@pytest.mark.parametrize(
+    ("fields", "backend"), [({}, "redis"), ({"backend": "memory"}, "memory")]
+)
+async def test_a_ref_with_no_backend_gets_the_default_of_its_client(
+    fields: dict[str, typing.Any], backend: str
+) -> None:
+    client, answers = connect(
+        BackendClient, {"CreateStream": CreateStreamResult(ref=StreamRef(id="s1"))}
+    )
+
+    stream = client.get_stream[str](id="s1", **fields)
+    _ = await client.create_stream(id="s1", **fields)
+
+    assert stream.ref == StreamRef(id="s1", backend=backend)
+    assert answers.started[0].arg.stream_ref == StreamRef(id="s1", backend=backend)
+
+
 async def test_a_resource_preserves_its_constructor_client_binding() -> None:
     client, answers = connect(
         Client, {"DescribeStream": DescribeStreamResponse(last_offset=9)}

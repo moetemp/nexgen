@@ -1,0 +1,13 @@
+package temporal:client-in-workflow-target@1.0.0;
+
+world system { export example; }
+
+// A source with no target list applies to the Workflow target too, which has no client.
+interface example {
+  record request {
+    /// @nexus.source python="default_backend(client)"
+    backend: option<string>,
+  }
+
+  submit: func(request: request);
+}

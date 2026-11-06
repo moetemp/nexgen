@@ -1,0 +1,1 @@
+In Python, a client-target `@nexus.source` can name `client`, the client that makes the call. A sourced field of a flattened record stays a parameter, and the source fills it when the caller passes `None`.

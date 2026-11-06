@@ -122,6 +122,7 @@ class Stream(typing.Generic[BodyT]):
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
         create_wait: datetime.timedelta | None = None,
+        last: int | None = None,
         max_bytes: int | None = None,
         *,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
@@ -135,6 +136,7 @@ class Stream(typing.Generic[BodyT]):
             max_records=max_records,
             wait=wait,
             create_wait=create_wait,
+            last=last,
             max_bytes=max_bytes,
         )
         handle = await self._nexus_client.start_operation(
@@ -154,6 +156,7 @@ class Stream(typing.Generic[BodyT]):
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
         create_wait: datetime.timedelta | None = None,
+        last: int | None = None,
         max_bytes: int | None = None,
         *,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
@@ -174,6 +177,8 @@ class Stream(typing.Generic[BodyT]):
                 s.
             create_wait: How long to wait for an uncreated Stream. Empty fails at once.
                 At most 60 s.
+            last: Read the newest this many Records, oldest first. No from-offset. No
+                wait.
             max_bytes: The maximum Record bytes in a page. A larger Record is still
                 returned alone.
         """
@@ -184,6 +189,7 @@ class Stream(typing.Generic[BodyT]):
             max_records=max_records,
             wait=wait,
             create_wait=create_wait,
+            last=last,
             max_bytes=max_bytes,
         )
         nexus_client = self._nexus_client
@@ -210,6 +216,7 @@ class Stream(typing.Generic[BodyT]):
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
         create_wait: datetime.timedelta | None = None,
+        last: int | None = None,
         max_bytes: int | None = None,
         *,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
@@ -233,6 +240,8 @@ class Stream(typing.Generic[BodyT]):
                 s.
             create_wait: How long to wait for an uncreated Stream. Empty fails at once.
                 At most 60 s.
+            last: Read the newest this many Records, oldest first. No from-offset. No
+                wait.
             max_bytes: The maximum Record bytes in a page. A larger Record is still
                 returned alone.
         """
@@ -243,6 +252,7 @@ class Stream(typing.Generic[BodyT]):
             max_records=max_records,
             wait=wait,
             create_wait=create_wait,
+            last=last,
             max_bytes=max_bytes,
         )
         return PollIterator(
@@ -253,6 +263,7 @@ class Stream(typing.Generic[BodyT]):
                 max_records=max_records,
                 wait=wait,
                 create_wait=create_wait,
+                last=last,
                 max_bytes=max_bytes,
                 rpc_metadata=rpc_metadata,
                 rpc_timeout=rpc_timeout,

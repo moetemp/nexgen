@@ -86,6 +86,9 @@ namespace Nexgen.DotNetExamples.Tests
         {
             Assert.Null(typeof(StreamServiceExample.ReadRecordsOptions).GetProperty("Last"));
             Assert.NotNull(typeof(StreamServiceExample.ReadRecordsRequest).GetProperty("Last"));
+            Assert.DoesNotContain(
+                typeof(StreamServiceExample.Stream<Turn>).GetMethod("ReadAsync")!.GetParameters(),
+                parameter => parameter.Name == "last");
         }
     }
 }

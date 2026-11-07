@@ -5,12 +5,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::integer_annotation;
 use crate::error::{Error, Result};
 use crate::generator::typescript::{
-    RenderedResource, RenderedService, render_resource_with_annotations,
-    typescript_resource_field_type,
+    RenderedResource, RenderedService, ResolvedFieldKind, ResolvedFieldType, TypeScriptRequirements,
+    render_resource_with_annotations, typescript_array_annotation, typescript_resource_field_type,
+    typescript_resource_value_annotation,
 };
 use crate::planning::{
     PlannedFamily, PlannedResource, PlannedResourceMethodBindingSpec, PlannedSpec, PlannedType,
-    RequestPlan, RequestPlanSource, ResolvedResourceBindingSource, operation_input_model,
+    RequestPlan, RequestPlanSource, ResolvedResourceBindingSource, flattened_list_field,
+    operation_input_model,
 };
 use crate::spec::{ExternalTypeSourceSpec, ExternalTypeSpec, IntSpec, ServiceSpec};
 
@@ -38,13 +40,26 @@ pub(super) fn render_resource(
             )
         },
         |method, param| {
-            typescript_resource_field_type(
-                &param.kind,
-                false,
-                param.function.as_ref(),
-                bindings.proto_methods.contains(&method.name),
-                api,
-            )
+            let proto = bindings.proto_methods.contains(&method.name);
+            // A `@nexus.varargs` list of one-field records takes that field's values.
+            if let PlannedType::List(item) = &param.kind
+                && let Some((_, nested)) = flattened_list_field(api, item)
+            {
+                let mut requirements = TypeScriptRequirements::default();
+                let element = typescript_resource_value_annotation(
+                    &nested.field_type,
+                    proto,
+                    &mut requirements,
+                    api,
+                );
+                return ResolvedFieldType {
+                    annotation: typescript_array_annotation(&element),
+                    kind: ResolvedFieldKind::Scalar,
+                    requirements,
+                    wire_conversion: None,
+                };
+            }
+            typescript_resource_field_type(&param.kind, false, param.function.as_ref(), proto, api)
         },
     );
     Ok(RenderedResource {

@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import {
   type ReadRecordsResponse,
   StreamStatus,
+  appendRecordsRequestTransferTypeConverter,
   createReadRecordsResponseTransferTypeConverter,
   describeStreamResponseTransferTypeConverter,
   readRecordsRequestTransferTypeConverter,
@@ -148,6 +149,25 @@ describe("stream-service generated output", () => {
       const model = readRecordsRequestTransferTypeConverter.fromTransferType(proto);
       expect(model.fromOffset?.equals(request.fromOffset)).toBe(true);
     }
+  });
+
+  test("wraps each value of an append in its record on the wire", () => {
+    const proto = appendRecordsRequestTransferTypeConverter.toTransferType({
+      ref: { id: "stream-1" },
+      records: ["a", "b"],
+      producer: { id: "client:sample" },
+      withdrawRun: "r1",
+    });
+
+    // `append-record` flattens, so the model holds the values and the proto holds the records.
+    expect(
+      proto.records?.map((record) =>
+        common.defaultPayloadConverter.fromPayload(record.body!),
+      ),
+    ).toEqual(["a", "b"]);
+    expect(
+      appendRecordsRequestTransferTypeConverter.fromTransferType(proto).records,
+    ).toEqual(["a", "b"]);
   });
 
   test("decodes an enum number that it doesn't know as the fallback case", () => {

@@ -5,9 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use super::integer_annotation;
 use crate::error::{Error, Result};
 use crate::generator::typescript::{
-    RenderedResource, RenderedService, ResolvedFieldKind, ResolvedFieldType, TypeScriptRequirements,
-    render_resource_with_annotations, typescript_array_annotation, typescript_resource_field_type,
-    typescript_resource_value_annotation,
+    RenderedResource, RenderedService, ResolvedFieldKind, ResolvedFieldType,
+    TypeScriptRequirements, render_resource_with_annotations, typescript_array_annotation,
+    typescript_resource_field_type, typescript_resource_value_annotation,
 };
 use crate::planning::{
     PlannedFamily, PlannedResource, PlannedResourceMethodBindingSpec, PlannedSpec, PlannedType,

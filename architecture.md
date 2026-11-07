@@ -144,7 +144,9 @@ Operations must return resources owned by their service, including those held in
 result records. Return bindings determine shared wire models regardless of API
 targets. Method relationships are resolved for inference even in models-only
 generation; callable method metadata is retained only when an API target is
-selected.
+selected. It rejects integer-width mismatches between resource values and the
+request or result fields they bind to, including constructor fields populated by
+operations that return resources.
 
 ### OperationBindingPass
 

@@ -8,7 +8,7 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::nexgen_config::GenerationTarget;
 use crate::spec::{
-    ApiSpec, ApiSpecLeaf, CompilerPass, ExternalTypeSpec, FieldOrigin, FunctionArgsSpec,
+    ApiSpec, ApiSpecLeaf, CompilerPass, ExternalTypeSpec, FieldPolicy, FunctionArgsSpec,
     FunctionResultSpec, OperationSpec, RecordFieldSpec, RecordSpec, ResourceSpec, SelectedFamily,
     TypeSpec,
 };
@@ -217,7 +217,7 @@ fn validate_resource_flatten(
         })
         .collect::<BTreeMap<_, _>>();
     let omitted = |field: &RecordFieldSpec<SelectedFamily>| {
-        matches!(field.origin, Some(FieldOrigin::Omitted))
+        field.origin.as_ref().is_some_and(FieldPolicy::is_omitted)
     };
     for (key, promoted) in nested.fields.iter().filter(|(_, field)| !omitted(field)) {
         if let Some(other) = parameters.get(&normalized(&promoted.name)) {
@@ -298,7 +298,7 @@ fn validate_flattened_field_names(
             .collect::<String>()
     };
     let omitted = |field: &RecordFieldSpec<SelectedFamily>| {
-        matches!(field.origin, Some(FieldOrigin::Omitted))
+        field.origin.as_ref().is_some_and(FieldPolicy::is_omitted)
     };
     let parameters = record
         .fields
@@ -346,7 +346,7 @@ fn validate_flattened_field_names(
         let fields = record
             .fields
             .values()
-            .filter(|field| !matches!(field.origin, Some(FieldOrigin::Omitted)))
+            .filter(|field| !field.origin.as_ref().is_some_and(FieldPolicy::is_omitted))
             .count();
         // TypeScript sends a record with no proto as it is, so only a proto converter can wrap.
         let reason = if fields != 1 {

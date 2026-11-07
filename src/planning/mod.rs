@@ -53,7 +53,7 @@ pub(crate) use type_planning::TypePlanningPass;
 pub(crate) struct PlannedFamily;
 
 impl TypeFamily for PlannedFamily {
-    type Origin = Option<crate::spec::FieldOrigin>;
+    type Origin = Option<crate::spec::FieldPolicy>;
     type SpecData = PlannedSpecData;
     type Record = PlannedRecordType;
     type Enum = PlannedEnumType;
@@ -106,7 +106,7 @@ pub(crate) fn flattened_list_field<'a>(
         !field
             .origin
             .as_ref()
-            .is_some_and(crate::spec::FieldOrigin::is_omitted)
+            .is_some_and(crate::spec::FieldPolicy::is_omitted)
     });
     let (key, field) = fields.next().filter(|_| record.flatten_in_api)?;
     fields.next().is_none().then_some((key.as_str(), field))

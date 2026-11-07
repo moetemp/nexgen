@@ -27,7 +27,7 @@ use crate::planning::{
     RequestPlan, RequestPlanField, RequestPlanSource, ResolvedResourceBindingSource,
 };
 use crate::spec::{
-    AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FieldOrigin, FlagsSpec,
+    AliasTypeSpec, EnumSpec, ExternalTypeSourceSpec, ExternalTypeSpec, FieldPolicy, FlagsSpec,
     FunctionArgsSpec, FunctionFieldSpec, FunctionResultSpec, LanguageImportSpec,
     LanguageImportStyle, ModulePath, OperationPollSpec, OperationSpec, RecordFieldSpec, RecordSpec,
     SelectedTextSpec, TypeDeclSpec, TypeParameterSpec, TypeReplacementSpec, TypeSpec, VariantSpec,
@@ -1661,7 +1661,7 @@ impl<'a> ApiPlanner<'a> {
         let fields = planned
             .fields
             .iter()
-            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldOrigin::is_omitted))
+            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldPolicy::is_omitted))
             .zip(&rendered.fields)
             .collect::<Vec<_>>();
         Some(ResourceFactoryFlatten {
@@ -2317,7 +2317,7 @@ impl<'a> ApiPlanner<'a> {
         record
             .fields
             .iter()
-            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldOrigin::is_omitted))
+            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldPolicy::is_omitted))
             .zip(&model.fields)
             .find(|((name, _), _)| name.as_str() == key)
             .map(|(_, field)| field.attr_name.clone())
@@ -3025,7 +3025,7 @@ impl<'a> ApiPlanner<'a> {
         for ((_field_name, planned_field), rendered_field) in planned_model
             .fields
             .iter()
-            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldOrigin::is_omitted))
+            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldPolicy::is_omitted))
             .zip(model.fields.iter())
         {
             if let Some(source_expr) = planned_field.source_for(target) {
@@ -3035,7 +3035,13 @@ impl<'a> ApiPlanner<'a> {
                 });
                 continue;
             }
-            if matches!(planned_field.origin, Some(FieldOrigin::ApiOmitted)) {
+            if planned_field.api_omitted_for(target) {
+                if api_omits_required_list(planned_field, target) {
+                    request_fields.push(RenderedUnpackedRequestField {
+                        attr_name: rendered_field.attr_name.clone(),
+                        value_expr: "[]".to_string(),
+                    });
+                }
                 continue;
             }
             let default_kind = rendered_field.default_kind.clone();
@@ -3197,11 +3203,10 @@ impl<'a> ApiPlanner<'a> {
             fields: nested_planned_model
                 .fields
                 .iter()
-                .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldOrigin::is_omitted))
+                .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldPolicy::is_omitted))
                 .zip(nested_rendered_model.fields.iter())
                 .filter(|((_, field), _)| {
-                    !matches!(field.origin, Some(FieldOrigin::ApiOmitted))
-                        && field.source_for(target).is_none()
+                    !field.api_omitted_for(target) && field.source_for(target).is_none()
                 })
                 .map(
                     |((nested_field_name, nested_planned_field), nested_rendered_field)| {
@@ -3286,7 +3291,7 @@ impl<'a> ApiPlanner<'a> {
         let fields = planned_model
             .fields
             .iter()
-            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldOrigin::is_omitted))
+            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldPolicy::is_omitted))
             .map(|(field_name, field)| self.build_field(planned_model, field_name, field))
             .collect::<Result<Vec<_>>>()?;
 
@@ -3710,7 +3715,7 @@ fn collect_python_language_imports(api_plan: &PlannedSpec) -> Vec<LanguageImport
         for (_, field) in record
             .fields
             .iter()
-            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldOrigin::is_omitted))
+            .filter(|(_, field)| !field.origin.as_ref().is_some_and(FieldPolicy::is_omitted))
         {
             if let Some(function) = &field.function {
                 collect_function_imports(function, &mut imports);
@@ -8598,6 +8603,18 @@ fn python_request_arguments(
                     )
                 }),
         );
+        arguments.extend(
+            record
+                .fields
+                .values()
+                .filter(|field| {
+                    api_omits_required_list(field, target)
+                        && fields
+                            .iter()
+                            .all(|planned| planned.field_name != field.name)
+                })
+                .map(|field| format!("{}=[]", python_field_name(&field.name))),
+        );
     }
     arguments.extend(
         python_missing_request_defaults(api_plan, message_name, fields, target)
@@ -8605,6 +8622,16 @@ fn python_request_arguments(
             .map(|(name, expression)| format!("{name}=({expression})")),
     );
     arguments
+}
+
+/// The model needs a required list that the target's API omits, so the request has it empty.
+fn api_omits_required_list(
+    field: &RecordFieldSpec<PlannedFamily>,
+    target: GenerationTarget,
+) -> bool {
+    field.required
+        && field.api_omitted_for(target)
+        && matches!(field.field_type, PlannedType::List(_))
 }
 
 fn python_request_model_name(api_plan: &PlannedSpec, message_name: &str) -> String {
@@ -8652,10 +8679,9 @@ fn resource_return_binding_expr_python(binding: &PlannedOperationResourceFieldBi
             proto_field_name: _,
             origin,
         } => {
-            if matches!(
-                origin,
-                Some(FieldOrigin::Source { .. } | FieldOrigin::Omitted)
-            ) {
+            if origin.as_ref().is_some_and(FieldPolicy::is_omitted)
+                || origin.as_ref().is_some_and(FieldPolicy::is_sourced)
+            {
                 let expr = format!("request.{}", python_field_name(field_name));
                 if binding.optional {
                     format!("{expr} or None")

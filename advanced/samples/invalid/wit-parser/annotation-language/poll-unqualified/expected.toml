@@ -5,5 +5,5 @@ system_nexus = true
 kind = "invalid-wit-directive"
 contains = [
   "invalid WIT directive `@nexus.poll` on interface `models` function `read`",
-  "is not supported for go; valid languages: python, typescript",
+  "is not supported for go; valid languages: python, typescript, dotnet",
 ]

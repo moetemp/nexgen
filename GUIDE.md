@@ -1624,10 +1624,11 @@ separate the targets with commas.
   selected API. Other languages represent resources as data classes.
 - `workflow` selects the API for Workflow code.
 - `client` writes the same API for code outside a Workflow, in a `client`
-  package inside the output directory. Python and TypeScript support it, and
-  only with System Nexus, so this target requires `--system-nexus`. It can be
-  selected independently or alongside `workflow`. nexgen refuses it for a
-  service with no `@nexus.endpoint`.
+  package inside the output directory. In .NET, that is the namespace
+  `<namespace>.Client`, in files under `Client/`. Python, TypeScript and .NET
+  support it, and only with System Nexus, so this target requires
+  `--system-nexus`. It can be selected independently or alongside `workflow`.
+  nexgen refuses it for a service with no `@nexus.endpoint`.
 
 Python keeps shared models and service contracts in the root package. Client
 APIs live in `client/`. Workflow-only generation keeps its API in the root
@@ -1759,6 +1760,16 @@ nexgen refuses an operation whose client method would be `createNexusClient`,
 and a type named `NexusServiceClient`, since both would clash in the client
 package.
 
+In .NET, each service gets a static `<Service>ClientExtensions` class of
+`ITemporalClient` extension methods, and each resource a `Get<Resource>`
+factory. C# picks an extension method at compile time, so nexgen refuses two
+services of one package with public methods of the same name.
+
+```csharp
+var stream = await client.CreateStreamAsync<Turn>(new CreateStreamOptions("s1"));
+await stream.AppendAsync(records);
+```
+
 Sources work in the client target as well. Restrict workflow-only helpers with
 `targets="workflow"`. If a required resource-method request field has neither an
 applicable source nor a resource field or method parameter supplying it,
@@ -1862,13 +1873,13 @@ The catalog currently declares these restrictions:
 
 <!-- annotation-availability:start -->
 
-| Annotation                              | Language restriction | System Nexus            |
-| --------------------------------------- | -------------------- | ----------------------- |
-| `@nexus.namespace`                      | dotnet, go           | not required by catalog |
-| `@nexus.facade`                         | go                   | not required by catalog |
-| `@nexus.operations-class`               | dotnet               | required                |
-| `@nexus.delay-load-temporalio-workflow` | none                 | required                |
-| `@nexus.poll`                           | python, typescript   | required                |
+| Annotation                              | Language restriction       | System Nexus            |
+| --------------------------------------- | -------------------------- | ----------------------- |
+| `@nexus.namespace`                      | dotnet, go                 | not required by catalog |
+| `@nexus.facade`                         | go                         | not required by catalog |
+| `@nexus.operations-class`               | dotnet                     | required                |
+| `@nexus.delay-load-temporalio-workflow` | none                       | required                |
+| `@nexus.poll`                           | python, typescript, dotnet | required                |
 
 <!-- annotation-availability:end -->
 
@@ -2571,19 +2582,25 @@ type or transform expression refers to an otherwise-unavailable module.
 ### @nexus.poll
 
 **Placement:** Operation (function) **Syntax:**
-`@nexus.poll python="<support-helper>" typescript="<support-helper>" targets="client"`,
-with optional `items="<field>"` and `python-resume="<support-helper>"`
+`@nexus.poll <language>="<support-helper>" targets="client"`, where `<language>`
+is `python`, `typescript` or `dotnet`, with optional `items="<field>"` and
+`python-resume="<support-helper>"`.
 
 Generates an async iterator on the client extension, and on each client resource
-method that binds the operation. Its name is `iter_<name>` in Python and
-`iter<Name>` in TypeScript. The iterator sends the request, yields the response,
-and calls `<support-helper>(request, response)` for the next request. The helper
-is a sync function in the `--support-package`. It returns `None` (`undefined` in
-TypeScript) to stop.
+method that binds the operation. Its name is `iter_<name>` in Python,
+`iter<Name>` in TypeScript, and `<Name>PagesAsync` in .NET. The iterator sends
+the request, yields the response, and calls
+`<support-helper>(request, response)` for the next request. The helper is a sync
+function in the `--support-package`. It returns `None` (`undefined` in
+TypeScript, `null` in .NET) to stop.
+
+In .NET, `<Name>PagesAsync` also takes a `CancellationToken` and returns an
+`IAsyncEnumerable`, as the SDK's `ListWorkflowsAsync` does.
 
 ```wit
 /// @nexus.operation name="ReadRecords"
-/// @nexus.poll python="next_read_request" typescript="nextReadRequest" targets="client"
+/// @nexus.poll python="next_read_request" typescript="nextReadRequest"
+///   dotnet="StreamPoll.NextReadRequest" targets="client"
 read-records: func(request: read-records-request) -> read-records-response;
 ```
 
@@ -2626,8 +2643,9 @@ resource method's iterator takes only the method's parameters, such as
 `from_offset` of the Stream's `iter_read_items`.
 
 The stream sample's full helpers are in
-[`temporal_support/poll.py`](advanced/samples/python/temporal_support/poll.py)
-and [`support/poll.ts`](advanced/samples/typescript/support/poll.ts).
+[`temporal_support/poll.py`](advanced/samples/python/temporal_support/poll.py),
+[`support/poll.ts`](advanced/samples/typescript/support/poll.ts) and
+[`StreamPoll.cs`](advanced/samples/dotnet/TemporalSupport/StreamService/StreamPoll.cs).
 
 - `iter_<name>` yields pages, and `iter_<name>_items` yields the items in them.
 - All pages use one Nexus client. Each page is a new operation with a new random

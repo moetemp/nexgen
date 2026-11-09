@@ -1,7 +1,7 @@
-languages = ["python", "typescript"]
+languages = ["python", "typescript", "dotnet"]
 system_nexus = true
 targets = ["workflow", "client"]
 
 [error]
 kind = "client-target-name-conflict"
-contains = ["`describe` is a client method of both `OrderService` and `UserService`"]
+contains = ["is a client method of both `OrderService` and `UserService`"]

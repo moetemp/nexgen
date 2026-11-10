@@ -172,27 +172,6 @@ async def _append_records(
     return _support.last_offset(result)
 
 
-async def append_records(
-    *,
-    ref: StreamRef,
-    records: list[BodyT],
-    sequence: int | None = None,
-) -> int:
-    """Append one batch. Workflow code makes the call from a Local Activity.
-
-    Args:
-        sequence: The batch number in this epoch. Empty takes the next one, and a retry
-            writes it again.
-    """
-    request = AppendRecordsRequest(
-        ref=ref,
-        records=[AppendRecord(body=value) for value in records],
-        writer=_support.workflow_writer(),
-        sequence=sequence,
-    )
-    return await _append_records(request)
-
-
 async def _close_stream(
     request: CloseStreamRequest,
 ) -> temporalio.workflow.NexusOperationHandle[CloseStreamResponse,]:
@@ -205,17 +184,6 @@ async def _close_stream(
         input=request,
         output_type=CloseStreamResponse,
     )
-
-
-async def close_stream(
-    *,
-    ref: StreamRef,
-) -> temporalio.workflow.NexusOperationHandle[CloseStreamResponse,]:
-    request = CloseStreamRequest(
-        ref=ref,
-        writer=_support.workflow_writer(),
-    )
-    return await _close_stream(request)
 
 
 async def _read_records(
@@ -233,62 +201,6 @@ async def _read_records(
     )
 
 
-class _ReadRecords(typing.Generic[BodyT]):
-    """Subscript it with the type arguments that the call decodes with."""
-
-    def __init__(
-        self,
-        body_type: type[BodyT] | None = None,
-    ) -> None:
-        self.body_type: type[BodyT] = typing.cast(
-            "type[BodyT]", typing.Any if body_type is None else body_type
-        )
-
-    def __getitem__(self, body_type: type[_BodyT]) -> _ReadRecords[_BodyT]:
-        return _ReadRecords(body_type)
-
-    async def __call__(
-        self,
-        *,
-        ref: StreamRef,
-        from_offset: int | None = None,
-        start: StreamReadStart | None = None,
-        max_records: int | None = None,
-        wait: datetime.timedelta | None = None,
-        create_wait: datetime.timedelta | None = None,
-        max_bytes: int | None = None,
-    ) -> temporalio.workflow.NexusOperationHandle[ReadRecordsResponse[BodyT],]:
-        """A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads from a Local
-        Activity.
-
-        Args:
-            from_offset: Start offset. Empty uses start. An offset past the newest one +
-                1 fails.
-            start: Where to start when from-offset is empty. Unspecified is the
-                beginning.
-            max_records: About this many items per page, 1 to 1000.
-            wait: How long to wait for a new Record before an empty answer. At most 60
-                s.
-            create_wait: How long to wait for an uncreated Stream. Empty fails at once.
-                At most 60 s.
-            max_bytes: The maximum Record bytes in a page. A larger Record is still
-                returned alone.
-        """
-        request = ReadRecordsRequest(
-            ref=ref,
-            from_offset=from_offset,
-            start=start,
-            max_records=max_records,
-            wait=wait,
-            create_wait=create_wait,
-            max_bytes=max_bytes,
-        )
-        return await _read_records(request, self.body_type)
-
-
-read_records: _ReadRecords[typing.Any] = _ReadRecords()
-
-
 async def _describe_stream(
     request: DescribeStreamRequest,
 ) -> temporalio.workflow.NexusOperationHandle[DescribeStreamResponse,]:
@@ -301,13 +213,3 @@ async def _describe_stream(
         input=request,
         output_type=DescribeStreamResponse,
     )
-
-
-async def describe_stream(
-    *,
-    ref: StreamRef,
-) -> temporalio.workflow.NexusOperationHandle[DescribeStreamResponse,]:
-    request = DescribeStreamRequest(
-        ref=ref,
-    )
-    return await _describe_stream(request)

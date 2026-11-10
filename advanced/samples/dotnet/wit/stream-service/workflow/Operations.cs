@@ -16,7 +16,7 @@ namespace Temporalio.Workflows
 {
 
     [GeneratedCode("nexgen", null)]
-    public class CreateStreamOptions
+    internal class CreateStreamOptions
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="CreateStreamOptions"/> class.
@@ -48,7 +48,7 @@ namespace Temporalio.Workflows
     /// Append one batch. Workflow code makes the call from a Local Activity.
     /// </summary>
     [GeneratedCode("nexgen", null)]
-    public class AppendRecordsOptions<TBody>
+    internal class AppendRecordsOptions<TBody>
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="AppendRecordsOptions{TBody}"/> class.
@@ -68,7 +68,7 @@ namespace Temporalio.Workflows
     }
 
     [GeneratedCode("nexgen", null)]
-    public class CloseStreamOptions
+    internal class CloseStreamOptions
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="CloseStreamOptions"/> class.
@@ -85,7 +85,7 @@ namespace Temporalio.Workflows
     /// A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads from a Local Activity.
     /// </summary>
     [GeneratedCode("nexgen", null)]
-    public class ReadRecordsOptions
+    internal class ReadRecordsOptions
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="ReadRecordsOptions"/> class.
@@ -123,7 +123,7 @@ namespace Temporalio.Workflows
     }
 
     [GeneratedCode("nexgen", null)]
-    public class DescribeStreamOptions
+    internal class DescribeStreamOptions
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="DescribeStreamOptions"/> class.
@@ -157,7 +157,7 @@ namespace Temporalio.Workflows
 
         /// <param name="options">Create a Stream. If it exists, fail, or with use-existing get the open one.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(CreateStreamOptions options)
+        internal static Task<Stream<TBody>> CreateStreamAsync<TBody>(CreateStreamOptions options)
         {
             var request = new CreateStreamRequest(new StreamRef(options.Id) { Backend = options.Backend }, Nexgen.Support.StreamWorkflowContext.RequestId())
             {
@@ -184,7 +184,7 @@ namespace Temporalio.Workflows
         /// </summary>
         /// <param name="options">Append one batch. The Store keeps a resent batch once, by Producer, epoch and sequence.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<AppendRecordsResponse> AppendRecordsAsync<TBody>(AppendRecordsOptions<TBody> options)
+        internal static Task<AppendRecordsResponse> AppendRecordsAsync<TBody>(AppendRecordsOptions<TBody> options)
         {
             var request = new AppendRecordsRequest<TBody>(options.Ref, System.Linq.Enumerable.ToArray(System.Linq.Enumerable.Select(options.Records, value => new AppendRecord<TBody>(value))), Nexgen.Support.StreamWorkflowContext.Writer())
             {
@@ -204,7 +204,7 @@ namespace Temporalio.Workflows
 
         /// <param name="options">Close a Stream. Readers drain what is left, then end. Later appends are refused.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<CloseStreamResponse> CloseStreamAsync(CloseStreamOptions options)
+        internal static Task<CloseStreamResponse> CloseStreamAsync(CloseStreamOptions options)
         {
             var request = new CloseStreamRequest(options.Ref, Nexgen.Support.StreamWorkflowContext.Writer());
             return CloseStreamAsync(request);
@@ -227,7 +227,7 @@ namespace Temporalio.Workflows
         /// </summary>
         /// <param name="options">Read Records from an offset.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<ReadRecordsResponse<TBody>> ReadRecordsAsync<TBody>(ReadRecordsOptions options)
+        internal static Task<ReadRecordsResponse<TBody>> ReadRecordsAsync<TBody>(ReadRecordsOptions options)
         {
             var request = new ReadRecordsRequest(options.Ref)
             {
@@ -251,7 +251,7 @@ namespace Temporalio.Workflows
 
         /// <param name="options">Options for the operation.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<DescribeStreamResponse> DescribeStreamAsync(DescribeStreamOptions options)
+        internal static Task<DescribeStreamResponse> DescribeStreamAsync(DescribeStreamOptions options)
         {
             var request = new DescribeStreamRequest(options.Ref);
             return DescribeStreamAsync(request);

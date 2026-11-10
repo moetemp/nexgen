@@ -761,6 +761,9 @@ pub struct ResourceMethodSpec<F: TypeFamily = AuthoredFamily> {
     pub close: bool,
     /// Set by `@nexus.varargs` to the name of its list parameter.
     pub varargs: Option<String>,
+    /// Set by `@nexus.api-omit param="..."`: the parameter it names, mapped to the targets that
+    /// drop it. Empty when the method has no such directive.
+    pub api_omitted: BTreeMap<String, BTreeSet<GenerationTarget>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -828,6 +831,7 @@ impl<F: TypeFamily> ResourceMethodSpec<F> {
             operation_name: self.operation_name,
             close: self.close,
             varargs: self.varargs,
+            api_omitted: self.api_omitted,
         }
     }
 }

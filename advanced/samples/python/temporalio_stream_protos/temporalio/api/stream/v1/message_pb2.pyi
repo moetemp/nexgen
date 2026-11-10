@@ -446,7 +446,7 @@ class StreamRecord(_message.Message):
     OFFSET_FIELD_NUMBER: _builtins.int
     DATA_FIELD_NUMBER: _builtins.int
     CLOSE_FIELD_NUMBER: _builtins.int
-    offset: _builtins.int
+    offset: _builtins.bytes
     @_builtins.property
     def data(self) -> Global___StreamData: ...
     @_builtins.property
@@ -454,7 +454,7 @@ class StreamRecord(_message.Message):
     def __init__(
         self,
         *,
-        offset: _builtins.int = ...,
+        offset: _builtins.bytes = ...,
         data: Global___StreamData | None = ...,
         close: Global___StreamClose | None = ...,
     ) -> None: ...

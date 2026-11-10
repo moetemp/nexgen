@@ -53,6 +53,6 @@ def request_id() -> str:
     return str(uuid.uuid4())
 
 
-def last_offset(response: typing.Any) -> int:
-    """The offset of the last Record that an append wrote, or 0 for none."""
-    return response.last_offset or 0
+def last_offset(response: typing.Any) -> bytes:
+    """The offset of the last Record that an append wrote, or empty for none."""
+    return response.last_offset or b""

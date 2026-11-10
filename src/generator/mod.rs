@@ -1246,7 +1246,7 @@ interface job-service {
     }
 
     #[test]
-    fn a_typescript_model_keeps_the_name_optionality_and_long_of_a_sourced_field() {
+    fn a_typescript_model_keeps_the_name_optionality_and_bytes_of_a_sourced_field() {
         let wit = r#"
 package temporal:nexus@1.0.0;
 
@@ -1256,13 +1256,15 @@ world system { export stream-service; }
 interface stream-service {
   use nexus:temporal-types/model@1.0.0.{placeholder};
 
+  type stream-offset = list<u8>;
+
   /// @nexus.proto "temporal.api.streamservice.v1.ReadRecordsRequest"
   record read-records-request {
     /// @nexus.omit
     ref: placeholder,
     /// @nexus.name typescript="offset"
     /// @nexus.source targets="workflow" typescript="startOffset()"
-    from-offset: option<s64>,
+    from-offset: option<stream-offset>,
     /// @nexus.omit
     start: placeholder,
     max-records: option<s32>,
@@ -1289,7 +1291,7 @@ interface stream-service {
 "#;
         let typescript = workflow_files(Language::TypeScript, wit);
         let models = &typescript[&PathBuf::from("models.ts")];
-        assert!(models.contains("offset?: Long;"), "{models}");
+        assert!(models.contains("offset?: Uint8Array;"), "{models}");
         assert!(models.contains("fromOffset: model.offset"), "{models}");
     }
 }

@@ -1449,6 +1449,11 @@ fn resolve_authored_field_type_spec(
                     declaration_index,
                 }));
             }
+            // A named `list<u8>` alias is a bytes type, the same as the proto `bytes` it rides on, so
+            // a field and a method parameter agree. An inline `list<u8>` keeps its list of ints.
+            if type_def.name.is_some() && matches!(type_def.kind, TypeDefKind::List(Type::U8)) {
+                return Ok(TypeSpec::Bytes);
+            }
             if !matches!(type_def.kind, TypeDefKind::Variant(_))
                 && let Some(proto_name) =
                     find_proto_name_for_type_def(type_def, path, &type_context)?

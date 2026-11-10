@@ -99,7 +99,7 @@ namespace Temporalio.Workflows
         /// <summary>
         /// Start offset. Empty uses start. An offset past the newest one + 1 fails.
         /// </summary>
-        public long? FromOffset { get; set; }
+        public byte[]? FromOffset { get; set; }
         /// <summary>
         /// Where to start when from-offset is empty. Unspecified is the beginning.
         /// </summary>

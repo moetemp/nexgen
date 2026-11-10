@@ -61,7 +61,7 @@ namespace Temporalio.Api.Stream.V1 {
             "dWNlchgBIAEoCzIgLnRlbXBvcmFsLmFwaS5zdHJlYW0udjEuUHJvZHVjZXIS",
             "OAoGc3RhdHVzGAQgASgOMigudGVtcG9yYWwuYXBpLmVudW1zLnYxLlN0cmVh",
             "bUNsb3NlU3RhdHVzSgQIAhADSgQIAxAEUgZyZXN1bHRSB2ZhaWx1cmUikAEK",
-            "DFN0cmVhbVJlY29yZBIOCgZvZmZzZXQYASABKAMSMgoEZGF0YRgCIAEoCzIi",
+            "DFN0cmVhbVJlY29yZBIOCgZvZmZzZXQYASABKAwSMgoEZGF0YRgCIAEoCzIi",
             "LnRlbXBvcmFsLmFwaS5zdHJlYW0udjEuU3RyZWFtRGF0YUgAEjQKBWNsb3Nl",
             "GAQgASgLMiMudGVtcG9yYWwuYXBpLnN0cmVhbS52MS5TdHJlYW1DbG9zZUgA",
             "QgYKBGl0ZW0iTgoSU3RyZWFtRXJyb3JEZXRhaWxzEjgKBnJlYXNvbhgBIAEo",
@@ -3796,13 +3796,13 @@ namespace Temporalio.Api.Stream.V1 {
 
     /// <summary>Field number for the "offset" field.</summary>
     public const int OffsetFieldNumber = 1;
-    private long offset_;
+    private pb::ByteString offset_ = pb::ByteString.Empty;
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
-    public long Offset {
+    public pb::ByteString Offset {
       get { return offset_; }
       set {
-        offset_ = value;
+        offset_ = pb::ProtoPreconditions.CheckNotNull(value, "value");
       }
     }
 
@@ -3877,7 +3877,7 @@ namespace Temporalio.Api.Stream.V1 {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public override int GetHashCode() {
       int hash = 1;
-      if (Offset != 0L) hash ^= Offset.GetHashCode();
+      if (Offset.Length != 0) hash ^= Offset.GetHashCode();
       if (itemCase_ == ItemOneofCase.Data) hash ^= Data.GetHashCode();
       if (itemCase_ == ItemOneofCase.Close) hash ^= Close.GetHashCode();
       hash ^= (int) itemCase_;
@@ -3899,9 +3899,9 @@ namespace Temporalio.Api.Stream.V1 {
     #if !GOOGLE_PROTOBUF_REFSTRUCT_COMPATIBILITY_MODE
       output.WriteRawMessage(this);
     #else
-      if (Offset != 0L) {
-        output.WriteRawTag(8);
-        output.WriteInt64(Offset);
+      if (Offset.Length != 0) {
+        output.WriteRawTag(10);
+        output.WriteBytes(Offset);
       }
       if (itemCase_ == ItemOneofCase.Data) {
         output.WriteRawTag(18);
@@ -3921,9 +3921,9 @@ namespace Temporalio.Api.Stream.V1 {
     [global::System.Diagnostics.DebuggerNonUserCodeAttribute]
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     void pb::IBufferMessage.InternalWriteTo(ref pb::WriteContext output) {
-      if (Offset != 0L) {
-        output.WriteRawTag(8);
-        output.WriteInt64(Offset);
+      if (Offset.Length != 0) {
+        output.WriteRawTag(10);
+        output.WriteBytes(Offset);
       }
       if (itemCase_ == ItemOneofCase.Data) {
         output.WriteRawTag(18);
@@ -3943,8 +3943,8 @@ namespace Temporalio.Api.Stream.V1 {
     [global::System.CodeDom.Compiler.GeneratedCode("protoc", null)]
     public int CalculateSize() {
       int size = 0;
-      if (Offset != 0L) {
-        size += 1 + pb::CodedOutputStream.ComputeInt64Size(Offset);
+      if (Offset.Length != 0) {
+        size += 1 + pb::CodedOutputStream.ComputeBytesSize(Offset);
       }
       if (itemCase_ == ItemOneofCase.Data) {
         size += 1 + pb::CodedOutputStream.ComputeMessageSize(Data);
@@ -3964,7 +3964,7 @@ namespace Temporalio.Api.Stream.V1 {
       if (other == null) {
         return;
       }
-      if (other.Offset != 0L) {
+      if (other.Offset.Length != 0) {
         Offset = other.Offset;
       }
       switch (other.ItemCase) {
@@ -4001,8 +4001,8 @@ namespace Temporalio.Api.Stream.V1 {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, input);
             break;
-          case 8: {
-            Offset = input.ReadInt64();
+          case 10: {
+            Offset = input.ReadBytes();
             break;
           }
           case 18: {
@@ -4042,8 +4042,8 @@ namespace Temporalio.Api.Stream.V1 {
           default:
             _unknownFields = pb::UnknownFieldSet.MergeFieldFrom(_unknownFields, ref input);
             break;
-          case 8: {
-            Offset = input.ReadInt64();
+          case 10: {
+            Offset = input.ReadBytes();
             break;
           }
           case 18: {

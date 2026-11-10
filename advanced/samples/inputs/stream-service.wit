@@ -164,6 +164,10 @@ interface stream-service {
     close(stream-close),
   }
 
+  // The wire carries opaque bytes. On a proto-backed field a `list<u8>` is the proto `bytes`, so the
+  // SDK sees `bytes`, which compare in Stream order and have no arithmetic.
+  type stream-offset = list<u8>;
+
   // An offset is ordered and unique in one Stream, and sparse. Offsets have gaps, so they don't
   // count Records. A read gives its Stream, so the read checks the offset against that Stream.
   /// @nexus.doc "One item that a read gives."
@@ -172,7 +176,7 @@ interface stream-service {
     // A newer server can send an item kind that this SDK doesn't know. Then the item is empty.
     item: option<stream-item>,
     /// @nexus.doc "The place of this item in the Stream. Ordered and unique, with gaps."
-    offset: option<s64>,
+    offset: option<stream-offset>,
   }
 
   /// @nexus.doc
@@ -245,8 +249,8 @@ interface stream-service {
 
   /// @nexus.proto "temporal.api.streamservice.v1.AppendRecordsResponse"
   record append-records-response {
-    first-offset: option<s64>,
-    last-offset: option<s64>,
+    first-offset: option<stream-offset>,
+    last-offset: option<stream-offset>,
   }
 
   // A close carries no value, so code that has a last value appends it first.
@@ -283,7 +287,7 @@ interface stream-service {
   record read-records-request {
     ref: stream-ref,
     /// @nexus.doc "Start offset. Empty uses start. An offset past the newest one + 1 fails."
-    from-offset: option<s64>,
+    from-offset: option<stream-offset>,
     /// @nexus.doc "Where to start when from-offset is empty. Unspecified is the beginning."
     start: option<stream-read-start>,
     /// @nexus.doc "About this many items per page, 1 to 1000."
@@ -313,7 +317,7 @@ interface stream-service {
   record read-records-response {
     records: list<stream-record>,
     /// @nexus.doc "The from-offset of the next read, which is the newest offset read + 1."
-    next-offset: option<s64>,
+    next-offset: option<stream-offset>,
     /// @nexus.doc "True when the Stream is closed and this read gave its last item."
     done: option<bool>,
     // Native only. The SDK Stores never set it.
@@ -332,7 +336,7 @@ interface stream-service {
   record describe-stream-response {
     status: option<stream-status>,
     /// @nexus.doc "The newest offset, of a Record. Empty for none."
-    last-offset: option<s64>,
+    last-offset: option<stream-offset>,
     retention: option<duration>,
   }
 
@@ -356,7 +360,7 @@ interface stream-service {
     /// @nexus.doc "Read one page of Records. The poll iterator reads them all."
     /// @nexus.operation "read-records"
     read: func(
-      from-offset: option<s64>,
+      from-offset: option<stream-offset>,
       start: option<stream-read-start>,
       max-records: option<s32>,
       wait: option<duration>,
@@ -377,7 +381,7 @@ interface stream-service {
   create-stream: func(request: create-stream-request) -> create-stream-result;
 
   /// @nexus.doc "Append one batch. Workflow code makes the call from a Local Activity."
-  /// @nexus.output-transform python-type="int" python="_support.last_offset(result)"
+  /// @nexus.output-transform python-type="bytes" python="_support.last_offset(result)"
   /// @nexus.operation name="AppendRecords"
   append-records: func(request: append-records-request) -> append-records-response;
 

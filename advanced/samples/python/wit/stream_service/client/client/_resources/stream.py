@@ -78,7 +78,7 @@ class Stream(typing.Generic[BodyT]):
         *records: BodyT,
         rpc_metadata: collections.abc.Mapping[str, str | bytes] | None = None,
         rpc_timeout: datetime.timedelta | None = None,
-    ) -> int:
+    ) -> bytes:
         """Append values, and return the offset of the last one."""
         request = AppendRecordsRequest(
             ref=self.ref,
@@ -117,7 +117,7 @@ class Stream(typing.Generic[BodyT]):
 
     async def read(
         self,
-        from_offset: int | None = None,
+        from_offset: bytes | None = None,
         start: StreamReadStart | None = None,
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
@@ -149,7 +149,7 @@ class Stream(typing.Generic[BodyT]):
 
     async def iter_read(
         self,
-        from_offset: int | None = None,
+        from_offset: bytes | None = None,
         start: StreamReadStart | None = None,
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
@@ -204,7 +204,7 @@ class Stream(typing.Generic[BodyT]):
 
     def iter_read_items(
         self,
-        from_offset: int | None = None,
+        from_offset: bytes | None = None,
         start: StreamReadStart | None = None,
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,

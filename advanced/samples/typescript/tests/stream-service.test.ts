@@ -1,6 +1,5 @@
 import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
-import Long from "long";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
@@ -14,6 +13,13 @@ import {
   readRecordsResponseTransferTypeConverter,
 } from "../wit/stream-service/workflow/models.ts";
 import { Stream } from "../wit/stream-service/workflow/resources.ts";
+
+function _offset(n: number): Uint8Array {
+  // Big-endian bytes, so a bytes compare keeps the int order these tests assert.
+  const bytes = new Uint8Array(8);
+  new DataView(bytes.buffer).setBigUint64(0, BigInt(n));
+  return bytes;
+}
 
 const startOperation = vi.hoisted(() => vi.fn());
 vi.mock("@temporalio/workflow", () => ({
@@ -55,7 +61,7 @@ describe("stream-service generated output", () => {
             tag: "data",
             value: { body: "hi" },
           },
-          offset: Long.fromNumber(1),
+          offset: _offset(1),
         },
         {
           item: {
@@ -68,23 +74,26 @@ describe("stream-service generated output", () => {
               status: StreamCloseStatus.StreamCloseStatusClosed,
             },
           },
-          offset: Long.fromNumber(2),
+          offset: _offset(2),
         },
       ],
-      nextOffset: Long.fromNumber(3),
+      nextOffset: _offset(3),
       done: true,
     };
 
     const proto: temporal.api.streamservice.v1.IReadRecordsResponse =
       readRecordsResponseTransferTypeConverter.toTransferType(model);
 
-    expect(proto.records?.map((record) => record.item)).toEqual(["data", "close"]);
+    expect(proto.records?.map((record) => record.item)).toEqual([
+      "data",
+      "close",
+    ]);
     expect(proto.records?.[1].close?.status).toBe(
       StreamCloseStatus.StreamCloseStatusClosed,
     );
-    expect(readRecordsResponseTransferTypeConverter.fromTransferType(proto)).toEqual(
-      model,
-    );
+    expect(
+      readRecordsResponseTransferTypeConverter.fromTransferType(proto),
+    ).toEqual(model);
   });
 
   // A Stream<Turn> read gives its runtime type to this converter.
@@ -93,8 +102,10 @@ describe("stream-service generated output", () => {
       records: [
         {
           item: "data",
-          data: { body: common.defaultPayloadConverter.toPayload({ role: "user" }) },
-          offset: Long.fromNumber(1),
+          data: {
+            body: common.defaultPayloadConverter.toPayload({ role: "user" }),
+          },
+          offset: _offset(1),
         },
       ],
     };
@@ -111,30 +122,32 @@ describe("stream-service generated output", () => {
 
   test("gives no item for a read record whose item kind only a newer server knows", () => {
     const proto: temporal.api.streamservice.v1.IReadRecordsResponse = {
-      records: [{ offset: Long.fromNumber(1) }],
+      records: [{ offset: _offset(1) }],
     };
 
-    const model = readRecordsResponseTransferTypeConverter.fromTransferType(proto);
+    const model =
+      readRecordsResponseTransferTypeConverter.fromTransferType(proto);
 
     expect(model.records?.[0].item).toBeUndefined();
-    expect(model.records?.[0].offset?.toNumber()).toBe(1);
+    expect(model.records?.[0].offset).toEqual(_offset(1));
   });
 
   test("maps every field of a read request through its proto", () => {
     const proto: temporal.api.streamservice.v1.IReadRecordsRequest = {
       ref: { id: "stream-1" },
-      fromOffset: Long.fromNumber(7),
+      fromOffset: _offset(7),
       maxRecords: 10,
     };
 
-    const model = readRecordsRequestTransferTypeConverter.fromTransferType(proto);
+    const model =
+      readRecordsRequestTransferTypeConverter.fromTransferType(proto);
 
     expect(model.ref.id).toBe("stream-1");
-    expect(model.fromOffset?.toNumber()).toBe(7);
+    expect(model.fromOffset).toEqual(_offset(7));
     expect(model.maxRecords).toBe(10);
-    expect(readRecordsRequestTransferTypeConverter.toTransferType(model).ref?.id).toBe(
-      "stream-1",
-    );
+    expect(
+      readRecordsRequestTransferTypeConverter.toTransferType(model).ref?.id,
+    ).toBe("stream-1");
   });
 
   test("wraps each value of an append in its record on the wire", () => {
@@ -155,10 +168,17 @@ describe("stream-service generated output", () => {
     ).toEqual(["a", "b"]);
   });
 
-  test("preserves offsets above 2^53 through resource calls and proto conversion", async () => {
-    const offset = Long.fromString("1880158843699200005");
+  test("preserves large offsets through resource calls and proto conversion", async () => {
+    const toBytes = (n: bigint): Uint8Array => {
+      const bytes = new Uint8Array(8);
+      new DataView(bytes.buffer).setBigUint64(0, n);
+      return bytes;
+    };
+    // A value past 2^53, so a byte offset keeps what a JS number would round off.
+    const offset = toBytes(1880158843699200005n);
+    const nextOffset = toBytes(1880158843699200006n);
     startOperation.mockResolvedValue({
-      result: async () => ({ records: [], nextOffset: offset.add(1) }),
+      result: async () => ({ records: [], nextOffset }),
     });
     const stream = new Stream({ id: "stream-1" }, undefined);
 
@@ -166,14 +186,16 @@ describe("stream-service generated output", () => {
     await stream.read(page.nextOffset);
 
     const requests = startOperation.mock.calls.map(([, request]) => request);
-    expect(requests.map((request) => request.fromOffset.toString())).toEqual([
-      "1880158843699200005",
-      "1880158843699200006",
+    expect(requests.map((request) => request.fromOffset)).toEqual([
+      offset,
+      nextOffset,
     ]);
     for (const request of requests) {
-      const proto = readRecordsRequestTransferTypeConverter.toTransferType(request);
-      const model = readRecordsRequestTransferTypeConverter.fromTransferType(proto);
-      expect(model.fromOffset?.equals(request.fromOffset)).toBe(true);
+      const proto =
+        readRecordsRequestTransferTypeConverter.toTransferType(request);
+      const model =
+        readRecordsRequestTransferTypeConverter.fromTransferType(proto);
+      expect(model.fromOffset).toEqual(request.fromOffset);
     }
   });
 
@@ -183,7 +205,8 @@ describe("stream-service generated output", () => {
       status: 9 as temporal.api.enums.v1.StreamStatus,
     };
 
-    const model = describeStreamResponseTransferTypeConverter.fromTransferType(proto);
+    const model =
+      describeStreamResponseTransferTypeConverter.fromTransferType(proto);
 
     expect(model.status).toBe(StreamStatus.StreamStatusUnspecified);
   });

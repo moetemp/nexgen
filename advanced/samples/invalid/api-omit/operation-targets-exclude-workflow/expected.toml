@@ -1,0 +1,6 @@
+[error]
+kind = "invalid-wit-directive"
+contains = [
+  "invalid WIT directive `@nexus.api-omit` on interface `example` operation `Submit`",
+  "on a function, `@nexus.api-omit` omits the workflow top-level function, so `targets` must include `workflow`",
+]

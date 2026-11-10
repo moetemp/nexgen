@@ -17,6 +17,7 @@ import {
   readRecordsResponseTransferTypeConverter,
 } from "../wit/stream-service/both/models.ts";
 import { Stream } from "../wit/stream-service/both/resources.ts";
+import * as streamPackage from "../wit/stream-service/both/index.ts";
 
 function _offset(n: number): Uint8Array {
   // Big-endian bytes, so a bytes compare keeps the int order these tests assert.
@@ -213,6 +214,22 @@ describe("stream-service generated output", () => {
     }
 
     expect(nexusClient).toBeTypeOf("function");
+  });
+
+  test("api-omit keeps the operation functions out of the package barrel", () => {
+    for (const name of [
+      "createStream",
+      "appendRecords",
+      "closeStream",
+      "readRecords",
+      "describeStream",
+    ]) {
+      expect(name in streamPackage).toBe(false);
+    }
+    // The Stream resource still reaches the operations.
+    const stream = new Stream({ id: "stream-1" }, undefined);
+    expect(typeof stream.append).toBe("function");
+    expect(typeof stream.read).toBe("function");
   });
 
   test("decodes an enum number that it doesn't know as the fallback case", () => {

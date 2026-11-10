@@ -198,11 +198,10 @@ def test_an_unknown_number_of_an_enum_with_no_fallback_fails_the_message(
 def test_a_workflow_read_takes_no_last(
     api: types.ModuleType, model_types: types.ModuleType
 ) -> None:
-    # Replay needs a fixed range, so the WIT omits `last` from the Workflow `read` method.
+    # Replay needs a fixed range, so the WIT omits `last` from the Workflow API only. The read is
+    # reached through the Stream resource, since `@nexus.api-omit` drops the top-level function.
     stream = api.get_stream[str](id="s-1")
     assert "last" not in inspect.signature(stream.read).parameters
-    # The operation and the model keep `last`.
-    assert "last" in inspect.signature(api.read_records).parameters
     request = model_types.ReadRecordsRequest(
         ref=model_types.StreamRef(id="s-1"), last=3
     )
@@ -221,7 +220,6 @@ async def test_workflow_apis_call_the_stream_service(
 ) -> None:
     ref = model_types.StreamRef(id="workflow-stream")
     replies = {
-        "CreateStream": model_types.CreateStreamResult(ref=ref, created=True),
         "AppendRecords": model_types.AppendRecordsResponse(last_offset=_offset(3)),
     }
     calls: list[tuple[str, typing.Any]] = []
@@ -250,13 +248,12 @@ async def test_workflow_apis_call_the_stream_service(
     monkeypatch.setattr(temporalio.workflow, "create_nexus_client", create_client)
     monkeypatch.setattr(temporalio.workflow, "info", lambda: FakeWorkflowInfo("r2"))
     monkeypatch.setattr(temporalio.workflow, "in_workflow", lambda: True)
-    request_id = uuid.UUID(int=7)
-    monkeypatch.setattr(temporalio.workflow, "uuid4", lambda: request_id)
-    stream = await api.create_stream[str](id=ref.id)
+    # The operations are api-omitted, so the Workflow API reaches them through the Stream resource.
+    stream = api.get_stream[str](id=ref.id)
     last_offset = await stream.append()
     assert last_offset == _offset(3)
-    assert await api.append_records(ref=ref, records=["a", "b"]) == _offset(3)
-    # The Workflow API fills the request id and the writer from its sources.
+    assert await stream.append("a", "b") == _offset(3)
+    # The Workflow API fills the writer from its source.
     writer = model_types.StreamWriter(
         producer=model_types.Producer(
             id="wf:r2",
@@ -267,10 +264,6 @@ async def test_workflow_apis_call_the_stream_service(
     )
     records = [model_types.AppendRecord(body="a"), model_types.AppendRecord(body="b")]
     expected = [
-        (
-            "CreateStream",
-            model_types.CreateStreamRequest(stream_ref=ref, request_id=str(request_id)),
-        ),
         (
             "AppendRecords",
             model_types.AppendRecordsRequest(ref=ref, records=[], writer=writer),
@@ -332,7 +325,7 @@ async def test_workflow_handle_decodes_with_its_type_parameter(
     monkeypatch.setattr(temporalio.workflow, "create_nexus_client", create_client)
     monkeypatch.setattr(temporalio.workflow, "uuid4", lambda: uuid.UUID(int=7))
     if construction == "create":
-        stream = await workflow_only.create_stream[Turn](id=ref.id)
+        stream = workflow_only.get_stream[Turn](id=ref.id)
     else:
         stream = WorkflowStream[Turn](ref=ref, created=None)
 
@@ -445,6 +438,43 @@ def test_a_workflow_factory_builds_a_handle_with_no_call(
     assert stream.ref == model_types.StreamRef(id="turns", backend="redis")
     assert stream.created is None
     assert stream.body_type is str
+
+
+@pytest.mark.parametrize(
+    "api",
+    [workflow_only, both_workflow],
+    ids=["workflow", "both"],
+)
+def test_api_omit_hides_the_public_operation_functions(api: types.ModuleType) -> None:
+    hidden = (
+        "append_records",
+        "close_stream",
+        "create_stream",
+        "describe_stream",
+        "read_records",
+    )
+    for name in hidden:
+        assert not hasattr(api, name)
+        assert name not in api.__all__
+    # The resource factory and its methods still reach the operations.
+    assert "get_stream" in api.__all__
+    stream = api.get_stream[str](id="s-1")
+    assert all(
+        callable(getattr(stream, method))
+        for method in ("append", "close", "read", "describe")
+    )
+    # Every operation stays registered, so the service still serves all five.
+    assert len(api.__nexus_operation_registry__) == 5
+    # The private helpers that the resource methods call stay in the resource module.
+    resources = importlib.import_module(api.__name__ + "._resources.stream")
+    for helper in (
+        "_append_records",
+        "_close_stream",
+        "_read_records",
+        "_describe_stream",
+    ):
+        assert hasattr(resources, helper)
+    assert not hasattr(resources, "append_records")
 
 
 @pytest.mark.parametrize(

@@ -666,6 +666,7 @@ impl<'a> TypePlanningContext<'a> {
                 transform: poll.transform.clone(),
                 item_type: poll.item_type.clone(),
             }),
+            api_omitted: operation.api_omitted.clone(),
             data: PlannedOperationData {
                 output_resource_return: plan_operation_resource_return(
                     &self.spec,
@@ -1487,7 +1488,7 @@ impl TypePlanningContext<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, BTreeSet};
     use std::path::PathBuf;
 
     use super::*;
@@ -1911,6 +1912,7 @@ interface alerts {
                     output_transform: None,
                     serialization_context: LanguageStringSpec::default(),
                     poll: None,
+                    api_omitted: BTreeSet::new(),
                     data: (),
                 }],
                 resources: Vec::new(),

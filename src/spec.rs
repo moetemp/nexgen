@@ -687,6 +687,10 @@ pub struct OperationSpec<F: TypeFamily = AuthoredFamily> {
     pub serialization_context: F::Text,
     /// The `@nexus.poll` settings. None when the operation has no poll.
     pub poll: Option<OperationPollSpec<F>>,
+    /// Targets whose public top-level operation function `@nexus.api-omit` suppresses. The
+    /// operation stays registered, in the service, and bindable by resource methods. Empty
+    /// keeps the function on every target.
+    pub api_omitted: BTreeSet<GenerationTarget>,
     pub data: F::OperationData,
 }
 
@@ -724,6 +728,7 @@ impl<F: TypeFamily> OperationSpec<F> {
                 .map(|transform| transform.map_names_with(map)),
             serialization_context: map.map_text(self.serialization_context),
             poll: self.poll.map(|poll| poll.map_names_with(map)),
+            api_omitted: self.api_omitted,
             data,
         }
     }

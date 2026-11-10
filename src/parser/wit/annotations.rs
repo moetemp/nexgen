@@ -175,7 +175,7 @@ const CATALOG: &[Annotation] = {
         },
         Annotation {
             name: "api-omit",
-            sites: &[Field, Method],
+            sites: &[Field, Method, Function],
             keys: &["targets", "param"],
             language_keys: &[],
             repeatable: false,

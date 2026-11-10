@@ -1822,7 +1822,7 @@ below, such as protobuf bindings, function signatures, and conflicting options.
 | `@nexus.name`                           | record field                                                                                  |
 | `@nexus.type`                           | record field, type alias, resource                                                            |
 | `@nexus.omit`                           | record field                                                                                  |
-| `@nexus.api-omit`                       | record field, resource method                                                                 |
+| `@nexus.api-omit`                       | record field, resource method, freestanding function                                         |
 | `@nexus.source`                         | record field                                                                                  |
 | `@nexus.default`                        | record field                                                                                  |
 | `@nexus.fallback`                       | enum case                                                                                     |
@@ -2274,17 +2274,28 @@ Cannot be combined with `@nexus.source`, `@nexus.type`, `@nexus.function`,
 
 ### @nexus.api-omit
 
-**Placement:** Record field, resource method **Syntax:**
+**Placement:** Record field, resource method or freestanding function **Syntax:**
 `@nexus.api-omit [targets="workflow,client"] [param="<parameter>"]`
 
 On a record field, keeps the field on generated models and in proto conversion,
 but excludes it from generated convenience operation APIs. `targets` limits the
 omission to those targets. Unlike `@nexus.omit`, this preserves the field in the
 generated model. On a resource method, `param` names a parameter to drop for
-those targets. See [API-omitted fields](#api-omitted-fields) for an example.
+those targets. On a freestanding function, it omits the operation's public top-level
+function, so its `targets` must include `workflow`. See
+[API-omitted fields](#api-omitted-fields) for an example.
 
-Cannot be combined with `@nexus.omit`, `@nexus.default`, or a `@nexus.source`
-for the same target.
+On a freestanding function (an operation), the bare `@nexus.api-omit` suppresses
+the operation's public top-level function and its export. Only the workflow
+target has a top-level operation function, so on a function `@nexus.api-omit` is
+effectively workflow-only, and `targets` (if given) must include `workflow`. The
+operation stays registered, stays in the generated service, and stays bindable
+by resource methods. The private per-operation helper that resource methods call
+remains, so the operation is still reached through its resource. A function takes
+`targets` only, not `param`.
+
+On a field, it cannot be combined with `@nexus.omit`, `@nexus.default`, or a
+`@nexus.source` for the same target.
 
 ---
 

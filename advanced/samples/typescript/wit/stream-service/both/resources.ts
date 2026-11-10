@@ -48,6 +48,7 @@ export class Stream<BodyT = unknown> {
     maxRecords?: number,
     wait?: common.Duration,
     createWait?: common.Duration,
+    last?: number,
     maxBytes?: Long,
   ): Promise<ReadRecordsResponse<BodyT>> {
     const request = {
@@ -57,6 +58,7 @@ export class Stream<BodyT = unknown> {
       maxRecords: maxRecords,
       wait: wait,
       createWait: createWait,
+      last: last,
       maxBytes: maxBytes,
     };
     const handle = await readRecords(request, this.bodyType);

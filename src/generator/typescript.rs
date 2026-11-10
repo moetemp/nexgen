@@ -8724,6 +8724,7 @@ fn render_client_resource(
                 operation_name,
                 request_plan,
                 direct_return,
+                ..
             } => {
                 let operation = service
                     .operations

@@ -44,18 +44,18 @@ namespace Temporalio.Workflows.Client
         }
 
         [GeneratedCode("nexgen", null)]
-        public async Task<ReadRecordsResponse<TBody>> ReadAsync(long? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait, long? maxBytes)
+        public async Task<ReadRecordsResponse<TBody>> ReadAsync(byte[]? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait, int? last, long? maxBytes)
         {
-            var request = new ReadRecordsRequest(Ref) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, MaxBytes = maxBytes };
+            var request = new ReadRecordsRequest(Ref) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, Last = last, MaxBytes = maxBytes };
             var result = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse<TBody>>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions()).ConfigureAwait(false);
             return result;
         }
 
         #if NETCOREAPP3_0_OR_GREATER
         [GeneratedCode("nexgen", null)]
-        public async IAsyncEnumerable<ReadRecordsResponse<TBody>> ReadPagesAsync(long? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait, long? maxBytes, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken = default)
+        public async IAsyncEnumerable<ReadRecordsResponse<TBody>> ReadPagesAsync(byte[]? fromOffset, StreamReadStart? start, int? maxRecords, System.TimeSpan? wait, System.TimeSpan? createWait, int? last, long? maxBytes, [System.Runtime.CompilerServices.EnumeratorCancellation] System.Threading.CancellationToken cancellationToken = default)
         {
-            var request = new ReadRecordsRequest(Ref) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, MaxBytes = maxBytes };
+            var request = new ReadRecordsRequest(Ref) { FromOffset = fromOffset, Start = start, MaxRecords = maxRecords, Wait = wait, CreateWait = createWait, Last = last, MaxBytes = maxBytes };
             while (true)
             {
                 var response = await nexusClient.ExecuteNexusOperationAsync<ReadRecordsResponse<TBody>>("ReadRecords", request, StreamServiceClientExtensions.NewOperationOptions(cancellationToken)).ConfigureAwait(false);

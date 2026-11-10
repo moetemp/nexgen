@@ -15,7 +15,7 @@ namespace Temporalio.Workflows.Client
 {
 
     [GeneratedCode("nexgen", null)]
-    public class CreateStreamOptions
+    internal class CreateStreamOptions
     {
         /// <summary>
         /// Initializes a new instance of the <see cref="CreateStreamOptions"/> class.
@@ -79,7 +79,7 @@ namespace Temporalio.Workflows.Client
         /// <param name="client">The client that starts the operation.</param>
         /// <param name="options">Create a Stream. If it exists, fail, or with use-existing get the open one.</param>
         [GeneratedCode("nexgen", null)]
-        public static Task<Stream<TBody>> CreateStreamAsync<TBody>(this Temporalio.Client.ITemporalClient client, CreateStreamOptions options)
+        internal static Task<Stream<TBody>> CreateStreamAsync<TBody>(this Temporalio.Client.ITemporalClient client, CreateStreamOptions options)
         {
             var request = new CreateStreamRequest(new StreamRef(options.Id) { Backend = options.Backend }, Nexgen.Support.StreamWorkflowContext.RequestId())
             {

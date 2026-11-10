@@ -54,11 +54,12 @@ export class Stream<BodyT = unknown> {
   }
 
   public async read(
-    fromOffset?: Long,
+    fromOffset?: Uint8Array,
     start?: StreamReadStart,
     maxRecords?: number,
     wait?: common.Duration,
     createWait?: common.Duration,
+    last?: number,
     maxBytes?: Long,
   ): Promise<ReadRecordsResponse<BodyT>> {
     const request = {
@@ -68,6 +69,7 @@ export class Stream<BodyT = unknown> {
       maxRecords: maxRecords,
       wait: wait,
       createWait: createWait,
+      last: last,
       maxBytes: maxBytes,
     };
     const handle = await this.#nexusClient.startOperation(
@@ -91,11 +93,12 @@ export class Stream<BodyT = unknown> {
    * Read one page of Records. The poll iterator reads them all.
    */
   public async *iterRead(
-    fromOffset?: Long,
+    fromOffset?: Uint8Array,
     start?: StreamReadStart,
     maxRecords?: number,
     wait?: common.Duration,
     createWait?: common.Duration,
+    last?: number,
     maxBytes?: Long,
   ): AsyncGenerator<ReadRecordsResponse<BodyT>, void> {
     let request: ReadRecordsRequest = {
@@ -105,6 +108,7 @@ export class Stream<BodyT = unknown> {
       maxRecords: maxRecords,
       wait: wait,
       createWait: createWait,
+      last: last,
       maxBytes: maxBytes,
     };
     while (true) {

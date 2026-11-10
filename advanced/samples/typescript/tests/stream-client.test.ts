@@ -3,7 +3,6 @@ import {
   asyncLocalStorage as activityContext,
 } from "@temporalio/activity";
 import * as common from "@temporalio/common";
-import Long from "long";
 import type * as nexus from "nexus-rpc";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -22,6 +21,13 @@ import {
   type StreamRef,
 } from "../wit/stream-service/both/models.ts";
 
+function _offset(n: number): Uint8Array {
+  // Big-endian bytes, so a bytes compare keeps the int order these tests assert.
+  const bytes = new Uint8Array(8);
+  new DataView(bytes.buffer).setBigUint64(0, BigInt(n));
+  return bytes;
+}
+
 const STREAM_SERVICE = "temporal.api.streamservice.v1.StreamService";
 const SYSTEM_ENDPOINT = "__temporal_system";
 
@@ -36,7 +42,9 @@ interface Call {
 class Client extends StreamServiceClientExtension(Object) {
   public readonly calls: Call[] = [];
   public readonly operationIds: string[] = [];
-  public readonly outputTypes: (nexus.TypeInfo<unknown, unknown> | undefined)[] = [];
+  public readonly outputTypes: (
+    nexus.TypeInfo<unknown, unknown> | undefined
+  )[] = [];
   public nexusClients = 0;
 
   public constructor(private readonly answers: Record<string, unknown[]>) {
@@ -100,18 +108,21 @@ describe("stream-service client target", () => {
   test("a created stream appends on the system endpoint", async () => {
     const ref: StreamRef = { id: "s1" };
     const appended: AppendRecordsResponse = {
-      firstOffset: Long.fromNumber(0),
-      lastOffset: Long.fromNumber(0),
+      firstOffset: _offset(0),
+      lastOffset: _offset(0),
     };
     const created: CreateStreamResult = { ref: ref, created: true };
-    const client = new Client({ CreateStream: [created], AppendRecords: [appended] });
+    const client = new Client({
+      CreateStream: [created],
+      AppendRecords: [appended],
+    });
 
     const stream = await client.createStream({ id: "s1" });
     const response = await stream.append([]);
 
     expect(stream).toBeInstanceOf(Stream);
     expect([stream.ref, stream.created]).toEqual([ref, true]);
-    expect(response.lastOffset?.toNumber()).toBe(0);
+    expect(response.lastOffset).toEqual(_offset(0));
     expect(client.calls).toEqual([
       {
         service: STREAM_SERVICE,
@@ -129,7 +140,10 @@ describe("stream-service client target", () => {
           ref: ref,
           records: [],
           writer: {
-            producer: { id: "client:sample", kind: { tag: "client", value: {} } },
+            producer: {
+              id: "client:sample",
+              kind: { tag: "client", value: {} },
+            },
           },
         },
       },
@@ -138,7 +152,7 @@ describe("stream-service client target", () => {
 
   test("an Activity append takes the writer of its attempt", async () => {
     const ref: StreamRef = { id: "s1" };
-    const appended: AppendRecordsResponse = { lastOffset: Long.fromNumber(1) };
+    const appended: AppendRecordsResponse = { lastOffset: _offset(1) };
     const client = new Client({ AppendRecords: [appended] });
     const info = {
       activityId: "a1",
@@ -171,18 +185,21 @@ describe("stream-service client target", () => {
 
     // The ref takes the id and the backend.
     expect(client.calls.map((call) => call.input)).toEqual([
-      { streamRef: { id: "s1", backend: "redis" }, requestId: expect.any(String) },
+      {
+        streamRef: { id: "s1", backend: "redis" },
+        requestId: expect.any(String),
+      },
     ]);
   });
 
   test("a stored ref rebuilds the stream", async () => {
     const ref: StreamRef = { id: "s2" };
-    const described: DescribeStreamResponse = { lastOffset: Long.fromNumber(7) };
+    const described: DescribeStreamResponse = { lastOffset: _offset(7) };
     const client = new Client({ DescribeStream: [described] });
 
     const response = await client.getStream(ref, undefined).describe();
 
-    expect(response.lastOffset?.toNumber()).toBe(7);
+    expect(response.lastOffset).toEqual(_offset(7));
     expect(client.calls).toEqual([
       {
         service: STREAM_SERVICE,
@@ -197,23 +214,23 @@ describe("stream-service client target", () => {
     const ref: StreamRef = { id: "s1" };
     const pages: ReadRecordsResponse<unknown>[] = [
       {
-        records: [{ offset: Long.fromNumber(1) }, { offset: Long.fromNumber(2) }],
-        nextOffset: Long.fromNumber(3),
+        records: [{ offset: _offset(1) }, { offset: _offset(2) }],
+        nextOffset: _offset(3),
       },
-      { records: [], nextOffset: Long.fromNumber(3) },
+      { records: [], nextOffset: _offset(3) },
     ];
     const client = new Client({ ReadRecords: [...pages] });
 
     const stream = client.getStream(ref, undefined);
 
-    const read = await readAll(stream.iterRead(Long.fromNumber(1)));
+    const read = await readAll(stream.iterRead(_offset(1)));
 
     expect(read).toEqual(pages);
     expect(client.calls.map((call) => call.input)).toEqual([
-      { ref: ref, fromOffset: Long.fromNumber(1) },
+      { ref: ref, fromOffset: _offset(1) },
       {
         ref: ref,
-        fromOffset: Long.fromNumber(3),
+        fromOffset: _offset(3),
         start: undefined,
         last: undefined,
       },
@@ -226,8 +243,8 @@ describe("stream-service client target", () => {
   test("a waiting read goes on after an empty page at the same offset", async () => {
     const ref: StreamRef = { id: "s1" };
     const pages: ReadRecordsResponse<unknown>[] = [
-      { records: [{ offset: Long.fromNumber(1) }], nextOffset: Long.fromNumber(2) },
-      { records: [], nextOffset: Long.fromNumber(2) },
+      { records: [{ offset: _offset(1) }], nextOffset: _offset(2) },
+      { records: [], nextOffset: _offset(2) },
       { records: [], done: true },
     ];
     const client = new Client({ ReadRecords: [...pages] });
@@ -235,22 +252,22 @@ describe("stream-service client target", () => {
     const stream = client.getStream(ref, undefined);
 
     const read = await readAll(
-      stream.iterRead(Long.fromNumber(1), undefined, undefined, "30s"),
+      stream.iterRead(_offset(1), undefined, undefined, "30s"),
     );
 
     expect(read).toEqual(pages);
     expect(client.calls.map((call) => call.input)).toMatchObject([
-      { ref: ref, fromOffset: Long.fromNumber(1), wait: "30s" },
-      { ref: ref, fromOffset: Long.fromNumber(2), wait: "30s" },
-      { ref: ref, fromOffset: Long.fromNumber(2), wait: "30s" },
+      { ref: ref, fromOffset: _offset(1), wait: "30s" },
+      { ref: ref, fromOffset: _offset(2), wait: "30s" },
+      { ref: ref, fromOffset: _offset(2), wait: "30s" },
     ]);
   });
 
   test("a stream read from the end stays at the first next offset", async () => {
     const ref: StreamRef = { id: "s1" };
     const pages: ReadRecordsResponse<unknown>[] = [
-      { records: [], nextOffset: Long.fromNumber(5) },
-      { records: [{ offset: Long.fromNumber(5) }], nextOffset: Long.fromNumber(6) },
+      { records: [], nextOffset: _offset(5) },
+      { records: [{ offset: _offset(5) }], nextOffset: _offset(6) },
       { records: [], done: true },
     ];
     const client = new Client({
@@ -260,14 +277,19 @@ describe("stream-service client target", () => {
     const stream = await client.createStream({ id: "s1" });
 
     const read = await readAll(
-      stream.iterRead(undefined, StreamReadStart.StreamReadStartEnd, undefined, "30s"),
+      stream.iterRead(
+        undefined,
+        StreamReadStart.StreamReadStartEnd,
+        undefined,
+        "30s",
+      ),
     );
 
     expect(read).toEqual(pages);
     expect(client.calls.slice(1).map((call) => call.input)).toMatchObject([
       { ref: ref, start: StreamReadStart.StreamReadStartEnd, wait: "30s" },
-      { ref: ref, fromOffset: Long.fromNumber(5), start: undefined, wait: "30s" },
-      { ref: ref, fromOffset: Long.fromNumber(6), start: undefined, wait: "30s" },
+      { ref: ref, fromOffset: _offset(5), start: undefined, wait: "30s" },
+      { ref: ref, fromOffset: _offset(6), start: undefined, wait: "30s" },
     ]);
     // The iterator uses the Nexus client that `createStream` gave the handle.
     expect(client.nexusClients).toBe(1);
@@ -277,8 +299,8 @@ describe("stream-service client target", () => {
     const ref: StreamRef = { id: "s1" };
     const pages: ReadRecordsResponse<unknown>[] = [
       {
-        records: [{ offset: Long.fromNumber(0) }],
-        nextOffset: Long.fromNumber(1),
+        records: [{ offset: _offset(0) }],
+        nextOffset: _offset(1),
         done: true,
       },
     ];
@@ -296,7 +318,7 @@ describe("stream-service client target", () => {
     const ref: StreamRef = { id: "s1" };
     const client = new Client({
       ReadRecords: [
-        { records: [{ offset: Long.fromNumber(1) }], nextOffset: Long.fromNumber(2) },
+        { records: [{ offset: _offset(1) }], nextOffset: _offset(2) },
         { records: [], done: true },
       ],
     });
@@ -304,17 +326,17 @@ describe("stream-service client target", () => {
     const stream = client.getStream(ref, undefined);
 
     for await (const page of stream.iterRead(
-      Long.fromNumber(1),
+      _offset(1),
       undefined,
       undefined,
       "30s",
     )) {
-      page.nextOffset = Long.fromNumber(9);
+      page.nextOffset = _offset(9);
     }
 
     expect(client.calls.map((call) => call.input)).toMatchObject([
-      { ref: ref, fromOffset: Long.fromNumber(1), wait: "30s" },
-      { ref: ref, fromOffset: Long.fromNumber(2), wait: "30s" },
+      { ref: ref, fromOffset: _offset(1), wait: "30s" },
+      { ref: ref, fromOffset: _offset(2), wait: "30s" },
     ]);
   });
 
@@ -329,15 +351,18 @@ describe("stream-service client target", () => {
 
     expect(stream.bodyType).toBe(turnType);
     // The type info of the started operation decodes the answer with the body type.
-    const decoded = client.outputTypes[1]?.transferTypeConverter?.fromTransferType({
-      records: [
-        {
-          item: "data",
-          data: { body: common.defaultPayloadConverter.toPayload({ role: "model" }) },
-          offset: Long.fromNumber(1),
-        },
-      ],
-    }) as ReadRecordsResponse<Turn>;
+    const decoded =
+      client.outputTypes[1]?.transferTypeConverter?.fromTransferType({
+        records: [
+          {
+            item: "data",
+            data: {
+              body: common.defaultPayloadConverter.toPayload({ role: "model" }),
+            },
+            offset: _offset(1),
+          },
+        ],
+      }) as ReadRecordsResponse<Turn>;
     expect(decoded.records?.[0].item).toEqual({
       tag: "data",
       value: { body: new Turn("model") },

@@ -1,12 +1,13 @@
-import Long from "long";
-
-type Offset = Long | number | null | undefined;
+type Offset = Uint8Array | null | undefined;
 
 function sameOffset(left: Offset, right: Offset): boolean {
   if (left == null || right == null) {
     return left == null && right == null;
   }
-  return Long.fromValue(left).equals(right);
+  if (left.length !== right.length) {
+    return false;
+  }
+  return left.every((byte, index) => byte === right[index]);
 }
 
 /** The next read of the stream-service poll, or `undefined` to stop. */
@@ -42,5 +43,10 @@ export function nextReadRequest<
     return { ...request, last: undefined };
   }
   // `last` takes no `fromOffset`, and a `fromOffset` overrides `start`.
-  return { ...request, fromOffset: nextOffset, start: undefined, last: undefined };
+  return {
+    ...request,
+    fromOffset: nextOffset,
+    start: undefined,
+    last: undefined,
+  };
 }

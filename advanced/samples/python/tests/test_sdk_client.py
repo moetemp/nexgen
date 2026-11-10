@@ -685,10 +685,12 @@ async def test_iter_read_items_yields_each_record_and_resumes_after_it() -> None
         {
             "ReadRecords": [
                 ReadRecordsResponse[str](
-                    records=[data_record(10), data_record(12)], next_offset=_offset(12)                ),
+                    records=[data_record(10), data_record(12)], next_offset=_offset(12)
+                ),
                 ReadRecordsResponse[str](records=[], next_offset=_offset(12)),
                 ReadRecordsResponse[str](
-                    records=[data_record(20)], next_offset=_offset(20), done=True                ),
+                    records=[data_record(20)], next_offset=_offset(20), done=True
+                ),
             ]
         },
     )
@@ -726,7 +728,8 @@ async def test_a_new_read_resumes_from_the_next_request_of_a_stopped_read() -> N
                     records=[data_record(1), data_record(2)], next_offset=_offset(2)
                 ),
                 ReadRecordsResponse[str](
-                    records=[data_record(2)], next_offset=_offset(2), done=True                ),
+                    records=[data_record(2)], next_offset=_offset(2), done=True
+                ),
             ]
         },
     )
@@ -755,7 +758,8 @@ async def test_a_changed_record_does_not_change_the_next_request() -> None:
         {
             "ReadRecords": [
                 ReadRecordsResponse[str](
-                    records=[data_record(1), data_record(2)], next_offset=_offset(2)                ),
+                    records=[data_record(1), data_record(2)], next_offset=_offset(2)
+                ),
                 ReadRecordsResponse[str](records=[], done=True),
             ]
         },
@@ -784,19 +788,19 @@ async def test_read_items_skip_unknown_kinds_and_count_records() -> None:
                 ReadRecordsResponse[str](
                     records=[
                         data_record(1),
-                        StreamRecord[str](offset=2),
+                        StreamRecord[str](offset=_offset(2)),
                         data_record(3),
                     ],
-                    next_offset=5,
+                    next_offset=_offset(5),
                 ),
                 ReadRecordsResponse[str](
                     records=[data_record(5), close_record(6)],
-                    next_offset=7,
+                    next_offset=_offset(7),
                     done=True,
                 ),
                 ReadRecordsResponse[str](
                     records=[data_record(5), close_record(6)],
-                    next_offset=7,
+                    next_offset=_offset(7),
                     done=True,
                 ),
             ]
@@ -804,7 +808,7 @@ async def test_read_items_skip_unknown_kinds_and_count_records() -> None:
     )
     stream = client.get_stream[str](id=ref.id)
 
-    read = stream.iter_read_items(from_offset=1)
+    read = stream.iter_read_items(from_offset=_offset(1))
     seen = [
         (item, read.next_request and read.next_request.from_offset)
         async for item in read
@@ -815,21 +819,21 @@ async def test_read_items_skip_unknown_kinds_and_count_records() -> None:
     # An item of an unknown kind is skipped, and the read still resumes past it. The close carries
     # the count of Records in the read, across its pages.
     assert seen == [
-        (Record(offset=1, body="r1"), 2),
-        (Record(offset=3, body="r3"), 5),
-        (Record(offset=5, body="r5"), 6),
-        (Closed(offset=6, count=3), None),
+        (Record(offset=_offset(1), body="r1"), _offset(1)),
+        (Record(offset=_offset(3), body="r3"), _offset(5)),
+        (Record(offset=_offset(5), body="r5"), _offset(5)),
+        (Closed(offset=_offset(6), count=3), None),
     ]
     # A new iteration counts its own Records from zero.
-    resumed = stream.iter_read_items(from_offset=5)
+    resumed = stream.iter_read_items(from_offset=_offset(5))
     assert [item async for item in resumed] == [
-        Record(offset=5, body="r5"),
-        Closed(offset=6, count=1),
+        Record(offset=_offset(5), body="r5"),
+        Closed(offset=_offset(6), count=1),
     ]
     assert [started.arg for started in answers.started] == [
-        ReadRecordsRequest(ref=ref, from_offset=1),
-        ReadRecordsRequest(ref=ref, from_offset=5),
-        ReadRecordsRequest(ref=ref, from_offset=5),
+        ReadRecordsRequest(ref=ref, from_offset=_offset(1)),
+        ReadRecordsRequest(ref=ref, from_offset=_offset(5)),
+        ReadRecordsRequest(ref=ref, from_offset=_offset(5)),
     ]
 
 
@@ -945,7 +949,7 @@ async def test_a_handle_decodes_its_bodies_with_its_type_parameter(
     assert page.records == [record]
     assert [page.records async for page in stream.iter_read()] == [[record]]
     assert [item async for item in stream.iter_read_items()] == [
-        Record(offset=1, body=Turn(role="model"))
+        Record(offset=_offset(1), body=Turn(role="model"))
     ]
 
 

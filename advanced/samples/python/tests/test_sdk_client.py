@@ -10,6 +10,7 @@ import asyncio
 import collections.abc
 import dataclasses
 import datetime
+import inspect
 import typing
 import uuid
 
@@ -858,6 +859,23 @@ async def test_the_next_request_passes_an_item_after_the_last_item_made_of_it() 
         ("4a", 10),
         ("4b", None),
     ]
+
+
+async def test_a_client_read_takes_last() -> None:
+    ref = StreamRef(id="s1")
+    client, answers = connect(
+        Client, {"ReadRecords": ReadRecordsResponse[str](records=[], done=True)}
+    )
+    stream = client.get_stream[str](id=ref.id)
+
+    _ = await stream.read(last=20)
+
+    assert [started.arg for started in answers.started] == [
+        ReadRecordsRequest(ref=ref, last=20)
+    ]
+    # Replay needs a fixed range, so the Workflow handle of the same package takes no `last`.
+    workflow_stream = workflow_package.get_stream[str](id=ref.id)
+    assert "last" not in inspect.signature(workflow_stream.read).parameters
 
 
 def test_only_the_client_target_has_the_read_poll() -> None:

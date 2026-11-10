@@ -6320,6 +6320,7 @@ pub(in crate::generator) fn render_resource_with_annotations(
                 operation_name,
                 request_plan,
                 direct_return,
+                ..
             } => {
                 let operation = service
                     .operations

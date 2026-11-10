@@ -983,8 +983,8 @@ temporalio.converter.transfer_type_convertible(_ClientEpochTransferTypeConverter
 
 @dataclasses.dataclass(slots=True)
 class AppendRecordsResponse:
-    first_offset: int | None = None
-    last_offset: int | None = None
+    first_offset: bytes | None = None
+    last_offset: bytes | None = None
 
 
 class _AppendRecordsResponseTransferTypeConverter(
@@ -1005,8 +1005,8 @@ class _AppendRecordsResponseTransferTypeConverter(
         type_hint: type[AppendRecordsResponse],
     ) -> AppendRecordsResponse:
         return AppendRecordsResponse(
-            first_offset=value.first_offset if value.first_offset != 0 else None,
-            last_offset=value.last_offset if value.last_offset != 0 else None,
+            first_offset=value.first_offset if bool(value.first_offset) else None,
+            last_offset=value.last_offset if bool(value.last_offset) else None,
         )
 
     @typing_extensions.override
@@ -1134,7 +1134,7 @@ class ReadRecordsRequest:
     """Read Records from an offset."""
 
     ref: StreamRef
-    from_offset: int | None = None
+    from_offset: bytes | None = None
     start: StreamReadStart | None = None
     max_records: int | None = None
     wait: datetime.timedelta | None = None
@@ -1165,7 +1165,7 @@ class _ReadRecordsRequestTransferTypeConverter(
         ref = _StreamRefTransferTypeConverter().from_transfer_type(value.ref, StreamRef)
         return ReadRecordsRequest(
             ref=ref,
-            from_offset=value.from_offset if value.from_offset != 0 else None,
+            from_offset=value.from_offset if bool(value.from_offset) else None,
             start=StreamReadStart(value.start) if value.start != 0 else None,
             max_records=value.max_records if value.max_records != 0 else None,
             wait=_support.duration_from_proto(value.wait)
@@ -1218,7 +1218,7 @@ temporalio.converter.transfer_type_convertible(
 @dataclasses.dataclass(slots=True)
 class ReadRecordsResponse(typing.Generic[BodyT]):
     records: list[StreamRecord[BodyT]]
-    next_offset: int | None = None
+    next_offset: bytes | None = None
     done: bool | None = None
 
 
@@ -1251,7 +1251,7 @@ class _ReadRecordsResponseTransferTypeConverter(
         ]
         return ReadRecordsResponse(
             records=records,
-            next_offset=value.next_offset if value.next_offset != 0 else None,
+            next_offset=value.next_offset if bool(value.next_offset) else None,
             done=value.done if bool(value.done) else None,
         )
 
@@ -1285,7 +1285,7 @@ class StreamRecord(typing.Generic[BodyT]):
     """One item that a read gives."""
 
     item: StreamItem[BodyT] | None = None
-    offset: int | None = None
+    offset: bytes | None = None
 
 
 class _StreamRecordTransferTypeConverter(
@@ -1325,7 +1325,7 @@ class _StreamRecordTransferTypeConverter(
                 _oneof_item = None
         return StreamRecord(
             item=_oneof_item,
-            offset=value.offset if value.offset != 0 else None,
+            offset=value.offset if bool(value.offset) else None,
         )
 
     @typing_extensions.override
@@ -1522,7 +1522,7 @@ temporalio.converter.transfer_type_convertible(
 @dataclasses.dataclass(slots=True)
 class DescribeStreamResponse:
     status: StreamStatus | None = None
-    last_offset: int | None = None
+    last_offset: bytes | None = None
     retention: datetime.timedelta | None = None
 
 
@@ -1549,7 +1549,7 @@ class _DescribeStreamResponseTransferTypeConverter(
             status=_stream_status_from_proto(value.status)
             if value.status != 0
             else None,
-            last_offset=value.last_offset if value.last_offset != 0 else None,
+            last_offset=value.last_offset if bool(value.last_offset) else None,
             retention=_support.duration_from_proto(value.retention)
             if value.HasField("retention")
             else None,

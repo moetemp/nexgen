@@ -36,6 +36,11 @@ from wit.stream_service.workflow._system_nexus_interceptor import (
 )
 
 
+def _offset(n: int) -> bytes:
+    # Big-endian, so a bytes compare keeps the int order these tests assert.
+    return n.to_bytes(8, "big")
+
+
 @dataclasses.dataclass
 class FakeWorkflowInfo:
     run_id: str
@@ -94,7 +99,7 @@ def test_read_items_round_trip_as_their_records(models: types.ModuleType) -> Non
                         ),
                     )
                 ),
-                offset=1,
+                offset=_offset(1),
             ),
             models.StreamRecord(
                 item=models.StreamItemClose(
@@ -108,10 +113,10 @@ def test_read_items_round_trip_as_their_records(models: types.ModuleType) -> Non
                         status=models.StreamCloseStatus.StreamCloseStatusClosed,
                     )
                 ),
-                offset=2,
+                offset=_offset(2),
             ),
         ],
-        next_offset=3,
+        next_offset=_offset(3),
         done=True,
     )
 
@@ -134,12 +139,14 @@ def test_read_items_round_trip_as_their_records(models: types.ModuleType) -> Non
 
 def test_a_record_of_an_unknown_item_kind_has_no_item(models: types.ModuleType) -> None:
     converter = models._StreamRecordTransferTypeConverter[object]()
-    # Offset 1, and an item in field 5, which only a newer server knows.
-    wire = message_pb2.StreamRecord.FromString(b"\x08\x01\x2a\x00")
+    # Offset 1 as 8 big-endian bytes, and an item in field 5, which only a newer server knows.
+    wire = message_pb2.StreamRecord.FromString(
+        b"\x0a\x08\x00\x00\x00\x00\x00\x00\x00\x01\x2a\x00"
+    )
 
     decoded = converter.from_transfer_type(wire, models.StreamRecord)
 
-    assert decoded == models.StreamRecord(item=None, offset=1)
+    assert decoded == models.StreamRecord(item=None, offset=_offset(1))
 
 
 def test_a_request_without_its_handle_is_refused(models: types.ModuleType) -> None:
@@ -215,7 +222,7 @@ async def test_workflow_apis_call_the_stream_service(
     ref = model_types.StreamRef(id="workflow-stream")
     replies = {
         "CreateStream": model_types.CreateStreamResult(ref=ref, created=True),
-        "AppendRecords": model_types.AppendRecordsResponse(last_offset=3),
+        "AppendRecords": model_types.AppendRecordsResponse(last_offset=_offset(3)),
     }
     calls: list[tuple[str, typing.Any]] = []
 
@@ -247,8 +254,8 @@ async def test_workflow_apis_call_the_stream_service(
     monkeypatch.setattr(temporalio.workflow, "uuid4", lambda: request_id)
     stream = await api.create_stream[str](id=ref.id)
     last_offset = await stream.append()
-    assert last_offset == 3
-    assert await api.append_records(ref=ref, records=["a", "b"]) == 3
+    assert last_offset == _offset(3)
+    assert await api.append_records(ref=ref, records=["a", "b"]) == _offset(3)
     # The Workflow API fills the request id and the writer from its sources.
     writer = model_types.StreamWriter(
         producer=model_types.Producer(
@@ -294,7 +301,7 @@ async def test_workflow_handle_decodes_with_its_type_parameter(
         item=workflow_models.StreamItemData(
             workflow_models.StreamData(body=Turn(role="model"))
         ),
-        offset=1,
+        offset=_offset(1),
     )
     payload = SYSTEM_CONVERTER.to_payload(
         workflow_models.ReadRecordsResponse[Turn](records=[record])
@@ -349,7 +356,7 @@ async def test_system_nexus_dispatch_decodes_a_read_with_its_type_argument() -> 
         item=workflow_models.StreamItemData(
             workflow_models.StreamData(body=Turn(role="model"))
         ),
-        offset=1,
+        offset=_offset(1),
     )
     payload = SYSTEM_CONVERTER.to_payload(
         workflow_models.ReadRecordsResponse[Turn](records=[record])

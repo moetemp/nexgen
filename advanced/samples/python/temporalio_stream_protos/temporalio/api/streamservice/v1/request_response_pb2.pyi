@@ -168,13 +168,13 @@ class AppendRecordsResponse(_message.Message):
 
     FIRST_OFFSET_FIELD_NUMBER: _builtins.int
     LAST_OFFSET_FIELD_NUMBER: _builtins.int
-    first_offset: _builtins.int
-    last_offset: _builtins.int
+    first_offset: _builtins.bytes
+    last_offset: _builtins.bytes
     def __init__(
         self,
         *,
-        first_offset: _builtins.int = ...,
-        last_offset: _builtins.int = ...,
+        first_offset: _builtins.bytes = ...,
+        last_offset: _builtins.bytes = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _Never  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
@@ -263,7 +263,7 @@ class ReadRecordsRequest(_message.Message):
     MAX_BYTES_FIELD_NUMBER: _builtins.int
     FLOOR_FROM_FIELD_NUMBER: _builtins.int
     namespace: _builtins.str
-    from_offset: _builtins.int
+    from_offset: _builtins.bytes
     """Start at this offset. Zero uses start. It fails with OFFSET_TOO_HIGH if it is past the newest
     offset + 1.
     (-- api-linter: core::0140::prepositions=disabled
@@ -273,7 +273,7 @@ class ReadRecordsRequest(_message.Message):
     """Where to start when from_offset is zero. Unspecified is the beginning."""
     max_records: _builtins.int
     """The most Records in one page. Zero is 1000."""
-    to_offset: _builtins.int
+    to_offset: _builtins.bytes
     """The exclusive end of the read. The read scans no entry at or after it, so a replay reads the
     same range. Zero means no end. Only the server serves it, and a Store refuses it.
     (-- api-linter: core::0140::prepositions=disabled
@@ -293,7 +293,7 @@ class ReadRecordsRequest(_message.Message):
     """The most Record bytes in one page, so a page fits the caller's limit, such as a History
     marker. A larger Record still comes alone, so the read always moves on. Zero is no cap.
     """
-    floor_from: _builtins.int
+    floor_from: _builtins.bytes
     """The lowest offset this run read on replay. A reset run copies the earlier run's reads into
     its History, so its floor must cover them too, not only its first live page. Only read by
     the server.
@@ -319,16 +319,16 @@ class ReadRecordsRequest(_message.Message):
         *,
         namespace: _builtins.str = ...,
         ref: _message_pb2.StreamRef | None = ...,
-        from_offset: _builtins.int = ...,
+        from_offset: _builtins.bytes = ...,
         start: _stream_pb2.StreamReadStart.ValueType = ...,
         max_records: _builtins.int = ...,
         wait: _duration_pb2.Duration | None = ...,
         create_wait: _duration_pb2.Duration | None = ...,
-        to_offset: _builtins.int = ...,
+        to_offset: _builtins.bytes = ...,
         wake_only: _builtins.bool = ...,
         last: _builtins.int = ...,
         max_bytes: _builtins.int = ...,
-        floor_from: _builtins.int = ...,
+        floor_from: _builtins.bytes = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["create_wait", b"create_wait", "ref", b"ref", "wait", b"wait"]  # noqa: Y015
     def HasField(self, field_name: _HasFieldArgType) -> _builtins.bool: ...
@@ -350,7 +350,7 @@ class ReadRecordsResponse(_message.Message):
     NEXT_OFFSET_FIELD_NUMBER: _builtins.int
     DONE_FIELD_NUMBER: _builtins.int
     CONTINUE_AS_NEW_SUGGESTED_FIELD_NUMBER: _builtins.int
-    next_offset: _builtins.int
+    next_offset: _builtins.bytes
     """The from_offset of the next read, which is the newest offset read + 1."""
     done: _builtins.bool
     """True when the Stream is closed and this read gave its last item. A read of a closed Stream
@@ -366,7 +366,7 @@ class ReadRecordsResponse(_message.Message):
         self,
         *,
         records: _abc.Iterable[_message_pb2.StreamRecord] | None = ...,
-        next_offset: _builtins.int = ...,
+        next_offset: _builtins.bytes = ...,
         done: _builtins.bool = ...,
         continue_as_new_suggested: _builtins.bool = ...,
     ) -> None: ...
@@ -417,7 +417,7 @@ class DescribeStreamResponse(_message.Message):
     LAST_OFFSET_FIELD_NUMBER: _builtins.int
     RETENTION_FIELD_NUMBER: _builtins.int
     status: _stream_pb2.StreamStatus.ValueType
-    last_offset: _builtins.int
+    last_offset: _builtins.bytes
     """The newest offset, of a Record. Zero when the Stream has none."""
     @_builtins.property
     def retention(self) -> _duration_pb2.Duration: ...
@@ -425,7 +425,7 @@ class DescribeStreamResponse(_message.Message):
         self,
         *,
         status: _stream_pb2.StreamStatus.ValueType = ...,
-        last_offset: _builtins.int = ...,
+        last_offset: _builtins.bytes = ...,
         retention: _duration_pb2.Duration | None = ...,
     ) -> None: ...
     _HasFieldArgType: _TypeAlias = _typing.Literal["retention", b"retention"]  # noqa: Y015

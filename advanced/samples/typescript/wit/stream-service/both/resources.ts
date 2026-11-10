@@ -43,7 +43,7 @@ export class Stream<BodyT = unknown> {
   }
 
   public async read(
-    fromOffset?: Long,
+    fromOffset?: Uint8Array,
     start?: StreamReadStart,
     maxRecords?: number,
     wait?: common.Duration,

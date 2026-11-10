@@ -47,7 +47,7 @@ namespace Nexgen.DotNetExamples.Tests
                             },
                             Status = StreamServiceExample.StreamCloseStatus.StreamCloseStatusClosed,
                         }),
-                    Offset = 2,
+                    Offset = new byte[] { 0, 0, 0, 0, 0, 0, 0, 2 },
                 },
             });
 
@@ -66,7 +66,7 @@ namespace Nexgen.DotNetExamples.Tests
             Assert.Equal(
                 StreamServiceExample.StreamCloseStatus.StreamCloseStatusClosed,
                 close.Value.Status);
-            Assert.Equal(2, decoded.Records[0].Offset);
+            Assert.Equal(new byte[] { 0, 0, 0, 0, 0, 0, 0, 2 }, decoded.Records[0].Offset);
         }
 
         // A newer server can send a Stream status that this code doesn't know.

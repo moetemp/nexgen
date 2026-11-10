@@ -28,17 +28,16 @@ def next_read_request(request: typing.Any, response: typing.Any) -> typing.Any:
 
 
 def resume_read_request(request: typing.Any, item: typing.Any) -> typing.Any:
-    # A read that resumes after an item starts past its offset, and doesn't read `last` again.
-    return dataclasses.replace(
-        request, from_offset=(item.offset or 0) + 1, start=None, last=None
-    )
+    # from-offset is exclusive, so a resume after an item passes the item's own offset, no
+    # arithmetic. It doesn't read `last` again.
+    return dataclasses.replace(request, from_offset=item.offset, start=None, last=None)
 
 
 @dataclasses.dataclass
 class Record(typing.Generic[_BodyT]):
     """A Record that a read gives."""
 
-    offset: int
+    offset: bytes
     body: _BodyT
 
 
@@ -46,7 +45,7 @@ class Record(typing.Generic[_BodyT]):
 class Closed:
     """The close item of a Stream, with the count of Records before it in the read."""
 
-    offset: int
+    offset: bytes
     count: int
 
 
@@ -67,7 +66,7 @@ def read_item_transform() -> collections.abc.Callable[
         if record.item is None:
             return []
         value = record.item.value
-        offset = record.offset or 0
+        offset = record.offset or b""
         # Only the close item has a status.
         if hasattr(value, "status"):
             return [Closed(offset=offset, count=count)]

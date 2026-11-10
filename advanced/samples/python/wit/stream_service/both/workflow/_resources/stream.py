@@ -71,7 +71,7 @@ class Stream(typing.Generic[BodyT]):
     async def append(
         self,
         *records: BodyT,
-    ) -> int:
+    ) -> bytes:
         """Append values, and return the offset of the last one."""
         request = AppendRecordsRequest(
             ref=self.ref,
@@ -93,7 +93,7 @@ class Stream(typing.Generic[BodyT]):
 
     async def read(
         self,
-        from_offset: int | None = None,
+        from_offset: bytes | None = None,
         start: StreamReadStart | None = None,
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,
@@ -158,7 +158,7 @@ get_stream: _GetStream[typing.Any] = _GetStream()
 
 async def _append_records(
     request: AppendRecordsRequest[BodyT],
-) -> int:
+) -> bytes:
     nexus_client = temporalio.workflow.create_nexus_client(
         service="temporal.api.streamservice.v1.StreamService",
         endpoint=temporalio.nexus.system.TEMPORAL_SYSTEM_ENDPOINT,
@@ -177,7 +177,7 @@ async def append_records(
     ref: StreamRef,
     records: list[BodyT],
     sequence: int | None = None,
-) -> int:
+) -> bytes:
     """Append one batch. Workflow code makes the call from a Local Activity.
 
     Args:
@@ -251,7 +251,7 @@ class _ReadRecords(typing.Generic[BodyT]):
         self,
         *,
         ref: StreamRef,
-        from_offset: int | None = None,
+        from_offset: bytes | None = None,
         start: StreamReadStart | None = None,
         max_records: int | None = None,
         wait: datetime.timedelta | None = None,

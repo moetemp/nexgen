@@ -210,18 +210,16 @@ export const createStreamRequestTransferTypeConverter = {
   },
 };
 export interface AppendRecordsResponse {
-  firstOffset?: Long;
-  lastOffset?: Long;
+  firstOffset?: Uint8Array;
+  lastOffset?: Uint8Array;
 }
 
 function appendRecordsResponseFromProto(
   proto: temporal.api.streamservice.v1.IAppendRecordsResponse,
 ): AppendRecordsResponse {
   return {
-    firstOffset:
-      proto.firstOffset == null ? undefined : Long.fromValue(proto.firstOffset, false),
-    lastOffset:
-      proto.lastOffset == null ? undefined : Long.fromValue(proto.lastOffset, false),
+    firstOffset: proto.firstOffset ?? undefined,
+    lastOffset: proto.lastOffset ?? undefined,
   };
 }
 
@@ -229,10 +227,8 @@ function appendRecordsResponseToProto(
   model: AppendRecordsResponse,
 ): temporal.api.streamservice.v1.IAppendRecordsResponse {
   return {
-    firstOffset:
-      model.firstOffset == null ? undefined : Long.fromValue(model.firstOffset, false),
-    lastOffset:
-      model.lastOffset == null ? undefined : Long.fromValue(model.lastOffset, false),
+    firstOffset: model.firstOffset,
+    lastOffset: model.lastOffset,
   };
 }
 
@@ -925,7 +921,7 @@ export interface ReadRecordsResponse<BodyT> {
   /**
    * The from-offset of the next read, which is the newest offset read + 1.
    */
-  nextOffset?: Long;
+  nextOffset?: Uint8Array;
   /**
    * True when the Stream is closed and this read gave its last item.
    */
@@ -946,8 +942,7 @@ function readRecordsResponseFromProto<BodyT>(
       "ReadRecordsResponse",
       "records",
     ),
-    nextOffset:
-      proto.nextOffset == null ? undefined : Long.fromValue(proto.nextOffset, false),
+    nextOffset: proto.nextOffset ?? undefined,
     done: proto.done ?? undefined,
   };
 }
@@ -966,8 +961,7 @@ function readRecordsResponseToProto<BodyT>(
       "ReadRecordsResponse",
       "records",
     ),
-    nextOffset:
-      model.nextOffset == null ? undefined : Long.fromValue(model.nextOffset, false),
+    nextOffset: model.nextOffset,
     done: model.done,
   };
 }
@@ -1008,7 +1002,7 @@ export interface StreamRecord<BodyT> {
   /**
    * The place of this item in the Stream. Ordered and unique, with gaps.
    */
-  offset?: Long;
+  offset?: Uint8Array;
 }
 
 function streamRecordFromProto<BodyT>(
@@ -1044,7 +1038,7 @@ function streamRecordFromProto<BodyT>(
   }
   return {
     item: result,
-    offset: proto.offset == null ? undefined : Long.fromValue(proto.offset, false),
+    offset: proto.offset ?? undefined,
   };
 }
 
@@ -1071,7 +1065,7 @@ function streamRecordToProto<BodyT>(
         throw new Error("invalid oneof tag for StreamRecord.item");
     }
   }
-  proto.offset = model.offset == null ? undefined : Long.fromValue(model.offset, false);
+  proto.offset = model.offset;
   return proto;
 }
 
@@ -1212,7 +1206,7 @@ export interface ReadRecordsRequest {
   /**
    * Start offset. Empty uses start. An offset past the newest one + 1 fails.
    */
-  fromOffset?: Long;
+  fromOffset?: Uint8Array;
   /**
    * Where to start when from-offset is empty. Unspecified is the beginning.
    */
@@ -1244,8 +1238,7 @@ function readRecordsRequestFromProto(
 ): ReadRecordsRequest {
   return {
     ref: streamRefFromProto(requiredField(proto.ref, "ReadRecordsRequest", "ref")),
-    fromOffset:
-      proto.fromOffset == null ? undefined : Long.fromValue(proto.fromOffset, false),
+    fromOffset: proto.fromOffset ?? undefined,
     start: proto.start == null ? undefined : (proto.start as number as StreamReadStart),
     maxRecords: proto.maxRecords ?? undefined,
     wait: proto.wait == null ? undefined : support.durationFromProto(proto.wait),
@@ -1264,8 +1257,7 @@ function readRecordsRequestToProto(
 ): temporal.api.streamservice.v1.IReadRecordsRequest {
   return {
     ref: streamRefToProto(requiredField(model.ref, "ReadRecordsRequest", "ref")),
-    fromOffset:
-      model.fromOffset == null ? undefined : Long.fromValue(model.fromOffset, false),
+    fromOffset: model.fromOffset,
     start:
       model.start == null
         ? undefined
@@ -1298,7 +1290,7 @@ export interface DescribeStreamResponse {
   /**
    * The newest offset, of a Record. Empty for none.
    */
-  lastOffset?: Long;
+  lastOffset?: Uint8Array;
   retention?: common.Duration;
 }
 
@@ -1308,8 +1300,7 @@ function describeStreamResponseFromProto(
   return {
     status:
       proto.status == null ? undefined : streamStatusFromNumber(proto.status as number),
-    lastOffset:
-      proto.lastOffset == null ? undefined : Long.fromValue(proto.lastOffset, false),
+    lastOffset: proto.lastOffset ?? undefined,
     retention:
       proto.retention == null ? undefined : support.durationFromProto(proto.retention),
   };
@@ -1323,8 +1314,7 @@ function describeStreamResponseToProto(
       model.status == null
         ? undefined
         : (model.status as number as temporal.api.enums.v1.StreamStatus),
-    lastOffset:
-      model.lastOffset == null ? undefined : Long.fromValue(model.lastOffset, false),
+    lastOffset: model.lastOffset,
     retention:
       model.retention == null ? undefined : support.durationToProto(model.retention),
   };

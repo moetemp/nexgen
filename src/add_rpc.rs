@@ -599,6 +599,7 @@ struct ExistingInterface {
     type_names_by_proto: BTreeMap<String, String>,
     type_names_in_scope: BTreeSet<String>,
     type_parameters: BTreeSet<String>,
+    bytes_alias_names: BTreeSet<String>,
 }
 
 impl ExistingInterface {
@@ -615,6 +616,7 @@ impl ExistingInterface {
         let mut type_names_by_proto = BTreeMap::new();
         let mut type_names_in_scope = BTreeSet::new();
         let mut type_parameters = BTreeSet::new();
+        let mut bytes_alias_names = BTreeSet::new();
         let mut records_by_proto = BTreeMap::new();
         let mut oneofs_by_variant = BTreeMap::new();
         let mut declared_type_names = BTreeSet::new();
@@ -648,6 +650,13 @@ impl ExistingInterface {
                 if directive(&resolved_directives, "type-parameter", path, &context)?.is_some() {
                     type_parameters.insert(type_name.clone());
                 }
+            }
+            // A named `list<u8>` alias types a proto `bytes` field, which renders as `list<u8>`.
+            if matches!(
+                resolve.types[resolved_id].kind,
+                TypeDefKind::List(WitType::U8)
+            ) {
+                bytes_alias_names.insert(type_name.clone());
             }
             if matches!(resolve.types[resolved_id].kind, TypeDefKind::Variant(_)) {
                 if let Some(proto_name) =
@@ -692,6 +701,7 @@ impl ExistingInterface {
             type_names_by_proto,
             type_names_in_scope,
             type_parameters,
+            bytes_alias_names,
         })
     }
 }
@@ -890,6 +900,13 @@ impl<'a> ProtoWitBuilder<'a> {
             .retain(|name| !interface.declared_type_names.contains(name));
         self.type_parameters
             .extend(interface.type_parameters.clone());
+        for alias in &interface.bytes_alias_names {
+            self.linked_wit
+                .type_compatibility
+                .entry(alias.clone())
+                .or_default()
+                .insert("list<u8>".to_string());
+        }
         self
     }
 

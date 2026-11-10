@@ -849,6 +849,50 @@ interface models {
 }
 
 #[test]
+fn add_message_accepts_a_named_byte_list_alias_for_a_bytes_field() {
+    let set = FileDescriptorSet {
+        file: vec![FileDescriptorProto {
+            name: Some("acme/bytes/v1/message.proto".to_string()),
+            package: Some("acme.bytes.v1".to_string()),
+            syntax: Some("proto3".to_string()),
+            message_type: vec![DescriptorProto {
+                name: Some("Position".to_string()),
+                field: vec![proto_field("offset", 1, Type::Bytes, None, None)],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }],
+    };
+    let directory = unique_temp_dir("bytes-descriptor");
+    fs::create_dir_all(&directory).unwrap();
+    let descriptor_path = directory.join("api.bin");
+    fs::write(&descriptor_path, set.encode_to_vec()).unwrap();
+    let input_path = write_temp_wit(
+        "add-message-bytes-alias",
+        r#"package temporal:nexus@1.0.0;
+
+world system {
+  export models;
+}
+
+interface models {
+  type stream-offset = list<u8>;
+
+  /// @nexus.proto "acme.bytes.v1.Position"
+  record position {
+    offset: option<stream-offset>,
+  }
+}
+"#,
+    );
+
+    let wit =
+        add_message_to_string(&[descriptor_path], "acme.bytes.v1.Position", &[input_path]).unwrap();
+
+    assert!(record_block(&wit, "position").contains("offset: option<stream-offset>,"));
+}
+
+#[test]
 fn add_message_rejects_an_incompatible_existing_oneof_mapping() {
     let input_path = write_temp_wit(
         "add-message-incompatible-oneof",

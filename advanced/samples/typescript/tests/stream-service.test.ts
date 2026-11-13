@@ -1,6 +1,10 @@
+import type { Client } from "@temporalio/client";
 import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
+import type * as nexus from "nexus-rpc";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+import type { NexusServiceClient } from "../wit/stream-service/both/client/nexus-client.ts";
 
 import {
   type CreateStreamRequest,
@@ -13,11 +17,11 @@ import {
   describeStreamResponseTransferTypeConverter,
   readRecordsRequestTransferTypeConverter,
   readRecordsResponseTransferTypeConverter,
-} from "../wit/stream-service/workflow/models.ts";
+} from "../wit/stream-service/both/models.ts";
 
 // The operation modules import the SDK's Nexus module, which this sample doesn't have.
-vi.mock("../wit/stream-service/workflow/operations/read-records.ts", () => ({}));
-vi.mock("../wit/stream-service/workflow/operations/describe-stream.ts", () => ({}));
+vi.mock("../wit/stream-service/both/operations/read-records.ts", () => ({}));
+vi.mock("../wit/stream-service/both/operations/describe-stream.ts", () => ({}));
 
 function _offset(n: number): Uint8Array {
   // Big-endian bytes, so a bytes compare keeps the int order these tests assert.
@@ -143,7 +147,7 @@ describe("stream-service generated output", () => {
   test("gives the Workflow Stream no append and no close", async () => {
     // The tsconfig excludes the stream output, which doesn't typecheck here, so a test loads it
     // at run time.
-    const resources = "../wit/stream-service/workflow/resources.ts";
+    const resources = "../wit/stream-service/both/resources.ts";
     const { Stream } = (await import(resources)) as { Stream: { prototype: object } };
 
     // `append` and `close` are api-omitted for the Workflow target, so only the reads stay.
@@ -151,6 +155,18 @@ describe("stream-service generated output", () => {
     expect("close" in Stream.prototype).toBe(false);
     expect("read" in Stream.prototype).toBe(true);
     expect("describe" in Stream.prototype).toBe(true);
+  });
+
+  test("the SDK's Nexus service client is the client target's Nexus client", () => {
+    // Only `tsc` checks this, on the return type.
+    function nexusClient<T extends nexus.ServiceDefinition>(
+      client: Client,
+      options: { service: T; endpoint: string },
+    ): NexusServiceClient<T> {
+      return client.nexus.createServiceClient(options);
+    }
+
+    expect(nexusClient).toBeTypeOf("function");
   });
 
   test("decodes an enum number that it doesn't know as the fallback case", () => {

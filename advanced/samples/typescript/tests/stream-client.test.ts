@@ -9,11 +9,13 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import "../support/client.ts";
 import type { NexusServiceClient } from "../wit/stream-service/both/client/nexus-client.ts";
+import { PollIterator } from "../wit/stream-service/both/client/poll.ts";
 import type {
   AppendRecordsResponse,
   CreateStreamResult,
   DescribeStreamResponse,
   Producer,
+  ReadRecordsRequest,
   ReadRecordsResponse,
   StreamRecord,
   StreamRef,
@@ -31,6 +33,15 @@ interface ClientStream<BodyT = unknown> {
     maxRecords?: number,
     wait?: common.Duration,
   ): AsyncGenerator<ReadRecordsResponse<BodyT>, void>;
+  iterReadItems(
+    fromOffset?: Uint8Array,
+    maxRecords?: number,
+    wait?: common.Duration,
+  ): PollIterator<
+    ReadRecordsRequest<BodyT>,
+    StreamRecord<BodyT>,
+    ReadRecordsResponse<BodyT>
+  >;
   describe(): Promise<DescribeStreamResponse>;
 }
 
@@ -342,6 +353,112 @@ describe("stream-service client target", () => {
     expect(client.calls.map((call) => call.input)).toMatchObject([
       { ref: ref, fromOffset: offset(1), wait: "30s" },
       { ref: ref, fromOffset: offset(2), wait: "30s" },
+    ]);
+  });
+
+  test("the item iterator yields each Record and resumes after it", async () => {
+    const ref: StreamRef<unknown> = { id: "s1" };
+    const client = new Client({
+      ReadRecords: [
+        { records: [record(10), record(12)], lastOffset: offset(12), done: false },
+        { records: [], lastOffset: offset(12), done: false },
+        { records: [record(20)], lastOffset: offset(20), done: true },
+      ],
+    });
+    const stream = client.getStream(ref, undefined);
+
+    const read = stream.iterReadItems(offset(10), undefined, "30s");
+    const seen: [Uint8Array, Uint8Array | undefined][] = [];
+    for await (const item of read) {
+      seen.push([item.offset, read.nextRequest?.fromOffset]);
+    }
+
+    // A from-offset is exclusive, so after a Record the read resumes after that Record's own
+    // offset. After a page's last Record, it goes on after the page's newest offset.
+    expect(seen).toEqual([
+      [offset(10), offset(10)],
+      [offset(12), offset(12)],
+      [offset(20), undefined],
+    ]);
+    expect(read.nextRequest).toBeUndefined();
+    expect(client.calls.map((call) => call.input)).toMatchObject([
+      { ref: ref, fromOffset: offset(10), wait: "30s" },
+      { ref: ref, fromOffset: offset(12), wait: "30s" },
+      { ref: ref, fromOffset: offset(12), wait: "30s" },
+    ]);
+  });
+
+  test("a new read resumes from the next request of a stopped read", async () => {
+    const ref: StreamRef<unknown> = { id: "s1" };
+    const client = new Client({
+      ReadRecords: [
+        { records: [record(1), record(2)], lastOffset: offset(2), done: false },
+        { records: [record(2)], lastOffset: offset(2), done: true },
+      ],
+    });
+    const stream = client.getStream(ref, undefined);
+
+    const read = stream.iterReadItems(offset(1));
+    const first = await read.next();
+    const saved = read.nextRequest;
+
+    expect(first.value?.offset).toEqual(offset(1));
+    const resumed: Uint8Array[] = [];
+    for await (const item of stream.iterReadItems(saved?.fromOffset)) {
+      resumed.push(item.offset);
+    }
+    expect(resumed).toEqual([offset(2)]);
+    expect(client.calls.map((call) => call.input)).toEqual([
+      { ref: ref, fromOffset: offset(1) },
+      { ref: ref, fromOffset: offset(1) },
+    ]);
+  });
+
+  test("a changed Record doesn't change the next request", async () => {
+    const ref: StreamRef<unknown> = { id: "s1" };
+    const client = new Client({
+      ReadRecords: [
+        { records: [record(1), record(2)], lastOffset: offset(2), done: false },
+        { records: [], done: true },
+      ],
+    });
+    const stream = client.getStream(ref, undefined);
+
+    const read = stream.iterReadItems(offset(1), undefined, "30s");
+    const nextOffsets: (Uint8Array | undefined)[] = [];
+    for await (const item of read) {
+      item.offset = offset(9);
+      nextOffsets.push(read.nextRequest?.fromOffset);
+    }
+
+    expect(nextOffsets).toEqual([offset(1), offset(2)]);
+    expect(client.calls.map((call) => call.input)).toMatchObject([
+      { ref: ref, fromOffset: offset(1), wait: "30s" },
+      { ref: ref, fromOffset: offset(2), wait: "30s" },
+    ]);
+  });
+
+  test("without a resume helper the next request reads the page again", async () => {
+    async function* pages(): AsyncGenerator<number[], void> {
+      yield [1, 2];
+      yield [3];
+    }
+    const read = new PollIterator(
+      "first",
+      pages(),
+      (page) => page,
+      (request) => (request === "first" ? "second" : undefined),
+    );
+
+    const seen: [number, string | undefined][] = [];
+    for await (const item of read) {
+      seen.push([item, read.nextRequest]);
+    }
+
+    expect(seen).toEqual([
+      [1, "first"],
+      [2, "second"],
+      [3, undefined],
     ]);
   });
 

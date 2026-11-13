@@ -2790,7 +2790,8 @@ type or transform expression refers to an otherwise-unavailable module.
 
 **Placement:** Operation (function) **Syntax:**
 `@nexus.poll python="<support-helper>" typescript="<support-helper>" targets="client"`,
-with optional `items="<field>"` and `python-resume="<support-helper>"`
+with optional `items="<field>"`, `python-resume="<support-helper>"` and
+`typescript-resume="<support-helper>"`
 
 Generates an async iterator on the client extension, and on each client resource
 method that binds the operation. Its name is `iter_<name>` in Python and
@@ -2815,18 +2816,19 @@ def next_read_request(request, response):
     return dataclasses.replace(request, from_offset=response.next_offset)
 ```
 
-In Python, with `items="<field>"`, nexgen also generates `iter_<name>_items`. It
-takes the parameters of `iter_<name>`, reads its pages, and yields the items of
-the list field `<field>` of each response. It returns a `PollIterator`, whose
-`next_request` is the request to resume with:
+With `items="<field>"`, nexgen also generates `iter_<name>_items` in Python and
+`iter<Name>Items` in TypeScript. It takes the parameters of the page iterator,
+reads its pages, and yields the items of the list field `<field>` of each
+response. It returns a `PollIterator`, whose `next_request` (`nextRequest` in
+TypeScript) is the request to resume with:
 
-- After an item, the `python-resume` helper gives it. The helper takes the
-  page's request and the item, and returns the request that resumes after the
-  item.
-- Without `python-resume`, it reads the item's page again, so a resumed read can
+- After an item, the `python-resume` or `typescript-resume` helper gives it. The
+  helper takes the page's request and the item, and returns the request that
+  resumes after the item.
+- Without a resume helper, it reads the item's page again, so a resumed read can
   yield an item twice.
-- After a page's last item, it is the page helper's request. It is `None` after
-  the last page.
+- After a page's last item, it is the page helper's request. It is `None`
+  (`undefined` in TypeScript) after the last page.
 
 ```wit
 /// @nexus.poll python="next_read_request" items="records"

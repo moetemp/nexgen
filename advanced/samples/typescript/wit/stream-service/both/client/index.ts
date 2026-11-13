@@ -3,3 +3,4 @@
 export { StreamServiceClientExtension } from "./extension";
 export type { NexusServiceClient } from "./nexus-client";
 export { Stream } from "./resources";
+export { PollIterator } from "./poll";

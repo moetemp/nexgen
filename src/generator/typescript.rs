@@ -611,6 +611,16 @@ impl<'a> ApiPlanner<'a> {
             ),
             _ => output_transfer_annotation.clone(),
         };
+        let poll_items = operation
+            .poll
+            .as_ref()
+            .and_then(|poll| poll.items.as_deref())
+            .filter(|_| {
+                crate::nexgen_config::current()
+                    .targets
+                    .contains(&GenerationTarget::Client)
+            })
+            .map(|key| self.resolve_poll_items(operation, key));
         let output_record_type_parameters = match operation.output_type() {
             Some(PlannedType::Record(record)) => {
                 type_parameter_names(&self.api_plan.record_type_parameters(&record.full_name))
@@ -679,11 +689,35 @@ impl<'a> ApiPlanner<'a> {
                 .value()
                 .map(support_reference),
             poll: operation.poll.as_ref(),
+            poll_items,
             output_none: operation.output_type().is_none(),
             runtime_type_parameters,
             output_record_type_parameters,
             api_omitted: &operation.api_omitted,
         })
+    }
+
+    /// The model field name and the item type of the list that the item iterator yields.
+    fn resolve_poll_items(&mut self, operation: &PlannedOperation, key: &str) -> (String, String) {
+        let Some(PlannedType::Record(record)) = operation.output_type() else {
+            panic!("a poll with `items` should return a record");
+        };
+        let api_plan = self.api_plan;
+        let field = api_plan
+            .record(&record.full_name)
+            .and_then(|record| record.fields.get(key))
+            .expect("the `items` field should exist");
+        let list = match &field.field_type {
+            PlannedType::Option(inner) => inner.as_ref(),
+            list => list,
+        };
+        let PlannedType::List(item) = list else {
+            panic!("the `items` field should be a list");
+        };
+        (
+            typescript_generated_field_name(&field.name),
+            self.resolve_planned_value_type(item).annotation,
+        )
     }
 
     fn input_flattened_fields(
@@ -3202,6 +3236,8 @@ struct RenderedOperation<'a> {
     output_transfer_type_converter: Option<String>,
     serialization_context_expr: Option<String>,
     poll: Option<&'a OperationPollSpec<PlannedFamily>>,
+    /// The model field name and the item type of the list that the item iterator yields.
+    poll_items: Option<(String, String)>,
     output_none: bool,
     runtime_type_parameters: Vec<String>,
     output_record_type_parameters: Vec<String>,
@@ -3308,6 +3344,24 @@ impl RenderedOperation<'_> {
             .filter(|poll| poll.targets.contains(&target))
             .and_then(|poll| poll.next.value())
             .map(support_reference)
+    }
+
+    fn poll_resume(&self) -> Option<String> {
+        self.poll
+            .and_then(|poll| poll.resume.value())
+            .map(support_reference)
+    }
+
+    /// The iterators that a client poll adds for a method of this name, with what each is.
+    fn poll_iterator_names(&self, name: &str) -> Vec<(String, &'static str)> {
+        if self.poll_next(GenerationTarget::Client).is_none() {
+            return Vec::new();
+        }
+        let mut names = vec![(poll_function_name(name), "iterator")];
+        if self.poll_items.is_some() {
+            names.push((poll_items_function_name(name), "item iterator"));
+        }
+        names
     }
 
     fn returns_direct(&self) -> bool {
@@ -7841,6 +7895,35 @@ fn render_client_package(
         index.push_str(&resource_names.join(", "));
         index.push_str(" } from './resources';\n");
     }
+    let item_poll = services
+        .iter()
+        .flat_map(|service| &service.operations)
+        .find(|operation| {
+            operation.poll_items.is_some()
+                && operation.poll_next(GenerationTarget::Client).is_some()
+        });
+    if let Some(operation) = item_poll {
+        // The client modules import the iterator next to the models and resources.
+        if let Some(name) = model_names
+            .iter()
+            .chain(&resource_names)
+            .find(|name| *name == POLL_ITERATOR_NAME)
+        {
+            return Err(Error::TypeScriptGeneratedNameConflict {
+                name: POLL_ITERATOR_NAME.to_string(),
+                generated_by: format!("the item iterator of operation `{}`", operation.name),
+                conflicting_declaration: format!("type `{name}`"),
+            });
+        }
+        index.push_str(&format!(
+            "export {{ {POLL_ITERATOR_NAME} }} from './poll';\n"
+        ));
+        files.insert(
+            format!("{package}/poll.ts"),
+            render_generated_module(String::new(), TYPESCRIPT_CLIENT_POLL_MODULE.to_string()),
+            module_origin.clone(),
+        )?;
+    }
     files.insert(
         format!("{package}/index.ts"),
         render_generated_module(String::new(), index),
@@ -7885,6 +7968,7 @@ fn render_client_package(
         render_cross_module_model_type_imports(&mut imports, &package_dir, api_plan, &body);
         render_client_service_imports(&mut imports, services, &body);
         render_client_nexus_imports(&mut imports, &body);
+        render_client_poll_imports(&mut imports, &body);
         render_support_import(&mut imports, support_package, &package_dir, &body);
         files.insert(
             format!("{package}/resources.ts"),
@@ -7949,6 +8033,7 @@ fn render_client_package(
     render_value_imports(&mut imports, "./resources", &value_resources);
     render_type_imports(&mut imports, "./resources", &type_resources);
     render_client_nexus_imports(&mut imports, &body);
+    render_client_poll_imports(&mut imports, &body);
     render_support_import(&mut imports, support_package, &package_dir, &body);
     files.insert(
         format!("{package}/extension.ts"),
@@ -7975,6 +8060,82 @@ fn render_client_service_imports(
         .filter(|name| contains_identifier(body, name))
         .collect::<Vec<_>>();
     render_value_imports(imports, "../services", &names);
+}
+
+const POLL_ITERATOR_NAME: &str = "PollIterator";
+
+const TYPESCRIPT_CLIENT_POLL_MODULE: &str = r#"/**
+ * Yields each item of the pages of a poll.
+ *
+ * `nextRequest` is the request to resume with. After an item, the resume helper gives it. Without
+ * a resume helper, it reads the item's page again. After a page's last item, it is the page
+ * helper's request, which is `undefined` after the last page.
+ */
+export class PollIterator<TRequest, TItem, TResponse = unknown>
+  implements AsyncIterableIterator<TItem>
+{
+  public nextRequest: TRequest | undefined;
+  readonly #pages: AsyncIterator<TResponse>;
+  readonly #items: (response: TResponse) => readonly TItem[] | null | undefined;
+  readonly #nextPage: (request: TRequest, response: TResponse) => TRequest | undefined;
+  readonly #resume: ((request: TRequest, item: TItem) => TRequest) | undefined;
+  #page: TItem[] = [];
+  #pageRequest: TRequest;
+  #pageNext: TRequest | undefined = undefined;
+
+  public constructor(
+    request: TRequest,
+    pages: AsyncIterator<TResponse>,
+    items: (response: TResponse) => readonly TItem[] | null | undefined,
+    nextPage: (request: TRequest, response: TResponse) => TRequest | undefined,
+    resume?: (request: TRequest, item: TItem) => TRequest,
+  ) {
+    this.nextRequest = request;
+    this.#pageRequest = request;
+    this.#pages = pages;
+    this.#items = items;
+    this.#nextPage = nextPage;
+    this.#resume = resume;
+  }
+
+  public [Symbol.asyncIterator](): this {
+    return this;
+  }
+
+  public async next(): Promise<IteratorResult<TItem, undefined>> {
+    while (this.#page.length === 0) {
+      if (this.nextRequest === undefined) {
+        return { done: true, value: undefined };
+      }
+      this.#pageRequest = this.nextRequest;
+      const page = await this.#pages.next();
+      if (page.done) {
+        this.nextRequest = undefined;
+        return { done: true, value: undefined };
+      }
+      // The page iterator keeps its requests to itself, so the page helper runs here again. It
+      // runs before the caller gets an item, so a changed item can't change the next request.
+      this.#pageNext = this.#nextPage(this.#pageRequest, page.value);
+      this.#page = [...(this.#items(page.value) ?? [])];
+      if (this.#page.length === 0) {
+        this.nextRequest = this.#pageNext;
+      }
+    }
+    const item = this.#page.shift() as TItem;
+    if (this.#page.length === 0) {
+      this.nextRequest = this.#pageNext;
+    } else if (this.#resume !== undefined) {
+      this.nextRequest = this.#resume(this.#pageRequest, item);
+    }
+    return { done: false, value: item };
+  }
+}
+"#;
+
+fn render_client_poll_imports(imports: &mut String, body: &str) {
+    if contains_unqualified_identifier_followed_by(body, POLL_ITERATOR_NAME, '(') {
+        render_value_imports(imports, "./poll", &[POLL_ITERATOR_NAME.to_string()]);
+    }
 }
 
 fn render_client_nexus_imports(imports: &mut String, body: &str) {
@@ -8410,8 +8571,9 @@ fn render_client_extension(
         .flat_map(|operation| {
             std::iter::once(operation.attr_name.clone()).chain(
                 operation
-                    .poll_next(GenerationTarget::Client)
-                    .map(|_| poll_function_name(&operation.attr_name)),
+                    .poll_iterator_names(&operation.attr_name)
+                    .into_iter()
+                    .map(|(name, _)| name),
             )
         })
         .chain(service.resources.iter().map(client_resource_factory_name))
@@ -8462,6 +8624,10 @@ fn render_client_extension(
         if let Some(next_expr) = operation.poll_next(GenerationTarget::Client) {
             output.push('\n');
             render_client_poll_method(output, service, operation, &next_expr);
+            if operation.poll_items.is_some() {
+                output.push('\n');
+                render_client_poll_items_method(output, service, operation, &next_expr);
+            }
         }
     }
     output.push_str("  }\n");
@@ -8672,6 +8838,72 @@ fn poll_function_name(name: &str) -> String {
     format!("iter{}", name.to_upper_camel_case())
 }
 
+fn poll_items_function_name(name: &str) -> String {
+    format!("iter{}Items", name.to_upper_camel_case())
+}
+
+fn poll_items_summary(name: &str, doc: Option<&str>, resume: bool) -> String {
+    let next_request = if resume {
+        "`nextRequest` resumes after the last item that the iterator yielded."
+    } else {
+        "`nextRequest` reads the page of the last item again, until the iterator yields the \
+         page's last item."
+    };
+    let summary = format!(
+        "Yields each item of `{}`, page by page.\n\n{next_request} It is `undefined` after the \
+         last page.",
+        poll_function_name(name)
+    );
+    match doc.map(str::trim).filter(|doc| !doc.is_empty()) {
+        Some(doc) => format!("{summary}\n\n{doc}"),
+        None => summary,
+    }
+}
+
+/// Returns a `PollIterator` that yields the items of the pages of `page_call`.
+fn render_poll_items_return(
+    output: &mut String,
+    indent: &str,
+    operation: &RenderedOperation<'_>,
+    page_call: &str,
+    next_expr: &str,
+) {
+    let Some((items_field, _)) = &operation.poll_items else {
+        return;
+    };
+    output.push_str(indent);
+    output.push_str("return new PollIterator(\n");
+    let mut args = vec![
+        "request".to_string(),
+        page_call.to_string(),
+        format!("(response) => response.{items_field}"),
+        next_expr.to_string(),
+    ];
+    args.extend(operation.poll_resume());
+    for arg in args {
+        output.push_str(indent);
+        output.push_str("  ");
+        output.push_str(&arg);
+        output.push_str(",\n");
+    }
+    output.push_str(indent);
+    output.push_str(");\n");
+}
+
+fn poll_items_annotation(
+    operation: &RenderedOperation<'_>,
+    input: &RenderedOperationInput,
+) -> String {
+    let (_, item) = operation
+        .poll_items
+        .as_ref()
+        .expect("an item iterator should have items");
+    format!(
+        "PollIterator<{}, {item}, {}>",
+        input.request_annotation, operation.output_operation_annotation
+    )
+}
+
 fn poll_function_summary(name: &str, doc: Option<&str>) -> String {
     let summary = format!("Yields each response of `{name}` until the poll helper stops.");
     match doc.map(str::trim).filter(|doc| !doc.is_empty()) {
@@ -8726,6 +8958,55 @@ fn render_client_poll_method(
         next_expr,
         "",
     );
+    output.push_str("    }\n");
+}
+
+fn render_client_poll_items_method(
+    output: &mut String,
+    service: &RenderedService<'_>,
+    operation: &RenderedOperation<'_>,
+    next_expr: &str,
+) {
+    let input = operation
+        .input
+        .as_ref()
+        .expect("a polled operation should have a request");
+    render_typescript_doc_comment(
+        output,
+        "    ",
+        Some(&poll_items_summary(
+            &operation.attr_name,
+            operation.doc.as_deref(),
+            operation.poll_resume().is_some(),
+        )),
+        &client_operation_doc_tags(operation),
+    );
+    render_client_method_signature(
+        output,
+        service,
+        operation,
+        "public ",
+        &poll_items_function_name(&operation.attr_name),
+    );
+    output.push_str(": ");
+    output.push_str(&poll_items_annotation(operation, input));
+    output.push_str(" {\n");
+    let input_name = client_request_input_name(operation);
+    render_client_request(output, "      ", input, input_name, false);
+    let page_args = std::iter::once(input_name.to_string())
+        .chain(
+            operation
+                .runtime_type_parameters
+                .iter()
+                .map(|name| typescript_runtime_type_argument_name(name)),
+        )
+        .collect::<Vec<_>>()
+        .join(", ");
+    let page_call = format!(
+        "this.{}({page_args})",
+        poll_function_name(&operation.attr_name)
+    );
+    render_poll_items_return(output, "      ", operation, &page_call, next_expr);
     output.push_str("    }\n");
 }
 
@@ -8881,6 +9162,37 @@ fn render_client_resource_poll_method(
         "this.",
     );
     output.push_str("  }\n");
+    if operation.poll_items.is_none() {
+        return;
+    }
+    output.push('\n');
+    render_typescript_doc_comment(
+        output,
+        "  ",
+        Some(&poll_items_summary(
+            &method_name,
+            method.doc.as_deref(),
+            operation.poll_resume().is_some(),
+        )),
+        &experimental_doc_tag(operation.experimental),
+    );
+    output.push_str("  public ");
+    output.push_str(&poll_items_function_name(&method_name));
+    output.push_str("(\n");
+    render_resource_method_params(output, method, api_plan);
+    output.push_str("  ): ");
+    output.push_str(&poll_items_annotation(operation, input));
+    output.push_str(" {\n");
+    render_client_request_from_plan(output, "    ", input, &request_expr, false);
+    let page_args = method
+        .params
+        .iter()
+        .map(|param| typescript_generated_field_name(&param.name))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let page_call = format!("this.{}({page_args})", poll_function_name(&method_name));
+    render_poll_items_return(output, "    ", operation, &page_call, &next_expr);
+    output.push_str("  }\n");
 }
 
 fn client_unfilled_sources(input: &RenderedOperationInput, plan: &RequestPlan) -> Vec<String> {
@@ -8945,19 +9257,17 @@ fn validate_client_polls(services: &[RenderedService<'_>]) -> Result<()> {
         .collect::<BTreeMap<_, _>>();
     for service in services {
         for operation in &service.operations {
-            if operation.poll_next(GenerationTarget::Client).is_none() {
-                continue;
-            }
-            let iterator_name = poll_function_name(&operation.attr_name);
-            if let Some(conflicting_declaration) = operation_names.get(&iterator_name) {
-                return Err(Error::TypeScriptGeneratedNameConflict {
-                    name: iterator_name,
-                    generated_by: format!(
-                        "the iterator of operation `{}.{}`",
-                        service.name, operation.name
-                    ),
-                    conflicting_declaration: conflicting_declaration.clone(),
-                });
+            for (iterator_name, kind) in operation.poll_iterator_names(&operation.attr_name) {
+                if let Some(conflicting_declaration) = operation_names.get(&iterator_name) {
+                    return Err(Error::TypeScriptGeneratedNameConflict {
+                        name: iterator_name,
+                        generated_by: format!(
+                            "the {kind} of operation `{}.{}`",
+                            service.name, operation.name
+                        ),
+                        conflicting_declaration: conflicting_declaration.clone(),
+                    });
+                }
             }
         }
         for resource in &service.resources {
@@ -8985,24 +9295,31 @@ fn validate_client_polls(services: &[RenderedService<'_>]) -> Result<()> {
                 else {
                     continue;
                 };
-                let polled = service.operations.iter().any(|operation| {
-                    operation.name == operation_name
-                        && operation.poll_next(GenerationTarget::Client).is_some()
-                });
-                let iterator_name =
-                    poll_function_name(&typescript_generated_field_name(&method.name));
-                let conflict = member_names
+                let Some(operation) = service
+                    .operations
                     .iter()
-                    .find(|(member_name, _, _)| *member_name == iterator_name);
-                if polled && let Some((_, kind, name)) = conflict {
-                    return Err(Error::TypeScriptGeneratedNameConflict {
-                        name: iterator_name,
-                        generated_by: format!(
-                            "the iterator of resource method `{}.{}`",
-                            resource.type_name, method.name
-                        ),
-                        conflicting_declaration: format!("{kind} `{}.{name}`", resource.type_name),
-                    });
+                    .find(|operation| operation.name == operation_name)
+                else {
+                    continue;
+                };
+                let method_name = typescript_generated_field_name(&method.name);
+                for (iterator_name, iterator_kind) in operation.poll_iterator_names(&method_name) {
+                    let conflict = member_names
+                        .iter()
+                        .find(|(member_name, _, _)| *member_name == iterator_name);
+                    if let Some((_, kind, name)) = conflict {
+                        return Err(Error::TypeScriptGeneratedNameConflict {
+                            name: iterator_name,
+                            generated_by: format!(
+                                "the {iterator_kind} of resource method `{}.{}`",
+                                resource.type_name, method.name
+                            ),
+                            conflicting_declaration: format!(
+                                "{kind} `{}.{name}`",
+                                resource.type_name
+                            ),
+                        });
+                    }
                 }
             }
         }
@@ -9034,11 +9351,13 @@ fn validate_client_names(services: &[RenderedService<'_>]) -> Result<()> {
                     ),
                 });
             }
-            let iterator_name = operation
-                .poll_next(GenerationTarget::Client)
-                .map(|_| poll_function_name(&operation.attr_name));
-            let names = [Some(operation.attr_name.clone()), iterator_name];
-            for name in names.into_iter().flatten() {
+            let names = std::iter::once(operation.attr_name.clone()).chain(
+                operation
+                    .poll_iterator_names(&operation.attr_name)
+                    .into_iter()
+                    .map(|(name, _)| name),
+            );
+            for name in names {
                 if name == CLIENT_HOOK_NAME {
                     return Err(Error::TypeScriptGeneratedNameConflict {
                         name,

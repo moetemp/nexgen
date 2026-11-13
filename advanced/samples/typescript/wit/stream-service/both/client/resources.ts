@@ -9,11 +9,13 @@ import type {
   Producer,
   CloseStreamRequest,
   ReadRecordsResponse,
+  StreamRecord,
   ReadRecordsRequest,
   DescribeStreamResponse,
 } from "../models";
 import { streamService } from "../services";
 import { type NexusServiceClient, operationId } from "./nexus-client";
+import { PollIterator } from "./poll";
 import * as support from "../../../../support/temporal_model_converters";
 
 export class Stream<BodyT = unknown> {
@@ -143,6 +145,40 @@ export class Stream<BodyT = unknown> {
       }
       request = next;
     }
+  }
+
+  /**
+   * Yields each item of `iterRead`, page by page.
+   *
+   * `nextRequest` resumes after the last item that the iterator yielded. It is
+   * `undefined` after the last page.
+   *
+   * Read one page of Records. The poll iterator reads them all.
+   */
+  public iterReadItems(
+    fromOffset?: Uint8Array,
+    maxRecords?: number,
+    wait?: common.Duration,
+    maxBytes?: number,
+  ): PollIterator<
+    ReadRecordsRequest<BodyT>,
+    StreamRecord<BodyT>,
+    ReadRecordsResponse<BodyT>
+  > {
+    const request: ReadRecordsRequest<BodyT> = {
+      ref: this.ref,
+      fromOffset: fromOffset,
+      maxRecords: maxRecords,
+      wait: wait,
+      maxBytes: maxBytes,
+    };
+    return new PollIterator(
+      request,
+      this.iterRead(fromOffset, maxRecords, wait, maxBytes),
+      (response) => response.records,
+      support.nextReadRequest,
+      support.resumeReadRequest,
+    );
   }
 
   public async describe(): Promise<DescribeStreamResponse> {

@@ -39,3 +39,12 @@ export function nextReadRequest<
   // A from-offset is exclusive, so a read after an offset passes that offset.
   return { ...request, fromOffset: lastOffset };
 }
+
+/** The read that resumes after `record`, a Record of the page of `request`. */
+export function resumeReadRequest<TRequest extends { readonly fromOffset?: Offset }>(
+  request: TRequest,
+  record: { readonly offset: Uint8Array },
+): TRequest {
+  // A from-offset is exclusive, so a read after a Record passes that Record's offset.
+  return { ...request, fromOffset: record.offset };
+}

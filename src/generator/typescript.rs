@@ -9105,6 +9105,23 @@ fn render_client_resource(
         output.push_str("  }\n");
         render_client_resource_poll_method(output, service, method, api_plan);
     }
+    if let Some(close) = resource.close_for(GenerationTarget::Client) {
+        output.push('\n');
+        render_typescript_doc_comment(
+            output,
+            "  ",
+            Some(&format!(
+                "Calls `{}` at the end of an `await using` scope.",
+                typescript_generated_field_name(close)
+            )),
+            &[],
+        );
+        output.push_str("  public async [Symbol.asyncDispose](): Promise<void> {\n");
+        output.push_str("    await this.");
+        output.push_str(&typescript_generated_field_name(close));
+        output.push_str("();\n");
+        output.push_str("  }\n");
+    }
     output.push_str("}\n");
 }
 

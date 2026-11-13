@@ -43,6 +43,7 @@ interface ClientStream<BodyT = unknown> {
     ReadRecordsResponse<BodyT>
   >;
   describe(): Promise<DescribeStreamResponse>;
+  [Symbol.asyncDispose](): Promise<void>;
 }
 
 interface StreamServiceClient {
@@ -66,6 +67,10 @@ const { Stream, StreamServiceClientExtension } = (await import(clientModule)) as
   ) => abstract new (...args: any[]) => InstanceType<TBase> & StreamServiceClient;
 };
 
+const CLIENT_PRODUCER: Producer = {
+  id: "client:sample",
+  kind: { tag: "client", value: {} },
+};
 const STREAM_SERVICE = "temporal.api.streamservice.v1.StreamService";
 const SYSTEM_ENDPOINT = "__temporal_system";
 
@@ -221,6 +226,40 @@ describe("stream-service client target", () => {
           },
         },
       },
+    ]);
+  });
+
+  test("the end of an `await using` scope closes its stream", async () => {
+    const client = new Client({
+      CreateStream: [{ ref: { id: "s1" } }],
+      CloseStream: [{}],
+    });
+
+    {
+      await using stream = await client.createStream({ id: "s1" });
+      expect(stream.ref).toEqual({ id: "s1" });
+    }
+
+    expect(client.calls.map((call) => [call.operation, call.input])).toEqual([
+      ["CreateStream", expect.anything()],
+      ["CloseStream", { ref: { id: "s1" }, producer: CLIENT_PRODUCER }],
+    ]);
+  });
+
+  test("a failed `await using` scope closes its stream", async () => {
+    const client = new Client({
+      CreateStream: [{ ref: { id: "s1" } }],
+      CloseStream: [{}],
+    });
+
+    await expect(async () => {
+      await using _stream = await client.createStream({ id: "s1" });
+      throw new Error("boom");
+    }).rejects.toThrow("boom");
+
+    expect(client.calls.map((call) => call.operation)).toEqual([
+      "CreateStream",
+      "CloseStream",
     ]);
   });
 

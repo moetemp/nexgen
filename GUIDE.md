@@ -861,7 +861,16 @@ async with client.create_stream(id="turns", body_type=Turn) as stream:
 
 A call that returns the resource returns a `ResourceCall`, such as
 `ResourceCall[Stream[Turn]]`. Await it for the resource, or enter it with
-`async with`. Only Python closes a resource this way.
+`async with`.
+
+A TypeScript client resource gets `[Symbol.asyncDispose]`, so the end of an
+`await using` scope calls the method. The TypeScript Workflow target and the
+other languages don't close a resource this way.
+
+```ts
+await using stream = await client.createStream({ id: "turns" }, turnType);
+await stream.append([new Turn("user")]);
+```
 
 ### Variadic Items
 

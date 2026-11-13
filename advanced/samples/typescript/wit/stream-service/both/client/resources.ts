@@ -190,4 +190,11 @@ export class Stream<BodyT = unknown> {
     );
     return await handle.result();
   }
+
+  /**
+   * Calls `close` at the end of an `await using` scope.
+   */
+  public async [Symbol.asyncDispose](): Promise<void> {
+    await this.close();
+  }
 }

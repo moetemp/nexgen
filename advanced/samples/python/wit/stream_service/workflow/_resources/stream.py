@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import collections.abc
 import typing
 import typing_extensions
 import temporalio.nexus.system
+import datetime
 import temporalio.workflow
 import types
 
@@ -17,6 +19,8 @@ from ..models import (
     DescribeStreamRequest,
     DescribeStreamResponse,
     Producer,
+    StreamRead,
+    StreamRecord,
     StreamRef,
 )
 import temporal_support as _support
@@ -94,6 +98,48 @@ class Stream(typing.Generic[BodyT]):
         )
         handle = await _describe_stream(request)
         return await handle
+
+    async def take(
+        self,
+        timeout: datetime.timedelta,
+        until: collections.abc.Callable[[StreamRecord[BodyT]], bool] | None = None,
+        from_offset: bytes | None = None,
+        idle_timeout: datetime.timedelta | None = None,
+        max_records: int | None = None,
+        max_bytes: int | None = None,
+    ) -> StreamRead[BodyT]:
+        """Read every Record up to a stop."""
+        return await _support.take_stream(
+            self,
+            timeout=timeout,
+            until=until,
+            from_offset=from_offset,
+            idle_timeout=idle_timeout,
+            max_records=max_records,
+            max_bytes=max_bytes,
+        )
+
+    async def filter(
+        self,
+        predicate: collections.abc.Callable[[StreamRecord[BodyT]], bool],
+        timeout: datetime.timedelta,
+        until: collections.abc.Callable[[StreamRecord[BodyT]], bool] | None = None,
+        from_offset: bytes | None = None,
+        idle_timeout: datetime.timedelta | None = None,
+        max_records: int | None = None,
+        max_bytes: int | None = None,
+    ) -> StreamRead[BodyT]:
+        """Read the Records that the predicate keeps, up to a stop."""
+        return await _support.filter_stream(
+            self,
+            predicate=predicate,
+            timeout=timeout,
+            until=until,
+            from_offset=from_offset,
+            idle_timeout=idle_timeout,
+            max_records=max_records,
+            max_bytes=max_bytes,
+        )
 
 
 @typing.overload

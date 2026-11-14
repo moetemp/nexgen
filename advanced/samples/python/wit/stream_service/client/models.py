@@ -47,6 +47,7 @@ class StreamReadStop(enum.IntEnum):
 
 
 BodyT = typing.TypeVar("BodyT")
+ValueT = typing.TypeVar("ValueT")
 _BodyT = typing_extensions.TypeVar("_BodyT", default=object)
 
 
@@ -1349,6 +1350,17 @@ class StreamRead(typing.Generic[BodyT]):
     """What one read of many pages gave."""
 
     records: list[StreamRecord[BodyT]]
+    last_offset: bytes | None = None
+    stop: StreamReadStop
+    done: bool
+
+
+@dataclasses.dataclass(slots=True, kw_only=True)
+class StreamReduce(typing.Generic[ValueT]):
+    """What one fold of many pages gave."""
+
+    value: ValueT
+    count: int
     last_offset: bytes | None = None
     stop: StreamReadStop
     done: bool

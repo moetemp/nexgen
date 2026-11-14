@@ -718,6 +718,31 @@ def _read_result(
     )
 
 
+def _reduce_result(
+    model_types: types.ModuleType, records: list[typing.Any]
+) -> typing.Any:
+    return model_types.StreamReduce(
+        value=len(records),
+        count=len(records),
+        last_offset=_offset(3),
+        stop=model_types.StreamReadStop.Done,
+        done=True,
+    )
+
+
+def _count(value: int, record: typing.Any) -> int:
+    del record
+    return value + 1
+
+
+def _has_ten(value: int, record: typing.Any) -> bool:
+    del record
+    return value >= 10
+
+
+RESULTS = {"take": _read_result, "filter": _read_result, "reduce": _reduce_result}
+
+
 # Each method's positional arguments, its keyword arguments, and what its helper gets.
 HELPER_READS: list[tuple[str, str, tuple[typing.Any, ...], dict[str, typing.Any]]] = [
     (
@@ -731,6 +756,12 @@ HELPER_READS: list[tuple[str, str, tuple[typing.Any, ...], dict[str, typing.Any]
         "filter_stream",
         (_is_user, datetime.timedelta(seconds=5)),
         {"idle_timeout": datetime.timedelta(seconds=1), "max_bytes": 1024},
+    ),
+    (
+        "reduce",
+        "reduce_stream",
+        (_count, 0, datetime.timedelta(seconds=5)),
+        {"until": _has_ten, "max_records": 20},
     ),
 ]
 
@@ -775,7 +806,7 @@ async def test_a_stream_read_calls_its_support_helper(
 ) -> None:
     stream = build(package, model_types)
     records = [model_types.StreamRecord(body=Turn(role="user"), offset=_offset(3))]
-    result = _read_result(model_types, records)
+    result = RESULTS[method](model_types, records)
     stream_reads.results[helper] = result
 
     read = await getattr(stream, method)(*args, **kwargs)
@@ -802,7 +833,7 @@ def test_a_client_stream_keeps_the_page_read(package: str) -> None:
     assert "wait" in inspect.signature(resources.Stream.read).parameters
 
 
-async def test_typed_stream_reads_give_their_body_type(
+async def test_typed_stream_reads_give_their_types(
     stream_reads: types.ModuleType,
 ) -> None:
     workflow_stream = workflow_only.get_stream(
@@ -832,20 +863,42 @@ async def test_typed_stream_reads_give_their_body_type(
         done=False,
     )
 
+    stream_reads.results["reduce_stream"] = workflow_models.StreamReduce[str](
+        value="user",
+        count=1,
+        last_offset=_offset(3),
+        stop=workflow_models.StreamReadStop.Done,
+        done=True,
+    )
+
     def is_workflow_user(record: workflow_models.StreamRecord[Turn]) -> bool:
         return record.body.role == "user"
 
     def is_client_user(record: client_models.StreamRecord[Turn]) -> bool:
         return record.body.role == "user"
 
+    def join_workflow_roles(
+        value: str, record: workflow_models.StreamRecord[Turn]
+    ) -> str:
+        return value + record.body.role
+
+    def join_client_roles(value: str, record: client_models.StreamRecord[Turn]) -> str:
+        return value + record.body.role
+
     timeout = datetime.timedelta(seconds=1)
     workflow_taken = await workflow_stream.take(timeout, until=is_workflow_user)
     workflow_filtered = await workflow_stream.filter(is_workflow_user, timeout)
     client_taken = await client_stream.take(timeout, until=is_client_user)
     client_filtered = await client_stream.filter(is_client_user, timeout)
+    # The initial value sets the method's own type parameter.
+    workflow_reduced = await workflow_stream.reduce(join_workflow_roles, "", timeout)
+    client_reduced = await client_stream.reduce(join_client_roles, "", timeout)
 
     _ = assert_type(workflow_taken, workflow_models.StreamRead[Turn])
     _ = assert_type(workflow_filtered, workflow_models.StreamRead[Turn])
     _ = assert_type(client_taken, client_models.StreamRead[Turn])
     _ = assert_type(client_filtered, client_models.StreamRead[Turn])
+    _ = assert_type(workflow_reduced, workflow_models.StreamReduce[str])
+    _ = assert_type(client_reduced, client_models.StreamReduce[str])
+    assert workflow_reduced.value == "user"
     assert client_filtered.records[0].body.role == "user"

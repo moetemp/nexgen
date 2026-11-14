@@ -3,6 +3,7 @@
 from .poll import next_read_request as next_read_request
 from .poll import resume_read_request as resume_read_request
 from .stream_reads import filter_stream as filter_stream
+from .stream_reads import reduce_stream as reduce_stream
 from .stream_reads import take_stream as take_stream
 from .streams import default_producer as default_producer
 from .streams import request_id as request_id

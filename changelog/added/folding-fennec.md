@@ -1,0 +1,1 @@
+A `@nexus.helper` method is generic in a `@nexus.type-parameter` that only it uses, and its resource does not take that type parameter. In Python the method uses a `TypeVar` of its own, which the call's arguments set.

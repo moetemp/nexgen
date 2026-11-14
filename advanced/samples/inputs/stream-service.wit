@@ -21,6 +21,10 @@ interface stream-service {
   /// @nexus.type-parameter
   type body-t = placeholder;
 
+  /// The value that `reduce` folds the Records into. A call's initial value sets it.
+  /// @nexus.type-parameter
+  type value-t = placeholder;
+
   // The WIT has no named offset type yet, so this comment tells what each `list<u8>` offset holds.
   // An offset is the opaque position of a Record in one Stream, and it is proto `bytes`. A caller
   // never parses it. It only gives it back to a read, or compares two offsets of one Stream. They
@@ -170,6 +174,25 @@ interface stream-service {
 
   /// @nexus.function signature="record-predicate"
   type read-predicate = placeholder;
+
+  /// @nexus.doc "What one fold of many pages gave."
+  record stream-reduce {
+    value: value-t,
+    count: s32,
+    last-offset: option<list<u8>>,
+    stop: stream-read-stop,
+    done: bool,
+  }
+
+  fold-function: func(value: value-t, %record: stream-record) -> value-t;
+
+  fold-predicate: func(value: value-t, %record: stream-record) -> bool;
+
+  /// @nexus.function signature="fold-function"
+  type fold = placeholder;
+
+  /// @nexus.function signature="fold-predicate"
+  type fold-until = placeholder;
 
   /// @nexus.doc
   ///   "Create a Stream. If it exists, fail, or with use-existing get the open one."
@@ -323,8 +346,8 @@ interface stream-service {
     /// @nexus.close
     close: func(producer: option<producer>);
 
-    // Workflow code reads with `take` and `filter`, not with a page read. So the Workflow target
-    // omits `read`, and the client target keeps it.
+    // Workflow code reads with `take`, `filter` and `reduce`, not with a page read. So the
+    // Workflow target omits `read`, and the client target keeps it.
     /// @nexus.doc "Read one page of Records. The poll iterator reads them all."
     /// @nexus.operation "read-records"
     /// @nexus.api-omit targets="workflow"
@@ -363,6 +386,19 @@ interface stream-service {
       max-records: option<s32>,
       max-bytes: option<s64>,
     ) -> stream-read;
+
+    /// @nexus.doc "Fold the Records into one value, up to a stop."
+    /// @nexus.helper python="reduce_stream"
+    reduce: func(
+      function: fold,
+      initial: value-t,
+      timeout: duration,
+      until: option<fold-until>,
+      from-offset: option<list<u8>>,
+      idle-timeout: option<duration>,
+      max-records: option<s32>,
+      max-bytes: option<s64>,
+    ) -> stream-reduce;
   }
 
   // With use-existing, created is false when the Stream existed.

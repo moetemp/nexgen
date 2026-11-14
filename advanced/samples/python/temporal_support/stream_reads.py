@@ -25,3 +25,8 @@ async def take_stream(stream: typing.Any, **arguments: typing.Any) -> typing.Any
 async def filter_stream(stream: typing.Any, **arguments: typing.Any) -> typing.Any:
     """Keep the call, and return the result that a test set."""
     return _call("filter_stream", stream, arguments)
+
+
+async def reduce_stream(stream: typing.Any, **arguments: typing.Any) -> typing.Any:
+    """Keep the call, and return the result that a test set."""
+    return _call("reduce_stream", stream, arguments)

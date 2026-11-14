@@ -136,11 +136,12 @@ Validates the selected generic model and operation surface after selection.
 Resolves resource-method and resource-return facts from the API spec and
 descriptors. After resolving method bindings, it infers each resource's type
 parameters, including propagation through returned resources to a fixed point.
-It validates generic-resource restrictions within this pass, before resolving
-return-field bindings. Inferred parameters first appear in
-`ResourceBoundFamily::ResourceData`, alongside the resolved resource facts;
-authored and selected `ResourceSpec` nodes have no type-parameter field.
-Inference also runs for models-only generation.
+Helper methods don't count toward them. Each helper method keeps the type
+parameters that it uses and its resource lacks. The pass also validates
+generic-resource restrictions, before resolving return-field bindings. Inferred
+parameters first appear in `ResourceBoundFamily::ResourceData`, alongside the
+resolved resource facts; authored and selected `ResourceSpec` nodes have no
+type-parameter field. Inference also runs for models-only generation.
 
 Operations must return resources owned by their service, including those held in
 result records. Return bindings determine shared wire models regardless of API

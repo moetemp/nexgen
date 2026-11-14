@@ -129,6 +129,9 @@ pub(crate) struct ResolvedResourceMethodSpec {
     pub(crate) varargs: Option<String>,
     pub(crate) api_omitted: BTreeSet<GenerationTarget>,
     pub(crate) binding: ResolvedResourceMethodBinding,
+    /// The type parameters that a helper method uses and its resource doesn't have, in stable
+    /// type-identity order. Inferred with the resource's own.
+    pub(crate) type_parameters: Vec<crate::spec::TypeParameterSpec>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -421,6 +424,7 @@ fn resolve_resource_method(
             binding: ResolvedResourceMethodBinding::Helper {
                 helper: helper.to_string(),
             },
+            type_parameters: Vec::new(),
         });
     }
 
@@ -467,6 +471,7 @@ fn resolve_resource_method(
                 operation_name: operation.name.clone(),
                 request_plan,
             },
+            type_parameters: Vec::new(),
         });
     }
 
@@ -538,6 +543,7 @@ fn resolve_resource_method(
         varargs: method.varargs.clone(),
         api_omitted: method.api_omitted.clone(),
         binding,
+        type_parameters: Vec::new(),
     })
 }
 
@@ -1335,6 +1341,60 @@ interface jobs {
                 .collect::<Vec<_>>(),
             ["restart"]
         );
+    }
+
+    #[test]
+    fn a_helper_method_keeps_a_type_parameter_that_its_resource_lacks() {
+        let wit = r#"
+package test:folds@1.0.0;
+world system { export folds; }
+interface folds {
+  type placeholder = string;
+  /// @nexus.type-parameter
+  type body-t = placeholder;
+  /// @nexus.type-parameter
+  type value-t = placeholder;
+  record item { body: body-t, }
+  record folded { value: value-t, count: s32, }
+  fold-function: func(value: value-t, item: item) -> value-t;
+  /// @nexus.function signature="fold-function"
+  type fold = placeholder;
+  resource items {
+    constructor(first: item);
+    /// @nexus.helper python="reduce_items"
+    reduce: func(function: fold, initial: value-t) -> folded;
+    /// @nexus.helper python="last_item"
+    last: func() -> item;
+  }
+}
+"#;
+        let descriptors = empty_descriptors();
+        let spec =
+            super::ResourceResolutionPass::new(&descriptors, vec![GenerationTarget::Workflow])
+                .bind_spec(
+                    parse(Language::Python, wit),
+                    std::path::Path::new("inline.wit"),
+                )
+                .unwrap();
+        let resource = &spec.services[0].resource("items").unwrap().data;
+        let names = |parameters: &[crate::spec::TypeParameterSpec]| {
+            parameters
+                .iter()
+                .map(|parameter| parameter.name.clone())
+                .collect::<Vec<_>>()
+        };
+        // `reduce` uses `value-t`, and the resource stays generic in `body-t` only.
+        assert_eq!(names(&resource.type_parameters), ["BodyT"]);
+        let method = |name: &str| {
+            resource
+                .methods
+                .iter()
+                .find(|method| method.name == name)
+                .unwrap()
+        };
+        assert_eq!(names(&method("reduce").type_parameters), ["ValueT"]);
+        // `last` uses only the resource's `body-t`, so it has none of its own.
+        assert!(method("last").type_parameters.is_empty());
     }
 
     #[test]

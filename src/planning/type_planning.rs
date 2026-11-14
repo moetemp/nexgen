@@ -870,6 +870,7 @@ impl<'a> TypePlanningContext<'a> {
                     varargs: method.varargs.clone(),
                     api_omitted: method.api_omitted.clone(),
                     binding,
+                    type_parameters: method.type_parameters.clone(),
                 })
             })
             .collect::<Result<Vec<_>>>()?;

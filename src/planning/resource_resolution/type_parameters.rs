@@ -5,8 +5,8 @@ use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ExternalTypeSpec, ResourceSpec, SelectedFamily, ServiceSpec, TypeParameterSpec,
-    TypeSpec,
+    ApiSpec, ExternalTypeSpec, FunctionArgsSpec, FunctionResultSpec, ResourceSpec, SelectedFamily,
+    ServiceSpec, TypeParameterSpec, TypeSpec,
 };
 
 use super::{ResolvedResourceMethodBinding, ResolvedServiceResources};
@@ -17,6 +17,7 @@ pub(super) fn infer_and_validate(
     path: &Path,
 ) -> Result<()> {
     infer_resource_type_parameters(spec, bindings);
+    infer_helper_method_type_parameters(spec, bindings);
     validate_generic_resources(spec, bindings, path)
 }
 
@@ -56,7 +57,13 @@ fn used_type_parameters(
     let mut values = Vec::<&TypeSpec<SelectedFamily>>::new();
     let mut results = Vec::<&TypeSpec<SelectedFamily>>::new();
     values.extend(resource.fields.iter().map(|field| &field.field_type));
-    for method in &resource.methods {
+    // A helper method is generic in a type parameter of its own, so it can't make its resource
+    // generic.
+    for method in resource
+        .methods
+        .iter()
+        .filter(|method| method.helper.is_none())
+    {
         values.extend(method.params.iter().map(|param| &param.field_type));
         results.extend(method.result.as_ref().map(|result| &result.result_type));
     }
@@ -97,6 +104,47 @@ fn used_type_parameters(
     parameters.sort_by(|left, right| left.full_name.cmp(&right.full_name));
     parameters.dedup();
     parameters
+}
+
+/// A helper method is generic in each type parameter that its parameters, its callables and its
+/// result use, and that its resource doesn't have. A call's arguments give it, as for a function.
+fn infer_helper_method_type_parameters(
+    spec: &ApiSpec<SelectedFamily>,
+    bindings: &mut BTreeMap<String, ResolvedServiceResources>,
+) {
+    for resource in bindings
+        .values_mut()
+        .flat_map(|service| &mut service.resources)
+    {
+        for method in resource
+            .methods
+            .iter_mut()
+            .filter(|method| matches!(method.binding, ResolvedResourceMethodBinding::Helper { .. }))
+        {
+            let mut values = Vec::<&TypeSpec<SelectedFamily>>::new();
+            for param in &method.params {
+                values.push(&param.field_type);
+                if let Some(function) = &param.function {
+                    let (FunctionArgsSpec::Fixed(args)
+                    | FunctionArgsSpec::Varargs { prefix: args, .. }) = &function.args;
+                    values.extend(args.iter().map(|arg| &arg.field_type));
+                    if let FunctionResultSpec::Authored(result) = &function.result {
+                        values.push(result);
+                    }
+                }
+            }
+            values.extend(method.result.as_ref().map(|result| &result.result_type));
+            let mut parameters = values
+                .iter()
+                .flat_map(|value| spec.type_parameters_through_protos(value))
+                .map(|usage| usage.parameter)
+                .filter(|parameter| !resource.type_parameters.contains(parameter))
+                .collect::<Vec<_>>();
+            parameters.sort_by(|left, right| left.full_name.cmp(&right.full_name));
+            parameters.dedup();
+            method.type_parameters = parameters;
+        }
+    }
 }
 
 fn validate_generic_resources(

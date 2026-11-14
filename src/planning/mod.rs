@@ -195,6 +195,8 @@ pub(crate) struct PlannedResourceMethod {
     /// `targets` of `@nexus.helper`.
     pub(crate) api_omitted: BTreeSet<GenerationTarget>,
     pub(crate) binding: PlannedResourceMethodBindingSpec,
+    /// The type parameters of a helper method that its resource doesn't have.
+    pub(crate) type_parameters: Vec<crate::spec::TypeParameterSpec>,
 }
 
 impl PlannedResource {
@@ -420,6 +422,7 @@ mod tests {
             varargs: None,
             api_omitted: api_omitted.iter().copied().collect(),
             binding: PlannedResourceMethodBindingSpec::Stub,
+            type_parameters: Vec::new(),
         }
     }
 

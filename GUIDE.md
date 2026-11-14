@@ -909,6 +909,31 @@ A record that only helper methods reach never goes on the wire, so it has no
 backing and may hold proto-backed records. It is a plain model, and it reads a
 `list<u8>` as bytes.
 
+### Method Guard
+
+`@nexus.guard` makes the resource class call a support function each time code
+takes a public method from an instance. Only Python takes a guard.
+
+```wit
+/// @nexus.guard python="check_stream_call"
+resource %stream {
+  constructor(ref: stream-ref, created: option<bool>);
+}
+```
+
+```python
+_support.check_stream_call(target="workflow", method="append")
+```
+
+The body of an `async def` runs only when it is awaited. A caller that can't
+await gets a coroutine that never runs, so a check inside the method can't stop
+it. The guard runs before any coroutine exists, and it refuses a call by
+raising.
+
+The guard also runs when a method of the class takes another one, so a guard
+must be cheap and must give the same answer each time. Fields, properties and
+private names are not guarded.
+
 ### Edge Cases and Error Conditions
 
 #### Same field name in constructor and method parameter
@@ -1872,6 +1897,7 @@ below, such as protobuf bindings, function signatures, and conflicting options.
 | `@nexus.close`                          | resource method                                                                               |
 | `@nexus.varargs`                        | resource method                                                                               |
 | `@nexus.helper`                         | resource method                                                                               |
+| `@nexus.guard`                          | resource                                                                                      |
 
 <!-- annotation-placements:end -->
 
@@ -1925,6 +1951,7 @@ The catalog currently declares these restrictions:
 | `@nexus.poll`                           | python               | required                |
 | `@nexus.context-propagation`            | go                   | required                |
 | `@nexus.helper`                         | python               | not required by catalog |
+| `@nexus.guard`                          | python               | not required by catalog |
 
 <!-- annotation-availability:end -->
 
@@ -2719,6 +2746,19 @@ The support helper implements the method, and the method binds no operation. See
 method. Only Python takes a helper, so the other languages leave the method out.
 nexgen refuses the directive together with `@nexus.operation`, `@nexus.close`,
 `@nexus.varargs` or `@nexus.api-omit`.
+
+---
+
+### @nexus.guard
+
+**Placement:** Resource **Syntax:** `@nexus.guard python="<support-function>"`
+
+The class of each target calls the plain support function when code takes a
+public method from an instance. It passes `target` (`"workflow"` or `"client"`)
+and `method`, the Python name of the method, by keyword. The guarded methods are
+the operation, helper, close and poll iterator methods that the target keeps.
+The methods stay `async def`. See [Method Guard](#method-guard). Only Python
+takes a guard, and the other languages ignore the directive.
 
 ---
 

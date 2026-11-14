@@ -902,6 +902,9 @@ resource %stream {
 }
 ```
 
+A helper method is generic in a `@nexus.type-parameter` that only it uses, such
+as the value of a fold. Its resource does not take that type parameter.
+
 A record that only helper methods reach never goes on the wire, so it has no
 backing and may hold proto-backed records. It is a plain model, and it reads a
 `list<u8>` as bytes.
@@ -2186,7 +2189,8 @@ occur.
 A resource that uses a type parameter in its fields, its methods or the
 operations that they bind is generic in it. Records, protos and a returned
 generic resource count too, so the resource needs no annotation. It takes its
-type parameters in the order of their aliases.
+type parameters in the order of their aliases. A
+[helper method](#helper-methods) doesn't count.
 
 ```wit
 /// @nexus.type-parameter

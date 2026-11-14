@@ -1,6 +1,10 @@
+import type { Client } from "@temporalio/client";
 import * as common from "@temporalio/common";
 import type { temporal } from "@temporalio/proto";
+import type * as nexus from "nexus-rpc";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+
+import type { NexusServiceClient } from "../wit/stream-service/both/client/nexus-client.ts";
 
 import {
   type CreateStreamRequest,
@@ -14,7 +18,7 @@ import {
   describeStreamResponseTransferTypeConverter,
   readRecordsRequestTransferTypeConverter,
   readRecordsResponseTransferTypeConverter,
-} from "../wit/stream-service/workflow/models.ts";
+} from "../wit/stream-service/both/models.ts";
 
 const captured = vi.hoisted(() => ({
   calls: [] as Array<{ operation: string; input: unknown }>,
@@ -22,19 +26,19 @@ const captured = vi.hoisted(() => ({
 
 // The operation modules import the SDK's Nexus module, which this sample doesn't have. So a test
 // sees what a resource method passes to its operation, and not the defaults that it fills.
-vi.mock("../wit/stream-service/workflow/operations/append-records.ts", () => ({
+vi.mock("../wit/stream-service/both/operations/append-records.ts", () => ({
   appendRecords: async (input: unknown) => {
     captured.calls.push({ operation: "appendRecords", input });
     return { result: async () => ({}) };
   },
 }));
-vi.mock("../wit/stream-service/workflow/operations/close-stream.ts", () => ({
+vi.mock("../wit/stream-service/both/operations/close-stream.ts", () => ({
   closeStream: async (input: unknown) => {
     captured.calls.push({ operation: "closeStream", input });
     return { result: async () => ({}) };
   },
 }));
-vi.mock("../wit/stream-service/workflow/operations/describe-stream.ts", () => ({}));
+vi.mock("../wit/stream-service/both/operations/describe-stream.ts", () => ({}));
 
 function _offset(n: number): Uint8Array {
   // Big-endian bytes, so a bytes compare keeps the int order these tests assert.
@@ -80,7 +84,7 @@ async function loadWorkflowStream(): Promise<{
     new (ref: StreamRef<string>, created: undefined): WorkflowStream;
   };
 }> {
-  const resources = "../wit/stream-service/workflow/resources.ts";
+  const resources = "../wit/stream-service/both/resources.ts";
   return await import(resources);
 }
 
@@ -206,6 +210,18 @@ describe("stream-service generated output", () => {
       },
       { operation: "closeStream", input: { ref: { id: "stream-1" }, producer } },
     ]);
+  });
+
+  test("the SDK's Nexus service client is the client target's Nexus client", () => {
+    // Only `tsc` checks this, on the return type.
+    function nexusClient<T extends nexus.ServiceDefinition>(
+      client: Client,
+      options: { service: T; endpoint: string },
+    ): NexusServiceClient<T> {
+      return client.nexus.createServiceClient(options);
+    }
+
+    expect(nexusClient).toBeTypeOf("function");
   });
 
   test("decodes an enum number that it doesn't know as the fallback case", () => {

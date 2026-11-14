@@ -1,0 +1,11 @@
+package temporal:client-typescript-nexus-client-name-clash@1.0.0;
+
+world system { export starter-service; }
+
+// The client package declares a `NexusServiceClient` type too.
+/// @nexus.endpoint "starters"
+interface starter-service {
+  record nexus-service-client { name: string }
+
+  start: func(request: nexus-service-client);
+}

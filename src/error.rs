@@ -106,6 +106,15 @@ pub enum Error {
         conflicting_declaration: String,
     },
 
+    #[error(
+        "TypeScript generated name `{name}` for {generated_by} conflicts with {conflicting_declaration}"
+    )]
+    TypeScriptGeneratedNameConflict {
+        name: String,
+        generated_by: String,
+        conflicting_declaration: String,
+    },
+
     #[error("can't flatten a request field of operation `{operation}`: {reason}")]
     UnsupportedFlatten { operation: String, reason: String },
 

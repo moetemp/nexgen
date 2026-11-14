@@ -1,0 +1,9 @@
+languages = ["typescript"]
+system_nexus = true
+targets = ["workflow", "client"]
+
+[error]
+kind = "type-script-generated-name-conflict"
+contains = [
+  "TypeScript generated name `iterRead` for the iterator of operation `Reader.Read` conflicts with operation `Reader.IterRead`",
+]

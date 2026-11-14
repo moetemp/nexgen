@@ -259,7 +259,7 @@ const CATALOG: &[Annotation] = {
             keys: &["value", "import", "targets", "items", "resume"],
             language_keys: &["", "import", "resume"],
             repeatable: false,
-            languages: Some(&[Language::Python]),
+            languages: Some(&[Language::Python, Language::TypeScript]),
             system_nexus: true,
         },
         Annotation {

@@ -24,6 +24,7 @@ of `@nexus` directives.
   - [Resource Return Binding](#resource-return-binding)
   - [Closing a Resource](#closing-a-resource)
   - [Variadic Items](#variadic-items)
+  - [Helper Methods](#helper-methods)
   - [Edge Cases and Error Conditions](#edge-cases-and-error-conditions)
 - [Proto-Backed Models](#proto-backed-models)
   - [Transfer-Type Conversion](#transfer-type-conversion)
@@ -881,6 +882,30 @@ resource %stream {
 async def publish(self, *records: BodyT) -> int: ...
 ```
 
+### Helper Methods
+
+`@nexus.helper` makes a support helper implement a resource method, with no
+operation. The method calls the helper with the resource and each parameter by
+keyword, and returns the helper's result. A parameter whose type is a
+`@nexus.function` alias is a typed callable that stays in the process.
+`targets="workflow"` or `targets="client"` limits a helper method to one target.
+
+```wit
+record-predicate: func(%record: stream-record) -> bool;
+
+/// @nexus.function signature="record-predicate"
+type read-predicate = placeholder;
+
+resource %stream {
+  /// @nexus.helper python="take_stream"
+  take: func(timeout: duration, until: option<read-predicate>) -> stream-read;
+}
+```
+
+A record that only helper methods reach never goes on the wire, so it has no
+backing and may hold proto-backed records. It is a plain model, and it reads a
+`list<u8>` as bytes.
+
 ### Edge Cases and Error Conditions
 
 #### Same field name in constructor and method parameter
@@ -1342,7 +1367,8 @@ type my-exe = placeholder;
 ```
 
 Now any field of type `my-exe` is treated as a function reference with the
-specified signature.
+specified signature. The signature function is not an operation, even in the
+interface of a service.
 
 ```wit
 record execute-function-request {
@@ -1842,6 +1868,7 @@ below, such as protobuf bindings, function signatures, and conflicting options.
 | `@nexus.add-rpc-compatible-with`        | type alias                                                                                    |
 | `@nexus.close`                          | resource method                                                                               |
 | `@nexus.varargs`                        | resource method                                                                               |
+| `@nexus.helper`                         | resource method                                                                               |
 
 <!-- annotation-placements:end -->
 
@@ -1894,6 +1921,7 @@ The catalog currently declares these restrictions:
 | `@nexus.delay-load-temporalio-workflow` | none                 | required                |
 | `@nexus.poll`                           | python               | required                |
 | `@nexus.context-propagation`            | go                   | required                |
+| `@nexus.helper`                         | python               | not required by catalog |
 
 <!-- annotation-availability:end -->
 
@@ -2674,6 +2702,19 @@ Marks the method that ends the resource. Its parameters must be optional. See
 
 The method takes the items of that list parameter as positional arguments. See
 [Variadic Items](#variadic-items).
+
+---
+
+### @nexus.helper
+
+**Placement:** Resource method **Syntax:**
+`@nexus.helper python="<support-helper>" [targets="workflow"|"client"]`
+
+The support helper implements the method, and the method binds no operation. See
+[Helper Methods](#helper-methods). Without `targets`, every target gets the
+method. Only Python takes a helper, so the other languages leave the method out.
+nexgen refuses the directive together with `@nexus.operation`, `@nexus.close`,
+`@nexus.varargs` or `@nexus.api-omit`.
 
 ---
 

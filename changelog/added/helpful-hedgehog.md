@@ -1,0 +1,3 @@
+`@nexus.helper python="<helper>"` on a resource method lets a function of the Python support package implement the method, with no operation. Its `targets` keep the method on the Workflow or the client resource only. TypeScript, .NET, Go and Java leave the method out.
+A helper method's parameter of a `@nexus.function` alias type is a typed callable that stays in the process, and an `option` of it may be `None`. The signature function of a `@nexus.function` alias is no longer an operation of its service.
+A record that only helper methods reach never goes on the wire. It needs no backing, may hold proto-backed records, and reads a `list<u8>` as bytes.

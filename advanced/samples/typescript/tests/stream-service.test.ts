@@ -8,6 +8,7 @@ import type { NexusServiceClient } from "../wit/stream-service/both/client/nexus
 
 import {
   type CreateStreamRequest,
+  type Producer,
   type ReadRecordsResponse,
   type StreamRef,
   StreamStatus,
@@ -19,8 +20,24 @@ import {
   readRecordsResponseTransferTypeConverter,
 } from "../wit/stream-service/both/models.ts";
 
-// The operation modules import the SDK's Nexus module, which this sample doesn't have.
-vi.mock("../wit/stream-service/both/operations/read-records.ts", () => ({}));
+const captured = vi.hoisted(() => ({
+  calls: [] as Array<{ operation: string; input: unknown }>,
+}));
+
+// The operation modules import the SDK's Nexus module, which this sample doesn't have. So a test
+// sees what a resource method passes to its operation, and not the defaults that it fills.
+vi.mock("../wit/stream-service/both/operations/append-records.ts", () => ({
+  appendRecords: async (input: unknown) => {
+    captured.calls.push({ operation: "appendRecords", input });
+    return { result: async () => ({}) };
+  },
+}));
+vi.mock("../wit/stream-service/both/operations/close-stream.ts", () => ({
+  closeStream: async (input: unknown) => {
+    captured.calls.push({ operation: "closeStream", input });
+    return { result: async () => ({}) };
+  },
+}));
 vi.mock("../wit/stream-service/both/operations/describe-stream.ts", () => ({}));
 
 function _offset(n: number): Uint8Array {
@@ -43,6 +60,7 @@ const turnType: common.TypeInfo<Turn, { role: string }> = {
 
 // A body goes through the payload converter of the Workflow.
 beforeEach(() => {
+  captured.calls.length = 0;
   vi.stubGlobal("__TEMPORAL_ACTIVATOR__", {
     payloadConverter: common.defaultPayloadConverter,
   });
@@ -52,6 +70,23 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+interface WorkflowStream {
+  append(records: string[], producer?: Producer, sequence?: number): Promise<unknown>;
+  close(producer?: Producer): Promise<void>;
+}
+
+// The tsconfig excludes the stream output, which doesn't typecheck here, so a test loads it at
+// run time.
+async function loadWorkflowStream(): Promise<{
+  Stream: {
+    prototype: object;
+    new (ref: StreamRef<string>, created: undefined): WorkflowStream;
+  };
+}> {
+  const resources = "../wit/stream-service/both/resources.ts";
+  return await import(resources);
+}
 
 describe("stream-service generated output", () => {
   test("carries a declared ref parameter through a create request", () => {
@@ -144,17 +179,37 @@ describe("stream-service generated output", () => {
     ).toEqual(["a", "b"]);
   });
 
-  test("gives the Workflow Stream no append and no close", async () => {
-    // The tsconfig excludes the stream output, which doesn't typecheck here, so a test loads it
-    // at run time.
-    const resources = "../wit/stream-service/both/resources.ts";
-    const { Stream } = (await import(resources)) as { Stream: { prototype: object } };
+  test("gives the Workflow Stream append and close and no read", async () => {
+    const { Stream } = await loadWorkflowStream();
 
-    // `append` and `close` are api-omitted for the Workflow target, so only the reads stay.
-    expect("append" in Stream.prototype).toBe(false);
-    expect("close" in Stream.prototype).toBe(false);
-    expect("read" in Stream.prototype).toBe(true);
+    // `read` is api-omitted for the Workflow target, so Workflow code appends and closes.
+    expect("append" in Stream.prototype).toBe(true);
+    expect("close" in Stream.prototype).toBe(true);
     expect("describe" in Stream.prototype).toBe(true);
+    expect("read" in Stream.prototype).toBe(false);
+  });
+
+  test("passes the arguments of a Workflow append and close to their operations", async () => {
+    const { Stream } = await loadWorkflowStream();
+    const stream = new Stream({ id: "stream-1" }, undefined);
+    const producer: Producer = { id: "la:r2:1" };
+
+    await stream.append(["a", "b"], undefined, 3);
+    await stream.close(producer);
+
+    // A missing Producer stays missing here. The operation fills it from its default.
+    expect(captured.calls).toEqual([
+      {
+        operation: "appendRecords",
+        input: {
+          ref: { id: "stream-1" },
+          records: ["a", "b"],
+          producer: undefined,
+          sequence: 3,
+        },
+      },
+      { operation: "closeStream", input: { ref: { id: "stream-1" }, producer } },
+    ]);
   });
 
   test("the SDK's Nexus service client is the client target's Nexus client", () => {

@@ -100,6 +100,15 @@ fn enqueue_resource(resource: &PlannedResource, pending: &mut Vec<PlannedType>) 
     for method in &resource.methods {
         for param in &method.params {
             pending.push(param.kind.clone());
+            // A callable parameter names the models of its arguments and result.
+            if let Some(function) = &param.function {
+                let (FunctionArgsSpec::Fixed(args)
+                | FunctionArgsSpec::Varargs { prefix: args, .. }) = &function.args;
+                pending.extend(args.iter().map(|arg| arg.field_type.clone()));
+                if let FunctionResultSpec::Authored(result) = &function.result {
+                    pending.push(result.clone());
+                }
+            }
         }
         if let Some(PlannedResourceMethodResult {
             kind: PlannedResourceMethodResultKind::Value(kind),

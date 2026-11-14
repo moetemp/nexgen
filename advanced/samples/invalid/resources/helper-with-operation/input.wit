@@ -1,0 +1,24 @@
+package test:helper-with-operation@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  record restart-job-request {
+    id: string,
+  }
+
+  record restart-job-response {
+  }
+
+  resource job {
+    constructor(id: string);
+
+    // A support helper implements the method, so it can't bind an operation as well.
+    /// @nexus.helper python="restart_job"
+    /// @nexus.operation "restart-job"
+    restart: func() -> restart-job-response;
+  }
+
+  restart-job: func(request: restart-job-request) -> restart-job-response;
+}

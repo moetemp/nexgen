@@ -118,8 +118,10 @@ also checks authored service configuration against the requested API targets.
 Language-specific policies remain in language backends. After protobuf binding
 checks, record-containment validation rejects mixed backing through aliases,
 containers, and variants before resource binding or target-specific emission.
-Independent operations may use different backing within the same service.
-Validation also checks constructor fields of resources returned as plain JSON.
+Independent operations may use different backing within the same service. A
+record that only `@nexus.helper` methods reach never goes on the wire, so the
+check skips it. Validation also checks constructor fields of resources returned
+as plain JSON.
 
 ### LanguageSelectionPass
 

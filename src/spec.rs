@@ -769,6 +769,9 @@ pub struct ResourceMethodSpec<F: TypeFamily = AuthoredFamily> {
     /// Targets whose resource class leaves this method out, from `@nexus.api-omit`. The bound
     /// operation stays in the service and in every other target.
     pub api_omitted: BTreeSet<GenerationTarget>,
+    /// The support helper of each language that implements the method, from `@nexus.helper`.
+    /// Such a method binds no operation, and a language without a helper leaves it out.
+    pub helper: Option<F::Text>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -835,6 +838,7 @@ impl<F: TypeFamily> ResourceMethodSpec<F> {
             operation_name: self.operation_name,
             varargs: self.varargs,
             api_omitted: self.api_omitted,
+            helper: self.helper.map(|helper| map.map_text(helper)),
         }
     }
 }
@@ -861,6 +865,9 @@ pub struct RecordSpec<F: TypeFamily = AuthoredFamily> {
     pub flatten_in_api: bool,
     /// Explicit generic dependencies, including parameters not used by any field.
     pub declared_type_parameters: Vec<TypeParameterSpec>,
+    /// Set when only `@nexus.helper` methods reach the record. It never goes on the wire, so it
+    /// has no backing and may hold records of any backing.
+    pub helper_only: bool,
     pub fields: IndexMap<String, RecordFieldSpec<F>>,
     pub data: F::RecordData,
 }
@@ -1136,6 +1143,7 @@ impl<F: TypeFamily> RecordSpec<F> {
             experimental: self.experimental,
             flatten_in_api: self.flatten_in_api,
             declared_type_parameters: self.declared_type_parameters,
+            helper_only: self.helper_only,
             fields: self
                 .fields
                 .into_iter()

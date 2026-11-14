@@ -847,6 +847,11 @@ impl<'a> TypePlanningContext<'a> {
                             direct_return: operation.direct_return,
                         }
                     }
+                    ResolvedResourceMethodBinding::Helper { helper } => {
+                        PlannedResourceMethodBindingSpec::Helper {
+                            helper: helper.clone(),
+                        }
+                    }
                     ResolvedResourceMethodBinding::Stub => PlannedResourceMethodBindingSpec::Stub,
                 };
 

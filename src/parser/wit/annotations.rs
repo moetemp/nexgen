@@ -376,6 +376,16 @@ const CATALOG: &[Annotation] = {
             languages: None,
             system_nexus: false,
         },
+        Annotation {
+            name: "helper",
+            sites: &[Method],
+            keys: &["value", "targets"],
+            language_keys: &[""],
+            repeatable: false,
+            // A language without a helper leaves the method out, so only Python takes one today.
+            languages: Some(&[Language::Python]),
+            system_nexus: false,
+        },
     ]
 };
 

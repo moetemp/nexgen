@@ -7,7 +7,7 @@ use heck::{ToSnakeCase, ToUpperCamelCase};
 use tempfile::TempDir;
 use wit_parser_crate::{
     Enum, Field, Function, FunctionKind, Handle, Interface, PackageId, PackageSourceMap, Record,
-    Resolve, Type, TypeDef, TypeDefKind, TypeId, TypeOwner, WorldId, WorldItem, WorldKey,
+    Resolve, Type, TypeDef, TypeDefKind, TypeId, TypeOwner, World, WorldId, WorldItem, WorldKey,
 };
 
 use crate::error::{Error, Result};
@@ -86,11 +86,19 @@ fn api_spec_from_wit(
     let world_id = select_world(resolve, package_id, &path)?;
     let world = &resolve.worlds[world_id];
 
+    let helper_only = helper_only_records(resolve, world, &path)?;
     let mut types = BTreeMap::new();
     for (_, dependency_package) in resolve.packages.iter() {
         for interface_id in dependency_package.interfaces.values() {
             let interface = &resolve.interfaces[*interface_id];
-            collect_interface_types(resolve, interface, &path, language, &mut types)?;
+            collect_interface_types(
+                resolve,
+                interface,
+                &path,
+                language,
+                &helper_only,
+                &mut types,
+            )?;
         }
     }
 
@@ -567,6 +575,7 @@ fn collect_interface_types(
     interface: &Interface,
     path: &Path,
     language: Language,
+    helper_only: &BTreeSet<TypeId>,
     types: &mut BTreeMap<String, TypeDeclEntry>,
 ) -> Result<()> {
     let interface_name = interface
@@ -577,9 +586,15 @@ fn collect_interface_types(
     for type_id in interface.types.values() {
         let type_def = &resolve.types[*type_id];
         validate_type_parameter_directive(resolve, *type_id, type_def, path)?;
-        if let Some(record) =
-            build_wit_record_spec(resolve, *type_id, type_def, path, &interface_name, language)?
-        {
+        if let Some(record) = build_wit_record_spec(
+            resolve,
+            *type_id,
+            type_def,
+            path,
+            &interface_name,
+            language,
+            helper_only.contains(type_id),
+        )? {
             if types
                 .insert(
                     record.full_name.clone(),
@@ -882,6 +897,7 @@ fn build_wit_record_spec(
     path: &Path,
     interface_name: &str,
     language: Language,
+    helper_only: bool,
 ) -> Result<Option<RecordSpec>> {
     let TypeDefKind::Record(record) = &type_def.kind else {
         return Ok(None);
@@ -897,11 +913,12 @@ fn build_wit_record_spec(
         .map(directive_language_string)
         .unwrap_or_default();
     let proto_backed = directive(&directives, "proto", path, &context)?.is_some();
+    // A record that stays in the process holds an offset as bytes, as a proto-backed one does.
     let (doc, fields) = build_fields_from_record(
         resolve,
         type_def.owner,
         record,
-        proto_backed,
+        proto_backed || helper_only,
         model_doc,
         path,
         &context,
@@ -922,6 +939,7 @@ fn build_wit_record_spec(
             path,
             &context,
         )?,
+        helper_only,
         fields,
         data: (),
     }))
@@ -2765,6 +2783,145 @@ fn function_args_field_type(args: &[FunctionArgSpec]) -> TypeSpec {
     )
 }
 
+/// The records that only `@nexus.helper` methods reach, as a parameter or a result type, directly
+/// or nested. A support helper builds them in the process, so they never go on the wire.
+fn helper_only_records(resolve: &Resolve, world: &World, path: &Path) -> Result<BTreeSet<TypeId>> {
+    let mut helper = BTreeSet::new();
+    let mut other = BTreeSet::new();
+    for (_, interface) in resolve.interfaces.iter() {
+        let signatures = function_signature_names(resolve, interface, path)?;
+        for (name, function) in &interface.functions {
+            let reached = match function.kind {
+                // A signature is reached only through its alias.
+                FunctionKind::Freestanding | FunctionKind::AsyncFreestanding
+                    if signatures.contains(name) =>
+                {
+                    continue;
+                }
+                FunctionKind::Method(_) | FunctionKind::AsyncMethod(_)
+                    if has_helper_directive(function, path)? =>
+                {
+                    &mut helper
+                }
+                _ => &mut other,
+            };
+            for ty in function
+                .params
+                .iter()
+                .map(|param| &param.ty)
+                .chain(function.result.iter())
+            {
+                reach_wit_types(resolve, ty, path, reached)?;
+            }
+        }
+    }
+    // A model-only interface exports all of its types, so each of them is on the API surface.
+    for item in world.exports.values() {
+        let WorldItem::Interface { id, .. } = item else {
+            continue;
+        };
+        let interface = &resolve.interfaces[*id];
+        let signatures = function_signature_names(resolve, interface, path)?;
+        let model_only = interface.functions.iter().all(|(name, function)| {
+            matches!(
+                function.kind,
+                FunctionKind::Freestanding | FunctionKind::AsyncFreestanding
+            ) && signatures.contains(name)
+        });
+        if model_only {
+            for type_id in interface.types.values() {
+                reach_wit_types(resolve, &Type::Id(*type_id), path, &mut other)?;
+            }
+        }
+    }
+    Ok(helper
+        .difference(&other)
+        .filter(|id| matches!(resolve.types[**id].kind, TypeDefKind::Record(_)))
+        .copied()
+        .collect())
+}
+
+fn has_helper_directive(function: &Function, path: &Path) -> Result<bool> {
+    let context = format!("function `{}`", function.name);
+    let directives = parse_directives(function.docs.contents.as_deref(), path, &context)?;
+    Ok(directive(&directives, "helper", path, &context)?.is_some())
+}
+
+/// A `@nexus.function` alias reaches the types of its signature too.
+fn reach_wit_types(
+    resolve: &Resolve,
+    ty: &Type,
+    path: &Path,
+    reached: &mut BTreeSet<TypeId>,
+) -> Result<()> {
+    let Type::Id(id) = ty else {
+        return Ok(());
+    };
+    if !reached.insert(*id) {
+        return Ok(());
+    }
+    let type_def = &resolve.types[*id];
+    let mut nested = Vec::<&Type>::new();
+    match &type_def.kind {
+        TypeDefKind::Record(record) => nested.extend(record.fields.iter().map(|field| &field.ty)),
+        TypeDefKind::Variant(variant) => {
+            nested.extend(variant.cases.iter().filter_map(|case| case.ty.as_ref()))
+        }
+        TypeDefKind::Tuple(tuple) => nested.extend(&tuple.types),
+        TypeDefKind::Option(inner) | TypeDefKind::List(inner) => nested.push(inner),
+        TypeDefKind::Map(key, value) => nested.extend([key, value]),
+        TypeDefKind::Result(result) => nested.extend(result.ok.iter().chain(result.err.iter())),
+        TypeDefKind::Type(target) => {
+            nested.push(target);
+            let context = format!(
+                "type `{}`",
+                type_def.name.as_deref().unwrap_or("unnamed-type")
+            );
+            let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
+            if let Some(signature) = directive(&directives, "function", path, &context)?
+                .and_then(|function| function.value("signature"))
+                && let TypeOwner::Interface(owner) = type_def.owner
+                && let Some(function) = resolve.interfaces[owner].functions.get(signature)
+            {
+                nested.extend(function.params.iter().map(|param| &param.ty));
+                nested.extend(function.result.iter());
+            }
+        }
+        _ => {}
+    }
+    for ty in nested {
+        reach_wit_types(resolve, ty, path, reached)?;
+    }
+    Ok(())
+}
+
+/// A `@nexus.function` signature only describes a callable, and it must live in the interface of
+/// its alias. So a service that declares one must not call it an operation.
+fn function_signature_names(
+    resolve: &Resolve,
+    interface: &Interface,
+    path: &Path,
+) -> Result<BTreeSet<String>> {
+    let mut names = BTreeSet::new();
+    for type_id in interface.types.values() {
+        let type_def = &resolve.types[*type_id];
+        if !matches!(type_def.kind, TypeDefKind::Type(_)) {
+            continue;
+        }
+        let context = format!(
+            "type `{}`",
+            type_def.name.as_deref().unwrap_or("unnamed-type")
+        );
+        let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
+        if let Some(signature) = directive(&directives, "function", path, &context)?
+            .and_then(|function| function.value("signature"))
+        {
+            names.insert(signature.to_string());
+        }
+    }
+    Ok(names)
+}
+
 fn build_service(
     resolve: &Resolve,
     key: &WorldKey,
@@ -2816,14 +2973,15 @@ fn build_service(
     let delay_load_temporalio_workflow =
         delay_load_temporalio_workflow_directive(&directives, path, &context)?;
 
+    let signatures = function_signature_names(resolve, interface, path)?;
     let operations = interface
         .functions
         .iter()
-        .filter(|(_, function)| {
+        .filter(|(name, function)| {
             matches!(
                 function.kind,
                 FunctionKind::Freestanding | FunctionKind::AsyncFreestanding
-            )
+            ) && !signatures.contains(name.as_str())
         })
         .map(|(_, function)| build_operation(resolve, function, path, &context, &service_name))
         .collect::<Result<Vec<_>>>()?;
@@ -3021,20 +3179,25 @@ fn build_resource_method(
         method_name.to_upper_camel_case()
     );
     let directives = parse_directives(function.docs.contents.as_deref(), path, &context)?;
+    let helper_method = directive(&directives, "helper", path, &context)?.is_some();
     let params = function
         .params
         .iter()
         .skip_while(|param| param.name == "self")
         .map(|param| {
-            build_resource_field(
-                resolve,
-                &param.name,
-                &param.ty,
-                path,
-                &context,
-                "parameter",
-                language,
-            )
+            if helper_method {
+                build_helper_method_param(resolve, &param.name, &param.ty, path, &context, language)
+            } else {
+                build_resource_field(
+                    resolve,
+                    &param.name,
+                    &param.ty,
+                    path,
+                    &context,
+                    "parameter",
+                    language,
+                )
+            }
         })
         .collect::<Result<Vec<_>>>()?;
     let result = function
@@ -3042,9 +3205,14 @@ fn build_resource_method(
         .as_ref()
         .map(|ty| build_resource_result(resolve, ty, path, &context, language))
         .transpose()?;
+    // The helper refuses the directives that it can't go with, before they check the method.
+    let helper = build_resource_method_helper(&directives, path, &context)?;
     let close = build_resource_method_close(&params, &directives, path, &context)?;
     let varargs = build_resource_method_varargs(&params, &directives, path, &context)?;
-    let api_omitted = build_resource_method_api_omit(&directives, path, &context)?;
+    let mut api_omitted = build_resource_method_api_omit(&directives, path, &context)?;
+    if let Some((_, omitted)) = &helper {
+        api_omitted = omitted.clone();
+    }
 
     let method = ResourceMethodSpec {
         name: method_name,
@@ -3056,8 +3224,68 @@ fn build_resource_method(
         operation_name: build_resource_method_operation_name(&directives, path, &context)?,
         varargs,
         api_omitted,
+        helper: helper.map(|(helper, _)| helper),
     };
     Ok((method, close))
+}
+
+/// A support helper implements the method in the process, so the method binds no operation and
+/// has nothing to close or spread as positional items. Its `targets` say where the method is,
+/// and the result is the set of targets that leave it out.
+fn build_resource_method_helper(
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<(LanguageStringSpec, BTreeSet<GenerationTarget>)>> {
+    let Some(helper) = directive(directives, "helper", path, context)? else {
+        return Ok(None);
+    };
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.helper".to_string(),
+        reason,
+    };
+    for (other, reason) in [
+        (
+            "operation",
+            "A support helper implements the method, so it binds no operation",
+        ),
+        (
+            "close",
+            "The end of a scope calls the close method, and a helper method has no operation that \
+             closes the resource",
+        ),
+        ("varargs", "The helper takes each parameter by keyword"),
+        (
+            "api-omit",
+            "The `targets` of `@nexus.helper` say which targets get the method",
+        ),
+    ] {
+        if directive(directives, other, path, context)?.is_some() {
+            return Err(invalid(format!("can't go with `@nexus.{other}`. {reason}")));
+        }
+    }
+    let spec = directive_language_string(helper);
+    if spec.is_empty() {
+        return Err(invalid(
+            "needs a support helper, such as `python=\"take_stream\"`".to_string(),
+        ));
+    }
+    if let Some(helper) = spec
+        .default
+        .iter()
+        .chain(spec.by_language.values())
+        .find(|helper| !is_valid_support_helper_path(helper))
+    {
+        return Err(invalid(format!("invalid support helper `{helper}`")));
+    }
+    let kept = build_origin_targets(helper, path, context, "helper")?;
+    let omitted = [GenerationTarget::Workflow, GenerationTarget::Client]
+        .into_iter()
+        .filter(|target| !kept.contains(target))
+        .collect();
+    Ok(Some((spec, omitted)))
 }
 
 /// A method that no target keeps has no use, so the directive must leave one target its method.
@@ -3215,6 +3443,30 @@ fn build_resource_field(
         field_type,
         function,
     })
+}
+
+/// A support helper gets its parameters in the process. So an offset is bytes, as in a
+/// proto-backed record, and an `option` of a function alias is an optional callable.
+fn build_helper_method_param(
+    resolve: &Resolve,
+    name: &str,
+    ty: &Type,
+    path: &Path,
+    context: &str,
+    language: Language,
+) -> Result<ResourceFieldSpec> {
+    let mut param = build_resource_field(resolve, name, ty, path, context, "parameter", language)?;
+    if let Some(bytes) = proto_bytes_type_spec(resolve, ty) {
+        param.field_type = bytes;
+    }
+    if param.function.is_none()
+        && let Type::Id(id) = ty
+        && let TypeDefKind::Option(inner) = &resolve.types[*id].kind
+    {
+        param.function = find_flattened_function_type_spec(resolve, inner, path, language)?
+            .and_then(|function_type| function_type.function);
+    }
+    Ok(param)
 }
 
 fn build_operation(
@@ -5508,6 +5760,135 @@ interface function-execution {
                     field_type: TypeSpec::Bool,
                 },
             ])
+        );
+    }
+
+    const HELPER_METHOD_WIT: &str = r#"
+package test:helpers@1.0.0;
+
+world system { export jobs; }
+
+/// @nexus.endpoint "jobs"
+interface jobs {
+  type placeholder = string;
+
+  record job-event {
+    payload: list<u8>,
+  }
+
+  record scan {
+    events: list<job-event>,
+    last-offset: option<list<u8>>,
+  }
+
+  record restart-job-request {
+    id: string,
+  }
+
+  record restart-job-response {
+    events: list<job-event>,
+  }
+
+  event-predicate: func(event: job-event) -> bool;
+
+  /// @nexus.function signature="event-predicate"
+  type predicate = placeholder;
+
+  resource job {
+    constructor(id: string);
+
+    /// @nexus.operation "restart-job"
+    restart: func() -> restart-job-response;
+
+    /// @nexus.helper python="scan_job" targets="workflow"
+    scan: func(
+      predicate: predicate,
+      until: option<predicate>,
+      from-offset: option<list<u8>>,
+    ) -> scan;
+  }
+
+  restart-job: func(request: restart-job-request) -> restart-job-response;
+}
+"#;
+
+    #[test]
+    fn a_helper_method_binds_no_operation_and_keeps_its_targets() {
+        let spec = parse(Language::Python, HELPER_METHOD_WIT);
+        let service = &spec.services[0];
+        // A signature describes a callable, so it is no operation of the service.
+        assert_eq!(
+            service
+                .operations
+                .iter()
+                .map(|operation| operation.name.as_str())
+                .collect::<Vec<_>>(),
+            ["RestartJob"]
+        );
+        let scan = service.resources[0]
+            .methods
+            .iter()
+            .find(|method| method.name == "scan")
+            .unwrap();
+        assert_eq!(scan.operation_name, None);
+        assert_eq!(
+            scan.helper
+                .as_ref()
+                .and_then(|helper| helper.for_language(Language::Python)),
+            Some("scan_job")
+        );
+        assert_eq!(
+            scan.api_omitted.iter().copied().collect::<Vec<_>>(),
+            [GenerationTarget::Client]
+        );
+        let [predicate, until, from_offset] = scan.params.as_slice() else {
+            panic!("scan should take three parameters");
+        };
+        assert!(predicate.function.is_some() && !predicate.optional);
+        assert!(until.function.is_some() && until.optional);
+        assert_eq!(
+            from_offset.field_type,
+            TypeSpec::Option(Box::new(TypeSpec::Bytes))
+        );
+    }
+
+    #[test]
+    fn only_a_record_that_no_operation_reaches_is_helper_only() {
+        let spec = parse(Language::Python, HELPER_METHOD_WIT);
+        let scan = spec.record("jobs.scan").unwrap();
+        assert!(scan.helper_only);
+        // A record that stays in the process holds an offset as bytes.
+        assert_eq!(
+            scan.fields["last_offset"].field_type,
+            TypeSpec::Option(Box::new(TypeSpec::Bytes))
+        );
+        // The operation's response reaches the event too, so it keeps a list of integers.
+        let event = spec.record("jobs.job-event").unwrap();
+        assert!(!event.helper_only);
+        assert!(matches!(
+            event.fields["payload"].field_type,
+            TypeSpec::List(_)
+        ));
+        assert!(
+            !spec
+                .record("jobs.restart-job-response")
+                .unwrap()
+                .helper_only
+        );
+    }
+
+    #[test]
+    fn a_helper_method_refuses_a_close() {
+        let wit = HELPER_METHOD_WIT.replace(
+            "/// @nexus.helper python=\"scan_job\" targets=\"workflow\"",
+            "/// @nexus.helper python=\"scan_job\"\n    /// @nexus.close",
+        );
+        let error = parse_result(Language::Python, &wit)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("can't go with `@nexus.close`"),
+            "unexpected error: {error}"
         );
     }
 

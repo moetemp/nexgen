@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import collections.abc
 import dataclasses
+import datetime
 import importlib
+import inspect
 import subprocess
 import sys
 import types
@@ -28,6 +30,7 @@ from wit.stream_service.client import models as client_models
 from wit.stream_service.both import models as both_models
 from wit.stream_service import workflow as workflow_only
 from wit.stream_service.both import workflow as both_workflow
+from wit.stream_service.client.client._resources.stream import Stream as ClientStream
 from wit.stream_service.workflow._resources.stream import Stream as WorkflowStream
 from wit.stream_service.workflow._system_nexus_interceptor import (
     _start_system_nexus_operation,
@@ -690,3 +693,159 @@ def test_root_service_contract_uses_shared_wire_models(package: str) -> None:
     operation = definition.operation_definitions["CreateStream"]
     assert operation.input_type == shared.CreateStreamRequest[typing.Any]
     assert operation.output_type == shared.CreateStreamResult[typing.Any]
+
+
+@pytest.fixture
+def stream_reads() -> collections.abc.Iterator[types.ModuleType]:
+    reads = importlib.import_module("temporal_support.stream_reads")
+    yield reads
+    reads.calls.clear()
+    reads.results.clear()
+
+
+def _is_user(record: typing.Any) -> bool:
+    return record.body.role == "user"
+
+
+def _read_result(
+    model_types: types.ModuleType, records: list[typing.Any]
+) -> typing.Any:
+    return model_types.StreamRead(
+        records=records,
+        last_offset=_offset(3),
+        stop=model_types.StreamReadStop.Match,
+        done=False,
+    )
+
+
+# Each method's positional arguments, its keyword arguments, and what its helper gets.
+HELPER_READS: list[tuple[str, str, tuple[typing.Any, ...], dict[str, typing.Any]]] = [
+    (
+        "take",
+        "take_stream",
+        (datetime.timedelta(seconds=5),),
+        {"until": _is_user, "from_offset": _offset(1), "max_records": 10},
+    ),
+    (
+        "filter",
+        "filter_stream",
+        (_is_user, datetime.timedelta(seconds=5)),
+        {"idle_timeout": datetime.timedelta(seconds=1), "max_bytes": 1024},
+    ),
+]
+
+
+def _workflow_stream(package: str, model_types: types.ModuleType) -> typing.Any:
+    api = importlib.import_module(package)
+    return api.get_stream(ref=model_types.StreamRef(id="s-1"), body_type=Turn)
+
+
+def _client_stream(package: str, model_types: types.ModuleType) -> typing.Any:
+    resources = importlib.import_module(package + "._resources.stream")
+    # A helper method makes no Nexus call, so the client is never used.
+    return resources.Stream(None, ref=model_types.StreamRef(id="s-1"), created=None)
+
+
+# The `Stream` of each target, with the models of its package.
+STREAMS = [
+    ("wit.stream_service.workflow", workflow_models, _workflow_stream),
+    ("wit.stream_service.both.workflow", both_models, _workflow_stream),
+    ("wit.stream_service.client.client", client_models, _client_stream),
+    ("wit.stream_service.both.client", both_models, _client_stream),
+]
+
+
+@pytest.mark.parametrize(
+    ("package", "model_types", "build"), STREAMS, ids=[stream[0] for stream in STREAMS]
+)
+@pytest.mark.parametrize(
+    ("method", "helper", "args", "kwargs"),
+    HELPER_READS,
+    ids=[read[0] for read in HELPER_READS],
+)
+async def test_a_stream_read_calls_its_support_helper(
+    stream_reads: types.ModuleType,
+    package: str,
+    model_types: types.ModuleType,
+    build: collections.abc.Callable[[str, types.ModuleType], typing.Any],
+    method: str,
+    helper: str,
+    args: tuple[typing.Any, ...],
+    kwargs: dict[str, typing.Any],
+) -> None:
+    stream = build(package, model_types)
+    records = [model_types.StreamRecord(body=Turn(role="user"), offset=_offset(3))]
+    result = _read_result(model_types, records)
+    stream_reads.results[helper] = result
+
+    read = await getattr(stream, method)(*args, **kwargs)
+
+    assert read is result
+    [(called, handle, arguments)] = stream_reads.calls
+    assert (called, handle) == (helper, stream)
+    # The helper gets every parameter by keyword, and None for one left out.
+    parameters = list(inspect.signature(getattr(stream, method)).parameters)
+    assert list(arguments) == parameters
+    given = dict(zip(parameters, args)) | kwargs
+    assert arguments == {name: given.get(name) for name in parameters}
+
+
+@pytest.mark.parametrize(
+    "package",
+    ["wit.stream_service.client.client", "wit.stream_service.both.client"],
+)
+def test_a_client_stream_keeps_the_page_read(package: str) -> None:
+    resources = importlib.import_module(package + "._resources.stream")
+    # The helper reads come next to the page read, which only the client target has.
+    for method, _, _, _ in HELPER_READS:
+        assert hasattr(resources.Stream, method)
+    assert "wait" in inspect.signature(resources.Stream.read).parameters
+
+
+async def test_typed_stream_reads_give_their_body_type(
+    stream_reads: types.ModuleType,
+) -> None:
+    workflow_stream = workflow_only.get_stream(
+        ref=workflow_models.StreamRef[Turn](id="s-1")
+    )
+    client_stream = ClientStream(
+        None,  # pyright: ignore[reportArgumentType]
+        ref=client_models.StreamRef[Turn](id="s-1"),
+        created=None,
+    )
+    stream_reads.results["take_stream"] = workflow_models.StreamRead[Turn](
+        records=[
+            workflow_models.StreamRecord[Turn](
+                body=Turn(role="user"), offset=_offset(3)
+            )
+        ],
+        last_offset=_offset(3),
+        stop=workflow_models.StreamReadStop.Match,
+        done=False,
+    )
+    stream_reads.results["filter_stream"] = client_models.StreamRead[Turn](
+        records=[
+            client_models.StreamRecord[Turn](body=Turn(role="user"), offset=_offset(3))
+        ],
+        last_offset=_offset(3),
+        stop=client_models.StreamReadStop.Match,
+        done=False,
+    )
+
+    def is_workflow_user(record: workflow_models.StreamRecord[Turn]) -> bool:
+        return record.body.role == "user"
+
+    def is_client_user(record: client_models.StreamRecord[Turn]) -> bool:
+        return record.body.role == "user"
+
+    timeout = datetime.timedelta(seconds=1)
+    workflow_taken = await workflow_stream.take(timeout, until=is_workflow_user)
+    workflow_filtered = await workflow_stream.filter(is_workflow_user, timeout)
+    client_taken = await client_stream.take(timeout, until=is_client_user)
+    client_filtered = await client_stream.filter(is_client_user, timeout)
+
+    _ = assert_type(workflow_taken, workflow_models.StreamRead[Turn])
+    _ = assert_type(workflow_filtered, workflow_models.StreamRead[Turn])
+    _ = assert_type(client_taken, client_models.StreamRead[Turn])
+    _ = assert_type(client_filtered, client_models.StreamRead[Turn])
+    assert client_filtered.records[0].body.role == "user"

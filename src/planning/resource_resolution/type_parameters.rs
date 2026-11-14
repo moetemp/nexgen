@@ -68,7 +68,9 @@ fn used_type_parameters(
             ResolvedResourceMethodBinding::Operation { operation_name, .. } => {
                 service.operation(operation_name)
             }
-            ResolvedResourceMethodBinding::Stub => None,
+            ResolvedResourceMethodBinding::Helper { .. } | ResolvedResourceMethodBinding::Stub => {
+                None
+            }
         });
     for operation in operations {
         values.extend(operation.input_type());

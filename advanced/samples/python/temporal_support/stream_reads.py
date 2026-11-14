@@ -1,4 +1,7 @@
-"""Test doubles of the Streams SDK's reads of many pages. They do not read a Store."""
+"""Test doubles of the Streams SDK's reads of many pages and of its call guard.
+
+They do not read a Store.
+"""
 
 from __future__ import annotations
 
@@ -30,3 +33,18 @@ async def filter_stream(stream: typing.Any, **arguments: typing.Any) -> typing.A
 async def reduce_stream(stream: typing.Any, **arguments: typing.Any) -> typing.Any:
     """Keep the call, and return the result that a test set."""
     return _call("reduce_stream", stream, arguments)
+
+
+# The generated `Stream` of each target calls the guard when code takes a method. A test reads
+# each call, and it sets the flag while a plain function of a caller runs.
+guard_calls: list[tuple[str, str]] = []
+in_caller_function = False
+
+
+def check_stream_call(*, target: str, method: str) -> None:
+    """Keep the call, and refuse it while a plain function of a caller runs."""
+    guard_calls.append((target, method))
+    if in_caller_function:
+        raise TypeError(
+            f"A plain function of a caller can't call `{method}` of a {target} Stream"
+        )

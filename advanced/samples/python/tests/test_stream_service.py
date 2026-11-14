@@ -833,6 +833,104 @@ def test_a_client_stream_keeps_the_page_read(package: str) -> None:
     assert "wait" in inspect.signature(resources.Stream.read).parameters
 
 
+@pytest.fixture
+def stream_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> collections.abc.Iterator[types.ModuleType]:
+    reads = importlib.import_module("temporal_support.stream_reads")
+    monkeypatch.setattr(reads, "guard_calls", [])
+    yield reads
+
+
+def _target(package: str) -> str:
+    # The last part of each package in `STREAMS` is its target.
+    return package.rsplit(".", 1)[1]
+
+
+@pytest.mark.parametrize(
+    ("package", "model_types", "build"), STREAMS, ids=[stream[0] for stream in STREAMS]
+)
+def test_taking_a_stream_method_calls_the_guard(
+    stream_guard: types.ModuleType,
+    package: str,
+    model_types: types.ModuleType,
+    build: collections.abc.Callable[[str, types.ModuleType], typing.Any],
+) -> None:
+    stream = build(package, model_types)
+    target = _target(package)
+    stream_guard.guard_calls.clear()
+
+    _ = stream.append
+    _ = stream.close
+    _ = stream.reduce
+    assert stream_guard.guard_calls == [
+        (target, "append"),
+        (target, "close"),
+        (target, "reduce"),
+    ]
+
+    # A field and a property are not methods, so the guard does not see them.
+    stream_guard.guard_calls.clear()
+    _ = stream.ref
+    _ = stream.body_type
+    assert stream_guard.guard_calls == []
+
+
+@pytest.mark.parametrize(
+    ("package", "model_types", "build"), STREAMS, ids=[stream[0] for stream in STREAMS]
+)
+def test_the_guard_refuses_a_call_that_is_not_awaited(
+    monkeypatch: pytest.MonkeyPatch,
+    stream_guard: types.ModuleType,
+    package: str,
+    model_types: types.ModuleType,
+    build: collections.abc.Callable[[str, types.ModuleType], typing.Any],
+) -> None:
+    stream = build(package, model_types)
+    target = _target(package)
+    monkeypatch.setattr(stream_guard, "in_caller_function", True)
+
+    # A plain function can't await. The guard refuses the call before it makes a coroutine.
+    with pytest.raises(TypeError, match=f"`append` of a {target} Stream"):
+        stream.append("a")
+    assert stream_guard.guard_calls[-1] == (target, "append")
+
+
+@pytest.mark.parametrize(
+    ("package", "model_types", "build"), STREAMS, ids=[stream[0] for stream in STREAMS]
+)
+def test_a_guarded_method_stays_a_coroutine_function(
+    stream_guard: types.ModuleType,
+    package: str,
+    model_types: types.ModuleType,
+    build: collections.abc.Callable[[str, types.ModuleType], typing.Any],
+) -> None:
+    del stream_guard
+    stream = build(package, model_types)
+    assert inspect.iscoroutinefunction(stream.__class__.append)
+    assert inspect.iscoroutinefunction(stream.append)
+
+
+@pytest.mark.parametrize(
+    ("package", "model_types", "build"),
+    [stream for stream in STREAMS if _target(stream[0]) == "workflow"],
+    ids=[stream[0] for stream in STREAMS if _target(stream[0]) == "workflow"],
+)
+def test_the_guard_skips_a_method_that_the_workflow_target_omits(
+    stream_guard: types.ModuleType,
+    package: str,
+    model_types: types.ModuleType,
+    build: collections.abc.Callable[[str, types.ModuleType], typing.Any],
+) -> None:
+    stream = build(package, model_types)
+    stream_guard.guard_calls.clear()
+    # The Workflow target omits `read`, so its class has neither the method nor its iterators.
+    for method in ["read", "iter_read", "iter_read_items"]:
+        with pytest.raises(AttributeError):
+            _ = getattr(stream, method)
+    assert stream_guard.guard_calls == []
+
+
 async def test_typed_stream_reads_give_their_types(
     stream_reads: types.ModuleType,
 ) -> None:

@@ -1784,7 +1784,17 @@ impl<'a> ApiPlanner<'a> {
             );
             body.push_str("\n\n");
         }
-        let type_variables = resource_type_variable_names(resource);
+        // A helper method's own type parameters are module TypeVars too. Python scopes a TypeVar
+        // to the method when the class isn't generic in it.
+        let mut type_variables = resource_type_variable_names(resource);
+        type_variables.extend(
+            resource
+                .methods_for(target)
+                .flat_map(|method| &method.type_parameters)
+                .map(|parameter| parameter.name.clone())
+                .filter(|name| !resource_type_variable_names(resource).contains(name))
+                .collect::<BTreeSet<_>>(),
+        );
         let workflow_factory = target == GenerationTarget::Workflow
             && workflow_factory_resources(service).any(|factory| factory.name == resource.name);
         for name in &type_variables {

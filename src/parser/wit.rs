@@ -3089,6 +3089,7 @@ fn build_resource(
     let doc = directive(&resource_directives, "doc", path, &context)?
         .map(directive_language_string)
         .unwrap_or_default();
+    let guard = build_resource_guard(&resource_directives, path, &context)?;
 
     let constructor = interface.functions.values().find(
         |function| matches!(function.kind, FunctionKind::Constructor(id) if id == resource_id),
@@ -3156,8 +3157,41 @@ fn build_resource(
         fields,
         methods,
         close,
+        guard,
         data: (),
     })
+}
+
+/// The SDK knows where code runs, so a support function of the SDK decides whether code may call
+/// the resource there. One function serves every target, since the class passes its target.
+fn build_resource_guard(
+    directives: &[Directive],
+    path: &Path,
+    context: &str,
+) -> Result<Option<LanguageStringSpec>> {
+    let Some(guard) = directive(directives, "guard", path, context)? else {
+        return Ok(None);
+    };
+    let invalid = |reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.to_string(),
+        directive: "@nexus.guard".to_string(),
+        reason,
+    };
+    let spec = directive_language_string(guard);
+    if spec.is_empty() {
+        return Err(invalid(
+            "needs a support function, such as `python=\"check_stream_call\"`".to_string(),
+        ));
+    }
+    if let Some(function) = spec
+        .by_language
+        .values()
+        .find(|function| !is_valid_support_helper_path(function))
+    {
+        return Err(invalid(format!("invalid support function `{function}`")));
+    }
+    Ok(Some(spec))
 }
 
 /// The flag says whether this method carries `@nexus.close`. The resource records which one.
@@ -5890,6 +5924,44 @@ interface jobs {
             error.contains("can't go with `@nexus.close`"),
             "unexpected error: {error}"
         );
+    }
+
+    #[test]
+    fn a_resource_guard_keeps_its_python_function() {
+        let wit = HELPER_METHOD_WIT.replace(
+            "  resource job {",
+            "  /// @nexus.guard python=\"check_job_call\"\n  resource job {",
+        );
+        let spec = parse(Language::Python, &wit);
+        let guard = spec.services[0].resources[0].guard.as_ref().unwrap();
+        assert_eq!(guard.for_language(Language::Python), Some("check_job_call"));
+        // Only Python names a guard, so the other languages get none.
+        assert_eq!(guard.for_language(Language::TypeScript), None);
+        // A resource with no guard keeps none.
+        assert_eq!(
+            parse(Language::Python, HELPER_METHOD_WIT).services[0].resources[0].guard,
+            None
+        );
+    }
+
+    #[test]
+    fn a_resource_guard_needs_a_valid_support_function() {
+        for (guard, reason) in [
+            ("@nexus.guard", "needs a support function"),
+            (
+                "@nexus.guard python=\"check-job\"",
+                "invalid support function `check-job`",
+            ),
+        ] {
+            let wit = HELPER_METHOD_WIT.replace(
+                "  resource job {",
+                &format!("  /// {guard}\n  resource job {{"),
+            );
+            let error = parse_result(Language::Python, &wit)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains(reason), "unexpected error: {error}");
+        }
     }
 
     #[test]

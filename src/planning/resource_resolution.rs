@@ -118,6 +118,8 @@ pub(crate) struct ResolvedResourceSpec {
     pub(crate) fields: Vec<ResourceFieldSpec<SelectedFamily>>,
     pub(crate) methods: Vec<ResolvedResourceMethodSpec>,
     pub(crate) close: Option<String>,
+    /// The support function of the selected language that guards each public method.
+    pub(crate) guard: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -389,6 +391,12 @@ fn resolve_resource_methods(
         fields: resource.fields.clone(),
         methods,
         close: resource.close.clone(),
+        // A language with no guard function calls no guard.
+        guard: resource
+            .guard
+            .as_ref()
+            .and_then(|guard| guard.value())
+            .map(str::to_string),
     })
 }
 
@@ -1395,6 +1403,52 @@ interface folds {
         assert_eq!(names(&method("reduce").type_parameters), ["ValueT"]);
         // `last` uses only the resource's `body-t`, so it has none of its own.
         assert!(method("last").type_parameters.is_empty());
+    }
+
+    #[test]
+    fn a_resource_guard_resolves_only_for_a_language_with_a_function() {
+        let wit = r#"
+package test:guards@1.0.0;
+
+world system { export jobs; }
+
+/// @nexus.endpoint "jobs"
+interface jobs {
+  record restart-job-request {
+    id: string,
+  }
+
+  record restart-job-response {
+  }
+
+  /// @nexus.guard python="check_job_call"
+  resource job {
+    constructor(id: string);
+
+    /// @nexus.operation "restart-job"
+    restart: func() -> restart-job-response;
+  }
+
+  restart-job: func(request: restart-job-request) -> restart-job-response;
+}
+"#;
+        let guard = |language| {
+            let spec = parse(language, wit);
+            resolve_service_resources(
+                &spec,
+                &spec.services[0],
+                &empty_descriptors(),
+                &[GenerationTarget::Workflow],
+            )
+            .unwrap()
+            .resources
+            .remove(0)
+            .guard
+        };
+
+        assert_eq!(guard(Language::Python), Some("check_job_call".to_string()));
+        // TypeScript has no guard function, so its resource calls no guard.
+        assert_eq!(guard(Language::TypeScript), None);
     }
 
     #[test]

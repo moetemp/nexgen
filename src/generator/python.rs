@@ -1887,6 +1887,7 @@ impl<'a> ApiPlanner<'a> {
             &module_imports,
             &self.language_imports,
             &skipped_language_modules,
+            resource_guard(resource, bound_operations, target).is_some(),
         );
         if wrote_imports
             && service.delay_load_temporalio_workflow
@@ -2023,6 +2024,11 @@ impl<'a> ApiPlanner<'a> {
             self.render_resource_constructor(output, resource);
         } else if handle {
             self.render_resource_init(output, resource);
+        }
+        if let Some(target) = target
+            && let Some((guard, names)) = resource_guard(resource, bound_operations, target)
+        {
+            render_resource_guard(output, guard, target, &names);
         }
         if target.is_some() {
             render_runtime_type_properties(
@@ -5512,6 +5518,91 @@ fn resource_data_type(type_name: &str) -> String {
     format!("{type_name}Data")
 }
 
+/// The guard function of the class of `target`, with the Python names of the methods that it
+/// guards. A class with no public method has nothing to guard.
+fn resource_guard<'r>(
+    resource: &'r PlannedResource,
+    bound_operations: &[ResourceBoundOperation<'_>],
+    target: GenerationTarget,
+) -> Option<(&'r str, BTreeSet<String>)> {
+    let guard = resource.guard.as_deref()?;
+    let names = resource_public_method_names(resource, bound_operations, target);
+    (!names.is_empty()).then_some((guard, names))
+}
+
+/// Every public method of the class of `target`, by its Python name. A client method of a polled
+/// operation brings its iterators.
+fn resource_public_method_names(
+    resource: &PlannedResource,
+    bound_operations: &[ResourceBoundOperation<'_>],
+    target: GenerationTarget,
+) -> BTreeSet<String> {
+    let mut names = BTreeSet::new();
+    for method in resource.methods_for(target) {
+        let name = python_field_name(&method.name);
+        if target == GenerationTarget::Client
+            && let PlannedResourceMethodBindingSpec::Operation { operation_name, .. } =
+                &method.binding
+            && let Some(operation) = bound_operations
+                .iter()
+                .map(|bound_operation| bound_operation.operation)
+                .find(|operation| {
+                    operation.name == *operation_name
+                        && operation.poll_next(GenerationTarget::Client).is_some()
+                })
+        {
+            names.extend(
+                poll_iterator_names(&name, operation)
+                    .into_iter()
+                    .map(|(iterator_name, _)| iterator_name),
+            );
+        }
+        names.insert(name);
+    }
+    names
+}
+
+/// A method stays an `async def`, and its body runs only when it is awaited. A caller that can't
+/// await never runs it, so the class calls the guard when code takes the method. The check hides
+/// from a type checker, which would stop reporting an unknown attribute of the class. The bare
+/// `TYPE_CHECKING` name keeps basedpyright from calling the block unreachable.
+fn render_resource_guard(
+    output: &mut String,
+    guard: &str,
+    target: GenerationTarget,
+    names: &BTreeSet<String>,
+) {
+    let target = match target {
+        GenerationTarget::Workflow => "workflow",
+        GenerationTarget::Client => "client",
+    };
+    output.push_str("\n    if not TYPE_CHECKING:\n\n");
+    output.push_str("        def __getattribute__(self, name: str) -> typing.Any:\n");
+    output.push_str(
+        "            # The body of an `async def` runs only when it is awaited. So the guard runs \
+         when\n",
+    );
+    output.push_str(
+        "            # code takes the method, and a caller that can't await gets its error too.\n",
+    );
+    // A set literal of constants is one constant in CPython, and the sorted order keeps the
+    // output stable.
+    output.push_str("            if name in {");
+    output.push_str(
+        &names
+            .iter()
+            .map(|name| python_string_literal(name))
+            .collect::<Vec<_>>()
+            .join(", "),
+    );
+    output.push_str("}:\n");
+    output.push_str(&format!(
+        "                _support.{guard}(target={}, method=name)\n",
+        python_string_literal(target)
+    ));
+    output.push_str("            return object.__getattribute__(self, name)\n");
+}
+
 /// The helper gets the handle and each parameter by keyword, so a helper can name its own order.
 fn render_resource_helper_method_body(
     output: &mut String,
@@ -5781,6 +5872,7 @@ pub(in crate::generator) fn render_optional_python_imports(
         module_imports,
         language_imports,
         &BTreeSet::new(),
+        false,
     )
 }
 
@@ -5790,6 +5882,7 @@ fn render_optional_python_imports_with_skipped_language_modules(
     module_imports: &BTreeSet<String>,
     language_imports: &[LanguageImportSpec],
     skipped_language_modules: &BTreeSet<String>,
+    type_checking_name: bool,
 ) -> bool {
     let simple_imports = [
         ("import collections.abc\n", "collections.abc"),
@@ -5833,6 +5926,10 @@ fn render_optional_python_imports_with_skipped_language_modules(
 
     if !used_module_imports.is_empty() {
         render_python_module_imports(output, &used_module_imports);
+        wrote_any = true;
+    }
+    if type_checking_name {
+        output.push_str("from typing import TYPE_CHECKING\n");
         wrote_any = true;
     }
     if uses_client {
@@ -6623,6 +6720,7 @@ fn render_operation_module(
         &module_imports,
         language_imports,
         &skipped_language_modules,
+        false,
     );
     if wrote_imports && service.delay_load_temporalio_workflow && !type_checking_names.is_empty() {
         output.push('\n');
@@ -12050,6 +12148,67 @@ mod tests {
                 vec![false, false],
             ]
         );
+    }
+
+    #[test]
+    fn a_guard_covers_each_public_method_of_its_target() {
+        use crate::nexgen_config::GenerationTarget;
+        use crate::planning::{
+            PlannedResource, PlannedResourceMethod, PlannedResourceMethodBindingSpec,
+        };
+
+        let method = |name: &str, api_omitted: &[GenerationTarget]| PlannedResourceMethod {
+            name: name.to_string(),
+            doc: None,
+            params: Vec::new(),
+            result: None,
+            varargs: None,
+            api_omitted: api_omitted.iter().copied().collect(),
+            binding: PlannedResourceMethodBindingSpec::Helper {
+                helper: "take_job".to_string(),
+            },
+            type_parameters: Vec::new(),
+        };
+        let mut resource = PlannedResource {
+            name: "job".to_string(),
+            doc: None,
+            type_name: "Job".to_string(),
+            type_parameters: Vec::new(),
+            fields: Vec::new(),
+            methods: vec![
+                method("take", &[]),
+                method("read-all", &[GenerationTarget::Workflow]),
+                method("close", &[]),
+            ],
+            close: Some("close".to_string()),
+            guard: Some("check_job_call".to_string()),
+        };
+
+        let guard = |resource: &PlannedResource, target| {
+            super::resource_guard(resource, &[], target)
+                .map(|(guard, names)| (guard.to_string(), names.into_iter().collect::<Vec<_>>()))
+        };
+        // The names are Python names in sorted order, and a target leaves out what it omits.
+        assert_eq!(
+            guard(&resource, GenerationTarget::Workflow),
+            Some((
+                "check_job_call".to_string(),
+                vec!["close".into(), "take".into()]
+            ))
+        );
+        assert_eq!(
+            guard(&resource, GenerationTarget::Client),
+            Some((
+                "check_job_call".to_string(),
+                vec!["close".into(), "read_all".into(), "take".into()]
+            ))
+        );
+        // A class with no public method has nothing to guard.
+        resource.methods = vec![method("read-all", &[GenerationTarget::Workflow])];
+        assert_eq!(guard(&resource, GenerationTarget::Workflow), None);
+        // A resource with no guard calls none.
+        resource.guard = None;
+        assert_eq!(guard(&resource, GenerationTarget::Client), None);
     }
 
     #[test]

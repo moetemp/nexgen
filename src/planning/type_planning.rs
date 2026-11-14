@@ -463,6 +463,7 @@ impl ApiSpecTransform<OperationLoweredFamily, PlannedFamily> for TypePlanningMap
                 fields: Vec::new(),
                 methods: Vec::new(),
                 close: None,
+                guard: None,
             })
     }
 
@@ -887,6 +888,7 @@ impl<'a> TypePlanningContext<'a> {
                 .collect(),
             methods,
             close: resource.close.clone(),
+            guard: resource.guard.clone(),
         })
     }
 

@@ -386,6 +386,16 @@ const CATALOG: &[Annotation] = {
             languages: Some(&[Language::Python]),
             system_nexus: false,
         },
+        Annotation {
+            name: "guard",
+            sites: &[Resource],
+            keys: &[],
+            language_keys: &[""],
+            repeatable: false,
+            // Only Python takes a support helper today, so only Python takes a guard.
+            languages: Some(&[Language::Python]),
+            system_nexus: false,
+        },
     ]
 };
 
@@ -866,6 +876,40 @@ mod tests {
             }),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn a_guard_takes_only_a_python_function() {
+        let validate = |docs: &str, language| {
+            validate_docs(
+                Some(docs),
+                Site::Resource,
+                Path::new("test.wit"),
+                "resource",
+                Some(GenerationContext {
+                    language,
+                    system_nexus: false,
+                }),
+            )
+        };
+        // The Python function scopes the guard, so the other languages ignore it.
+        for language in all_languages() {
+            validate("@nexus.guard python=\"check_call\"", language).unwrap();
+        }
+        for (docs, reason) in [
+            ("@nexus.guard \"check_call\"", "unknown argument `value`"),
+            (
+                "@nexus.guard python=\"check_call\" targets=\"client\"",
+                "unknown argument `targets`",
+            ),
+            (
+                "@nexus.guard typescript=\"checkCall\"",
+                "argument `typescript` is not supported for typescript",
+            ),
+        ] {
+            let error = validate(docs, Language::Python).unwrap_err().to_string();
+            assert!(error.contains(reason), "unexpected error: {error}");
+        }
     }
 
     #[test]

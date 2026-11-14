@@ -174,6 +174,9 @@ pub(crate) struct PlannedResource {
     pub(crate) methods: Vec<PlannedResourceMethod>,
     /// The method the end of an `async with` block calls, from `@nexus.close`.
     pub(crate) close: Option<String>,
+    /// The support function that the class calls when code takes a public method, from
+    /// `@nexus.guard`.
+    pub(crate) guard: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -447,6 +450,7 @@ mod tests {
                 method("read", &[]),
             ],
             close: Some("close".to_string()),
+            guard: None,
         };
 
         assert_eq!(

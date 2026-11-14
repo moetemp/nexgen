@@ -746,6 +746,9 @@ pub struct ResourceSpec<F: TypeFamily = AuthoredFamily> {
     /// Set by `@nexus.close` to the method the end of an `async with` block calls. One per
     /// resource, so it lives here and not as a flag on each method.
     pub close: Option<String>,
+    /// The support function of each language that the class calls when code takes a public
+    /// method, from `@nexus.guard`. A language without one has no guard.
+    pub guard: Option<F::Text>,
     pub data: F::ResourceData,
 }
 
@@ -800,6 +803,7 @@ impl<F: TypeFamily> ResourceSpec<F> {
                 .map(|method| method.map_names_with(map))
                 .collect(),
             close: self.close,
+            guard: self.guard.map(|guard| map.map_text(guard)),
             data,
         }
     }

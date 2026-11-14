@@ -2144,7 +2144,8 @@ impl<'a> ApiPlanner<'a> {
                 .iter()
                 .find(|bound_operation| bound_operation.operation.name == operation_name)
                 .map(|bound_operation| bound_operation.operation),
-            PlannedResourceMethodBindingSpec::Stub => None,
+            PlannedResourceMethodBindingSpec::Helper { .. }
+            | PlannedResourceMethodBindingSpec::Stub => None,
         };
         // A method returns what its operation returns, so an output transform changes its type.
         let result_annotation = match bound_operation {
@@ -2163,7 +2164,13 @@ impl<'a> ApiPlanner<'a> {
         output.push_str("    async def ");
         output.push_str(&python_field_name(&method.name));
         output.push_str("(\n");
-        self.render_resource_method_params(output, method, client);
+        // The RPC options go to the start of an operation, and a helper method starts none.
+        let rpc_options = client
+            && !matches!(
+                method.binding,
+                PlannedResourceMethodBindingSpec::Helper { .. }
+            );
+        self.render_resource_method_params(output, method, rpc_options);
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
@@ -2218,6 +2225,15 @@ impl<'a> ApiPlanner<'a> {
                         &request_expr,
                     );
                 }
+            }
+            PlannedResourceMethodBindingSpec::Helper { helper } => {
+                render_resource_helper_method_body(
+                    output,
+                    resource,
+                    method,
+                    helper,
+                    result_annotation == "None",
+                );
             }
             PlannedResourceMethodBindingSpec::Stub => {
                 output.push_str("        raise NotImplementedError(");
@@ -2505,13 +2521,7 @@ impl<'a> ApiPlanner<'a> {
         function: Option<&FunctionFieldSpec<PlannedFamily>>,
     ) -> String {
         let base = if let Some(function) = function {
-            python_function_field_annotation(
-                function,
-                function
-                    .alternate_type
-                    .as_ref()
-                    .map(python_authored_type_annotation),
-            )
+            self.python_resource_function_annotation(function)
         } else {
             match kind {
                 PlannedType::Option(value) | PlannedType::List(value) => {
@@ -2532,6 +2542,65 @@ impl<'a> ApiPlanner<'a> {
             format!("{base} | None")
         } else {
             base
+        }
+    }
+
+    /// A callable of a resource takes generic models with their type arguments, such as
+    /// `StreamRecord[BodyT]`, so a caller's function type-checks against the handle's type.
+    fn python_resource_function_annotation(
+        &self,
+        function: &FunctionFieldSpec<PlannedFamily>,
+    ) -> String {
+        let args = match &function.args {
+            FunctionArgsSpec::Fixed(args) => RenderedFunctionArgs::Typed {
+                parameters: args
+                    .iter()
+                    .map(|arg| RenderedFunctionArg {
+                        name: python_field_name(&arg.name),
+                        annotation: self.python_function_value_annotation(&arg.field_type),
+                    })
+                    .collect(),
+            },
+            FunctionArgsSpec::Varargs { .. } => python_function_args(&function.args),
+        };
+        let result = match &function.result {
+            FunctionResultSpec::Authored(result) => self.python_function_value_annotation(result),
+            FunctionResultSpec::Annotation(_) => {
+                python_function_result_annotation(&function.result)
+            }
+        };
+        let result = erase_python_type_parameters(
+            &result,
+            &function
+                .result_type_parameter
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>(),
+        );
+        python_function_annotation_from_args(
+            &args,
+            function
+                .alternate_type
+                .as_ref()
+                .map(python_authored_type_annotation)
+                .as_deref(),
+            &result,
+        )
+    }
+
+    fn python_function_value_annotation(&self, value: &PlannedType) -> String {
+        match value {
+            PlannedType::Record(_) | PlannedType::Variant(_) => {
+                self.python_resource_value_annotation(value)
+            }
+            PlannedType::Option(inner) => {
+                format!("{} | None", self.python_function_value_annotation(inner))
+            }
+            PlannedType::List(inner) => format!(
+                "collections.abc.Sequence[{}]",
+                self.python_function_value_annotation(inner)
+            ),
+            value => python_authored_type_annotation(value),
         }
     }
 
@@ -5311,25 +5380,6 @@ fn python_field_annotation(
     }
 }
 
-fn python_function_field_annotation(
-    function: &FunctionFieldSpec<PlannedFamily>,
-    alternate_annotation: Option<String>,
-) -> String {
-    let result_annotation = erase_python_type_parameters(
-        &python_function_result_annotation(&function.result),
-        &function
-            .result_type_parameter
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>(),
-    );
-    python_function_annotation_from_args(
-        &python_function_args(&function.args),
-        alternate_annotation.as_deref(),
-        &result_annotation,
-    )
-}
-
 fn python_function_annotation_from_args(
     args: &RenderedFunctionArgs,
     alternate_annotation: Option<&str>,
@@ -5450,6 +5500,30 @@ fn resource_module_name(resource: &PlannedResource) -> String {
 /// A shared wire identity DTO, not a callable resource handle.
 fn resource_data_type(type_name: &str) -> String {
     format!("{type_name}Data")
+}
+
+/// The helper gets the handle and each parameter by keyword, so a helper can name its own order.
+fn render_resource_helper_method_body(
+    output: &mut String,
+    resource: &PlannedResource,
+    method: &PlannedResourceMethod,
+    helper: &str,
+    returns_none: bool,
+) {
+    output.push_str(if returns_none {
+        "        await _support."
+    } else {
+        "        return await _support."
+    });
+    output.push_str(helper);
+    output.push_str("(\n            ");
+    output.push_str(&resource_client_identifier(resource, "self"));
+    output.push_str(",\n");
+    for param in &method.params {
+        let name = python_field_name(&param.name);
+        output.push_str(&format!("            {name}={name},\n"));
+    }
+    output.push_str("        )\n");
 }
 
 fn resource_client_identifier(resource: &PlannedResource, base: &str) -> String {

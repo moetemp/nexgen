@@ -592,12 +592,20 @@ impl<'a> ApiPlanner<'a> {
         type_name: &str,
         method: &PlannedResourceMethod,
     ) {
+        // Only Python takes a support helper, so .NET leaves a helper method out.
+        if matches!(
+            method.binding,
+            PlannedResourceMethodBindingSpec::Helper { .. }
+        ) {
+            return;
+        }
         let operation = match &method.binding {
             PlannedResourceMethodBindingSpec::Operation { operation_name, .. } => service
                 .operations
                 .iter()
                 .find(|operation| operation.name == *operation_name),
-            PlannedResourceMethodBindingSpec::Stub => None,
+            PlannedResourceMethodBindingSpec::Helper { .. }
+            | PlannedResourceMethodBindingSpec::Stub => None,
         };
         let return_type = self.resource_method_task_return_type(method);
         output.push_str("    ");
@@ -655,7 +663,8 @@ impl<'a> ApiPlanner<'a> {
                 }
                 output.push_str("    }\n\n");
             }
-            PlannedResourceMethodBindingSpec::Stub => {
+            PlannedResourceMethodBindingSpec::Helper { .. }
+            | PlannedResourceMethodBindingSpec::Stub => {
                 output.push_str(" => throw new NotSupportedException(\"Resource method is not bound to a Nexus operation.\");\n\n");
             }
         }

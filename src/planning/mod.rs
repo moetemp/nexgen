@@ -191,7 +191,8 @@ pub(crate) struct PlannedResourceMethod {
     pub(crate) params: Vec<PlannedResourceField>,
     pub(crate) result: Option<PlannedResourceMethodResult>,
     pub(crate) varargs: Option<String>,
-    /// Targets whose resource class leaves this method out, from `@nexus.api-omit`.
+    /// Targets whose resource class leaves this method out, from `@nexus.api-omit` or the
+    /// `targets` of `@nexus.helper`.
     pub(crate) api_omitted: BTreeSet<GenerationTarget>,
     pub(crate) binding: PlannedResourceMethodBindingSpec,
 }
@@ -244,6 +245,10 @@ pub(crate) enum PlannedResourceMethodBindingSpec {
         operation_name: String,
         request_plan: RequestPlan,
         direct_return: bool,
+    },
+    /// The support helper that implements the method in the process.
+    Helper {
+        helper: String,
     },
     Stub,
 }

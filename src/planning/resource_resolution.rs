@@ -137,6 +137,10 @@ pub enum ResolvedResourceMethodBinding {
         operation_name: String,
         request_plan: RequestPlan,
     },
+    /// A support helper implements the method, with the resource and the method's parameters.
+    Helper {
+        helper: String,
+    },
     Stub,
 }
 
@@ -366,6 +370,13 @@ fn resolve_resource_methods(
     let methods = resource
         .methods
         .iter()
+        // A language with no helper for a helper method leaves the method out.
+        .filter(|method| {
+            method
+                .helper
+                .as_ref()
+                .is_none_or(|helper| helper.value().is_some())
+        })
         .map(|method| resolve_resource_method(spec, service, resource, method, descriptors))
         .collect::<Result<Vec<_>>>()?;
     Ok(ResolvedResourceSpec {
@@ -397,6 +408,20 @@ fn resolve_resource_method(
             param.name.clone(),
             RequestPlanSource::MethodParam(param.name.clone()),
         );
+    }
+
+    if let Some(helper) = method.helper.as_ref().and_then(|helper| helper.value()) {
+        return Ok(ResolvedResourceMethodSpec {
+            name: method.name.clone(),
+            doc: method.doc.clone(),
+            params: method.params.clone(),
+            result: method.result.clone(),
+            varargs: None,
+            api_omitted: method.api_omitted.clone(),
+            binding: ResolvedResourceMethodBinding::Helper {
+                helper: helper.to_string(),
+            },
+        });
     }
 
     if let Some(operation_name) = &method.operation_name {
@@ -501,7 +526,9 @@ fn resolve_resource_method(
         ResolvedResourceMethodBinding::Operation { request_plan, .. } => {
             bytes_bound_params(spec, &method.params, request_plan)
         }
-        ResolvedResourceMethodBinding::Stub => method.params.clone(),
+        ResolvedResourceMethodBinding::Helper { .. } | ResolvedResourceMethodBinding::Stub => {
+            method.params.clone()
+        }
     };
     Ok(ResolvedResourceMethodSpec {
         name: method.name.clone(),
@@ -1210,6 +1237,7 @@ mod tests {
 
     use crate::descriptors::DescriptorIndex;
     use crate::language::Language;
+    use crate::nexgen_config::GenerationTarget;
     use crate::spec::{
         ApiSpec, ApiSpecLeaf, ApiSpecNode, ApiSpecTree, CompilerPass, SelectedFamily, TypeSpec,
     };
@@ -1241,6 +1269,72 @@ mod tests {
         )
         .unwrap();
         crate::planning::select_spec(authored, language)
+    }
+
+    #[test]
+    fn a_helper_method_binds_its_helper_and_leaves_a_language_without_one() {
+        let wit = r#"
+package test:helpers@1.0.0;
+
+world system { export jobs; }
+
+/// @nexus.endpoint "jobs"
+interface jobs {
+  record restart-job-request {
+    id: string,
+  }
+
+  record restart-job-response {
+  }
+
+  record scan {
+    count: s32,
+  }
+
+  resource job {
+    constructor(id: string);
+
+    /// @nexus.operation "restart-job"
+    restart: func() -> restart-job-response;
+
+    /// @nexus.helper python="scan_job"
+    scan: func(limit: option<s32>) -> scan;
+  }
+
+  restart-job: func(request: restart-job-request) -> restart-job-response;
+}
+"#;
+        let methods = |language| {
+            let spec = parse(language, wit);
+            resolve_service_resources(
+                &spec,
+                &spec.services[0],
+                &empty_descriptors(),
+                &[GenerationTarget::Workflow],
+            )
+            .unwrap()
+            .resources
+            .remove(0)
+            .methods
+        };
+
+        let python = methods(Language::Python);
+        let scan = python.iter().find(|method| method.name == "scan").unwrap();
+        assert_eq!(
+            scan.binding,
+            ResolvedResourceMethodBinding::Helper {
+                helper: "scan_job".to_string()
+            }
+        );
+        // TypeScript has no helper, so its resource has only the bound method.
+        let typescript = methods(Language::TypeScript);
+        assert_eq!(
+            typescript
+                .iter()
+                .map(|method| method.name.as_str())
+                .collect::<Vec<_>>(),
+            ["restart"]
+        );
     }
 
     #[test]
@@ -1465,7 +1559,7 @@ interface workflow-service {
             ResolvedResourceMethodBinding::Operation { operation_name, .. } => {
                 assert_eq!(operation_name, "RestartWorkflow");
             }
-            ResolvedResourceMethodBinding::Stub => {
+            ResolvedResourceMethodBinding::Helper { .. } | ResolvedResourceMethodBinding::Stub => {
                 panic!("restart-workflow should bind to RestartWorkflow");
             }
         }
@@ -1700,7 +1794,7 @@ interface user-service {
                     value: RequestPlan::Source(RequestPlanSource::MethodParam("email".to_string())),
                 }));
             }
-            ResolvedResourceMethodBinding::Stub => {
+            ResolvedResourceMethodBinding::Helper { .. } | ResolvedResourceMethodBinding::Stub => {
                 panic!("update-email should bind to UpdatesEmail");
             }
         }

@@ -27,7 +27,8 @@ pub(super) fn validate(
     descriptors: &DescriptorIndex,
     language: Language,
 ) -> Result<()> {
-    for (_, record) in spec.records() {
+    // A record that only helper methods reach never goes on the wire, so it has no backing.
+    for (_, record) in spec.records().filter(|(_, record)| !record.helper_only) {
         for field in record.fields.values().filter(|field| {
             !field
                 .origin

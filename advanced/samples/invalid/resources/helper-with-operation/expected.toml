@@ -1,0 +1,8 @@
+targets = ["workflow"]
+
+[error]
+kind = "invalid-wit-directive"
+contains = [
+  "invalid WIT directive `@nexus.helper` on interface `job-service` resource `Job` method `Restart` in `",
+  "input.wit`: can't go with `@nexus.operation`. A support helper implements the method, so it binds no operation",
+]

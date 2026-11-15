@@ -45,13 +45,14 @@ fn collect_spec_module_imports(
                         imports,
                     );
                 }
-                if let Some(result) = &method.result {
-                    collect_type_module_imports(
-                        &spec.module_path,
-                        Some(&result.result_type),
-                        imports,
-                    );
-                }
+                collect_type_module_imports(
+                    &spec.module_path,
+                    method
+                        .result
+                        .as_ref()
+                        .and_then(ResourceResultSpec::value_type),
+                    imports,
+                );
             }
         }
     }
@@ -848,9 +849,10 @@ impl<'a> TypePlanningContext<'a> {
                             direct_return: operation.direct_return,
                         }
                     }
-                    ResolvedResourceMethodBinding::Helper { helper } => {
+                    ResolvedResourceMethodBinding::Helper { helper, sync } => {
                         PlannedResourceMethodBindingSpec::Helper {
                             helper: helper.clone(),
+                            sync: *sync,
                         }
                     }
                     ResolvedResourceMethodBinding::Stub => PlannedResourceMethodBindingSpec::Stub,
@@ -897,8 +899,20 @@ impl<'a> TypePlanningContext<'a> {
         service: &ServiceSpec<OperationLoweredFamily>,
         result: &ResourceResultSpec<SelectedFamily>,
     ) -> PlannedResourceMethodResult {
-        let optional = matches!(result.result_type, TypeSpec::Option(_));
-        let kind = match result.result_type.without_option() {
+        let result_type = match result {
+            ResourceResultSpec::Value(result_type) => result_type,
+            ResourceResultSpec::Support(support) => {
+                return PlannedResourceMethodResult {
+                    kind: PlannedResourceMethodResultKind::Support {
+                        type_name: support.type_name.value().unwrap_or_default().to_string(),
+                        type_parameters: support.type_parameters.clone(),
+                    },
+                    optional: false,
+                };
+            }
+        };
+        let optional = matches!(result_type, TypeSpec::Option(_));
+        let kind = match result_type.without_option() {
             TypeSpec::Resource(resource) => PlannedResourceMethodResultKind::Resource {
                 type_name: resource.as_str().to_upper_camel_case(),
                 type_parameters: service
@@ -907,7 +921,7 @@ impl<'a> TypePlanningContext<'a> {
                     .unwrap_or_default(),
             },
             _ => PlannedResourceMethodResultKind::Value(
-                self.planned_selected_type_from_authored(&result.result_type),
+                self.planned_selected_type_from_authored(result_type),
             ),
         };
         PlannedResourceMethodResult { kind, optional }

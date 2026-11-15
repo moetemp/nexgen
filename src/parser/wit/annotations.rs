@@ -139,7 +139,8 @@ const CATALOG: &[Annotation] = {
         },
         Annotation {
             name: "generic",
-            sites: &[Record],
+            // An alias takes it only with `@nexus.support-type`, which the parser checks.
+            sites: &[Record, Alias],
             keys: &["value"],
             language_keys: &[],
             repeatable: true,
@@ -379,7 +380,7 @@ const CATALOG: &[Annotation] = {
         Annotation {
             name: "helper",
             sites: &[Method],
-            keys: &["value", "targets"],
+            keys: &["value", "targets", "sync"],
             language_keys: &[""],
             repeatable: false,
             // A language without a helper leaves the method out, so only Python takes one today.
@@ -393,6 +394,16 @@ const CATALOG: &[Annotation] = {
             language_keys: &[""],
             repeatable: false,
             // Only Python takes a support helper today, so only Python takes a guard.
+            languages: Some(&[Language::Python]),
+            system_nexus: false,
+        },
+        Annotation {
+            name: "support-type",
+            sites: &[Alias],
+            keys: &[],
+            language_keys: &[""],
+            repeatable: false,
+            // Only a helper method returns a support class, so only Python takes one today.
             languages: Some(&[Language::Python]),
             system_nexus: false,
         },

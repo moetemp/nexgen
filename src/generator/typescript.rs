@@ -6547,7 +6547,12 @@ fn typescript_resource_method_result_annotation(
         return "void".to_string();
     };
     let annotation = match &result.kind {
+        // Only Python has a support class, so TypeScript keeps no method that returns one.
         PlannedResourceMethodResultKind::Resource {
+            type_name,
+            type_parameters,
+        }
+        | PlannedResourceMethodResultKind::Support {
             type_name,
             type_parameters,
         } => generic_type_annotation(

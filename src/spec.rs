@@ -774,12 +774,41 @@ pub struct ResourceMethodSpec<F: TypeFamily = AuthoredFamily> {
     pub api_omitted: BTreeSet<GenerationTarget>,
     /// The support helper of each language that implements the method, from `@nexus.helper`.
     /// Such a method binds no operation, and a language without a helper leaves it out.
-    pub helper: Option<F::Text>,
+    pub helper: Option<ResourceHelperSpec<F>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct ResourceResultSpec<F: TypeFamily = AuthoredFamily> {
-    pub result_type: TypeSpec<F>,
+pub struct ResourceHelperSpec<F: TypeFamily = AuthoredFamily> {
+    pub name: F::Text,
+    /// Set by `sync=true`. The method returns the helper's result with no await, so a caller
+    /// gets an object at once, such as a read that gives each Record as it arrives.
+    pub sync: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResourceResultSpec<F: TypeFamily = AuthoredFamily> {
+    Value(TypeSpec<F>),
+    /// A class of the support package, from `@nexus.support-type`. It never goes on the wire,
+    /// so only a helper method returns one.
+    Support(SupportTypeSpec<F>),
+}
+
+/// A class that the support package writes by hand, since it has behavior.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SupportTypeSpec<F: TypeFamily = AuthoredFamily> {
+    pub type_name: F::Text,
+    /// From `@nexus.generic`, in annotation order.
+    pub type_parameters: Vec<TypeParameterSpec>,
+}
+
+impl<F: TypeFamily> ResourceResultSpec<F> {
+    /// The type of a result that is a value or a resource. A support class has none.
+    pub fn value_type(&self) -> Option<&TypeSpec<F>> {
+        match self {
+            Self::Value(value) => Some(value),
+            Self::Support(_) => None,
+        }
+    }
 }
 
 impl<F: TypeFamily> ResourceSpec<F> {
@@ -842,7 +871,10 @@ impl<F: TypeFamily> ResourceMethodSpec<F> {
             operation_name: self.operation_name,
             varargs: self.varargs,
             api_omitted: self.api_omitted,
-            helper: self.helper.map(|helper| map.map_text(helper)),
+            helper: self.helper.map(|helper| ResourceHelperSpec {
+                name: map.map_text(helper.name),
+                sync: helper.sync,
+            }),
         }
     }
 }
@@ -853,8 +885,12 @@ impl<F: TypeFamily> ResourceResultSpec<F> {
         G: TypeFamily,
         M: ApiSpecTransform<F, G>,
     {
-        ResourceResultSpec {
-            result_type: self.result_type.map_names_with(map),
+        match self {
+            Self::Value(value) => ResourceResultSpec::Value(value.map_names_with(map)),
+            Self::Support(support) => ResourceResultSpec::Support(SupportTypeSpec {
+                type_name: map.map_text(support.type_name),
+                type_parameters: support.type_parameters,
+            }),
         }
     }
 }

@@ -1,0 +1,6 @@
+[error]
+kind = "invalid-wit-directive"
+contains = [
+  "invalid WIT directive `@nexus.support-type` on type `job-service.follow-job-response` field `follow` type `job-follow` in `",
+  "input.wit`: stands for a class of the support package that never goes on the wire, so only a `@nexus.helper` method may return it",
+]

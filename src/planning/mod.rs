@@ -242,6 +242,12 @@ pub(crate) enum PlannedResourceMethodResultKind {
         type_parameters: Vec<crate::spec::TypeParameterSpec>,
     },
     Value(PlannedType),
+    /// A class of the support package, which only a helper method returns. Resolution keeps such
+    /// a method only in a language that has the class.
+    Support {
+        type_name: String,
+        type_parameters: Vec<crate::spec::TypeParameterSpec>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -251,9 +257,11 @@ pub(crate) enum PlannedResourceMethodBindingSpec {
         request_plan: RequestPlan,
         direct_return: bool,
     },
-    /// The support helper that implements the method in the process.
+    /// The support helper that implements the method in the process. A `sync` method returns
+    /// the helper's result with no await.
     Helper {
         helper: String,
+        sync: bool,
     },
     Stub,
 }

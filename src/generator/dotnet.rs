@@ -1748,7 +1748,12 @@ impl<'a> ApiPlanner<'a> {
             return "void".to_string();
         };
         let base = match &result.kind {
+            // Only Python has a support class, so .NET keeps no method that returns one.
             PlannedResourceMethodResultKind::Resource {
+                type_name,
+                type_parameters,
+            }
+            | PlannedResourceMethodResultKind::Support {
                 type_name,
                 type_parameters,
             } => csharp_generic_type(type_name, type_parameters),

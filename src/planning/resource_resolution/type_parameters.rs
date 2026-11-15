@@ -5,8 +5,8 @@ use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ExternalTypeSpec, FunctionArgsSpec, FunctionResultSpec, ResourceSpec, SelectedFamily,
-    ServiceSpec, TypeParameterSpec, TypeSpec,
+    ApiSpec, ExternalTypeSpec, FunctionArgsSpec, FunctionResultSpec, ResourceResultSpec,
+    ResourceSpec, SelectedFamily, ServiceSpec, TypeParameterSpec, TypeSpec,
 };
 
 use super::{ResolvedResourceMethodBinding, ResolvedServiceResources};
@@ -65,7 +65,12 @@ fn used_type_parameters(
         .filter(|method| method.helper.is_none())
     {
         values.extend(method.params.iter().map(|param| &param.field_type));
-        results.extend(method.result.as_ref().map(|result| &result.result_type));
+        results.extend(
+            method
+                .result
+                .as_ref()
+                .and_then(ResourceResultSpec::value_type),
+        );
     }
     // Use the resolved binding for explicit and implicit methods, on every target.
     let operations = resolved.resources[resource_index]
@@ -133,11 +138,22 @@ fn infer_helper_method_type_parameters(
                     }
                 }
             }
-            values.extend(method.result.as_ref().map(|result| &result.result_type));
+            // A support class takes the type parameters of its `@nexus.generic` directives.
+            let support = match &method.result {
+                Some(ResourceResultSpec::Support(support)) => support.type_parameters.as_slice(),
+                _ => &[],
+            };
+            values.extend(
+                method
+                    .result
+                    .as_ref()
+                    .and_then(ResourceResultSpec::value_type),
+            );
             let mut parameters = values
                 .iter()
                 .flat_map(|value| spec.type_parameters_through_protos(value))
                 .map(|usage| usage.parameter)
+                .chain(support.iter().cloned())
                 .filter(|parameter| !resource.type_parameters.contains(parameter))
                 .collect::<Vec<_>>();
             parameters.sort_by(|left, right| left.full_name.cmp(&right.full_name));

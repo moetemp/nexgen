@@ -143,8 +143,10 @@ pub enum ResolvedResourceMethodBinding {
         request_plan: RequestPlan,
     },
     /// A support helper implements the method, with the resource and the method's parameters.
+    /// A `sync` method returns the helper's result with no await.
     Helper {
         helper: String,
+        sync: bool,
     },
     Stub,
 }
@@ -375,12 +377,17 @@ fn resolve_resource_methods(
     let methods = resource
         .methods
         .iter()
-        // A language with no helper for a helper method leaves the method out.
+        // A language with no helper for a helper method leaves the method out, and so does a
+        // language with no support class for its result.
         .filter(|method| {
             method
                 .helper
                 .as_ref()
-                .is_none_or(|helper| helper.value().is_some())
+                .is_none_or(|helper| helper.name.value().is_some())
+                && method.result.as_ref().is_none_or(|result| match result {
+                    ResourceResultSpec::Support(support) => support.type_name.value().is_some(),
+                    ResourceResultSpec::Value(_) => true,
+                })
         })
         .map(|method| resolve_resource_method(spec, service, resource, method, descriptors))
         .collect::<Result<Vec<_>>>()?;
@@ -421,7 +428,11 @@ fn resolve_resource_method(
         );
     }
 
-    if let Some(helper) = method.helper.as_ref().and_then(|helper| helper.value()) {
+    if let Some((helper, sync)) = method
+        .helper
+        .as_ref()
+        .and_then(|helper| helper.name.value().map(|name| (name, helper.sync)))
+    {
         return Ok(ResolvedResourceMethodSpec {
             name: method.name.clone(),
             doc: method.doc.clone(),
@@ -431,6 +442,7 @@ fn resolve_resource_method(
             api_omitted: method.api_omitted.clone(),
             binding: ResolvedResourceMethodBinding::Helper {
                 helper: helper.to_string(),
+                sync,
             },
             type_parameters: Vec::new(),
         });
@@ -640,7 +652,10 @@ fn resource_method_result_matches_operation(
     let Some(result) = &method.result else {
         return true;
     };
-    match result.result_type.without_option() {
+    let Some(result_type) = result.value_type() else {
+        return false;
+    };
+    match result_type.without_option() {
         TypeSpec::Resource(resource_name) => {
             operation_output_resource_name(service, operation) == Some(resource_name.as_str())
         }
@@ -1337,7 +1352,8 @@ interface jobs {
         assert_eq!(
             scan.binding,
             ResolvedResourceMethodBinding::Helper {
-                helper: "scan_job".to_string()
+                helper: "scan_job".to_string(),
+                sync: false,
             }
         );
         // TypeScript has no helper, so its resource has only the bound method.
@@ -1449,6 +1465,64 @@ interface jobs {
         assert_eq!(guard(Language::Python), Some("check_job_call".to_string()));
         // TypeScript has no guard function, so its resource calls no guard.
         assert_eq!(guard(Language::TypeScript), None);
+    }
+
+    #[test]
+    fn a_sync_helper_method_takes_the_type_parameters_of_its_support_class() {
+        let wit = r#"
+package test:follows@1.0.0;
+world system { export follows; }
+interface follows {
+  type placeholder = string;
+  /// @nexus.type-parameter
+  type body-t = placeholder;
+  /// @nexus.type-parameter
+  type cursor-t = placeholder;
+  /// @nexus.support-type python="ItemFollow"
+  /// @nexus.generic "body-t"
+  /// @nexus.generic "cursor-t"
+  type item-follow = placeholder;
+  record item { body: body-t, }
+  resource items {
+    constructor(first: item);
+    /// @nexus.helper python="follow_items" sync=true
+    follow: func() -> item-follow;
+  }
+}
+"#;
+        let descriptors = empty_descriptors();
+        let resource = |language| {
+            super::ResourceResolutionPass::new(&descriptors, vec![GenerationTarget::Workflow])
+                .bind_spec(parse(language, wit), std::path::Path::new("inline.wit"))
+                .unwrap()
+                .services[0]
+                .resource("items")
+                .unwrap()
+                .data
+                .clone()
+        };
+        let python = resource(Language::Python);
+        let [follow] = python.methods.as_slice() else {
+            panic!("items should have one method");
+        };
+        assert_eq!(
+            follow.binding,
+            ResolvedResourceMethodBinding::Helper {
+                helper: "follow_items".to_string(),
+                sync: true,
+            }
+        );
+        // The resource has `body-t` from its field, so the method keeps only `cursor-t`.
+        let names = |parameters: &[crate::spec::TypeParameterSpec]| {
+            parameters
+                .iter()
+                .map(|parameter| parameter.name.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(&python.type_parameters), ["BodyT"]);
+        assert_eq!(names(&follow.type_parameters), ["CursorT"]);
+        // TypeScript names neither the helper nor the class, so it leaves the method out.
+        assert!(resource(Language::TypeScript).methods.is_empty());
     }
 
     #[test]

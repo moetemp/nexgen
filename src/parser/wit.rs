@@ -586,6 +586,7 @@ fn collect_interface_types(
     for type_id in interface.types.values() {
         let type_def = &resolve.types[*type_id];
         validate_type_parameter_directive(resolve, *type_id, type_def, path)?;
+        validate_support_type_directive(resolve, *type_id, type_def, path)?;
         if let Some(record) = build_wit_record_spec(
             resolve,
             *type_id,
@@ -727,6 +728,69 @@ fn validate_type_parameter_directive(
             });
         }
     }
+    Ok(())
+}
+
+/// A support class stands in for a WIT alias, so it can't also be a type parameter, a proto, a
+/// language type or a callable. An alias is generic only as a support class.
+fn validate_support_type_directive(
+    resolve: &Resolve,
+    type_id: TypeId,
+    type_def: &TypeDef,
+    path: &Path,
+) -> Result<()> {
+    let context = format!("type `{}`", wit_type_full_name(resolve, type_id));
+    let directives = parse_directives(type_def.docs.contents.as_deref(), path, &context)?;
+    let invalid = |directive: &str, reason: String| Error::InvalidWitDirective {
+        path: path.to_path_buf(),
+        context: context.clone(),
+        directive: format!("@nexus.{directive}"),
+        reason,
+    };
+    let Some(support) = directive(&directives, "support-type", path, &context)? else {
+        if !matches!(type_def.kind, TypeDefKind::Record(_))
+            && directive(&directives, "generic", path, &context)?.is_some()
+        {
+            return Err(invalid(
+                "generic",
+                "is only supported on a type alias with `@nexus.support-type`".to_string(),
+            ));
+        }
+        return Ok(());
+    };
+    if !matches!(type_def.kind, TypeDefKind::Type(_)) {
+        return Err(invalid(
+            "support-type",
+            "is only supported on a WIT alias of another type, such as `placeholder`".to_string(),
+        ));
+    }
+    for conflict in ["type-parameter", "proto", "type", "function"] {
+        if directive(&directives, conflict, path, &context)?.is_some() {
+            return Err(invalid(
+                "support-type",
+                format!("cannot be combined with `@nexus.{conflict}`"),
+            ));
+        }
+    }
+    let spec = directive_language_string(support);
+    if spec.is_empty() {
+        return Err(invalid(
+            "support-type",
+            "needs a support class, such as `python=\"StreamReading\"`".to_string(),
+        ));
+    }
+    if let Some(name) = spec
+        .by_language
+        .values()
+        .find(|name| !is_valid_support_helper_path(name))
+    {
+        return Err(invalid(
+            "support-type",
+            format!("invalid support class `{name}`"),
+        ));
+    }
+    // The type parameters must resolve, even when no helper method returns the class.
+    record_generic_parameters(resolve, type_def.owner, &directives, path, &context)?;
     Ok(())
 }
 
@@ -1509,6 +1573,7 @@ fn resolve_authored_field_type_spec(
                     full_name: wit_type_full_name(resolve, *id),
                 }));
             }
+            refuse_support_type(resolve, ty, path, context)?;
             if !matches!(type_def.kind, TypeDefKind::Variant(_))
                 && let Some(proto_name) =
                     find_proto_name_for_type_def(type_def, path, &type_context)?
@@ -3237,7 +3302,17 @@ fn build_resource_method(
     let result = function
         .result
         .as_ref()
-        .map(|ty| build_resource_result(resolve, ty, path, &context, language))
+        .map(|ty| {
+            // Only a helper builds a class of the support package, so only its method returns one.
+            match helper_method
+                .then(|| build_support_type(resolve, ty, path, &context))
+                .transpose()?
+                .flatten()
+            {
+                Some(support) => Ok(ResourceResultSpec::Support(support)),
+                None => build_resource_result(resolve, ty, path, &context, language),
+            }
+        })
         .transpose()?;
     // The helper refuses the directives that it can't go with, before they check the method.
     let helper = build_resource_method_helper(&directives, path, &context)?;
@@ -3270,7 +3345,7 @@ fn build_resource_method_helper(
     directives: &[Directive],
     path: &Path,
     context: &str,
-) -> Result<Option<(LanguageStringSpec, BTreeSet<GenerationTarget>)>> {
+) -> Result<Option<(ResourceHelperSpec, BTreeSet<GenerationTarget>)>> {
     let Some(helper) = directive(directives, "helper", path, context)? else {
         return Ok(None);
     };
@@ -3314,12 +3389,18 @@ fn build_resource_method_helper(
     {
         return Err(invalid(format!("invalid support helper `{helper}`")));
     }
+    let sync = helper
+        .value("sync")
+        .map(parse_bool)
+        .transpose()
+        .map_err(invalid)?
+        .unwrap_or(false);
     let kept = build_origin_targets(helper, path, context, "helper")?;
     let omitted = [GenerationTarget::Workflow, GenerationTarget::Client]
         .into_iter()
         .filter(|target| !kept.contains(target))
         .collect();
-    Ok(Some((spec, omitted)))
+    Ok(Some((ResourceHelperSpec { name: spec, sync }, omitted)))
 }
 
 /// A method that no target keeps has no use, so the directive must leave one target its method.
@@ -3448,12 +3529,42 @@ fn build_resource_result(
     context: &str,
     language: Language,
 ) -> Result<ResourceResultSpec> {
-    Ok(ResourceResultSpec {
-        result_type: authored_field_type_for_language(
-            resolve_authored_field_type_spec(resolve, ty, path, context)?,
-            language,
-        ),
-    })
+    Ok(ResourceResultSpec::Value(authored_field_type_for_language(
+        resolve_authored_field_type_spec(resolve, ty, path, context)?,
+        language,
+    )))
+}
+
+/// The support class that a `@nexus.support-type` alias names, with the type parameters of its
+/// `@nexus.generic` directives. `None` for any other type.
+fn build_support_type(
+    resolve: &Resolve,
+    ty: &Type,
+    path: &Path,
+    context: &str,
+) -> Result<Option<SupportTypeSpec>> {
+    let Type::Id(id) = ty else {
+        return Ok(None);
+    };
+    let type_def = &resolve.types[*id];
+    let type_context = format!(
+        "{context} type `{}`",
+        type_def.name.as_deref().unwrap_or("unnamed-type")
+    );
+    let directives = parse_directives(type_def.docs.contents.as_deref(), path, &type_context)?;
+    let Some(support) = directive(&directives, "support-type", path, &type_context)? else {
+        return Ok(None);
+    };
+    Ok(Some(SupportTypeSpec {
+        type_name: directive_language_string(support),
+        type_parameters: record_generic_parameters(
+            resolve,
+            type_def.owner,
+            &directives,
+            path,
+            &type_context,
+        )?,
+    }))
 }
 
 fn build_resource_field(
@@ -3611,12 +3722,38 @@ fn build_operation(
     })
 }
 
+/// A class of the support package never goes on the wire. A helper method's result takes one
+/// before any other use of a type gets here.
+fn refuse_support_type(resolve: &Resolve, ty: &Type, path: &Path, context: &str) -> Result<()> {
+    let Type::Id(id) = ty else {
+        return Ok(());
+    };
+    let type_def = &resolve.types[*id];
+    let type_context = format!(
+        "{context} type `{}`",
+        type_def.name.as_deref().unwrap_or("unnamed-type")
+    );
+    let directives = parse_directives(type_def.docs.contents.as_deref(), path, &type_context)?;
+    if directive(&directives, "support-type", path, &type_context)?.is_some() {
+        return Err(Error::InvalidWitDirective {
+            path: path.to_path_buf(),
+            context: type_context,
+            directive: "@nexus.support-type".to_string(),
+            reason: "stands for a class of the support package that never goes on the wire, so \
+                     only a `@nexus.helper` method may return it"
+                .to_string(),
+        });
+    }
+    Ok(())
+}
+
 fn find_operation_type_spec(
     resolve: &Resolve,
     ty: &Type,
     path: &Path,
     context: &str,
 ) -> Result<Option<TypeSpec>> {
+    refuse_support_type(resolve, ty, path, context)?;
     if let Some(resource_name) = find_owned_resource_name_for_type(resolve, ty) {
         let wire_type = find_proto_name_for_type(resolve, ty, path, context)?
             .map(|proto_name| ExternalTypeSpec::Proto(Symbol::new(proto_name)));
@@ -4341,8 +4478,10 @@ mod tests {
     use crate::language::Language;
     use crate::spec::{
         CompilerPass, ExternalTypeSourceSpec, ExternalVariantSourceSpec, FieldOrigin,
-        LanguageStringSpec, ProtoOneofSpec, ProtoTypeSpec,
+        LanguageStringSpec, ProtoOneofSpec, ProtoTypeSpec, ResourceResultSpec, SupportTypeSpec,
+        TypeParameterSpec,
     };
+    use std::collections::BTreeMap;
 
     use super::{
         ApiSpec, AuthoredResourceType, DeclaredTypeName, ExternalTypeSpec, FunctionArgSpec,
@@ -5633,8 +5772,8 @@ interface user-service {
                 .result
                 .as_ref()
                 .unwrap()
-                .result_type,
-            TypeSpec::Resource(AuthoredResourceType::new("user"))
+                .value_type(),
+            Some(&TypeSpec::Resource(AuthoredResourceType::new("user")))
         );
 
         let json_echo = service.operation("JsonEcho").unwrap();
@@ -5714,8 +5853,12 @@ interface workflow-service {
             .find(|method| method.name == "get-result")
             .unwrap();
         assert_eq!(
-            method.result.as_ref().unwrap().result_type.to_type_string(),
-            "list<string>"
+            method
+                .result
+                .as_ref()
+                .and_then(|result| result.value_type())
+                .map(TypeSpec::to_type_string),
+            Some("list<string>".to_string())
         );
     }
 
@@ -5868,7 +6011,7 @@ interface jobs {
         assert_eq!(
             scan.helper
                 .as_ref()
-                .and_then(|helper| helper.for_language(Language::Python)),
+                .and_then(|helper| helper.name.for_language(Language::Python)),
             Some("scan_job")
         );
         assert_eq!(
@@ -5962,6 +6105,79 @@ interface jobs {
                 .to_string();
             assert!(error.contains(reason), "unexpected error: {error}");
         }
+    }
+
+    const SUPPORT_TYPE_WIT: &str = r#"
+package test:follow@1.0.0;
+
+world system { export jobs; }
+
+interface jobs {
+  type placeholder = string;
+
+  /// @nexus.type-parameter
+  type event-t = placeholder;
+
+  /// @nexus.support-type python="JobFollow"
+  /// @nexus.generic "event-t"
+  type job-follow = placeholder;
+
+  resource job {
+    constructor(id: string);
+
+    /// @nexus.helper python="follow_job" targets="workflow" sync=true
+    follow: func(from-offset: option<list<u8>>) -> job-follow;
+
+    /// @nexus.helper python="scan_job"
+    scan: func() -> job-follow;
+  }
+}
+"#;
+
+    #[test]
+    fn a_helper_method_returns_a_support_class_with_its_type_parameters() {
+        let spec = parse(Language::Python, SUPPORT_TYPE_WIT);
+        let method = |name: &str| {
+            spec.services[0].resources[0]
+                .methods
+                .iter()
+                .find(|method| method.name == name)
+                .unwrap()
+                .clone()
+        };
+        let support = ResourceResultSpec::Support(SupportTypeSpec {
+            type_name: LanguageStringSpec {
+                by_language: BTreeMap::from([(Language::Python, "JobFollow".to_string())]),
+                ..LanguageStringSpec::default()
+            },
+            type_parameters: vec![TypeParameterSpec {
+                name: "EventT".to_string(),
+                full_name: "jobs.event-t".to_string(),
+            }],
+        });
+        let follow = method("follow");
+        let helper = follow.helper.as_ref().unwrap();
+        assert_eq!(
+            (helper.name.for_language(Language::Python), helper.sync),
+            (Some("follow_job"), true)
+        );
+        assert_eq!(follow.result.as_ref(), Some(&support));
+        // Without `sync`, a helper method is awaited, and it may return a support class too.
+        let scan = method("scan");
+        assert!(!scan.helper.as_ref().unwrap().sync);
+        assert_eq!(scan.result.as_ref(), Some(&support));
+    }
+
+    #[test]
+    fn a_generic_alias_must_name_a_support_class() {
+        let wit = SUPPORT_TYPE_WIT.replace("/// @nexus.support-type python=\"JobFollow\"\n", "");
+        let error = parse_result(Language::Python, &wit)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("is only supported on a type alias with `@nexus.support-type`"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

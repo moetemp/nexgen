@@ -24,6 +24,8 @@ from temporalio.worker import StartNexusOperationInput
 import temporalio.workflow
 from typing_extensions import assert_type, override
 
+from temporal_support import StreamReading
+
 from wit.stream_service.models import models as models_only
 from wit.stream_service.workflow import models as workflow_models
 from wit.stream_service.client import models as client_models
@@ -701,6 +703,7 @@ def stream_reads() -> collections.abc.Iterator[types.ModuleType]:
     yield reads
     reads.calls.clear()
     reads.results.clear()
+    reads.queued.clear()
 
 
 def _is_user(record: typing.Any) -> bool:
@@ -833,6 +836,90 @@ def test_a_client_stream_keeps_the_page_read(package: str) -> None:
     assert "wait" in inspect.signature(resources.Stream.read).parameters
 
 
+@pytest.mark.parametrize(
+    "package",
+    ["wit.stream_service.client.client", "wit.stream_service.both.client"],
+)
+def test_a_client_stream_has_no_iter(package: str) -> None:
+    resources = importlib.import_module(package + "._resources.stream")
+    # Only Workflow code reads each Record as it arrives.
+    assert not hasattr(resources.Stream, "iter")
+
+
+WORKFLOW_STREAMS = [stream for stream in STREAMS if stream[0].endswith(".workflow")]
+
+
+@pytest.mark.parametrize(
+    ("package", "model_types", "build"),
+    WORKFLOW_STREAMS,
+    ids=[stream[0] for stream in WORKFLOW_STREAMS],
+)
+async def test_a_workflow_stream_iter_gives_each_record_with_no_await(
+    stream_reads: types.ModuleType,
+    package: str,
+    model_types: types.ModuleType,
+    build: collections.abc.Callable[[str, types.ModuleType], typing.Any],
+) -> None:
+    stream = build(package, model_types)
+    records = [
+        model_types.StreamRecord(body=Turn(role="user"), offset=_offset(n))
+        for n in (4, 5)
+    ]
+    stream_reads.queued.extend(records)
+
+    assert not inspect.iscoroutinefunction(stream.iter)
+    reading = stream.iter(from_offset=_offset(3))
+    assert isinstance(reading, StreamReading)
+
+    given = [record async for record in reading]
+
+    assert given == records
+    assert (reading.last_offset, reading.stop, reading.done) == (
+        _offset(5),
+        "done",
+        True,
+    )
+    # The helper gets every parameter by keyword, and None for one left out.
+    [(called, handle, arguments)] = stream_reads.calls
+    assert (called, handle) == ("iter_stream", stream)
+    assert arguments == {
+        "timeout": None,
+        "from_offset": _offset(3),
+        "idle_timeout": None,
+        "max_records": None,
+        "max_bytes": None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("package", "model_types", "build"),
+    WORKFLOW_STREAMS,
+    ids=[stream[0] for stream in WORKFLOW_STREAMS],
+)
+async def test_a_closed_reading_gives_no_more_records(
+    stream_reads: types.ModuleType,
+    package: str,
+    model_types: types.ModuleType,
+    build: collections.abc.Callable[[str, types.ModuleType], typing.Any],
+) -> None:
+    stream = build(package, model_types)
+    stream_reads.queued.extend(
+        model_types.StreamRecord(body=Turn(role="user"), offset=_offset(n))
+        for n in (1, 2)
+    )
+    reading = stream.iter()
+
+    async for record in reading:
+        assert record.offset == _offset(1)
+        await reading.aclose()
+
+    assert (reading.last_offset, reading.stop, reading.done) == (
+        _offset(1),
+        "closed",
+        False,
+    )
+
+
 @pytest.fixture
 def stream_guard(
     monkeypatch: pytest.MonkeyPatch,
@@ -909,6 +996,24 @@ def test_a_guarded_method_stays_a_coroutine_function(
     stream = build(package, model_types)
     assert inspect.iscoroutinefunction(stream.__class__.append)
     assert inspect.iscoroutinefunction(stream.append)
+
+
+@pytest.mark.parametrize(
+    ("package", "model_types", "build"),
+    [stream for stream in STREAMS if _target(stream[0]) == "workflow"],
+    ids=[stream[0] for stream in STREAMS if _target(stream[0]) == "workflow"],
+)
+def test_taking_the_workflow_iter_calls_the_guard(
+    stream_guard: types.ModuleType,
+    package: str,
+    model_types: types.ModuleType,
+    build: collections.abc.Callable[[str, types.ModuleType], typing.Any],
+) -> None:
+    stream = build(package, model_types)
+    stream_guard.guard_calls.clear()
+    # `iter` is no coroutine, and the guard sees it as it sees the others.
+    _ = stream.iter
+    assert stream_guard.guard_calls == [("workflow", "iter")]
 
 
 @pytest.mark.parametrize(
@@ -997,6 +1102,8 @@ async def test_typed_stream_reads_give_their_types(
     _ = assert_type(client_taken, client_models.StreamRead[Turn])
     _ = assert_type(client_filtered, client_models.StreamRead[Turn])
     _ = assert_type(workflow_reduced, workflow_models.StreamReduce[str])
+    # A read that gives each Record has the body type of its Stream.
+    _ = assert_type(workflow_stream.iter(), StreamReading[Turn])
     _ = assert_type(client_reduced, client_models.StreamReduce[str])
     assert workflow_reduced.value == "user"
     assert client_filtered.records[0].body.role == "user"

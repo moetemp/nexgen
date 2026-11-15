@@ -169,6 +169,13 @@ interface stream-service {
     done: bool,
   }
 
+  // The SDK's support package writes this class by hand, since it is an async iterator that a
+  // caller can close.
+  /// One read of a Stream. It gives each Record as it arrives.
+  /// @nexus.support-type python="StreamReading"
+  /// @nexus.generic "body-t"
+  type stream-reading = placeholder;
+
   // A function of the caller stays in the process, so this signature is no operation.
   record-predicate: func(%record: stream-record) -> bool;
 
@@ -400,6 +407,18 @@ interface stream-service {
       max-records: option<s32>,
       max-bytes: option<s64>,
     ) -> stream-reduce;
+
+    // Workflow code reads each Record as it arrives. The read starts with no await, so the loop
+    // can read where and why it ended.
+    /// @nexus.doc "Read each Record as it arrives."
+    /// @nexus.helper python="iter_stream" targets="workflow" sync=true
+    iter: func(
+      timeout: option<duration>,
+      from-offset: option<list<u8>>,
+      idle-timeout: option<duration>,
+      max-records: option<u32>,
+      max-bytes: option<u64>,
+    ) -> stream-reading;
   }
 
   // With use-existing, created is false when the Stream existed.

@@ -1,4 +1,4 @@
-"""Test doubles of the Streams SDK's reads of many pages and of its call guard.
+"""Test doubles of the Streams SDK's reads and of its call guard.
 
 They do not read a Store.
 """
@@ -6,6 +6,8 @@ They do not read a Store.
 from __future__ import annotations
 
 import typing
+
+BodyT = typing.TypeVar("BodyT")
 
 # The generated `Stream` of each target calls the same helper. A test sets each result, and it
 # reads each call.
@@ -33,6 +35,57 @@ async def filter_stream(stream: typing.Any, **arguments: typing.Any) -> typing.A
 async def reduce_stream(stream: typing.Any, **arguments: typing.Any) -> typing.Any:
     """Keep the call, and return the result that a test set."""
     return _call("reduce_stream", stream, arguments)
+
+
+# A test queues the Records that the next read gives.
+queued: list[typing.Any] = []
+
+
+class StreamReading(typing.Generic[BodyT]):
+    """One read that gives each queued Record, then ends as if the Stream closed.
+
+    After the loop, `last_offset`, `stop` and `done` tell where and why it ended.
+    """
+
+    last_offset: bytes | None
+    stop: str | None
+    done: bool
+    _records: list[typing.Any]
+
+    def __init__(self, records: list[typing.Any]) -> None:
+        self._records = records
+        self.last_offset = None
+        self.stop = None
+        self.done = False
+
+    def __aiter__(self) -> StreamReading[BodyT]:
+        return self
+
+    async def __anext__(self) -> typing.Any:
+        if self.stop is not None:
+            raise StopAsyncIteration
+        if not self._records:
+            self.stop = "done"
+            self.done = True
+            raise StopAsyncIteration
+        record = self._records.pop(0)
+        self.last_offset = record.offset
+        return record
+
+    async def aclose(self) -> None:
+        """End the read. A later step of the loop gives no Record."""
+        if self.stop is None:
+            self.stop = "closed"
+
+
+def iter_stream(
+    stream: typing.Any, **arguments: typing.Any
+) -> StreamReading[typing.Any]:
+    """Keep the call, and read the Records that a test queued."""
+    calls.append(("iter_stream", stream, arguments))
+    records = list(queued)
+    queued.clear()
+    return StreamReading(records)
 
 
 # The generated `Stream` of each target calls the guard when code takes a method. A test reads

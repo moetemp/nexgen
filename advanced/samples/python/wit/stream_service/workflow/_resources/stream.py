@@ -53,7 +53,15 @@ class Stream(typing.Generic[BodyT]):
         def __getattribute__(self, name: str) -> typing.Any:
             # The body of an `async def` runs only when it is awaited. So the guard runs when
             # code takes the method, and a caller that can't await gets its error too.
-            if name in {"append", "close", "describe", "filter", "reduce", "take"}:
+            if name in {
+                "append",
+                "close",
+                "describe",
+                "filter",
+                "iter",
+                "reduce",
+                "take",
+            }:
                 _support.check_stream_call(target="workflow", method=name)
             return object.__getattribute__(self, name)
 
@@ -172,6 +180,24 @@ class Stream(typing.Generic[BodyT]):
             initial=initial,
             timeout=timeout,
             until=until,
+            from_offset=from_offset,
+            idle_timeout=idle_timeout,
+            max_records=max_records,
+            max_bytes=max_bytes,
+        )
+
+    def iter(
+        self,
+        timeout: datetime.timedelta | None = None,
+        from_offset: bytes | None = None,
+        idle_timeout: datetime.timedelta | None = None,
+        max_records: int | None = None,
+        max_bytes: int | None = None,
+    ) -> _support.StreamReading[BodyT]:
+        """Read each Record as it arrives."""
+        return _support.iter_stream(
+            self,
+            timeout=timeout,
             from_offset=from_offset,
             idle_timeout=idle_timeout,
             max_records=max_records,

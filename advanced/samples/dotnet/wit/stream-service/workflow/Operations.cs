@@ -41,7 +41,7 @@ namespace Temporalio.Workflows
     }
 
     /// <summary>
-    /// Append one batch. Workflow code makes the call from a Local Activity.
+    /// Append one batch. For Workflow code, Core or a Local Activity makes the call.
     /// </summary>
     [GeneratedCode("nexgen", null)]
     internal class AppendRecordsOptions<TBody>
@@ -86,7 +86,7 @@ namespace Temporalio.Workflows
     }
 
     /// <summary>
-    /// A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads from a Local Activity.
+    /// A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads with `iter`.
     /// </summary>
     [GeneratedCode("nexgen", null)]
     internal class ReadRecordsOptions<TBody>
@@ -163,7 +163,7 @@ namespace Temporalio.Workflows
         }
 
         /// <summary>
-        /// Append one batch. Workflow code makes the call from a Local Activity.
+        /// Append one batch. For Workflow code, Core or a Local Activity makes the call.
         /// </summary>
         /// <param name="request">Append one batch. The Store keeps a resent batch once, by Producer, epoch and sequence.</param>
         [GeneratedCode("nexgen", null)]
@@ -175,7 +175,7 @@ namespace Temporalio.Workflows
         }
 
         /// <summary>
-        /// Append one batch. Workflow code makes the call from a Local Activity.
+        /// Append one batch. For Workflow code, Core or a Local Activity makes the call.
         /// </summary>
         /// <param name="options">Append one batch. The Store keeps a resent batch once, by Producer, epoch and sequence.</param>
         [GeneratedCode("nexgen", null)]
@@ -206,7 +206,7 @@ namespace Temporalio.Workflows
         }
 
         /// <summary>
-        /// A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads from a Local Activity.
+        /// A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads with `iter`.
         /// </summary>
         /// <param name="request">Read Records after an offset.</param>
         [GeneratedCode("nexgen", null)]
@@ -218,7 +218,7 @@ namespace Temporalio.Workflows
         }
 
         /// <summary>
-        /// A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads from a Local Activity.
+        /// A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads with `iter`.
         /// </summary>
         /// <param name="options">Read Records after an offset.</param>
         [GeneratedCode("nexgen", null)]

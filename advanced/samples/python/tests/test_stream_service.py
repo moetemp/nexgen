@@ -4,6 +4,7 @@ import asyncio
 import collections.abc
 import dataclasses
 import importlib
+import inspect
 import subprocess
 import sys
 import types
@@ -21,6 +22,8 @@ import temporalio.nexus.system
 from temporalio.worker import StartNexusOperationInput
 import temporalio.workflow
 from typing_extensions import assert_type, override
+
+from temporal_support import StreamReading
 
 from wit.stream_service.models import models as models_only
 from wit.stream_service.workflow import models as workflow_models
@@ -559,7 +562,7 @@ def test_api_omit_hides_the_public_operation_functions(
     [(workflow_only, workflow_models), (both_workflow, both_models)],
     ids=["workflow", "both"],
 )
-async def test_a_workflow_stream_can_not_read(
+async def test_a_workflow_stream_has_no_page_read(
     monkeypatch: pytest.MonkeyPatch,
     api: types.ModuleType,
     model_types: types.ModuleType,
@@ -690,3 +693,99 @@ def test_root_service_contract_uses_shared_wire_models(package: str) -> None:
     operation = definition.operation_definitions["CreateStream"]
     assert operation.input_type == shared.CreateStreamRequest[typing.Any]
     assert operation.output_type == shared.CreateStreamResult[typing.Any]
+
+
+@pytest.fixture
+def stream_reads() -> collections.abc.Iterator[types.ModuleType]:
+    reads = importlib.import_module("temporal_support.stream_reads")
+    yield reads
+    reads.calls.clear()
+    reads.queued.clear()
+
+
+@pytest.mark.parametrize(
+    "package",
+    ["wit.stream_service.client.client", "wit.stream_service.both.client"],
+)
+def test_a_client_stream_has_no_iter(package: str) -> None:
+    resources = importlib.import_module(package + "._resources.stream")
+    # Only Workflow code reads each Record as it arrives.
+    assert not hasattr(resources.Stream, "iter")
+
+
+WORKFLOW_APIS = pytest.mark.parametrize(
+    ("api", "model_types"),
+    [(workflow_only, workflow_models), (both_workflow, both_models)],
+    ids=["workflow", "both"],
+)
+
+
+@WORKFLOW_APIS
+async def test_a_workflow_stream_iter_gives_each_record_with_no_await(
+    stream_reads: types.ModuleType,
+    api: types.ModuleType,
+    model_types: types.ModuleType,
+) -> None:
+    stream = api.get_stream(ref=model_types.StreamRef(id="s-1"), body_type=Turn)
+    records = [
+        model_types.StreamRecord(body=Turn(role="user"), offset=_offset(n))
+        for n in (4, 5)
+    ]
+    stream_reads.queued.extend(records)
+
+    assert not inspect.iscoroutinefunction(stream.iter)
+    reading = stream.iter(from_offset=_offset(3))
+    assert isinstance(reading, StreamReading)
+
+    given = [record async for record in reading]
+
+    assert given == records
+    assert (reading.last_offset, reading.stop, reading.done) == (
+        _offset(5),
+        "done",
+        True,
+    )
+    # The helper gets every parameter by keyword, and None for one left out.
+    [(called, handle, arguments)] = stream_reads.calls
+    assert (called, handle) == ("iter_stream", stream)
+    assert arguments == {
+        "timeout": None,
+        "from_offset": _offset(3),
+        "idle_timeout": None,
+        "max_records": None,
+        "max_bytes": None,
+    }
+
+
+@WORKFLOW_APIS
+async def test_a_closed_reading_gives_no_more_records(
+    stream_reads: types.ModuleType,
+    api: types.ModuleType,
+    model_types: types.ModuleType,
+) -> None:
+    stream = api.get_stream(ref=model_types.StreamRef(id="s-1"), body_type=Turn)
+    stream_reads.queued.extend(
+        model_types.StreamRecord(body=Turn(role="user"), offset=_offset(n))
+        for n in (1, 2)
+    )
+    reading = stream.iter()
+
+    async for record in reading:
+        assert record.offset == _offset(1)
+        await reading.aclose()
+
+    # A read that the code closed gives no stop, as in the SDK.
+    assert (reading.last_offset, reading.stop, reading.done) == (
+        _offset(1),
+        None,
+        False,
+    )
+
+
+def test_a_workflow_reading_has_the_body_type_of_its_stream(
+    stream_reads: types.ModuleType,
+) -> None:
+    del stream_reads
+    stream = workflow_only.get_stream(ref=workflow_models.StreamRef[Turn](id="s-1"))
+    # A read that gives each Record has the body type of its Stream.
+    _ = assert_type(stream.iter(), StreamReading[Turn])

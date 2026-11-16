@@ -5,6 +5,7 @@ from __future__ import annotations
 import typing
 import typing_extensions
 import temporalio.nexus.system
+import datetime
 import temporalio.workflow
 import types
 
@@ -94,6 +95,24 @@ class Stream(typing.Generic[BodyT]):
         )
         handle = await _describe_stream(request)
         return await handle
+
+    def iter(
+        self,
+        timeout: datetime.timedelta | None = None,
+        from_offset: bytes | None = None,
+        idle_timeout: datetime.timedelta | None = None,
+        max_records: int | None = None,
+        max_bytes: int | None = None,
+    ) -> _support.StreamReading[BodyT]:
+        """Read each Record as it arrives, up to a stop."""
+        return _support.iter_stream(
+            self,
+            timeout=timeout,
+            from_offset=from_offset,
+            idle_timeout=idle_timeout,
+            max_records=max_records,
+            max_bytes=max_bytes,
+        )
 
 
 @typing.overload

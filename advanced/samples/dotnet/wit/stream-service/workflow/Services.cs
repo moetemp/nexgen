@@ -23,7 +23,7 @@ namespace Temporalio.Workflows
         CreateStreamResult<object> CreateStream(CreateStreamRequest<object> request);
 
         /// <summary>
-        /// Append one batch. Workflow code makes the call from a Local Activity.
+        /// Append one batch. For Workflow code, Core or a Local Activity makes the call.
         /// </summary>
         [GeneratedCode("nexgen", null)]
         [NexusOperation("AppendRecords")]
@@ -34,7 +34,7 @@ namespace Temporalio.Workflows
         CloseStreamResponse CloseStream(CloseStreamRequest<object> request);
 
         /// <summary>
-        /// A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads from a Local Activity.
+        /// A long poll. NOT_FOUND for an uncreated Stream. Workflow code reads with `iter`.
         /// </summary>
         [GeneratedCode("nexgen", null)]
         [NexusOperation("ReadRecords")]

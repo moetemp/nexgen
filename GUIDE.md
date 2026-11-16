@@ -24,6 +24,7 @@ of `@nexus` directives.
   - [Resource Return Binding](#resource-return-binding)
   - [Closing a Resource](#closing-a-resource)
   - [Variadic Items](#variadic-items)
+  - [Helper Methods](#helper-methods)
   - [Edge Cases and Error Conditions](#edge-cases-and-error-conditions)
 - [Proto-Backed Models](#proto-backed-models)
   - [Transfer-Type Conversion](#transfer-type-conversion)
@@ -880,6 +881,39 @@ resource %stream {
 ```python
 async def publish(self, *records: BodyT) -> int: ...
 ```
+
+### Helper Methods
+
+`@nexus.helper` makes a support helper implement a resource method, with no
+operation. The method calls the helper with the resource and each parameter by
+keyword, and returns the helper's result. Without `sync`, the method is an
+`async def` that awaits the helper. With `sync=true`, it is a plain `def` that
+returns the result immediately, and the helper is a plain function.
+`targets="workflow"` or `targets="client"` keeps the method on one target only.
+
+A helper method may return a class that the support package writes by hand, such
+as an async iterator. A `@nexus.support-type` alias stands for the class, and
+`@nexus.generic` gives its type parameters. nexgen generates nothing for the
+class, and the class never goes on the wire.
+
+```wit
+/// @nexus.support-type python="StreamReading"
+/// @nexus.generic "body-t"
+type stream-reading = placeholder;
+
+resource %stream {
+  /// @nexus.helper python="iter_stream" targets="workflow" sync=true
+  iter: func(from-offset: option<list<u8>>) -> stream-reading;
+}
+```
+
+```python
+def iter(self, from_offset: bytes | None = None) -> _support.StreamReading[BodyT]:
+    return _support.iter_stream(self, from_offset=from_offset)
+```
+
+A helper method uses the type parameters of its resource, and they make the
+resource generic.
 
 ### Edge Cases and Error Conditions
 
@@ -1819,7 +1853,7 @@ below, such as protobuf bindings, function signatures, and conflicting options.
 | `@nexus.delay-load-temporalio-workflow` | interface                                                                                     |
 | `@nexus.proto`                          | record, enum, flags, variant, type alias, resource                                            |
 | `@nexus.type-parameter`                 | type alias                                                                                    |
-| `@nexus.generic`                        | record                                                                                        |
+| `@nexus.generic`                        | record, type alias                                                                            |
 | `@nexus.proto-field`                    | record field                                                                                  |
 | `@nexus.name`                           | record field                                                                                  |
 | `@nexus.type`                           | record field, type alias, resource                                                            |
@@ -1842,6 +1876,8 @@ below, such as protobuf bindings, function signatures, and conflicting options.
 | `@nexus.add-rpc-compatible-with`        | type alias                                                                                    |
 | `@nexus.close`                          | resource method                                                                               |
 | `@nexus.varargs`                        | resource method                                                                               |
+| `@nexus.helper`                         | resource method                                                                               |
+| `@nexus.support-type`                   | type alias                                                                                    |
 
 <!-- annotation-placements:end -->
 
@@ -1894,6 +1930,8 @@ The catalog currently declares these restrictions:
 | `@nexus.delay-load-temporalio-workflow` | none                 | required                |
 | `@nexus.poll`                           | python               | required                |
 | `@nexus.context-propagation`            | go                   | required                |
+| `@nexus.helper`                         | python               | not required by catalog |
+| `@nexus.support-type`                   | python               | not required by catalog |
 
 <!-- annotation-availability:end -->
 
@@ -2229,7 +2267,8 @@ operation with no `@nexus.proto` message can't return one yet.
 
 ### @nexus.generic
 
-**Placement:** Record **Syntax:** `@nexus.generic "type-parameter-alias"`
+**Placement:** Record, or a type alias with `@nexus.support-type` **Syntax:**
+`@nexus.generic "type-parameter-alias"`
 
 Explicitly declares a record's dependency on an alias marked
 `@nexus.type-parameter`, even when no field uses that parameter. Repeat the
@@ -2674,6 +2713,33 @@ Marks the method that ends the resource. Its parameters must be optional. See
 
 The method takes the items of that list parameter as positional arguments. See
 [Variadic Items](#variadic-items).
+
+---
+
+### @nexus.helper
+
+**Placement:** Resource method **Syntax:**
+`@nexus.helper python="<support-helper>" [targets="workflow"|"client"] [sync=true]`
+
+The support helper implements the method, and the method binds no operation. See
+[Helper Methods](#helper-methods). Without `targets`, every target gets the
+method. With `sync=true` the method is a plain `def`, and the helper is a plain
+function. Only Python takes a helper, so the other languages leave the method
+out. nexgen refuses the directive together with `@nexus.operation`,
+`@nexus.close`, `@nexus.varargs` or `@nexus.api-omit`.
+
+---
+
+### @nexus.support-type
+
+**Placement:** Type alias **Syntax:** `@nexus.support-type python="<class>"`
+
+The alias stands for a class that the support package exports. Repeat
+`@nexus.generic` on the alias for each type parameter of the class. nexgen
+generates no model for it, and it never goes on the wire. Only a
+[helper method](#helper-methods) may return it, and nexgen refuses any other
+use. Only Python takes a support class, so the other languages leave out a
+method that returns one.
 
 ---
 

@@ -1,0 +1,18 @@
+package test:support-type-outside-helper@1.0.0;
+
+world system { export job-service; }
+
+/// @nexus.endpoint "jobs"
+interface job-service {
+  type placeholder = string;
+
+  /// @nexus.support-type python="JobFollow"
+  type job-follow = placeholder;
+
+  // A support class never goes on the wire, so a record can't hold one.
+  record follow-job-response {
+    follow: job-follow,
+  }
+
+  follow-job: func() -> follow-job-response;
+}

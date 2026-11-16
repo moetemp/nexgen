@@ -2144,7 +2144,8 @@ impl<'a> ApiPlanner<'a> {
                 .iter()
                 .find(|bound_operation| bound_operation.operation.name == operation_name)
                 .map(|bound_operation| bound_operation.operation),
-            PlannedResourceMethodBindingSpec::Stub => None,
+            PlannedResourceMethodBindingSpec::Helper { .. }
+            | PlannedResourceMethodBindingSpec::Stub => None,
         };
         // A method returns what its operation returns, so an output transform changes its type.
         let result_annotation = match bound_operation {
@@ -2160,10 +2161,21 @@ impl<'a> ApiPlanner<'a> {
         );
         let param_exprs = self.resource_method_param_exprs(method);
         let optional_params = resource_method_optional_params(method);
-        output.push_str("    async def ");
+        // A sync helper gives its object immediately, so a caller uses it with no await.
+        let sync = matches!(
+            method.binding,
+            PlannedResourceMethodBindingSpec::Helper { sync: true, .. }
+        );
+        output.push_str(if sync { "    def " } else { "    async def " });
         output.push_str(&python_field_name(&method.name));
         output.push_str("(\n");
-        self.render_resource_method_params(output, method, client);
+        // The RPC options go to the start of an operation, and a helper method starts none.
+        let rpc_options = client
+            && !matches!(
+                method.binding,
+                PlannedResourceMethodBindingSpec::Helper { .. }
+            );
+        self.render_resource_method_params(output, method, rpc_options);
         output.push_str("    ) -> ");
         output.push_str(&result_annotation);
         output.push_str(":\n");
@@ -2218,6 +2230,16 @@ impl<'a> ApiPlanner<'a> {
                         &request_expr,
                     );
                 }
+            }
+            PlannedResourceMethodBindingSpec::Helper { helper, sync } => {
+                render_resource_helper_method_body(
+                    output,
+                    resource,
+                    method,
+                    helper,
+                    *sync,
+                    result_annotation == "None",
+                );
             }
             PlannedResourceMethodBindingSpec::Stub => {
                 output.push_str("        raise NotImplementedError(");
@@ -2490,6 +2512,17 @@ impl<'a> ApiPlanner<'a> {
             PlannedResourceMethodResultKind::Value(kind) => {
                 self.python_resource_field_annotation(kind, result.optional, None)
             }
+            // The module imports the support package as `_support` for the helper call.
+            PlannedResourceMethodResultKind::Support {
+                type_name,
+                type_parameters,
+            } => python_type_annotation_with_arguments(
+                &format!("_support.{type_name}"),
+                &type_parameters
+                    .iter()
+                    .map(|parameter| parameter.name.clone())
+                    .collect::<Vec<_>>(),
+            ),
         };
         if result.optional && !annotation.contains("| None") {
             format!("{annotation} | None")
@@ -5450,6 +5483,32 @@ fn resource_module_name(resource: &PlannedResource) -> String {
 /// A shared wire identity DTO, not a callable resource handle.
 fn resource_data_type(type_name: &str) -> String {
     format!("{type_name}Data")
+}
+
+/// The helper gets the handle and each parameter by keyword, so a helper can keep its own order.
+fn render_resource_helper_method_body(
+    output: &mut String,
+    resource: &PlannedResource,
+    method: &PlannedResourceMethod,
+    helper: &str,
+    sync: bool,
+    returns_none: bool,
+) {
+    output.push_str(match (returns_none, sync) {
+        (true, true) => "        _support.",
+        (true, false) => "        await _support.",
+        (false, true) => "        return _support.",
+        (false, false) => "        return await _support.",
+    });
+    output.push_str(helper);
+    output.push_str("(\n            ");
+    output.push_str(&resource_client_identifier(resource, "self"));
+    output.push_str(",\n");
+    for param in &method.params {
+        let name = python_field_name(&param.name);
+        output.push_str(&format!("            {name}={name},\n"));
+    }
+    output.push_str("        )\n");
 }
 
 fn resource_client_identifier(resource: &PlannedResource, base: &str) -> String {

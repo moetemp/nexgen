@@ -191,7 +191,8 @@ pub(crate) struct PlannedResourceMethod {
     pub(crate) params: Vec<PlannedResourceField>,
     pub(crate) result: Option<PlannedResourceMethodResult>,
     pub(crate) varargs: Option<String>,
-    /// Targets whose resource class leaves this method out, from `@nexus.api-omit`.
+    /// Targets whose resource class leaves this method out, from `@nexus.api-omit` or the
+    /// `targets` of `@nexus.helper`.
     pub(crate) api_omitted: BTreeSet<GenerationTarget>,
     pub(crate) binding: PlannedResourceMethodBindingSpec,
 }
@@ -236,6 +237,12 @@ pub(crate) enum PlannedResourceMethodResultKind {
         type_parameters: Vec<crate::spec::TypeParameterSpec>,
     },
     Value(PlannedType),
+    /// A class of the support package, which only a helper method returns. Resolution keeps such
+    /// a method only in a language that has the class.
+    Support {
+        type_name: String,
+        type_parameters: Vec<crate::spec::TypeParameterSpec>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -244,6 +251,12 @@ pub(crate) enum PlannedResourceMethodBindingSpec {
         operation_name: String,
         request_plan: RequestPlan,
         direct_return: bool,
+    },
+    /// The support helper that implements the method in the process. A `sync` method returns
+    /// the helper's result with no await.
+    Helper {
+        helper: String,
+        sync: bool,
     },
     Stub,
 }

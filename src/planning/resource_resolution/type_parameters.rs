@@ -5,8 +5,8 @@ use std::path::Path;
 
 use crate::error::{Error, Result};
 use crate::spec::{
-    ApiSpec, ExternalTypeSpec, ResourceSpec, SelectedFamily, ServiceSpec, TypeParameterSpec,
-    TypeSpec,
+    ApiSpec, ExternalTypeSpec, ResourceResultSpec, ResourceSpec, SelectedFamily, ServiceSpec,
+    TypeParameterSpec, TypeSpec,
 };
 
 use super::{ResolvedResourceMethodBinding, ResolvedServiceResources};
@@ -56,9 +56,17 @@ fn used_type_parameters(
     let mut values = Vec::<&TypeSpec<SelectedFamily>>::new();
     let mut results = Vec::<&TypeSpec<SelectedFamily>>::new();
     values.extend(resource.fields.iter().map(|field| &field.field_type));
+    // A support class has no type to walk, so its `@nexus.generic` parameters count directly.
+    let mut supported = Vec::<TypeParameterSpec>::new();
     for method in &resource.methods {
         values.extend(method.params.iter().map(|param| &param.field_type));
-        results.extend(method.result.as_ref().map(|result| &result.result_type));
+        match &method.result {
+            Some(ResourceResultSpec::Value(result)) => results.push(result),
+            Some(ResourceResultSpec::Support(support)) => {
+                supported.extend(support.type_parameters.iter().cloned());
+            }
+            None => {}
+        }
     }
     // Use the resolved binding for explicit and implicit methods, on every target.
     let operations = resolved.resources[resource_index]
@@ -68,7 +76,9 @@ fn used_type_parameters(
             ResolvedResourceMethodBinding::Operation { operation_name, .. } => {
                 service.operation(operation_name)
             }
-            ResolvedResourceMethodBinding::Stub => None,
+            ResolvedResourceMethodBinding::Helper { .. } | ResolvedResourceMethodBinding::Stub => {
+                None
+            }
         });
     for operation in operations {
         values.extend(operation.input_type());
@@ -90,6 +100,7 @@ fn used_type_parameters(
         .flat_map(|value| spec.type_parameters_through_protos(value))
         .map(|usage| usage.parameter)
         .chain(returned)
+        .chain(supported)
         .collect::<Vec<_>>();
     // `full_name` is a type parameter's identity, so this order stays stable when a method moves.
     parameters.sort_by(|left, right| left.full_name.cmp(&right.full_name));

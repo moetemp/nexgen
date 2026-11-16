@@ -5298,7 +5298,12 @@ fn render_resource_methods(
     if service.endpoint.is_none() {
         return;
     }
-    for method in &resource.methods {
+    // Only Python takes a support helper, so Go leaves a helper method out.
+    for method in resource
+        .methods
+        .iter()
+        .filter(|method| !matches!(method.binding, PlannedResourceMethodBinding::Helper { .. }))
+    {
         output.push('\n');
         let method_name = go_field_name(&method.name);
 
@@ -5558,7 +5563,7 @@ fn render_resource_methods(
                 );
                 output.push_str("}\n");
             }
-            PlannedResourceMethodBinding::Stub => {
+            PlannedResourceMethodBinding::Helper { .. } | PlannedResourceMethodBinding::Stub => {
                 // Stub method -- emit a panic placeholder
                 output.push_str("func (u *");
                 output.push_str(&go_declaration_name(&resource.type_name));

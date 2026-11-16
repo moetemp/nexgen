@@ -6362,8 +6362,17 @@ fn render_resource(
         output.push_str("  ) {}\n");
     }
 
-    // A TypeScript resource method calls the Workflow API, so the Workflow omissions apply.
-    let mut methods = resource.methods_for(GenerationTarget::Workflow).peekable();
+    // A TypeScript resource method calls the Workflow API, so the Workflow omissions apply. Only
+    // Python takes a support helper, so TypeScript leaves a helper method out.
+    let mut methods = resource
+        .methods_for(GenerationTarget::Workflow)
+        .filter(|method| {
+            !matches!(
+                method.binding,
+                PlannedResourceMethodBindingSpec::Helper { .. }
+            )
+        })
+        .peekable();
     if methods.peek().is_none() {
         output.push_str("}\n");
         return;
@@ -6462,7 +6471,8 @@ fn render_resource(
                     ));
                 }
             }
-            PlannedResourceMethodBindingSpec::Stub => {
+            PlannedResourceMethodBindingSpec::Helper { .. }
+            | PlannedResourceMethodBindingSpec::Stub => {
                 output.push_str("    throw new Error(");
                 output.push_str(&typescript_string_literal(&format!(
                     "{}.{} is not yet implemented",
@@ -6537,7 +6547,12 @@ fn typescript_resource_method_result_annotation(
         return "void".to_string();
     };
     let annotation = match &result.kind {
+        // Only Python has a support class, so TypeScript keeps no method that returns one.
         PlannedResourceMethodResultKind::Resource {
+            type_name,
+            type_parameters,
+        }
+        | PlannedResourceMethodResultKind::Support {
             type_name,
             type_parameters,
         } => generic_type_annotation(

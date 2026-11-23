@@ -1143,11 +1143,11 @@ record start-workflow-request {
 ```
 
 The workflow convenience API does not require a `namespace` argument. Request
-construction evaluates the helper. In a resource method, a resource field or a
-method parameter of the same name takes precedence over a source, and the source
-fills only the fields that the method has no value for. Every language follows
-this rule. Shared models and their converters do not evaluate sources, so direct
-model construction must supply required fields:
+construction evaluates the helper. In a resource method, a resource field of the
+same name takes precedence over a source, and the source fills only the fields
+that the method has no value for. Every language follows this rule. Shared
+models and their converters do not evaluate sources, so direct model
+construction must supply required fields:
 
 ```python
 request = StartWorkflowRequest(
@@ -1159,6 +1159,33 @@ request = StartWorkflowRequest(
 Nexgen prefixes the helper call, but it does not add arguments. The configured
 package supplies the helper. The `@nexus.output-transform` directive is
 different: its value remains a raw expression.
+
+A resource method parameter of the same name doesn't take precedence. In a
+target where the field has a source, nexgen generates the method as if it had no
+such parameter, so the source fills the field. The other targets keep the
+parameter. So one field can have a source in one target and a default in the
+other:
+
+```wit
+record append-records-request {
+  /// @nexus.source targets="workflow" python="workflow_producer()"
+  /// @nexus.default targets="client" python="_support.default_producer(nexus_client)"
+  producer: producer,
+}
+
+resource %stream {
+  append: func(records: list<append-record>, producer: option<producer>);
+}
+```
+
+Here the Workflow `append` takes only `records`, and its request gets
+`_support.workflow_producer()`. The client `append` also takes an optional
+`producer`, with the default of the field.
+
+This rule is for a parameter that fills a field of the request itself, not a
+field of a record inside it, and every language follows it too. nexgen refuses a
+parameter whose field has a source in each target of its method, since no target
+would keep the parameter.
 
 ### Omitted Fields
 
@@ -2512,7 +2539,9 @@ same field. Overlaps are errors, not declaration-order overrides.
 In Python, a source of the client target can pass `nexus_client` to its helper,
 as a [default](#nexusdefault) can.
 
-Cannot be combined with `@nexus.default` for the same language.
+Cannot be combined with `@nexus.default` for the same target. A field can have a
+source in one target and a default in the other. See
+[Sourced Fields](#sourced-fields) for what a resource method does then.
 
 ---
 
@@ -2591,7 +2620,7 @@ client, and a client extension method makes its Nexus client after it builds the
 request. nexgen refuses a resource method of the client target with a parameter
 called `nexus_client`, since the name would hide the parameter.
 
-A default cannot be combined with `@nexus.source` for the same language.
+A default cannot be combined with `@nexus.source` for the same target.
 
 ---
 
